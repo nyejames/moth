@@ -139,8 +139,8 @@ Check each proposed editorial improvement for a concrete gain in precision, comp
 Read examples against the exact unsuffixed language reference and current status. Check imports, file and module roles, syntax, receiving types, mutability, output, command flags and target support where relevant.
 
 - Positive examples should exercise the feature they teach. Show the expected result when it helps a reader understand the behaviour.
-- Label intentionally invalid examples, future design and supported-but-unimplemented cases clearly. Check the reason an invalid example fails, not just that it fails.
-- Inspect partial and supported status rows against their actual implementation and the relevant tests or backend lanes. Do not infer coverage from case names or the existence of a fixture.
+- Label intentionally invalid examples, accepted but unimplemented features and target-limited behaviour clearly. Check the reason an invalid example fails, not just that it fails.
+- Check supported status rows against the implementation and relevant tests or backend lanes. Partial rows should name the implemented subset and important gaps. Use `tests/cases/manifest.toml` to locate integration coverage, then inspect the selected assertions rather than inferring coverage from case names.
 - Distinguish executable documentation from quoted code and non-compiled examples. A successful documentation build does not prove that a fenced snippet compiles or behaves as described.
 - Use current compiler and focused test commands when practical. Preserve the minimal reproduction and actual result when a finding depends on execution. Report which examples were read, checked, compiled or executed.
 - Check that the rendered page presents the intended headings, links, examples and supporting material.
