@@ -12,6 +12,86 @@ fn element() -> LiveValue {
 }
 
 #[test]
+fn immutable_scalars_need_no_binding_cells() {
+    let mut budget = ExecutionBudget::new(ConstValueStore::default().execution_meter());
+    let mut storage = LiveStorage::default();
+    let scalar = element();
+    let site = AccessSite::default();
+    for _ in 0..20_000 {
+        let binding = storage
+            .bind_slot(scalar, Permission::ReadOnly, site, &mut budget)
+            .expect("immutable scalar binding");
+        assert!(storage.read(binding.place(), site, &mut budget).is_ok());
+        assert!(matches!(
+            storage.replace(binding.place(), scalar, site, &mut budget),
+            Ok(false)
+        ));
+    }
+    assert!(storage.cells.is_empty());
+    assert!(storage.shared.is_empty());
+}
+
+#[test]
+fn immutable_scalar_keeps_its_external_cell_witness() {
+    let mut budget = ExecutionBudget::new(ConstValueStore::default().execution_meter());
+    let mut storage = LiveStorage::default();
+    let scalar = element();
+    let site = AccessSite::default();
+    let mutable = storage
+        .bind_slot(scalar, Permission::Writable, site, &mut budget)
+        .expect("mutable scalar binding");
+    let observed = match storage.read(mutable.place(), site, &mut budget) {
+        Ok(value) => value,
+        Err(_) => panic!("read mutable scalar"),
+    };
+    let immutable = storage
+        .bind_slot(observed, Permission::ReadOnly, site, &mut budget)
+        .expect("immutable scalar binding");
+    assert_eq!(storage.cells.len(), 1);
+    assert!(storage.read(immutable.place(), site, &mut budget).is_ok());
+    assert!(matches!(
+        storage.replace(mutable.place(), scalar, site, &mut budget),
+        Ok(true)
+    ));
+    assert!(matches!(
+        storage.read(immutable.place(), site, &mut budget),
+        Err(StorageError::InvalidAccess(_))
+    ));
+}
+
+#[test]
+fn immutable_scalar_keeps_its_external_projection_witness() {
+    let mut budget = ExecutionBudget::new(ConstValueStore::default().execution_meter());
+    let mut storage = LiveStorage::default();
+    let scalar = element();
+    let site = AccessSite::default();
+    let owner = storage
+        .allocate(scalar.shape, [scalar].into_iter(), &mut budget)
+        .expect("aggregate");
+    let edge = storage
+        .project(owner, 0)
+        .expect("projection")
+        .expect("edge");
+    let observed = match storage.read(edge, site, &mut budget) {
+        Ok(value) => value,
+        Err(_) => panic!("read projected scalar"),
+    };
+    let immutable = storage
+        .bind_slot(observed, Permission::ReadOnly, site, &mut budget)
+        .expect("immutable scalar binding");
+    assert!(storage.cells.is_empty());
+    assert!(storage.read(immutable.place(), site, &mut budget).is_ok());
+    assert!(matches!(
+        storage.replace(edge, scalar, site, &mut budget),
+        Ok(true)
+    ));
+    assert!(matches!(
+        storage.read(immutable.place(), site, &mut budget),
+        Err(StorageError::InvalidAccess(_))
+    ));
+}
+
+#[test]
 fn refused_graph_mutation_preserves_contents_and_access() {
     let constants = ConstValueStore::default();
     let meter = constants.execution_meter();

@@ -122,7 +122,7 @@ impl From<ValueMode> for Permission {
 
 /// The shape ID carries the exact type and occurrence provenance. Two different
 /// shape IDs can name one allocation, and equal shapes need not alias.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LiveValue {
     pub(super) shape: ConstValueId,
     pub(super) allocation: Option<AllocationId>,
@@ -198,6 +198,8 @@ pub(super) struct LivePlace {
 enum Location {
     Cell(CellId),
     Edge(EdgeLocation),
+    /// A read-only scalar cannot expose a writable binding cell.
+    Scalar(LiveValue),
 }
 
 /// Struct indices retain their identity for an allocation's lifetime. Collection
@@ -284,6 +286,14 @@ impl LiveStorage {
         } else {
             value.into_slot()
         };
+        if permission == Permission::ReadOnly && value.allocation.is_none() {
+            return Ok(LiveBinding::Slot(LivePlace {
+                location: Location::Scalar(value),
+                permission,
+                ancestors: None,
+                acquisition: None,
+            }));
+        }
         retain::<Cell>(1, budget)?;
         let cell = CellId(nonzero_index(self.cells.len())?);
         self.cells.push(Cell {
@@ -441,6 +451,10 @@ impl LiveStorage {
     ) -> Result<LiveValue, StorageError> {
         let place = self.check_place(place, budget)?;
         let mut value = match place.location {
+            Location::Scalar(value) => {
+                self.validate_value(value, budget)?;
+                value
+            }
             Location::Cell(cell) => {
                 let CellTarget::Value(mut value) = self.cell(cell).target else {
                     return Err(storage_invariant().into());
@@ -638,6 +652,7 @@ impl LiveStorage {
         }
         let value = value.into_slot();
         match place.location {
+            Location::Scalar(_) => return Ok(false),
             Location::Cell(cell) => {
                 let stamp = self.prepare_stamp(site, budget)?;
                 self.epoch = stamp.epoch;
