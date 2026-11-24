@@ -532,6 +532,10 @@ The typed abstract syntax tree (AST) stage consumes sorted shells and bound visi
 
 Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and builder root slot contributions. Root slot facts enter the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
 
+Synthetic control-flow scopes take their identity from the module's path interner. The
+compiler-only component cannot collide with a source binding, and unrelated or parallel
+frontend compilations cannot renumber those scopes.
+
 The semantic order is:
 
 ```text
@@ -957,13 +961,17 @@ fold before HIR exists: constants, TIR, template composition and selected static
 consume their results. Invalid required execution reports a source diagnostic and has no runtime
 fallback. The executor owns no parser, type system, second value domain or second template engine;
 numeric, cast, collection and template semantics retain their established owners.
-Consumers that need only a value fold through the shared walker without committing replacement
-rows. Inside a const body, a pure expression folds directly from the frame bindings. Short-circuit
-logic, user const calls, handlers, collection effects and templates take the executor's ordered
-rewrite, which owns their evaluation order. A value-producing block, which only occurs at a
-closed receiving site, compiles to its selected-branch statements plus that receiver, so a branch
-exit unwinds the same frame stack as any statement. A multi-result call commits its ordered slots
-as one constant result block, the same replacement the host folder uses.
+Consumers that need only values do not publish replacement rows. In a const body, ordered
+rewriting selects the operations that actually execute; the shared fold then reads the completed
+expression and frame bindings. It does not probe executable operands speculatively. A call
+validates every stored slot against its resolved contract before handing the ordered values
+directly to its receiver. AST consumers still publish a constant result block when several
+slots must survive as one expression, using the same replacement as the host folder. `then`
+delivers a closed value block's results; a catch can recover or transfer control to its
+enclosing function or loop. Handler transfers use the same frame unwind as ordinary statements.
+An authored known-invalid conversion remains a source diagnostic. A supported conversion
+that fails on values discovered during const execution enters the prepared catch handler
+with the builtin error code and message; it skips the rest of the protected expression.
 
 Simple completed pure expressions may fold eagerly when their result is deterministic, their
 source evaluation is semantics-preserving and any selected fast-operation or other validation

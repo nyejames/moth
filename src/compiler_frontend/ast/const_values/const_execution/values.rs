@@ -15,7 +15,7 @@ use super::{
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
-    ConstantValueFold, FoldRequirement, FoldServices, fold_interpreted_value,
+    ConstantFoldRefusalReason, ConstantValueFold, FoldRequirement, FoldServices,
     fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
@@ -279,7 +279,7 @@ impl ConstInterpreter<'_> {
     pub(super) fn fold_to_constant(
         &mut self,
         expression: ExprId,
-        bindings: &FrameBindings,
+        bindings: &mut FrameBindings,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         self.budget.step()?;
         let value_count = self.constants.value_count();
@@ -291,75 +291,28 @@ impl ConstInterpreter<'_> {
                 self.string_table,
                 Some(self.scope),
                 Some(self.scope.external_package_registry.as_ref()),
-            ),
+            )
+            .recover_cast_failure(self.state.active_handler.body.is_some()),
             self.types,
             FoldRequirement::Required,
             |path| bindings.get(&path).copied(),
         )? {
             ConstantValueFold::Value(value) => value,
             ConstantValueFold::NotConstant => return Ok(None),
+            ConstantValueFold::Refused(ConstantFoldRefusalReason::CastConversion {
+                error,
+                span,
+                ..
+            }) => {
+                self.execute_builtin_handler(error.code, Some(error.message), span, bindings)?;
+                return Ok(None);
+            }
             ConstantValueFold::Refused(reason) => {
                 return Err(ConstantFoldError::Diagnostic(reason.into_draft()));
             }
         };
         charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
         Ok(Some(value))
-    }
-
-    /// Evaluate a body expression from the frame bindings alone when the fold proves it constant,
-    /// or return `None` when the interpreter's ordered rewrite must evaluate it.
-    ///
-    /// WHY: a pure expression needs no rewritten rows, only its value. Fold refusals and source
-    ///      failures fall back instead of escaping, because the probe walks eagerly while the
-    ///      rewrite path owns evaluation order and so decides which failure is reported first.
-    ///      Budget and infrastructure failures still propagate. A settled value costs one step,
-    ///      charged at the whole expression's span: the fold attempt the rewrite path would have
-    ///      made, without its separate attempt on the inner value of a catch or `!` wrapper. A
-    ///      fallback charges nothing here. New value text is charged by the enclosing
-    ///      `evaluate_expression`.
-    pub(super) fn evaluate_directly(
-        &mut self,
-        expression: ExprId,
-        bindings: &FrameBindings,
-    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
-        let value = match fold_interpreted_value(
-            expression,
-            self.builder,
-            self.constants,
-            FoldServices::new(
-                self.string_table,
-                Some(self.scope),
-                Some(self.scope.external_package_registry.as_ref()),
-            ),
-            self.types,
-            |path| bindings.get(&path).copied(),
-        ) {
-            Ok(ConstantValueFold::Value(value)) => value,
-            Ok(ConstantValueFold::NotConstant | ConstantValueFold::Refused(_))
-            | Err(ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_)) => {
-                return Ok(None);
-            }
-            Err(error) => return Err(error),
-        };
-        self.budget.span = self.builder.view(expression)?.span();
-        self.budget.step()?;
-        Ok(Some(value))
-    }
-}
-
-pub(super) fn constant_operation(
-    builder: &AstExpressionBuilder,
-    expression: ExprId,
-    string_table: &mut StringTable,
-) -> Result<ConstValueId, ConstantFoldError> {
-    let view = builder.view(expression)?;
-    match view.operation() {
-        ExpressionOperationView::Constant(value) => Ok(value),
-        _ => Err(unsupported_error(
-            labels::LOOP_BINDING,
-            view.span(),
-            string_table,
-        )),
     }
 }
 
@@ -423,25 +376,41 @@ pub(super) fn expression_with_value(
     Ok(builder.constant(value, type_id, span, value_mode)?.id())
 }
 
-/// Replace a call with its result slots while retaining both authored and evaluated synthetic
-/// provenance. One slot becomes a `Constant`; several commit as one ordered constant result block.
-///
-/// WHY: HIR link facts accumulate the provenance of the expressions that survive into the module.
-///      A folded helper may depend on project-context values that were only reachable through the
-///      erased call. Dropping that provenance would let a facade appear not to expose them.
-pub(super) fn call_result_inheriting_provenance(
-    builder: &mut AstExpressionBuilder,
+/// Check the callee, call site and returned values against the same ordered result contract
+/// before any receiver or AST publication can observe the slots.
+pub(super) fn validate_call_results(
     constants: &ConstValueStore,
+    call_types: &[TypeId],
+    return_types: &[TypeId],
+    slots: &[ConstValueId],
+) -> Result<(), ConstantFoldError> {
+    if call_types != return_types || call_types.len() != slots.len() {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "const function result slots disagreed with its call signature",
+        )
+        .into());
+    }
+    for (&value, &expected) in slots.iter().zip(call_types) {
+        if constants.metadata(value).map(|metadata| metadata.type_id) != Some(expected) {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "const function returned a value whose stored type disagreed with its result slot",
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// Publish checked call results at an actual expression replacement boundary.
+pub(super) fn commit_call_result(
+    builder: &mut AstExpressionBuilder,
     call: ExprId,
     slots: &[ConstValueId],
     scope: PathId,
-    mut provenance: SyntheticInterfaceProvenance,
+    provenance: SyntheticInterfaceProvenance,
 ) -> Result<ExprId, ConstantFoldError> {
-    for &slot in slots {
-        if let Some(metadata) = constants.metadata(slot) {
-            provenance.merge(&metadata.synthetic_interface_provenance);
-        }
-    }
     let replacement = if let [value] = slots {
         let view = builder.view(call)?;
         let (span, value_mode) = (view.span(), view.value_mode());
@@ -462,9 +431,7 @@ pub(super) fn call_result_inheriting_provenance(
     Ok(replacement.id())
 }
 
-/// Read the ordered slots of a constant result block, or `None` for any other expression.
-///
-/// WHAT: the inverse of the several-slot replacement in `call_result_inheriting_provenance`.
+/// Read an already materialized constant result block, such as a folded Host call.
 pub(super) fn constant_result_block_slots(
     builder: &AstExpressionBuilder,
     expression: ExprId,

@@ -8,7 +8,9 @@
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
 use crate::compiler_frontend::ast::expressions::expression::FallibleHandling;
-use crate::compiler_frontend::ast::expressions::expression_store::{ExprId, OwnedExpr, PlaceId};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView, ExpressionView, OwnedExpr, PlaceId,
+};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -440,4 +442,15 @@ pub struct ValueCatchBlock {
     pub handled_value: ExprId,
     pub handler: FallibleHandling,
     pub result_type_ids: Vec<TypeId>,
+}
+
+/// A catch on a direct cast to an optional receiver produces the cast's inner target first.
+/// Both the converted and recovered values are wrapped after the catch.
+pub(crate) fn optional_cast_catch_target(protected: ExpressionView<'_>) -> Option<TypeId> {
+    match protected.operation() {
+        ExpressionOperationView::Cast { facts, .. } if facts.requires_optional_wrap_after_cast => {
+            Some(facts.target_type_id)
+        }
+        _ => None,
+    }
 }

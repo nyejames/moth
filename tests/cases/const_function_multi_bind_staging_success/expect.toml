@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " aliased=3034 swapped=1101,-91 handled=1,6,-100 recovered=203,4050,1,2,150 crossed=203,5051,51,6 selected=9 summed=24 discarded=3 point=5,10,15 "
+rendered_output_exact = " aliased=3034 swapped=1101,-91 handled=1,6,-100 recovered=203,4050,1,2,150 crossed=203,5051,51,6 selected=9 summed=24 discarded=3 transfer=107 empty=90,31 point=5,10,15 "

@@ -802,6 +802,20 @@ fn iteration_index_binding(
     expressions: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
 ) -> Result<TemplateFoldBinding, TemplateError> {
+    let constant = const_iteration_index(index, position, constants)?;
+    let value = iteration_constant(expressions, constant, index, provenance.clone())?;
+    Ok(TemplateFoldBinding {
+        path: index.id,
+        value,
+    })
+}
+
+/// Materialize the common zero-based I32 loop index without publishing an expression row.
+pub(crate) fn const_iteration_index(
+    index: &Declaration,
+    position: usize,
+    constants: &mut ConstValueStore,
+) -> Result<crate::compiler_frontend::ast::const_values::store::ConstValueId, TemplateError> {
     let position = i32::try_from(position).map_err(|_| {
         crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
@@ -810,14 +824,9 @@ fn iteration_index_binding(
     })?;
     let scalar = FixedScalarValue::signed(FixedScalar::I32, i64::from(position))
         .expect("checked I32 position");
-    let constant = constants.insert_resolved(
+    Ok(constants.insert_resolved(
         index.type_id,
         ConstValuePayload::FixedScalar(scalar),
         index.binding_span,
-    )?;
-    let value = iteration_constant(expressions, constant, index, provenance.clone())?;
-    Ok(TemplateFoldBinding {
-        path: index.id,
-        value,
-    })
+    )?)
 }

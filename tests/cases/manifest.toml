@@ -20739,6 +20739,20 @@ contract = "language.functions.const_function_collection_read_memory_rejected"
 role = "primary"
 
 [[case]]
+id = "const_function_catch_transfer_memory_rejected"
+path = "const_function_catch_transfer_memory_rejected"
+tags = ["integration", "functions", "const", "catch", "budgets", "diagnostics"]
+contract = "language.functions.const_budget_failure_precedes_catch_transfer"
+role = "primary"
+
+[[case]]
+id = "const_function_value_block_receiver_memory_rejected"
+path = "const_function_value_block_receiver_memory_rejected"
+tags = ["integration", "functions", "const", "value-blocks", "budgets", "diagnostics"]
+contract = "language.functions.const_value_block_receiver_memory_rejected"
+role = "primary"
+
+[[case]]
 id = "const_function_logical_discovery_success"
 path = "const_function_logical_discovery_success"
 tags = ["integration", "functions", "const", "budgets"]

@@ -112,6 +112,32 @@ discard #|value I32| -> I32:
     return value
 ;
 
+loop_transfer #|limit I32| -> I32:
+    values = {7}
+    total ~= 0
+    loop 0 to limit |index|:
+        ~total = total + values.get(index) catch:
+            if index is 1:
+                continue
+            ;
+            break
+        ;
+        ~total = total + 100
+    ;
+    return total
+;
+
+empty_recovery #|index I32| -> I32:
+    values ~= {3}
+    indices = {0}
+    did_recover ~= 0
+    ~values.set(indices.get(index), 9) catch:
+        ~did_recover = 1
+    ;
+    first = values.get(0) catch then -1
+    return first * 10 + did_recover
+;
+
 aliased #I32 = alias_write(7)
 swapped #String = [:[swap_read(1)],[swap_read(-1)]]
 handled #String = [:[handler_block(0)],[handler_block(3)],[handler_block(9)]]
@@ -120,6 +146,8 @@ crossed #String = [:[across(0)],[across(9)],[across_single(9)],[handler_statemen
 selected #I32 = static(9)
 summed #I32 = composite(4)
 discarded #I32 = discard(3)
+transferred #I32 = loop_transfer(5)
+empty #String = [:[empty_recovery(0)],[empty_recovery(9)]]
 point, tripled = shape(5)
 
-~[: aliased=[aliased] swapped=[swapped] handled=[handled] recovered=[recovered] crossed=[crossed] selected=[selected] summed=[summed] discarded=[discarded] point=[point.x],[point.y],[tripled] ]
+~[: aliased=[aliased] swapped=[swapped] handled=[handled] recovered=[recovered] crossed=[crossed] selected=[selected] summed=[summed] discarded=[discarded] transfer=[transferred] empty=[empty] point=[point.x],[point.y],[tripled] ]

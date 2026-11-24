@@ -19,14 +19,15 @@ use super::{
         direct_alias_target, expand_alias_target, fallible_handler_error_binding,
         unwrap_fallible_expression,
     },
-    rewrite::RewriteMode,
+    rewrite::{RewriteMode, RewriteOutput},
     state::{
         ActiveHandler, ConstExecutionServices, ConstInterpreter, ExecutionState, FrameBindings,
+        FrameOutcome,
     },
     values::{
-        ProjectionWrite, assign_constant_projections, constant_operation,
-        constant_result_block_slots, expression_with_value, hard_limit_error,
-        project_constant_value, template_error, unsupported_error,
+        ProjectionWrite, assign_constant_projections, constant_result_block_slots,
+        expression_with_value, hard_limit_error, project_constant_value, template_error,
+        unsupported_error,
     },
 };
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, MultiBindTargetKind, RangeLoopSpec};
@@ -42,10 +43,12 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ValueBlock, optional_cast_catch_target,
+};
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, TemplateFoldBinding, build_collection_iteration_bindings,
-    build_range_iteration_bindings,
+    ConstRangeCursor, TemplateFoldBinding, const_iteration_index,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     RequiredCallSiteRewriter, TemplateEmission,
@@ -92,7 +95,7 @@ enum ExecFrame {
 
 /// One active collection-loop frame.
 struct CollectionFrame {
-    values: Vec<ConstValueId>,
+    iterable: ConstValueId,
     next: usize,
     loop_bindings: Box<LoopBindings>,
     body: Rc<[ConstInstruction]>,
@@ -121,7 +124,6 @@ impl ConstInterpreter<'_> {
     ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
         let saved_aliases = std::mem::take(&mut self.state.aliases);
         let saved_handler_bodies = self.state.handler_bodies.take();
-        let saved_rewritten_handlers = std::mem::take(&mut self.state.rewritten_handlers);
         let saved_body = std::mem::replace(&mut self.state.current_body, body);
         // The budget span names the source that spends the allowance. A callee leaves its last
         // instruction there, and its first frame charges before reading its own instruction span,
@@ -140,20 +142,26 @@ impl ConstInterpreter<'_> {
         );
         self.state.aliases = saved_aliases;
         self.state.handler_bodies = saved_handler_bodies;
-        self.state.rewritten_handlers = saved_rewritten_handlers;
         self.state.current_body = saved_body;
         self.budget.span = saved_span;
         let result = result
             .map_err(|error| attach_donor_identity(error, executable.donor_identity.as_ref()))?;
-        Ok(self.state.pending_handler_return.take().unwrap_or(result))
+        match result {
+            FrameOutcome::Return(slots) => Ok(slots),
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "const control transfer escaped its function",
+            )
+            .into()),
+        }
     }
 
-    /// Run a prepared catch handler body and return the values its `then` statements produced.
+    /// Run a selected catch in isolation, with transfers reported to the enclosing frame.
     pub(super) fn execute_handler_body(
         &mut self,
         instructions: &Rc<[ConstInstruction]>,
         bindings: &mut FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
+    ) -> Result<FrameOutcome, ConstantFoldError> {
         if self.state.handler_depth >= MAX_HANDLER_DEPTH {
             return Err(hard_limit_error(
                 self.budget.span,
@@ -170,29 +178,19 @@ impl ConstInterpreter<'_> {
 
     /// Run one instruction stream with its own expression-recovery context.
     ///
-    /// WHY: a catch's recovery belongs to the statement that raised it. A callee or handler body
-    ///      starts with no inherited handler or recovery and consumes its own recovery at its own
-    ///      statement depth; the caller's in-flight state comes back unchanged. A pending handler
-    ///      return is not saved because it must cross this boundary; `expression_depth` and
-    ///      `handler_depth` stay global because they bound native recursion.
+    /// Callers receive any frame outcome explicitly; their in-flight handler state is restored
+    /// even on failure. Depths remain shared to bound native recursion.
     fn execute_frames(
         &mut self,
         instructions: &Rc<[ConstInstruction]>,
         mode: FrameMode,
         bindings: &mut FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
-        let saved_statement_depth = std::mem::replace(
-            &mut self.state.statement_expression_depth,
-            self.state.expression_depth,
-        );
+    ) -> Result<FrameOutcome, ConstantFoldError> {
         let saved_handler = std::mem::take(&mut self.state.active_handler);
-        let saved_recovered = std::mem::take(&mut self.state.inherited_handler_recovered);
-        let saved_recovery = std::mem::take(&mut self.state.inherited_handler_values);
+        let saved_outcome = self.state.outcome.take();
         let result = self.run_frames(instructions, mode, bindings);
-        self.state.statement_expression_depth = saved_statement_depth;
         self.state.active_handler = saved_handler;
-        self.state.inherited_handler_recovered = saved_recovered;
-        self.state.inherited_handler_values = saved_recovery;
+        self.state.outcome = saved_outcome;
         result
     }
 
@@ -202,25 +200,13 @@ impl ConstInterpreter<'_> {
         instructions: &Rc<[ConstInstruction]>,
         mode: FrameMode,
         bindings: &mut FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
+    ) -> Result<FrameOutcome, ConstantFoldError> {
         let mut frames = vec![ExecFrame::Program {
             instructions: Rc::clone(instructions),
             ip: 0,
         }];
 
         while let Some(frame) = frames.pop() {
-            match mode {
-                FrameMode::HandlerBody => {
-                    if let Some(returns) = self.state.pending_handler_return.clone() {
-                        return Ok(returns);
-                    }
-                }
-                FrameMode::FunctionBody => {
-                    if let Some(returns) = self.state.pending_handler_return.take() {
-                        return Ok(returns);
-                    }
-                }
-            }
             self.budget.step()?;
             match frame {
                 ExecFrame::Program { instructions, ip } => {
@@ -233,11 +219,7 @@ impl ConstInterpreter<'_> {
                         instructions: Rc::clone(&instructions),
                         ip: ip + 1,
                     });
-                    if let Some(returns) =
-                        self.execute_instruction(&instruction.kind, &mut frames, bindings)?
-                    {
-                        return Ok(returns);
-                    }
+                    self.execute_instruction(&instruction.kind, &mut frames, bindings)?;
                 }
                 ExecFrame::While { condition, body } => {
                     self.run_while_frame(condition, body, &mut frames, bindings)?;
@@ -262,10 +244,23 @@ impl ConstInterpreter<'_> {
                     .into());
                 }
             }
+            if let Some(outcome) = self.state.outcome.take() {
+                let keep_loop = match outcome {
+                    FrameOutcome::Return(_) | FrameOutcome::Recovered(_) => return Ok(outcome),
+                    FrameOutcome::Break => false,
+                    FrameOutcome::Continue => true,
+                };
+                if let Some(index) = nearest_loop(&frames) {
+                    frames.truncate(index + usize::from(keep_loop));
+                } else {
+                    // A handler can target a loop in its enclosing frame stream.
+                    return Ok(outcome);
+                }
+            }
         }
 
         match mode {
-            FrameMode::HandlerBody => Ok(Vec::new()),
+            FrameMode::HandlerBody => Ok(FrameOutcome::Recovered(Vec::new())),
             FrameMode::FunctionBody => Err(unsupported_error(
                 labels::WITHOUT_FINAL_RETURN,
                 None,
@@ -275,15 +270,12 @@ impl ConstInterpreter<'_> {
     }
 
     /// Run one instruction.
-    ///
-    /// Returns the values a `return` instruction produces; `None` keeps executing the frame
-    /// stack. `break` and `continue` repair the stack here instead of escaping it.
     fn execute_instruction(
         &mut self,
         instruction: &ConstInstructionKind,
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<(), ConstantFoldError> {
         match instruction {
             ConstInstructionKind::Bind {
                 path,
@@ -337,10 +329,24 @@ impl ConstInterpreter<'_> {
                 frames,
                 bindings,
             )?,
-            ConstInstructionKind::ReturnFromFunction(values) => {
-                return self.execute_return_from_function(values, bindings);
+            ConstInstructionKind::Return(values) | ConstInstructionKind::Recover(values) => {
+                if let Some(slots) = self.evaluate_value_slots(values, bindings)? {
+                    self.state.outcome = Some(match instruction {
+                        ConstInstructionKind::Return(_) => FrameOutcome::Return(slots),
+                        _ => FrameOutcome::Recovered(slots),
+                    });
+                }
             }
-            ConstInstructionKind::Return(values) => return self.execute_return(values, bindings),
+            ConstInstructionKind::MultiBind {
+                expression,
+                receiver,
+            } => {
+                if let Some(slots) =
+                    self.evaluate_value_slots(std::slice::from_ref(expression), bindings)?
+                {
+                    self.receive_values(receiver, slots, bindings)?;
+                }
+            }
             ConstInstructionKind::ValueBlock { body, receiver } => {
                 frames.push(ExecFrame::ValueBlock(Rc::clone(receiver)));
                 frames.push(ExecFrame::Program {
@@ -349,15 +355,15 @@ impl ConstInterpreter<'_> {
                 });
             }
             ConstInstructionKind::Then(values) => {
-                return self.execute_then(values, frames, bindings);
+                self.execute_then(values, frames, bindings)?;
             }
-            ConstInstructionKind::Break => execute_break(frames, self.string_table)?,
-            ConstInstructionKind::Continue => execute_continue(frames, self.string_table)?,
+            ConstInstructionKind::Break => self.state.outcome = Some(FrameOutcome::Break),
+            ConstInstructionKind::Continue => self.state.outcome = Some(FrameOutcome::Continue),
             ConstInstructionKind::Assert { condition, message } => {
                 self.execute_assert(*condition, *message, bindings)?;
             }
         }
-        Ok(None)
+        Ok(())
     }
 
     /// Bind one declaration, recording a mutable alias target when the value names a place.
@@ -373,7 +379,9 @@ impl ConstInterpreter<'_> {
         } else {
             None
         };
-        let value = self.evaluate_expression(expression, bindings)?;
+        let Some(value) = self.evaluate_expression(expression, bindings)? else {
+            return Ok(());
+        };
         if let Some((root, projections)) = alias_target {
             let (root, projections) = expand_alias_target(root, projections, &self.state.aliases);
             self.state
@@ -393,10 +401,9 @@ impl ConstInterpreter<'_> {
         expression: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let value = self.evaluate_expression(expression, bindings)?;
-        if self.state.pending_handler_return.is_some() {
+        let Some(value) = self.evaluate_expression(expression, bindings)? else {
             return Ok(());
-        }
+        };
         self.assign_value(place, value, bindings)
     }
 
@@ -406,7 +413,9 @@ impl ConstInterpreter<'_> {
         value: ConstValueId,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let (root, projections) = self.evaluate_place_projections(place, bindings)?;
+        let Some((root, projections)) = self.evaluate_place_projections(place, bindings)? else {
+            return Ok(());
+        };
         let span = self
             .builder
             .place(place)
@@ -453,11 +462,10 @@ impl ConstInterpreter<'_> {
         values: &[ExprId],
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
-        let slots = self.evaluate_value_slots(values, bindings)?;
-        if self.state.pending_handler_return.is_some() {
-            return Ok(None);
-        }
+    ) -> Result<(), ConstantFoldError> {
+        let Some(slots) = self.evaluate_value_slots(values, bindings)? else {
+            return Ok(());
+        };
         let receiver = loop {
             match frames.pop() {
                 Some(ExecFrame::ValueBlock(receiver)) => break receiver,
@@ -481,7 +489,7 @@ impl ConstInterpreter<'_> {
         receiver: &ValueReceiver,
         slots: Vec<ConstValueId>,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<(), ConstantFoldError> {
         match receiver {
             ValueReceiver::Declaration(path) => {
                 let [value] = slots[..] else {
@@ -519,13 +527,9 @@ impl ConstInterpreter<'_> {
                     }
                 }
             }
-            ValueReceiver::Return => return Ok(Some(slots)),
-            ValueReceiver::ReturnFromFunction => {
-                self.state.pending_handler_return = Some(slots.clone());
-                return Ok(Some(slots));
-            }
+            ValueReceiver::Return => self.state.outcome = Some(FrameOutcome::Return(slots)),
         }
-        Ok(None)
+        Ok(())
     }
 
     fn execute_if(
@@ -536,7 +540,9 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let condition = self.evaluate_bool(condition, bindings)?;
+        let Some(condition) = self.evaluate_bool(condition, bindings)? else {
+            return Ok(());
+        };
         let body = if condition { then_body } else { else_body };
         if !body.is_empty() {
             frames.push(ExecFrame::Program {
@@ -574,7 +580,7 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        if self.evaluate_bool(condition, bindings)? {
+        if self.evaluate_bool(condition, bindings)? == Some(true) {
             frames.push(ExecFrame::While {
                 condition,
                 body: Rc::clone(body),
@@ -597,6 +603,9 @@ impl ConstInterpreter<'_> {
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
         let range = self.evaluated_range_spec(range, bindings)?;
+        if self.state.outcome.is_some() {
+            return Ok(());
+        }
         let cursor = ConstRangeCursor::new_lenient(
             &range,
             self.builder,
@@ -624,10 +633,9 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let iterable = self.evaluate_expression(iterable, bindings)?;
-        if self.state.pending_handler_return.is_some() {
+        let Some(iterable) = self.evaluate_expression(iterable, bindings)? else {
             return Ok(());
-        }
+        };
         let Some(ConstValuePayload::Collection(values)) = self.constants.payload(iterable) else {
             return Err(unsupported_error(
                 labels::COLLECTION_LOOP,
@@ -635,17 +643,9 @@ impl ConstInterpreter<'_> {
                 self.string_table,
             ));
         };
-        self.budget.retain_values(values.len(), span)?;
-        self.budget.retain_memory_bytes(
-            values
-                .len()
-                .saturating_mul(std::mem::size_of::<ConstValueId>()),
-            span,
-        )?;
-        let values = values.clone();
         if !values.is_empty() {
             frames.push(ExecFrame::Collection(CollectionFrame {
-                values,
+                iterable,
                 next: 0,
                 loop_bindings: Box::new(loop_bindings.clone()),
                 body: Rc::clone(body),
@@ -654,58 +654,36 @@ impl ConstInterpreter<'_> {
         Ok(())
     }
 
-    /// Evaluate a handler `return` and keep it pending for the owning function boundary.
-    fn execute_return_from_function(
-        &mut self,
-        values: &[ExprId],
-        bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
-        let returns = self.evaluate_value_slots(values, bindings)?;
-        if self.state.pending_handler_return.is_some() {
-            // A nested handler `return` ran first and already owns the unwind.
-            return Ok(None);
-        }
-        self.receive_values(&ValueReceiver::ReturnFromFunction, returns, bindings)
-    }
-
-    /// Evaluate an ordinary `return`; a pending handler return wins at the function boundary.
-    fn execute_return(
-        &mut self,
-        values: &[ExprId],
-        bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
-        let returns = self.evaluate_value_slots(values, bindings)?;
-        if self.state.pending_handler_return.is_some() {
-            // Leave the pending return for the function boundary; this instruction must not
-            // consume it as ordinary recovery.
-            return Ok(Some(Vec::new()));
-        }
-        Ok(Some(returns))
-    }
-
     /// Evaluate `return` or `then` values in order, expanding each multi-result producer into its
-    /// slots. Evaluation stops at the first pending handler return, which owns the unwind.
+    /// slots. A handler transfer interrupts the whole receiving site.
     fn evaluate_value_slots(
         &mut self,
         values: &[ExprId],
         bindings: &mut FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
+    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+        if let [expression] = values
+            && self.has_multiple_success_slots(*expression)?
+        {
+            return self.evaluate_result_block(*expression, bindings);
+        }
         let mut slots = Vec::with_capacity(values.len());
         for &expression in values {
             if self.has_multiple_success_slots(expression)? {
-                slots.extend(self.evaluate_result_block(expression, bindings)?);
+                let Some(produced) = self.evaluate_result_block(expression, bindings)? else {
+                    return Ok(None);
+                };
+                slots.extend(produced);
             } else {
-                slots.push(self.evaluate_expression(expression, bindings)?);
-            }
-            if self.state.pending_handler_return.is_some() {
-                break;
+                let Some(value) = self.evaluate_expression(expression, bindings)? else {
+                    return Ok(None);
+                };
+                slots.push(value);
             }
         }
-        Ok(slots)
+        Ok(Some(slots))
     }
 
-    /// Whether `expression` has several success slots, which its constant replacement carries
-    /// as one result block.
+    /// Whether `expression` produces several ordered success slots.
     fn has_multiple_success_slots(&self, expression: ExprId) -> Result<bool, ConstantFoldError> {
         Ok(matches!(
             self.builder.view(expression)?.success_shape(),
@@ -719,14 +697,15 @@ impl ConstInterpreter<'_> {
         message: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let condition_value = self.evaluate_bool(condition, bindings)?;
-        if self.state.pending_handler_return.is_some() {
+        let Some(condition_value) = self.evaluate_bool(condition, bindings)? else {
             return Ok(());
-        }
+        };
         if !condition_value {
             // Runtime assertion lowering evaluates the message only on the failure branch, so a
             // passing assertion must not execute it.
-            self.evaluate_expression(message, bindings)?;
+            if self.evaluate_expression(message, bindings)?.is_none() {
+                return Ok(());
+            }
             return Err(ConstantFoldError::Diagnostic(
                 choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::ConstAssertionFailed,
@@ -748,7 +727,7 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        if self.evaluate_bool(condition, bindings)? {
+        if self.evaluate_bool(condition, bindings)? == Some(true) {
             frames.push(ExecFrame::While {
                 condition,
                 body: Rc::clone(&body),
@@ -794,7 +773,15 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let Some(&item_value) = frame.values.get(frame.next) else {
+        let Some(ConstValuePayload::Collection(values)) = self.constants.payload(frame.iterable)
+        else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "const collection loop lost its iterable value",
+            )
+            .into());
+        };
+        let Some(&item_value) = values.get(frame.next) else {
             return Ok(());
         };
         self.bind_collection_iteration(&frame.loop_bindings, item_value, frame.next, bindings)?;
@@ -832,8 +819,14 @@ impl ConstInterpreter<'_> {
         expression: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<ExprId, ConstantFoldError> {
+        if self.state.outcome.is_some() {
+            return Ok(expression);
+        }
         let (type_id, span, value_mode) = {
             let view = self.builder.view(expression)?;
+            if matches!(view.operation(), ExpressionOperationView::Constant(_)) {
+                return Ok(expression);
+            }
             let type_id = view.success_shape().single().ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ConstantEvaluation,
@@ -842,10 +835,9 @@ impl ConstInterpreter<'_> {
             })?;
             (type_id, view.span(), view.value_mode())
         };
-        let value = self.evaluate_expression(expression, bindings)?;
-        if self.state.pending_handler_return.is_some() {
+        let Some(value) = self.evaluate_expression(expression, bindings)? else {
             return Ok(expression);
-        }
+        };
         expression_with_value(self.builder, value, type_id, span, value_mode)
     }
 
@@ -856,20 +848,17 @@ impl ConstInterpreter<'_> {
         zero_based_index: usize,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let built = build_range_iteration_bindings(
-            loop_bindings,
-            counter,
-            zero_based_index,
-            &Default::default(),
-            self.builder,
-            self.constants,
-        )
-        .map_err(template_error)?;
-        for binding in built {
-            let value = constant_operation(self.builder, binding.value, self.string_table)?;
-            bindings.insert(binding.path, value);
+        let count = self.constants.value_count();
+        if let Some(item) = &loop_bindings.item {
+            let value = self.constants.insert_resolved(
+                item.type_id,
+                ConstValuePayload::FixedScalar(counter),
+                item.binding_span,
+            )?;
+            bindings.insert(item.id, value);
         }
-        Ok(())
+        self.bind_iteration_index(loop_bindings, zero_based_index, bindings)?;
+        charge_new_value_text(self.constants, self.string_table, count, self.budget)
     }
 
     fn bind_collection_iteration(
@@ -879,35 +868,24 @@ impl ConstInterpreter<'_> {
         source_index: usize,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let item_type = self
-            .constants
-            .metadata(item_value)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::ConstantEvaluation,
-                    "collection loop item is outside its constant owner",
-                )
-            })?
-            .type_id;
-        let item_expression = expression_with_value(
-            self.builder,
-            item_value,
-            item_type,
-            None,
-            ValueMode::ImmutableOwned,
-        )?;
-        let built = build_collection_iteration_bindings(
-            loop_bindings,
-            item_expression,
-            source_index,
-            &Default::default(),
-            self.builder,
-            self.constants,
-        )
-        .map_err(template_error)?;
-        for binding in built {
-            let value = constant_operation(self.builder, binding.value, self.string_table)?;
-            bindings.insert(binding.path, value);
+        let count = self.constants.value_count();
+        if let Some(item) = &loop_bindings.item {
+            bindings.insert(item.id, item_value);
+        }
+        self.bind_iteration_index(loop_bindings, source_index, bindings)?;
+        charge_new_value_text(self.constants, self.string_table, count, self.budget)
+    }
+
+    fn bind_iteration_index(
+        &mut self,
+        loop_bindings: &LoopBindings,
+        position: usize,
+        bindings: &mut FrameBindings,
+    ) -> Result<(), ConstantFoldError> {
+        if let Some(index) = &loop_bindings.index {
+            let value =
+                const_iteration_index(index, position, self.constants).map_err(template_error)?;
+            bindings.insert(index.id, value);
         }
         Ok(())
     }
@@ -916,13 +894,12 @@ impl ConstInterpreter<'_> {
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<bool, ConstantFoldError> {
-        let value = self.evaluate_expression(expression, bindings)?;
-        if self.state.pending_handler_return.is_some() {
-            return Ok(false);
-        }
+    ) -> Result<Option<bool>, ConstantFoldError> {
+        let Some(value) = self.evaluate_expression(expression, bindings)? else {
+            return Ok(None);
+        };
         match self.constants.payload(value) {
-            Some(ConstValuePayload::Bool(boolean)) => Ok(*boolean),
+            Some(ConstValuePayload::Bool(boolean)) => Ok(Some(*boolean)),
             _ => Err(unsupported_error(
                 labels::CONDITION,
                 self.builder.view(expression)?.span(),
@@ -944,52 +921,57 @@ impl ConstInterpreter<'_> {
         Ok(())
     }
 
-    /// Whether the evaluation that started at `depth` is its statement's outermost expression,
-    /// with an inherited recovery waiting. Only that evaluation consumes the recovery; nested
-    /// evaluations read it and leave the marker for this boundary.
-    fn consumes_inherited_recovery(&self, depth: usize) -> bool {
-        self.state.inherited_handler_recovered && depth == self.state.statement_expression_depth
+    /// A recovery belongs to its authored catch, never to a nested operand or a mutation argument.
+    fn take_recovery(
+        &mut self,
+        expression: ExprId,
+    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+        if matches!(self.state.outcome, Some(FrameOutcome::Recovered(_)))
+            && self.fallible_handler_instructions(expression)?.is_some()
+            && let Some(FrameOutcome::Recovered(slots)) = self.state.outcome.take()
+        {
+            return Ok(Some(slots));
+        }
+        Ok(None)
     }
 
     /// Evaluate one multi-result producer to its ordered slots.
-    ///
-    /// WHY: the rewrite executes the producing call once and commits its slots as one constant
-    ///      result block, so reading the block rows back keeps one producer run per receiving site.
-    ///      A successful catch keeps that block as its handled value; a recovering catch replaces
-    ///      every slot with its handler's values.
     fn evaluate_result_block(
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
+    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
         self.check_expression_depth(expression)?;
-        let depth = self.state.expression_depth;
         let value_count = self.constants.value_count();
         self.state.expression_depth += 1;
-        let rewritten = self.rewrite_with_handler(expression, bindings);
+        let rewritten = self.with_expression_handler(expression, |interpreter| {
+            interpreter.rewrite_for_value(expression, bindings)
+        });
         self.state.expression_depth -= 1;
         let rewritten = rewritten?;
         charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
-        if self.state.pending_handler_return.is_some() {
-            return Ok(Vec::new());
+        if let Some(slots) = self.take_recovery(expression)? {
+            return Ok(Some(slots));
         }
-        if self.consumes_inherited_recovery(depth) {
-            // A nested catch is a handler boundary, so a recovery that reaches a statement-root
-            // producer belongs to its own catch. Its handler values replace every slot.
-            self.state.inherited_handler_recovered = false;
-            return Ok(std::mem::take(&mut self.state.inherited_handler_values));
+        if self.state.outcome.is_some() {
+            return Ok(None);
         }
+        let rewritten = match rewritten {
+            RewriteOutput::CallResults(slots) => return Ok(Some(slots)),
+            RewriteOutput::Expression(expression) => expression,
+        };
         let produced = unwrap_fallible_expression(rewritten, self.builder)?;
-        constant_result_block_slots(self.builder, produced)?.ok_or_else(|| {
-            unsupported_error(
+        let Some(slots) = constant_result_block_slots(self.builder, produced)? else {
+            return Err(unsupported_error(
                 labels::VALUE_EXPRESSION,
                 self.builder
                     .view(expression)
                     .ok()
                     .and_then(|view| view.span()),
                 self.string_table,
-            )
-        })
+            ));
+        };
+        Ok(Some(slots))
     }
 
     /// Evaluate one typed expression to a constant value, consuming inherited recovery once.
@@ -997,83 +979,113 @@ impl ConstInterpreter<'_> {
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<ConstValueId, ConstantFoldError> {
+    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         self.check_expression_depth(expression)?;
-        let depth = self.state.expression_depth;
         let value_count = self.constants.value_count();
         self.state.expression_depth += 1;
-        let result = self.evaluate_expression_inner(expression, bindings);
+        let result = self.with_expression_handler(expression, |interpreter| {
+            interpreter.evaluate_expression_inner(expression, bindings)
+        });
         self.state.expression_depth -= 1;
-        // Charge new value rows before the recovery marker is consulted: a budget refusal while
-        // charging must escape even when a handler recovered part of this expression. The marker
-        // substitutes a recovery value for the evaluation result, but never suppresses this
-        // charge.
-        if result.is_ok() {
+        let result = result?;
+        charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+        if let Some(slots) = self.take_recovery(expression)? {
+            let [value] = slots[..] else {
+                return Err(receiver_slot_mismatch());
+            };
+            let value = self.complete_recovered_value(expression, value)?;
             charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+            return Ok(Some(value));
         }
-        if let Some(&value) = self.state.inherited_handler_values.first() {
-            if self.consumes_inherited_recovery(depth) {
-                self.state.inherited_handler_recovered = false;
-                self.state.inherited_handler_values.clear();
-            }
-            return Ok(value);
-        }
-        if let Some(value) = self
-            .state
-            .pending_handler_return
-            .as_ref()
-            .and_then(|values| values.first())
-            .copied()
-        {
-            return Ok(value);
-        }
-        result
+        Ok(if self.state.outcome.is_some() {
+            None
+        } else {
+            result
+        })
     }
 
-    /// Rewrite `expression` under its own catch handler, or the inherited one, then restore the
-    /// caller's handler.
-    fn rewrite_with_handler(
+    fn complete_recovered_value(
         &mut self,
         expression: ExprId,
-        bindings: &mut FrameBindings,
-    ) -> Result<ExprId, ConstantFoldError> {
-        // Resolve the selected catch body before touching the inherited handler: handler lookup
-        // reads only the prepared frame tables, and an infrastructure error here must not clear
-        // live state.
-        let own_handler = self.fallible_handler_instructions(expression)?;
-        let own_error_binding = fallible_handler_error_binding(self.builder, expression)?;
-        let inherited_handler = std::mem::take(&mut self.state.active_handler);
-        self.state.active_handler = ActiveHandler {
-            body: own_handler.or_else(|| inherited_handler.body.clone()),
-            error_binding: own_error_binding.or(inherited_handler.error_binding),
-            boundary: false,
+        value: ConstValueId,
+    ) -> Result<ConstValueId, ConstantFoldError> {
+        let view = self.builder.view(expression)?;
+        let ExpressionOperationView::ValueBlock(ValueBlock::Catch(block)) = view.operation() else {
+            return Ok(value);
         };
-        let rewritten =
-            self.rewrite_with_bindings(expression, RewriteMode::InterpretedBody, bindings);
+        let protected = self.builder.view(block.handled_value)?;
+        let Some(target) = optional_cast_catch_target(protected) else {
+            return Ok(value);
+        };
+        let recovered = self
+            .constants
+            .metadata(value)
+            .filter(|value| value.type_id == target)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "const catch recovery disagrees with the cast's inner receiving type",
+                )
+            })?;
+        let mut metadata = ConstValueStore::metadata_from_view(view, ConstValueKind::Composite)?;
+        metadata.type_id = protected.value_type_id()?;
+        metadata
+            .synthetic_interface_provenance
+            .merge(&recovered.synthetic_interface_provenance);
+        Ok(self
+            .constants
+            .insert_value(metadata, ConstValuePayload::OptionSome(value))?)
+    }
+
+    /// Keep an authored catch active across expression rewriting and evaluation, including
+    /// completion of rebuilt expressions. A nested catch installs its own handler.
+    pub(super) fn with_expression_handler<T>(
+        &mut self,
+        expression: ExprId,
+        evaluate: impl FnOnce(&mut Self) -> Result<T, ConstantFoldError>,
+    ) -> Result<T, ConstantFoldError> {
+        let Some(body) = self.fallible_handler_instructions(expression)? else {
+            return evaluate(self);
+        };
+        let error_binding = fallible_handler_error_binding(self.builder, expression)?;
+        let inherited_handler = ActiveHandler::replace(self.state, Some(body), error_binding);
+        let result = evaluate(self);
         self.state.active_handler = inherited_handler;
-        rewritten
+        result
     }
 
     fn evaluate_expression_inner(
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<ConstValueId, ConstantFoldError> {
+    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         if let Some(value) = self.evaluate_collection_read(expression, bindings)? {
-            return Ok(value);
+            return Ok(Some(value));
         }
-        if let Some(value) = self.evaluate_directly(expression, bindings)? {
-            return Ok(value);
+        if self.state.outcome.is_some() {
+            return Ok(None);
         }
-        let rewritten = self.rewrite_with_handler(expression, bindings)?;
-        if let Some(value) = self.evaluate_collection_read(rewritten, bindings)? {
-            return Ok(value);
+        let rewritten = match self.rewrite_for_value(expression, bindings)? {
+            RewriteOutput::CallResults(slots) => {
+                let [value] = slots[..] else {
+                    return Err(receiver_slot_mismatch());
+                };
+                return Ok(Some(value));
+            }
+            RewriteOutput::Expression(expression) => expression,
+        };
+        if self.state.outcome.is_some() {
+            return Ok(None);
         }
         if let Some(value) = self.fold_to_constant(rewritten, bindings)? {
-            return Ok(value);
+            return Ok(Some(value));
         }
         if let ExpressionOperationView::Copy(place) = self.builder.view(rewritten)?.operation() {
-            let (root, projections) = self.evaluate_place_projections(place.id(), bindings)?;
+            let Some((root, projections)) =
+                self.evaluate_place_projections(place.id(), bindings)?
+            else {
+                return Ok(None);
+            };
             if let Some(root_value) = bindings.get(&root).copied() {
                 return project_constant_value(
                     self.constants,
@@ -1081,6 +1093,7 @@ impl ConstInterpreter<'_> {
                     &projections,
                     self.path_fork,
                 )
+                .map(Some)
                 .ok_or_else(|| {
                     unsupported_error(
                         labels::PROJECTED_READ,
@@ -1094,7 +1107,10 @@ impl ConstInterpreter<'_> {
             }
         }
         if let Some(projected) = self.fold_template_with_bindings(rewritten, bindings)? {
-            return Ok(projected.value);
+            return Ok(Some(projected.value));
+        }
+        if self.state.outcome.is_some() {
+            return Ok(None);
         }
         Err(unsupported_error(
             labels::VALUE_EXPRESSION,
@@ -1247,6 +1263,9 @@ impl ConstInterpreter<'_> {
         {
             return Ok(None);
         }
+        // TIR still receives expression IDs for its bindings. These rows live in the source
+        // arena, so bound them before adapting a frame, even when the template emits no text.
+        self.budget.retain_values(bindings.len(), template_span)?;
         let mut fold_bindings = Vec::with_capacity(bindings.len());
         for (path, value) in bindings {
             let metadata = self.constants.metadata(*value).ok_or_else(|| {
@@ -1374,32 +1393,6 @@ fn receiver_slot_mismatch() -> ConstantFoldError {
         "const value block produced a slot count its receiver does not accept",
     )
     .into()
-}
-
-/// Truncate the frame stack at the nearest active loop for `break`.
-fn execute_break(
-    frames: &mut Vec<ExecFrame>,
-    string_table: &mut StringTable,
-) -> Result<(), ConstantFoldError> {
-    if let Some(index) = nearest_loop(frames) {
-        frames.truncate(index);
-        Ok(())
-    } else {
-        Err(unsupported_error(labels::LOOP_CONTROL, None, string_table))
-    }
-}
-
-/// Resume the nearest active loop for `continue`.
-fn execute_continue(
-    frames: &mut Vec<ExecFrame>,
-    string_table: &mut StringTable,
-) -> Result<(), ConstantFoldError> {
-    if let Some(index) = nearest_loop(frames) {
-        frames.truncate(index + 1);
-        Ok(())
-    } else {
-        Err(unsupported_error(labels::LOOP_CONTROL, None, string_table))
-    }
 }
 
 fn nearest_loop(frames: &[ExecFrame]) -> Option<usize> {

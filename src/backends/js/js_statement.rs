@@ -1318,7 +1318,8 @@ impl<'hir> JsEmitter<'hir> {
                 );
                 format!("((({scrutinee_expression}).tag === \"some\") && {inner_equality})")
             }
-            HirPattern::OptionRelational { op, value } => {
+            HirPattern::OptionRelational { op, value } | HirPattern::Relational { op, value } => {
+                let compared_type = self.hir.expressions.expression(*value).ty;
                 let rhs = self.lower_expr(*value)?;
                 let js_op = match op {
                     HirRelationalPatternOp::LessThan => "<",
@@ -1326,23 +1327,18 @@ impl<'hir> JsEmitter<'hir> {
                     HirRelationalPatternOp::GreaterThan => ">",
                     HirRelationalPatternOp::GreaterThanOrEqual => ">=",
                 };
-                format!(
-                    "((({scrutinee_expression}).tag === \"some\") && (({scrutinee_expression}).value {js_op} {rhs}))"
-                )
+                if matches!(arm.pattern, HirPattern::OptionRelational { .. }) {
+                    let left = format!("({scrutinee_expression}).value");
+                    let comparison =
+                        self.lower_ordered_comparison(&left, &rhs, compared_type, js_op);
+                    format!("((({scrutinee_expression}).tag === \"some\") && {comparison})")
+                } else {
+                    self.lower_ordered_comparison(scrutinee_expression, &rhs, compared_type, js_op)
+                }
             }
             HirPattern::Wildcard => "true".to_owned(),
             HirPattern::OptionPresent => {
                 format!("({scrutinee_expression}).tag === \"some\"")
-            }
-            HirPattern::Relational { op, value } => {
-                let rhs = self.lower_expr(*value)?;
-                let js_op = match op {
-                    HirRelationalPatternOp::LessThan => "<",
-                    HirRelationalPatternOp::LessThanOrEqual => "<=",
-                    HirRelationalPatternOp::GreaterThan => ">",
-                    HirRelationalPatternOp::GreaterThanOrEqual => ">=",
-                };
-                format!("{scrutinee_expression} {js_op} {rhs}")
             }
             HirPattern::ChoiceVariant { variant_index, .. } => {
                 format!("{scrutinee_expression}.tag === {variant_index}")

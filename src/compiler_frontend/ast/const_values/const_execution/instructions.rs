@@ -67,9 +67,8 @@ pub(super) enum ConstInstructionKind {
         span: Option<SourceSpan>,
     },
     Return(Vec<ExprId>),
-    /// An explicit `return` inside a catch handler must leave the enclosing const function,
-    /// not merely produce the handler recovery value.
-    ReturnFromFunction(Vec<ExprId>),
+    /// `then` at a catch handler's own receiving site.
+    Recover(Vec<ExprId>),
     /// A value-producing block at a closed receiving site. Its body selects one branch with the
     /// ordinary statement forms, and the `Then` that completes the branch hands its values to
     /// `receiver`.
@@ -80,6 +79,10 @@ pub(super) enum ConstInstructionKind {
     ValueBlock {
         body: Rc<[ConstInstruction]>,
         receiver: Rc<ValueReceiver>,
+    },
+    MultiBind {
+        expression: ExprId,
+        receiver: ValueReceiver,
     },
     /// `then` in a value block body: produce every slot, then complete the innermost value block.
     Then(Vec<ExprId>),
@@ -99,14 +102,12 @@ pub(super) struct ConstInstruction {
 }
 
 /// The receiving site a value block, or a multi-bind producer, delivers its slots to.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum ValueReceiver {
     Declaration(PathId),
     Assignment(PlaceId),
     MultiBind(Box<[MultiBindTarget]>),
     Return,
-    /// The block is returned from a catch handler body, so it leaves the enclosing const function.
-    ReturnFromFunction,
 }
 
 /// One prepared match arm: the AST's resolved pattern and guard, with its body compiled once.
@@ -133,19 +134,8 @@ enum BodyContext {
     /// A catch handler body: a bare `then` value is the handler result and an explicit `return`
     /// leaves the enclosing const function.
     CatchHandler,
-    /// A value block branch: a bare `then` value completes the block. `in_handler` records whether
-    /// an explicit `return` must also leave an enclosing catch handler.
-    ValueBlock { in_handler: bool },
-}
-
-impl BodyContext {
-    /// Whether an explicit `return` here runs inside a catch handler's own frame stack.
-    fn in_handler(self) -> bool {
-        matches!(
-            self,
-            Self::CatchHandler | Self::ValueBlock { in_handler: true }
-        )
-    }
+    /// A value block branch: a bare `then` value completes the block.
+    ValueBlock,
 }
 
 pub(super) fn compile_body(
@@ -188,7 +178,7 @@ impl BodyCompiler<'_> {
                 }
                 NodeKind::VariableDeclaration(declaration) => match &declaration.value {
                     DeclarationValue::Initializer(expression) => {
-                        match self.value_block_body(*expression, body_context)? {
+                        match self.value_block_body(*expression)? {
                             Some(body) => {
                                 value_block(body, ValueReceiver::Declaration(declaration.id))
                             }
@@ -214,26 +204,22 @@ impl BodyCompiler<'_> {
                         return reject("declaration shell", node.span);
                     }
                 },
-                NodeKind::Assignment { target, value } => {
-                    match self.value_block_body(*value, body_context)? {
-                        Some(body) => value_block(body, ValueReceiver::Assignment(*target)),
-                        None => ConstInstructionKind::Assign {
-                            place: *target,
+                NodeKind::Assignment { target, value } => match self.value_block_body(*value)? {
+                    Some(body) => value_block(body, ValueReceiver::Assignment(*target)),
+                    None => ConstInstructionKind::Assign {
+                        place: *target,
+                        expression: *value,
+                    },
+                },
+                NodeKind::MultiBind { targets, value } => {
+                    let receiver = ValueReceiver::MultiBind(targets.clone().into());
+                    match self.value_block_body(*value)? {
+                        Some(body) => value_block(body, receiver),
+                        None => ConstInstructionKind::MultiBind {
                             expression: *value,
+                            receiver,
                         },
                     }
-                }
-                NodeKind::MultiBind { targets, value } => {
-                    let body = match self.value_block_body(*value, body_context)? {
-                        Some(body) => body,
-                        // A multi-bind producer is a one-statement value block, so every slot
-                        // reaches its targets through the same staged receive as a `then`.
-                        None => Rc::from([ConstInstruction {
-                            kind: ConstInstructionKind::Then(vec![*value]),
-                            span: node.span,
-                        }]),
-                    };
-                    value_block(body, ValueReceiver::MultiBind(targets.clone().into()))
                 }
                 NodeKind::ExpressionStatement(expression) => {
                     ConstInstructionKind::Eval(*expression)
@@ -280,14 +266,12 @@ impl BodyCompiler<'_> {
                 }
                 NodeKind::Return(values) => {
                     let block = match values.as_slice() {
-                        [value] => self.value_block_body(*value, body_context)?,
+                        [value] => self.value_block_body(*value)?,
                         _ => None,
                     };
-                    match (block, body_context.in_handler()) {
-                        (Some(body), true) => value_block(body, ValueReceiver::ReturnFromFunction),
-                        (Some(body), false) => value_block(body, ValueReceiver::Return),
-                        (None, true) => ConstInstructionKind::ReturnFromFunction(values.clone()),
-                        (None, false) => ConstInstructionKind::Return(values.clone()),
+                    match block {
+                        Some(body) => value_block(body, ValueReceiver::Return),
+                        None => ConstInstructionKind::Return(values.clone()),
                     }
                 }
                 NodeKind::Break => ConstInstructionKind::Break,
@@ -300,9 +284,9 @@ impl BodyCompiler<'_> {
                     // A handler body is evaluated by the fallible expression that owns it, so its
                     // `then` values are that body's own result.
                     BodyContext::CatchHandler => {
-                        ConstInstructionKind::Return(values.expressions.clone())
+                        ConstInstructionKind::Recover(values.expressions.clone())
                     }
-                    BodyContext::ValueBlock { .. } => {
+                    BodyContext::ValueBlock => {
                         ConstInstructionKind::Then(values.expressions.clone())
                     }
                     BodyContext::ConstFunction => {
@@ -339,7 +323,6 @@ impl BodyCompiler<'_> {
     fn value_block_body(
         &self,
         expression: ExprId,
-        body_context: BodyContext,
     ) -> Result<Option<Rc<[ConstInstruction]>>, ConstBodyRejection> {
         // An unreadable expression stays ordinary; eligibility reports it as infrastructure.
         let Ok(view) = self.expressions.view(expression) else {
@@ -348,9 +331,7 @@ impl BodyCompiler<'_> {
         let ExpressionOperationView::ValueBlock(block) = view.operation() else {
             return Ok(None);
         };
-        let branch_context = BodyContext::ValueBlock {
-            in_handler: body_context.in_handler(),
-        };
+        let branch_context = BodyContext::ValueBlock;
         let body = match block {
             ValueBlock::If(block) => Rc::from([ConstInstruction {
                 kind: ConstInstructionKind::If {

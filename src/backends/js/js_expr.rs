@@ -379,7 +379,28 @@ impl<'hir> JsEmitter<'hir> {
             HirBinOp::Or => "||",
         };
 
+        if matches!(
+            operator,
+            HirBinOp::Lt | HirBinOp::Le | HirBinOp::Gt | HirBinOp::Ge
+        ) {
+            return Ok(self.lower_ordered_comparison(&left, &right, left_type, js_operator));
+        }
         Ok(format!("({left} {js_operator} {right})"))
+    }
+
+    pub(crate) fn lower_ordered_comparison(
+        &self,
+        left: &str,
+        right: &str,
+        compared_type: TypeId,
+        operator: &str,
+    ) -> String {
+        if compared_type == self.type_environment.builtins().char {
+            // JS string ordering uses UTF-16 units. Moth Char orders Unicode scalar values.
+            format!("(({left}).codePointAt(0) {operator} ({right}).codePointAt(0))")
+        } else {
+            format!("({left} {operator} {right})")
+        }
     }
 
     fn option_equality_sides(

@@ -14,7 +14,9 @@ use crate::compiler_frontend::ast::const_eval::{
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolved_operation;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::ast::expressions::expression_store::PlaceRecord;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, PlaceRecord,
+};
 use crate::compiler_frontend::ast::module_ast::environment::declaration_table::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::ContextKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
@@ -544,13 +546,13 @@ fn budget_refusal_after_nested_provider_call_keeps_the_callers_span_and_donor() 
     let mut executables = FxHashMap::default();
     executables.insert(callee_path, callee);
 
-    // The caller's entry, the callee's body and both completed-call folds fit; the caller's
-    // next step is refused.
+    // The caller's entry, the callee's entry and its literal fold fit. Direct result delivery
+    // needs no caller-side fold, so the next frame step is the refusal.
     let meter = constants.execution_meter();
     {
         let mut meter = meter.borrow_mut();
-        meter.limits.max_attempt_steps = 4;
-        meter.limits.max_total_steps = 4;
+        meter.limits.max_attempt_steps = 3;
+        meter.limits.max_total_steps = 3;
     }
     let scope = empty_module_scope();
     let paths = PathInternerFork::empty();
@@ -774,7 +776,6 @@ fn failed_rewrite_restores_the_handler_it_replaced() {
     state.active_handler = ActiveHandler {
         body: Some(Rc::clone(&saved_handler)),
         error_binding: Some(saved_error_binding),
-        boundary: true,
     };
     let mut handler_bodies = FxHashMap::default();
     handler_bodies.insert(catch, Rc::clone(&instructions));
@@ -811,10 +812,6 @@ fn failed_rewrite_restores_the_handler_it_replaced() {
         state.active_handler.error_binding,
         Some(saved_error_binding),
         "the rewrite must restore the replaced error binding"
-    );
-    assert!(
-        state.active_handler.boundary,
-        "the rewrite must restore the replaced boundary flag"
     );
 }
 
@@ -896,8 +893,13 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
         )
         .expect("returned literal")
         .id();
-    let returned_value =
-        values::constant_operation(&builder, returned, &mut strings).expect("returned constant");
+    let ExpressionOperationView::Constant(returned_value) = builder
+        .view(returned)
+        .expect("returned expression")
+        .operation()
+    else {
+        panic!("expected a returned literal");
+    };
     let callee = PathId::try_from_index(4).expect("callee path");
     let callee_executable = ConstFunctionExecutable {
         parameters: Vec::new(),
@@ -1107,7 +1109,7 @@ fn fold_to_constant_propagates_budget_refusals() {
     };
     let mut interpreter = services.interpreter(&mut budget, &mut state);
     let error = interpreter
-        .fold_to_constant(expression, &FrameBindings::default())
+        .fold_to_constant(expression, &mut FrameBindings::default())
         .expect_err("a free fold must escape its budget refusal");
     assert!(
         matches!(error, ConstantFoldError::Budget(_)),

@@ -1,7 +1,7 @@
 //! Live interpreter state and the borrowed service context for const execution.
 //!
-//! WHAT: owns the per-attempt interpreter state (frame aliases, prepared catch bodies, active and
-//!       inherited handler recovery, nesting depths and the pending handler return) and bundles
+//! WHAT: owns per-attempt interpreter state (frame aliases, prepared catch bodies, active handler,
+//!       pending frame outcome and nesting depths) and bundles
 //!       the compiler services every operation reads.
 //! WHY: one context replaces long positional parameter lists, while resource limits stay in
 //!       `ExecutionBudget` and frame bindings stay explicit per function frame. Separating state
@@ -89,14 +89,6 @@ pub(super) struct ExecutionState {
     pub(super) aliases: FxHashMap<PathId, AliasTarget>,
     /// Prepared catch bodies for the active function frame.
     pub(super) handler_bodies: Option<Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>>,
-    /// Prepared catch bodies carried to catch expressions a rewrite rebuilt under a fresh `ExprId`.
-    ///
-    /// WHY: a rewrite replaces folded children, so a catch whose handled value or arguments folded
-    /// is rebuilt under a new id. Completion can evaluate that rebuilt catch (a successful
-    /// collection read under an arithmetic catch is enough), and the handler compiled for the
-    /// authored expression must follow it. The entry is registered with the rebuild, so the
-    /// identity travels with the expression instead of being guessed from an authored span.
-    pub(super) rewritten_handlers: FxHashMap<ExprId, Rc<[ConstInstruction]>>,
     /// Catch handler currently available to collection failures.
     ///
     /// This is not owned by one collection operation: a larger handled expression installs its
@@ -107,29 +99,10 @@ pub(super) struct ExecutionState {
     /// Current expression evaluation nesting depth across every running body, bounding native
     /// recursion.
     pub(super) expression_depth: usize,
-    /// Expression depth at which the running instruction stream evaluates its own statements.
-    /// Inherited recovery is consumed by the evaluation at this depth: the outermost expression
-    /// of the current statement, not of a caller's statement.
-    pub(super) statement_expression_depth: usize,
-    /// True when an inherited catch handler completed, including a handler with no value.
-    pub(super) inherited_handler_recovered: bool,
-    /// Recovery slots produced by an inherited catch handler; the whole handled expression yields
-    /// these instead of the partially evaluated child expression. A one-slot expression reads the
-    /// first; a multi-result producer receives every slot.
-    pub(super) inherited_handler_values: Vec<ConstValueId>,
-    /// A `return` executed by a selected catch handler, awaiting its owning function boundary.
-    ///
-    /// WHY this is a slot rather than a returned value: a handler body runs from inside expression
-    /// evaluation and the expression rewriter, which yield a value or a rewritten expression to
-    /// their caller. Its `return` must abandon the whole enclosing statement, not merely produce
-    /// the handler's recovery value, and the template callback trait
-    /// (`RequiredCallSiteRewriter`) has no channel for an early-exit variant. The pending values
-    /// therefore stay visible until `execute_frames` in `FrameMode::FunctionBody` consumes them
-    /// (or `execute_body` does after handler instructions run); nested handler frames only peek
-    /// so the return can cross them, and expression evaluation keeps returning its first value
-    /// (no slots for a several-slot producer) so no enclosing expression continues past the
-    /// handled statement.
-    pub(super) pending_handler_return: Option<Vec<ConstValueId>>,
+    /// An outcome from a handler reached through expression evaluation rather than a frame step.
+    /// `Recovered` belongs to the protected expression; other outcomes belong to the frame
+    /// machine. An empty recovery is still an outcome.
+    pub(super) outcome: Option<FrameOutcome>,
     /// Set once an escaping diagnostic has received its call-site labels.
     pub(super) call_chain_attached: bool,
     /// Compact identity of the executable body currently running, if any.
@@ -140,35 +113,36 @@ pub(super) struct ExecutionState {
     pub(super) current_body: Option<PathId>,
 }
 
+pub(super) enum FrameOutcome {
+    Recovered(Vec<ConstValueId>),
+    Return(Vec<ConstValueId>),
+    Break,
+    Continue,
+}
 /// The catch handler currently available to fallible collection operations.
 ///
 /// This value is swapped wholesale while an inner operation runs, so a saved copy restores the
-/// body, error binding and boundary together.
+/// body and its error binding together.
 #[derive(Clone, Default)]
 pub(super) struct ActiveHandler {
     /// Body of the handler selected by the nearest enclosing catch.
     pub(super) body: Option<Rc<[ConstInstruction]>>,
     /// Error binding inherited with `body`.
     pub(super) error_binding: Option<PathId>,
-    /// True when this handler owns a nested catch boundary rather than the whole expression being
-    /// evaluated.
-    pub(super) boundary: bool,
 }
 
 impl ActiveHandler {
-    /// Replace the handler body and error binding, leaving the boundary flag untouched.
+    /// Install a handler for the duration of a protected expression.
     pub(super) fn replace(
         state: &mut ExecutionState,
         body: Option<Rc<[ConstInstruction]>>,
         error_binding: Option<PathId>,
     ) -> Self {
-        let boundary = state.active_handler.boundary;
         std::mem::replace(
             &mut state.active_handler,
             ActiveHandler {
                 body,
                 error_binding,
-                boundary,
             },
         )
     }

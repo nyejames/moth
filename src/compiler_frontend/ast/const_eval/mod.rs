@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::field_access::project_explicit_const_record_f
 use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::builtins::casts::policies::BuiltinCastError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
@@ -35,7 +36,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraft
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidCastReason,
 };
-use crate::compiler_frontend::datatypes::CallableEvaluation;
 pub(crate) use crate::compiler_frontend::datatypes::const_budget::{
     ConstBudgetCategory, ConstBudgetUnit,
 };
@@ -159,6 +159,13 @@ pub(crate) enum ConstantValueFold {
 pub(crate) enum ConstantFoldRefusalReason {
     StructuralTextUnavailable(DiagnosticDraft),
     EvaluationOutputBoundExceeded(DiagnosticDraft),
+    /// A supported cast failed on a value discovered in an active const catch.
+    CastConversion {
+        error: BuiltinCastError,
+        source: TypeId,
+        target: TypeId,
+        span: Option<SourceSpan>,
+    },
 }
 
 impl ConstantFoldRefusalReason {
@@ -166,6 +173,17 @@ impl ConstantFoldRefusalReason {
         match self {
             Self::StructuralTextUnavailable(diagnostic)
             | Self::EvaluationOutputBoundExceeded(diagnostic) => diagnostic,
+            Self::CastConversion {
+                source,
+                target,
+                span,
+                ..
+            } => calls_data::invalid_cast(
+                InvalidCastReason::BuiltinCastFailedInConst,
+                Some(source),
+                Some(target),
+                span,
+            ),
         }
     }
 }
@@ -181,6 +199,7 @@ pub(crate) struct FoldServices<'a> {
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) scope: Option<&'a ScopeContext>,
     pub(crate) registry: Option<&'a ExternalPackageRegistry>,
+    recover_cast_failure: bool,
 }
 
 impl<'a> FoldServices<'a> {
@@ -193,7 +212,13 @@ impl<'a> FoldServices<'a> {
             string_table,
             scope,
             registry,
+            recover_cast_failure: false,
         }
+    }
+
+    pub(crate) fn recover_cast_failure(mut self, active_handler: bool) -> Self {
+        self.recover_cast_failure = active_handler;
+        self
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -339,18 +364,12 @@ enum FoldBoundary<'a> {
         types: &'a TypeEnvironment,
         requirement: FoldRequirement,
     },
-    /// Required content probed from a const-function body. Short-circuit logic and user const
-    /// calls settle as not constant, leaving them to the interpreter's ordered evaluation.
-    Interpreted {
-        types: &'a TypeEnvironment,
-    },
 }
 
 impl<'a> FoldBoundary<'a> {
     fn requirement(self) -> FoldRequirement {
         match self {
             Self::Runtime { requirement } | Self::Content { requirement, .. } => requirement,
-            Self::Interpreted { .. } => FoldRequirement::Required,
         }
     }
 
@@ -358,11 +377,10 @@ impl<'a> FoldBoundary<'a> {
         !matches!(self, Self::Runtime { .. })
     }
 
-    /// The type environment that composite folds consult; only content and interpreted boundaries
-    /// carry one.
+    /// Only content boundaries materialize composite values.
     fn types(self) -> Result<&'a TypeEnvironment, InfrastructureFailure> {
         match self {
-            Self::Content { types, .. } | Self::Interpreted { types } => Ok(types),
+            Self::Content { types, .. } => Ok(types),
             Self::Runtime { .. } => crate::compiler_bug!(
                 CompilerStage::ConstantEvaluation,
                 "Composite constant folding requires a constant content boundary.",
@@ -386,6 +404,7 @@ struct FoldContext<'a, 'prefix, F> {
     strings: &'a mut StringTable,
     lookup: F,
     boundary: FoldBoundary<'a>,
+    recover_cast_failure: bool,
     scope: Option<&'a ScopeContext>,
     registry: Option<&'a ExternalPackageRegistry>,
     /// Expression rows the walk reads. The fold never mutates them.
@@ -511,9 +530,15 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     policy,
                 } => {
                     let view = expressions.view(expression)?;
-                    let value = self.complete_cast(view, policy, &walk.results[base..])?;
+                    let result = self.complete_cast(view, policy, &walk.results[base..])?;
+                    if matches!(
+                        self.refusal,
+                        Some(ConstantFoldRefusalReason::CastConversion { .. })
+                    ) {
+                        return Ok(None);
+                    }
                     walk.results.truncate(base);
-                    walk.results.push(value);
+                    walk.results.push(result);
                 }
                 FoldStep::EnterDecPowerExponent => {
                     let Some(depth) = self.dec_power_exponent_depth.checked_add(1) else {
@@ -678,21 +703,6 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 walk.steps.push(FoldStep::Enter(right.id()));
                 walk.steps.push(FoldStep::EnterDecPowerExponent);
                 walk.steps.push(FoldStep::Enter(left.id()));
-            }
-            // An eager walk would build values and text for an operand the interpreter may skip,
-            // and report a failure its short-circuit never reaches. A user const call never folds
-            // here either, so walking its arguments is wasted work. Settling both leaves the whole
-            // expression to the interpreter's ordered rewrite.
-            Operation::LogicalBinary { .. }
-                if matches!(self.boundary, FoldBoundary::Interpreted { .. }) =>
-            {
-                return Ok(FoldEntry::Settled(None));
-            }
-            Operation::Call(call)
-                if call.metadata().evaluation == CallableEvaluation::Const
-                    && matches!(self.boundary, FoldBoundary::Interpreted { .. }) =>
-            {
-                return Ok(FoldEntry::Settled(None));
             }
             Operation::NumericBinary { left, right, .. }
             | Operation::Compare { left, right, .. }
@@ -1120,14 +1130,24 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             },
             _ => return Ok(None),
         };
-        let literal = apply_builtin_cast_policy(policy, &literal).map_err(|_| {
-            calls_data::invalid_cast(
-                InvalidCastReason::BuiltinCastFailedInConst,
-                Some(facts.source_type_id),
-                Some(facts.target_type_id),
-                original.span(),
-            )
-        })?;
+        let literal = match apply_builtin_cast_policy(policy, &literal) {
+            Ok(literal) => literal,
+            Err(error) => {
+                let failure = ConstantFoldRefusalReason::CastConversion {
+                    error,
+                    source: facts.source_type_id,
+                    target: facts.target_type_id,
+                    span: original.span(),
+                };
+                // Source folding must diagnose a known-invalid conversion even under a catch.
+                // An already validated body can discover a recoverable failure on frame values.
+                if self.recover_cast_failure {
+                    self.refusal.get_or_insert(failure);
+                    return Ok(None);
+                }
+                return Err(failure.into_draft().into());
+            }
+        };
         let payload = match literal {
             BuiltinCastLiteral::Bool(value) => ConstValuePayload::Bool(value),
             BuiltinCastLiteral::Fixed(value) => ConstValuePayload::FixedScalar(value),
@@ -1731,32 +1751,17 @@ fn binary_payload(
             Operator::NotEqual => Some(left != right),
             _ => invalid_operator_for_compile_time_type(&facts.operator, strings, facts.span)?,
         },
-        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
-            if left.scalar() == FixedScalar::Byte && right.scalar() == FixedScalar::Byte =>
-        {
-            left.as_u64()
-                .zip(right.as_u64())
-                .and_then(|(left, right)| comparison_result(&facts.operator, left.cmp(&right)))
+        (ConstValuePayload::FixedScalar(_), ConstValuePayload::FixedScalar(_))
+        | (ConstValuePayload::Char(_), ConstValuePayload::Char(_)) => {
+            fold_nonnumeric_order(left, right, &facts.operator)
         }
         (ConstValuePayload::String(_), ConstValuePayload::String(_)) => {
             if !matches!(facts.operator, Operator::Equality | Operator::NotEqual) {
                 invalid_operator_for_compile_time_type::<()>(&facts.operator, strings, facts.span)?;
             }
-            let requirement = ConstStringRequirement::EqualityComparison;
-            let left = concrete_payload_text(left, span, requirement, strings);
-            let right = concrete_payload_text(right, span, requirement, strings);
-            match (left, right) {
-                (Ok(Some(left)), Ok(Some(right))) => {
-                    Some(if matches!(facts.operator, Operator::Equality) {
-                        left == right
-                    } else {
-                        left != right
-                    })
-                }
-                (Err(diagnostic), _) | (_, Err(diagnostic)) => {
-                    return Ok(PayloadFoldOutcome::TextUnavailable(diagnostic));
-                }
-                _ => None,
+            match fold_text_equality(left, right, &facts.operator, span, strings) {
+                Ok(value) => value,
+                Err(diagnostic) => return Ok(PayloadFoldOutcome::TextUnavailable(diagnostic)),
             }
         }
         _ => None,
@@ -2137,30 +2142,6 @@ pub(crate) fn fold_value_with_constants(
     )
 }
 
-/// Probe one const-function body expression for its value from frame bindings alone.
-///
-/// WHY: most body expressions are pure operations over bindings, so folding them directly skips
-///      the interpreter's rewrite walk. Short-circuit logic and user const calls settle as not
-///      constant, which leaves their evaluation order to the interpreter.
-pub(crate) fn fold_interpreted_value(
-    root: ExprId,
-    builder: &AstExpressionBuilder,
-    constants: &mut ConstValueStore,
-    services: FoldServices<'_>,
-    types: &TypeEnvironment,
-    lookup: impl FnMut(PathId) -> Option<ConstValueId>,
-) -> Result<ConstantValueFold, ConstantFoldError> {
-    fold_value(
-        root,
-        builder,
-        constants,
-        services,
-        FoldBoundary::Interpreted { types },
-        lookup,
-        0,
-    )
-}
-
 /// Fold one constant-boundary expression (a declaration or signature default).
 ///
 /// Unlike [`constant_fold`], this materialises every foldable constructor (collections, records, choices,
@@ -2228,6 +2209,7 @@ fn fold_root(
             string_table: strings,
             scope,
             registry,
+            recover_cast_failure,
         } = services;
         let block_scope = scope.map(|context| context.scope);
         let mut refusal = None;
@@ -2237,6 +2219,7 @@ fn fold_root(
                 strings,
                 lookup,
                 boundary,
+                recover_cast_failure,
                 scope,
                 registry,
                 expressions: &*builder,
@@ -2352,6 +2335,7 @@ fn fold_value(
         string_table: strings,
         scope,
         registry,
+        recover_cast_failure,
     } = services;
     let mut refusal = None;
     let value = constants.stage_values(|values| {
@@ -2360,6 +2344,7 @@ fn fold_value(
             strings,
             lookup,
             boundary,
+            recover_cast_failure,
             scope,
             registry,
             expressions: builder,
@@ -2924,21 +2909,81 @@ fn fold_numeric_comparison(
     op: &Operator,
     comparison: &ResolvedComparisonOperation,
 ) -> Option<bool> {
-    let ordering = match comparison.domain {
+    fold_numeric_comparison_in_domain(
+        lhs,
+        rhs,
+        op,
+        comparison.domain,
+        (comparison.left_conversion, comparison.right_conversion),
+    )
+}
+
+fn fold_numeric_comparison_in_domain(
+    lhs: &ConstValuePayload,
+    rhs: &ConstValuePayload,
+    op: &Operator,
+    domain: NumericComparisonDomain,
+    (left_conversion, right_conversion): (Option<NumericScalar>, Option<NumericScalar>),
+) -> Option<bool> {
+    let ordering = match domain {
         NumericComparisonDomain::ExactInteger => {
             // Both values widen exactly into i128, including the complete U64 range.
             integer_value_from_payload(lhs)?.cmp(&integer_value_from_payload(rhs)?)
         }
         NumericComparisonDomain::BinaryFloat => {
-            float_value_from_payload(lhs)?.partial_cmp(&float_value_from_payload(rhs)?)?
+            let left = float_value_from_payload(lhs)?;
+            let right = float_value_from_payload(rhs)?;
+            let Some(ordering) = left.partial_cmp(&right) else {
+                // IEEE unordered values never match an equality or relational pattern, but
+                // compare unequal under the ordinary `!=` operator.
+                return Some(matches!(op, Operator::NotEqual));
+            };
+            ordering
         }
         NumericComparisonDomain::Number(scale) => {
-            let left = number_operand_in_domain(lhs, scale, comparison.left_conversion)?;
-            let right = number_operand_in_domain(rhs, scale, comparison.right_conversion)?;
+            let left = number_operand_in_domain(lhs, scale, left_conversion)?;
+            let right = number_operand_in_domain(rhs, scale, right_conversion)?;
             left.coefficient().cmp(right.coefficient())
         }
     };
     comparison_result(op, ordering)
+}
+
+fn fold_nonnumeric_order(
+    left: &ConstValuePayload,
+    right: &ConstValuePayload,
+    op: &Operator,
+) -> Option<bool> {
+    let ordering = match (left, right) {
+        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
+            if left.scalar() == FixedScalar::Byte && right.scalar() == FixedScalar::Byte =>
+        {
+            left.as_u64()?.cmp(&right.as_u64()?)
+        }
+        (ConstValuePayload::Char(left), ConstValuePayload::Char(right)) => left.cmp(right),
+        (ConstValuePayload::Bool(left), ConstValuePayload::Bool(right))
+            if matches!(op, Operator::Equality | Operator::NotEqual) =>
+        {
+            left.cmp(right)
+        }
+        _ => return None,
+    };
+    comparison_result(op, ordering)
+}
+
+fn fold_text_equality(
+    left: &ConstValuePayload,
+    right: &ConstValuePayload,
+    op: &Operator,
+    span: Option<SourceSpan>,
+    strings: &mut StringTable,
+) -> Result<Option<bool>, DiagnosticDraft> {
+    let requirement = ConstStringRequirement::EqualityComparison;
+    let left = concrete_payload_text(left, span, requirement, strings)?;
+    let right = concrete_payload_text(right, span, requirement, strings)?;
+    Ok(left
+        .zip(right)
+        .map(|(left, right)| (left == right) == matches!(op, Operator::Equality)))
 }
 
 /// Compare a match scrutinee with one pattern value of the same value type.
@@ -2955,47 +3000,36 @@ pub(crate) fn fold_pattern_comparison(
     span: Option<SourceSpan>,
     strings: &mut StringTable,
 ) -> Result<Option<bool>, DiagnosticDraft> {
-    let ordering = match (scrutinee, pattern) {
-        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right)) => {
+    let domain = match (scrutinee, pattern) {
+        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
+            if left.scalar() == right.scalar() =>
+        {
             match left.scalar().class() {
-                FixedScalarClass::BinaryFloat => match (left.as_f64(), right.as_f64()) {
-                    // An unordered NaN satisfies no pattern, like the runtime comparison.
-                    (Some(left), Some(right)) => match left.partial_cmp(&right) {
-                        Some(ordering) => Some(ordering),
-                        None => return Ok(Some(false)),
-                    },
-                    _ => None,
-                },
-                FixedScalarClass::Octet => left
-                    .as_u64()
-                    .zip(right.as_u64())
-                    .map(|(left, right)| left.cmp(&right)),
+                FixedScalarClass::BinaryFloat => Some(NumericComparisonDomain::BinaryFloat),
                 FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
-                    integer_value_from_payload(scrutinee)
-                        .zip(integer_value_from_payload(pattern))
-                        .map(|(left, right)| left.cmp(&right))
+                    Some(NumericComparisonDomain::ExactInteger)
                 }
+                FixedScalarClass::Octet => None,
             }
         }
         (ConstValuePayload::Number(left), ConstValuePayload::Number(right))
             if left.scale() == right.scale() =>
         {
-            Some(left.coefficient().cmp(right.coefficient()))
+            Some(NumericComparisonDomain::Number(left.scale()))
         }
-        (ConstValuePayload::Char(left), ConstValuePayload::Char(right)) => Some(left.cmp(right)),
-        (ConstValuePayload::Bool(left), ConstValuePayload::Bool(right)) => Some(left.cmp(right)),
-        // Text has no relational patterns.
         (ConstValuePayload::String(_), ConstValuePayload::String(_))
             if matches!(op, Operator::Equality) =>
         {
-            let requirement = ConstStringRequirement::EqualityComparison;
-            let left = concrete_payload_text(scrutinee, span, requirement, strings)?;
-            let right = concrete_payload_text(pattern, span, requirement, strings)?;
-            return Ok(left.zip(right).map(|(left, right)| left == right));
+            return fold_text_equality(scrutinee, pattern, op, span, strings);
         }
         _ => None,
     };
-    Ok(ordering.and_then(|ordering| comparison_result(op, ordering)))
+    Ok(match domain {
+        Some(domain) => {
+            fold_numeric_comparison_in_domain(scrutinee, pattern, op, domain, (None, None))
+        }
+        None => fold_nonnumeric_order(scrutinee, pattern, op),
+    })
 }
 
 #[cfg(test)]

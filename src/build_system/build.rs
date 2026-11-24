@@ -602,11 +602,21 @@ impl ProjectCompilation {
         )
     }
 
-    /// Iterate the project boundary's base artefacts, with their published facade interfaces, in
-    /// `ModuleId` order. Generated sidecars and source-package boundaries are not included.
+    /// Iterate project and source-package facade artefacts in their owning boundary's module
+    /// order. Generated sidecars are executable-only and publish no facade.
     #[cfg(test)]
-    pub(crate) fn project_artefacts(&self) -> impl Iterator<Item = &CompiledModuleArtifact> + '_ {
-        self.project.successful_artefacts_in_module_id_order()
+    pub(crate) fn facade_artefacts(
+        &self,
+    ) -> impl Iterator<Item = (Option<&str>, &CompiledModuleArtifact)> + '_ {
+        self.project
+            .successful_artefacts_in_module_id_order()
+            .map(|artefact| (None, artefact))
+            .chain(self.source_packages.iter().flat_map(|package| {
+                package
+                    .boundary
+                    .successful_artefacts_in_module_id_order()
+                    .map(|artefact| (Some(package.package_prefix()), artefact))
+            }))
     }
 
     /// Number of successful module views (base artefacts plus generated sidecars).

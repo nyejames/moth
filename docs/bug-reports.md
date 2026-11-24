@@ -48,20 +48,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: if capture pauses after verifying a contained alias, the alias is retargeted to another contained file and its former target is replaced by an out-of-root symlink, the reopen publishes the external bytes under the alias's HTTP key. The directory branch also checks and reopens by name. An unowned hard link to an external file is served in both the old and new code; path containment cannot distinguish it.
 - Investigate: anchor traversal at the verified output-root handle and open entries beneath it (openat with no-follow semantics, or a capability-style filesystem crate), then read the same handles. This needs platform-specific APIs or a new dependency, so decide the approach before implementing. Decide separately whether hard links to external files are inside the boundary.
 
-### Control-flow scope names come from a process-wide counter
-
-- Found: const foundation Phase C parity test, 2026-11. Confirmed by building one project twice in one process; not observed in user-visible output.
-- Where: `ScopeContext::new_child_control_flow` in `src/compiler_frontend/ast/module_ast/scope_context.rs` names each control-flow scope `__scope_{N}` from the static `CONTROL_FLOW_SCOPE_COUNTER`.
-- Observed: the interned scope-path text depends on how many scopes earlier compilations in the process created, and on thread interleaving when modules compile in parallel. Two builds of the same project in one process intern different `__scope_N` text, visible in diagnostic report `Debug` output. The parity test in `profile_parity_tests.rs` therefore numbers these components by first appearance before comparing interned text.
-- Investigate: whether any fingerprint, cache key or rendered name can read this text. If so, derive the component from a module-local counter or the scope arena frame id so identical input yields identical paths.
-
-### JS relational Char patterns compare UTF-16 code units
-
-- Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
-- Where: JS match lowering for relational `Char` patterns in `src/backends/js/js_statement.rs`.
-- Observed: `> '\u{FFFF}'` matches `'😀'` in a const function, which compares Unicode scalar values, but not at runtime. The JS output compares the strings with `>`, which orders UTF-16 code units, so astral characters sort below some BMP characters. `strings-and-characters-basic.mtf` says `Char` follows scalar values.
-- Investigate: compare code points (`codePointAt(0)`) in the emitted relational pattern test, and check `Char` comparison operators for the same issue.
-
 ### Nested match ending without `else` fails to parse in a non-final arm
 
 - Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
@@ -69,33 +55,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: an arm `0 =>` whose body is an option match ending in `|x| => return x`, followed by `else => return 3`, reports MOTH-SYNTAX-0028. The same nested match parses when it ends with `else =>` or sits in the last arm.
 - Investigate: how the inner match's closing `;` and the outer arm boundary are recognised when the inner match's final arm is not `else`.
 
-### Value-producing match in a const body reports a vague diagnostic
-
-- Found: const evaluator Phase 3 audit, 2026-11. Same output before and after Phase 3.
-- Where: const-body eligibility in `src/compiler_frontend/ast/const_values/const_execution/eligibility.rs`.
-- Observed: a value-producing match in a const body reports "content reference" at a capture or "value expression", not the value-producing match as the unsupported form.
-- Investigate: name the value-producing match block itself as the unsupported form until const execution supports value-producing matches.
-
 ### Choice arm repeated after a guarded arm warns as unreachable
 
 - Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
 - Where: duplicate-variant tracking in `src/compiler_frontend/ast/statements/match_exhaustiveness.rs`.
 - Observed: `Circle(radius) if radius > 5 => ...` followed by `Circle(radius) => ...` reports MOTH-RULE-0022 "Unreachable match arm", but the second arm runs when the guard rejects.
 - Investigate: whether a guarded arm should mark its variant as covered at all, and align the warning with the exhaustiveness rule that guarded choice arms require `else =>`.
-
-### Collection literal argument in a `#` constant initializer is a compiler bug
-
-- Found: const evaluator Phase 3 tests, 2026-11. Reproduced with the Phase 0 baseline binary, so this is not a match regression.
-- Where: the numeric-fragment completion guard for compile-time declaration initializers, raised during AST construction.
-- Observed: `early #I32 = first({3, 12})`, where `first #|values {I32}| -> I32` is a const function, reports MOTH-INFRA-0001 "a numeric-dependent expression fragment reached a compile-time or non-runtime declaration initializer". The same call as `early = first({3, 12})` builds.
-- Investigate: whether the collection literal's contextually typed numeric elements should complete against the parameter type before the required call folds, as scalar literal arguments already do.
-
-### A caught failing cast is rejected in compile-time evaluation
-
-- Found: const evaluator Phase 2 audit, 2026-11. Confirmed with the debug CLI before and after Phase 2, so this is not a Phase 2 regression.
-- Where: `FoldContext::complete_cast` / `cast_complete` in `src/compiler_frontend/ast/const_eval/mod.rs` under a required boundary.
-- Observed: `value #I32 = cast "x" catch then 0` and a const function returning `cast value catch then 0` called with `"x"` both report MOTH-RULE-0083 ("This builtin cast failed while evaluating a compile-time expression"). The same expression at runtime yields `0`. The cast documentation says `catch` handles conversion failure and only refuses to legalise unsupported conversions or statically invalid numeric work.
-- Investigate: whether required compile-time evaluation should select the catch fallback for a value-dependent conversion failure. If it should, fix it once in the shared cast fold, so constant declarations and const-function bodies agree with runtime. If the rejection is intended, document it in the cast and constant-folding references.
 
 ### Repeated work in single-file namespace validation
 
@@ -216,4 +181,4 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary, so it pre-dates this phase.
 - Where: const declaration preparation. A const body is executed by the typed-AST interpreter and never reaches HIR borrow checking.
 - Observed: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiles and folds, while the same body as an ordinary function reports MOTH-BORROW-0007 "Cannot mutably access immutable local `value`". The multi-bind alias entry above is a second instance of the same divergence.
-- Investigate: const bodies need the same access verdicts as runtime bodies. Options: borrow-check the const body's HIR without emitting it, or run the AST-level access rules the HIR checker enforces during const preparation.
+- Investigate: the [const checkpoint's access design gate](./roadmap/plans/const-functions-evaluation-foundation-and-semantics-plan.md#access-design-gate) records the validation-only HIR proposal. It requires the production checker and ordinary alias summaries, including imported and multiple-result calls, without publishing const bodies in runtime HIR.

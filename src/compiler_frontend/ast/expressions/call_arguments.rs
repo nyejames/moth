@@ -954,11 +954,14 @@ fn parse_call_arguments_inner(
         // either, keeps its pending fragment, so the slot's exact receiver types the fragment's
         // literal leaves before body-root defaults run. The optional layer peels exactly as the
         // receiver witness peels it. A generic-parameter slot is handled by `generic_slot` below.
-        let retains_known_aggregate =
-            matches!(
+        // A `#` initializer has no later body-root completion: its concrete parameter already
+        // supplies the context needed to type the literal at this boundary.
+        let retains_known_aggregate = !context.kind.is_constant_context()
+            && matches!(
                 receiving_context.numeric_retention,
                 CallArgumentNumericRetention::Retain
-            ) && parameter_expectation.is_some_and(|expectation| match expectation.expected_type {
+            )
+            && parameter_expectation.is_some_and(|expectation| match expectation.expected_type {
                 ExpectedParameterType::Known(type_id) => {
                     let environment = type_interner.environment();
                     let receiver = environment.option_inner_type(type_id).unwrap_or(type_id);

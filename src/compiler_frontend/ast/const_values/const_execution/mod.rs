@@ -109,10 +109,6 @@ pub(crate) struct ConstFunctionExecutable {
     instructions: Rc<[ConstInstruction]>,
     /// Catch bodies compiled once during declaration preparation, keyed by their authored catch
     /// expression.
-    ///
-    /// A rewrite that rebuilds a catch under a fresh `ExprId` registers the same body in
-    /// `ExecutionState::rewritten_handlers` as it produces the rebuild, so selection never depends
-    /// on an authored span or on the rebuilt expression having been prepared.
     handler_bodies: Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>,
     /// Declaring-domain owner for a body imported from a provider boundary.
     ///

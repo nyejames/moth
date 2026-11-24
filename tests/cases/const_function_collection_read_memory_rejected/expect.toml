@@ -7,5 +7,3 @@ diagnostic_codes = ["MOTH-RULE-0053"]
 code = "MOTH-RULE-0053"
 reason = "compile_time_evaluation_error.const_memory_limit_exceeded"
 path = "input/@entry.moth"
-line = 4
-column = 20

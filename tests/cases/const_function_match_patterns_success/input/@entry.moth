@@ -24,6 +24,22 @@ letter_rank #|letter Char| -> I32:
     ;
 ;
 
+scalar_order #|letter Char| -> Bool:
+    return letter > 'Ａ'
+;
+
+runtime_scalar_order |letter Char| -> Bool:
+    return letter > 'Ａ'
+;
+
+runtime_scalar_pattern |letter Char?| -> I32:
+    if letter is:
+        > 'Ａ' => return 2
+        |present| => return 1
+        none => return 0
+    ;
+;
+
 area #|shape Shape| -> I32:
     if shape is:
         Circle(radius) => return radius * radius * 3
@@ -131,10 +147,14 @@ big #I32 = describe(500)
 negative #I32 = describe(-7)
 positive #I32 = describe(21)
 loop_total #I32 = tally(5)
-early = first_large({3, 12, 40})
+early #I32 = first_large({3, 12, 40})
 steps #String = [:[step_kind(0)][step_kind(2)][step_kind(7)]]
 cheap #I32 = bands(1.50, 0.25, 255)
 dear #I32 = bands(12.00, 0.75, 1)
 recovered #String = [:[removed_or(0)],[removed_or(9)]]
+scalar_folded #Bool = scalar_order('😀')
+scalar_runtime = runtime_scalar_order('😀')
+scalar_pattern = runtime_scalar_pattern('😀')
+scalar_pattern_none = runtime_scalar_pattern(none)
 
-~[: words=[word],[missing_word] ranks=[ranks] shapes=[circle],[rect],[empty],[square],[not_square] options=[absent],[zero],[big],[negative],[positive] loop=[loop_total] early=[early] steps=[steps] bands=[cheap],[dear] handler=[recovered] ]
+~[: words=[word],[missing_word] ranks=[ranks] shapes=[circle],[rect],[empty],[square],[not_square] options=[absent],[zero],[big],[negative],[positive] loop=[loop_total] early=[early] steps=[steps] bands=[cheap],[dear] handler=[recovered] scalar=[scalar_folded],[scalar_runtime],[scalar_pattern],[scalar_pattern_none] ]

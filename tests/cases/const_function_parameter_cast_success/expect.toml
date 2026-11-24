@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " rendered=42 parsed=37 scalar=65 caught=37 runtime=42/37/65/37 "
+rendered_output_exact = " rendered=42 parsed=37 scalar=65 caught=37 recovery=0 runtime=42/37/65/37/0 codes=200/200 optional=37/2 "

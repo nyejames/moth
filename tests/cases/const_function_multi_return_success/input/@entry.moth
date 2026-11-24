@@ -14,6 +14,15 @@ forward #|value I32| -> I32, I32:
     return pair(value * 10)
 ;
 
+describe_for #|value I32| -> I32, String, Bool:
+    label = if value > 0 then "positive" else "nonpositive"
+    return describe(value, label)
+;
+
+forward_nested #|value I32| -> I32, String, Bool:
+    return describe_for(value)
+;
+
 sum_pair #|value I32| -> I32:
     left, right = forward(value)
     return left + right
@@ -43,6 +52,14 @@ pick #|value I32| -> I32:
         else => then value, value * 2
     ;
     return low * 100 + high
+;
+
+pick_option #|value I32?| -> I32:
+    result = if value is:
+        |present| => then present + 1
+        none => then -1
+    ;
+    return result
 ;
 
 loop_sum #|limit I32| -> I32:
@@ -81,11 +98,13 @@ first_even #|limit I32| -> I32:
 summed #I32 = sum_pair(4)
 updated #I32 = update(5)
 picked #String = [:[pick(0)],[pick(-3)],[pick(4)]]
+picked_option #String = [:[pick_option(9)],[pick_option(none)]]
 looped #I32 = loop_sum(4)
 singles #String = [:[single(true)],[single(false)]]
 even #I32 = first_even(5)
 first, second = choose(true)
 third, fourth = choose(false)
-number, text, positive = describe(3, "three")
+number, text, positive = forward_nested(3)
+negative_number, negative_text, negative = forward_nested(-3)
 
-~[: summed=[summed] updated=[updated] picked=[picked] looped=[looped] singles=[singles] even=[even] choose=[first],[second],[third],[fourth] describe=[number],[text],[positive] ]
+~[: summed=[summed] updated=[updated] picked=[picked] option=[picked_option] looped=[looped] singles=[singles] even=[even] choose=[first],[second],[third],[fourth] describe=[number],[text],[positive];[negative_number],[negative_text],[negative] ]

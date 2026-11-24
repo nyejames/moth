@@ -22,6 +22,11 @@ bounds #|value I32| -> I32, I32:
     return value - 1, value + 1
 ;
 
+$export
+forwarded_bounds #|value I32| -> I32, I32:
+    return bounds(value)
+;
+
 -- The owner's own body folds a multi-result call, so the importer runs it in the owner's scope.
 $export
 packed #|value I32| -> I32:

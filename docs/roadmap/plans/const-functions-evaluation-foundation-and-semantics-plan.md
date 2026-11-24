@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C and Phases 0-4 complete
-**Current slice:** Phase 5, immutable const receiver methods
-**Blockers:** None known
-**Next action:** Run Task 5.1: trace receiver identity before choosing an API.
+**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. Phase 5 remains paused.
+**Current slice:** Corrective checkpoint before immutable const receiver methods
+**Blockers:** Const bodies bypass ordinary borrow validation. See the access design gate below.
+**Next action:** Review the validation-only borrow design and close the access gate before resuming Phase 5.
 
 ## Global constraints
 
@@ -470,6 +470,10 @@ The literal-only control is unchanged. Template const calls go through TIR site 
 
 ### Phase 2 outcome
 
+This records the original implementation. The [corrective checkpoint](#corrective-checkpoint-before-phase-5)
+removed this speculative probe after tracing work performed before its budget charge, duplicated
+fallback evaluation and text interning outside the value-store transaction.
+
 **Design.**
 - `evaluate_expression_inner` first calls `ConstInterpreter::evaluate_directly`. It runs right after the existing collection-read probe and before handler setup and `RewriteWalk`.
 - `evaluate_directly` folds the original `ExprId` through `fold_interpreted_value` with the frame bindings. `fold_interpreted_value` is the Phase 1 value fold under a new private `FoldBoundary::Interpreted`.
@@ -692,6 +696,90 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 - A runtime multi-bind through a mutable alias is rejected with an internal temporary name.
 - Const bodies skip runtime borrow rules.
 
+## Corrective checkpoint before Phase 5
+
+Preserve the profile-independent frontend and the single required const evaluator. Do not resume Phase 5 until this checkpoint passes `just validate` and const source legality no longer bypasses ordinary borrow rules.
+
+1. **Access and borrow correctness.** Reproduce direct and projected alias cases, copies, result aliases and uncalled bodies. Reuse the ordinary analysis; do not make all const values independent copies.
+2. **Result ownership.** Return checked ordered values directly to interpreted receivers. Keep AST result blocks at publication boundaries. Remove unnecessary multi-bind frames. Measure expression rows, compile time and peak memory on the recorded 20,000-iteration workloads here, not in Phase 7.
+3. **Recovery and control flow.** Unify normal results, recovery and nonlocal transfers. Preserve lazy selection and handler isolation, never suppress budget or infrastructure failures, and test outer-loop exits and receiver writes.
+4. **Folding boundaries.** Share comparison policy, check Unicode scalar order and audit direct evaluation's work, fallback and value staging. Correct only relevant caught-cast and collection-initialiser defects.
+5. **Regression gate.** Exercise the real build service, use deterministic module-local scope identity, and compare package interfaces and generated sidecars without new fingerprint infrastructure.
+6. **Closeout.** Update canonical docs and audit coverage, retire resolved reports, perform the Slice review and run `just validate` before committing. Keep full validation for final merge readiness.
+
+### Access design gate
+
+The Phase 4 binary folded writes through immutable parameter aliases, overlapping shared aliases, returned aliases and multi-return aliases. The equivalent ordinary functions all reported `MOTH-BORROW-0007`, including an uncalled declaration. Legal direct and projected mutable aliases wrote through, and explicit copy kept the original field unchanged. The minimal pair differs only in the const marker (and whether the call initializes a constant):
+
+```moth
+probe #|input I32| -> I32:
+    slot ~= input
+    ~slot = slot + 1
+    return slot
+;
+```
+
+`probe(3)` folded to `4`; the ordinary version rejects `~slot`. The const
+executor's refreshed mutable aliases are not a loan checker or proof of access.
+
+`BorrowChecker` consumes a validated `HirModule` with real places, CFG, liveness and per-callee result provenance. `finalizer.rs` currently discards the const body roots before the AST freeze, and `hir_expression.rs` rejects a surviving required call in runtime lowering. Standalone configuration also consumes the AST without the ordinary HIR gate. An AST access-marker check would only cover the first repro, not loans across control flow or returned projections.
+
+**Design for review:** retain finalised const body roots through a validation-only boundary. Use the canonical HIR lowerer and checker, then drop that representation before any runtime HIR or link publication. In that boundary only, resolve const-to-const calls through the ordinary callable access and alias summaries; imported calls need the same summary projected under their stable const origin. Preserve the runtime HIR fail-closed check. Apply the validation on every source path that publishes const results or bodies, including configuration. Do not run HIR as an evaluator or add a separate access engine. The result-summary and validation-boundary changes need review before implementation.
+
+Stage 4 early const execution already supplies type-level values before a complete typed module
+exists. Do not invoke HIR from that dependency walk. A validation-only boundary after const body
+finalisation can gate publication but cannot guarantee that an earlier required
+evaluation error will not be reported first. Review that diagnostic precedence separately. Also resolve the
+ordinary multi-bind false conflict through its HIR owner rather than treating it as const policy.
+
+### Independent corrections
+
+- Prepared calls check every stored slot against the resolved call and executable contracts before
+  publication. Interpreted receivers consume the ordered values directly; ordinary multi-bind
+  uses the receiving operation without a synthetic frame. Nested/local and imported forwarding
+  fixtures check exact rendered values.
+- Recovery and nonlocal transfer share one frame outcome. A catch is active for its protected
+  evaluation, not looked up again under each rebuilt expression ID. Handlers preserve a distinct
+  zero-slot recovery; `break` and `continue` use ordinary loop unwind. Regressions cover nested
+  and multi-slot recovery, returns, loops, projected receivers and hard memory refusals.
+- Pattern comparisons use the same numeric and text operations as binary comparisons. JS
+  relational `Char` operators and patterns compare Unicode scalar values. Known-invalid
+  conversions remain diagnostics; a conversion that fails on a bound value uses the prepared
+  handler. Concrete aggregate parameters complete literal arguments at `#` initializers.
+- The normal build-service parity tests compare canonical package interfaces and generated
+  sidecars, with exact synthetic scope names in sequential and concurrent builds.
+
+### Result ownership measurement
+
+Matched release CLI builds with `benchmark_counters`, before and after the result
+and loop-binding changes. Each uses the recorded 20,000-iteration workload. Rows
+are the main module's pre-freeze expression census, wall time is the median of
+15 `moth check` runs, and RSS is the maximum macOS resident size across them.
+
+| Workload | Phase 4 rows | Checkpoint rows | Phase 4 wall | Checkpoint wall | Phase 4 peak RSS | Checkpoint peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Two single results per iteration | 60,032 | 31 | 64.66 ms | 63.03 ms | 29,622,272 B | 26,148,864 B |
+| One two-slot result per iteration | 80,030 | 29 | 67.76 ms | 56.09 ms | 38,649,856 B | 26,181,632 B |
+
+Direct result delivery alone removed 40,000 and 60,000 expression rows respectively.
+The 20,000 common residual rows were range-iteration bindings, now delivered as
+already-typed values. Collection reads and iteration hold the immutable collection ID
+instead of copying its items. Fresh values remain subject to the existing allocation
+ceiling. Rebuilt expression child slots and TIR binding rows consume the existing
+retained-slot allowance; neither has a separate budget.
+
+### Review and verification
+
+The Slice review checked the remaining result and handler boundaries for duplicate
+representations, avoidable copies, shared semantic rules and stale comments. New cases
+assert exact rendered results or diagnostic identities and source sites, not acceptance alone.
+Targeted checks passed: 341 const Rust tests, 131 const integration checks and both backends
+of the ordinary optional cast recovery case. `just validate` passed, including 3,856
+integration checks and the docs build. `just validate-full` remains a merge-readiness gate.
+
+The access gate is still open. These checks verify the independent corrections, not
+ordinary borrow-rule enforcement in const declarations.
+
 ## Phase 5: Support immutable const receiver methods
 
 **Purpose:** Allow the existing const marker on eligible immutable source receiver methods and evaluate receiver calls through the one prepared executable/frame machine.
@@ -797,7 +885,6 @@ The runtime contract must remain exact:
 - [ ] Repeat the Phase 0 cases with matched environment/toolchain and inspect the same counters.
 - [ ] Record compile time, append/rewrite counts, retained value allocation, peak memory where measured and effects on non-const ordinary source.
 - [ ] Attribute unexpected regressions to specific operations. Refactor only when the evidence identifies a real owner or responsibility problem.
-- [ ] Decide the per-execution AST rows that const calls in executing bodies commit; Phase 4 outcome records the measurement. Either charge them to the const budget or deliver statement-root slots without committing rows.
 - [ ] Do not use benchmark wins as a substitute for semantic parity.
 
 ### Task 7.3: Conduct a final simplification and correctness audit

@@ -1,6 +1,6 @@
 -- Parameter substitution must preserve the canonical cast semantics inside a required call and
 -- match the same casts performed by ordinary runtime calls. `scalar` covers a `Char` argument;
--- `parse_or` covers a caught cast whose conversion succeeds.
+-- `parse_or` covers both success and recovery.
 
 stringify #|value I32| -> String:
     return cast value
@@ -16,6 +16,27 @@ scalar #|letter Char| -> I32:
 
 parse_or #|value String| -> I32:
     return cast value catch then 0
+;
+
+take_left #|left U32, right U32| -> U32:
+    return left + right
+;
+
+verify #|ok Bool| -> U32:
+    assert(ok, "later cast argument executed")
+    return 0
+;
+
+-- A conversion failure in the first argument skips the second and the containing call.
+parse_code #|value String| -> U32:
+    number = take_left(cast value, verify(false)) catch |err|:
+        return err.code
+    ;
+    return number
+;
+
+parse_optional #|value String| -> I32?:
+    return cast value catch then 2
 ;
 
 stringify_runtime |value I32| -> String:
@@ -34,14 +55,28 @@ parse_or_runtime |value String| -> I32:
     return cast value catch then 0
 ;
 
+parse_code_runtime |value String| -> U32:
+    return cast value catch |err|:
+        then err.code
+    ;
+;
+
 rendered #String = stringify(42)
 parsed #I32 = parse("37")
 scalar_value #I32 = scalar('A')
 caught #I32 = parse_or("37")
+bad_cast #I32 = parse_or("x")
 
 runtime_rendered = stringify_runtime(42)
 runtime_parsed = parse_runtime("37")
 runtime_scalar = scalar_runtime('A')
 runtime_caught = parse_or_runtime("37")
+runtime_bad_cast = parse_or_runtime("x")
 
-~[: rendered=[rendered] parsed=[parsed] scalar=[scalar_value] caught=[caught] runtime=[runtime_rendered]/[runtime_parsed]/[runtime_scalar]/[runtime_caught] ]
+code #U32 = parse_code("x")
+runtime_code = parse_code_runtime("x")
+maybe_parsed #I32? = parse_optional("37")
+maybe_recovered #I32? = parse_optional("x")
+option_success = if maybe_parsed is |present| then present else -1
+option_recovery = if maybe_recovered is |present| then present else -1
+~[: rendered=[rendered] parsed=[parsed] scalar=[scalar_value] caught=[caught] recovery=[bad_cast] runtime=[runtime_rendered]/[runtime_parsed]/[runtime_scalar]/[runtime_caught]/[runtime_bad_cast] codes=[code]/[runtime_code] optional=[option_success]/[option_recovery] ]

@@ -86,9 +86,8 @@ never receives a runtime body.
   type-checked.
 - A const body may use multi-bind and value-producing `if`, match and `catch`
   blocks at their ordinary receiving sites. All results are read before any
-  existing target is written. An `if` or match branch may leave through
-  `return`, `break` or `continue`; a `catch` handler may leave only through
-  `return`.
+  existing target is written. A branch or handler can also leave through
+  `return`, or through `break` or `continue` when it is inside a loop.
 - A call in an ordinary function is folded during compilation. A call that
   cannot be evaluated is a source error rather than a runtime fallback.
 - Invalid const operations, unresolved runtime arguments and nonterminating

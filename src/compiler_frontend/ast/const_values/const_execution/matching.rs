@@ -30,8 +30,7 @@ impl ConstInterpreter<'_> {
     /// Return the body of the first arm whose pattern and guard accept the scrutinee, or the
     /// default body when none does.
     ///
-    /// WHAT: `Ok(None)` means evaluating the scrutinee or a guard produced a handler return, which
-    ///       already owns the unwind, so no arm body runs.
+    /// WHAT: `Ok(None)` means a handler transferred control, so no arm body runs.
     /// WHY: a matching pattern binds its captures before its guard runs, as the runtime does.
     ///      A capture left behind by a rejecting guard needs no removal: an arm's guard and body
     ///      can name only its own captures, which its pattern rebinds before either runs, and no
@@ -43,19 +42,17 @@ impl ConstInterpreter<'_> {
         default: Option<&Rc<[ConstInstruction]>>,
         bindings: &mut FrameBindings,
     ) -> Result<Option<Rc<[ConstInstruction]>>, ConstantFoldError> {
-        let scrutinee = self.evaluate_expression(scrutinee, bindings)?;
-        if self.state.pending_handler_return.is_some() {
+        let Some(scrutinee) = self.evaluate_expression(scrutinee, bindings)? else {
             return Ok(None);
-        }
+        };
         for arm in arms {
             if !self.pattern_matches(&arm.pattern, scrutinee, bindings)? {
                 continue;
             }
             if let Some(guard) = arm.guard {
-                let accepted = self.evaluate_bool(guard, bindings)?;
-                if self.state.pending_handler_return.is_some() {
+                let Some(accepted) = self.evaluate_bool(guard, bindings)? else {
                     return Ok(None);
-                }
+                };
                 if !accepted {
                     continue;
                 }
@@ -140,7 +137,7 @@ impl ConstInterpreter<'_> {
             // still hold an unfolded pattern expression. Folding it without bindings keeps a
             // pattern from ever reading a local.
             PatternValueKind::Runtime(expression) => self
-                .fold_to_constant(expression, &FrameBindings::default())?
+                .fold_to_constant(expression, &mut FrameBindings::default())?
                 .ok_or_else(|| {
                     unsupported_error(labels::MATCH_PATTERN, pattern.span, self.string_table)
                 })?,

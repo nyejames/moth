@@ -78,6 +78,13 @@ in `docs/bug-reports.md`. Recording an incidental issue never records coverage.
 | `projects.dev_server.static_files` | `src/projects/dev_server/static_files.rs` request decoding, path validation, page and asset resolution, redirects, MIME types, known HTML entries and client injection; GET static request parsing, origin dispatch, failure-page substitution, immutable response capture and transmission in `src/projects/dev_server/http.rs`; related snapshot state and capture/publication in `state.rs` and `build_loop.rs`, routing helpers and focused static/HTTP tests. Excludes SSE, runtime-report POST processing, rebuild scheduling, watcher logic, compiler workers and general server lifecycle. | Correctness 2026-11 @72330758a |
 | `projects.html_runtime_glue` | All six modules under `src/projects/html_project/external_js/runtime_glue/`: referenced export selection, generated wrapper source, import-map assembly, runtime module paths/emission and URL handling. Includes the relevant `external_js/tests/runtime_glue_tests.rs` assertions and their direct producer/consumer handoffs. Excludes external package registration, HTML template input, the wider JS backend and general build orchestration. | Redundancy 2026-11 AUD-0026 |
 
+The Stage 4 [const corrective checkpoint](plans/const-functions-evaluation-foundation-and-semantics-plan.md#corrective-checkpoint-before-phase-5)
+adds targeted evidence for deterministic scope identity and numeric, cast and recovery parity.
+It does not refresh the full correctness coverage of `frontend.symbols`,
+`contract.numeric_profile.frontend_runtime` or `frontend.function_body_parsing`. The
+release-only AST folding inspected by `contract.constraints.selected_evidence` no longer exists;
+its replacement regression compares the real debug and release build-service handoffs.
+
 ## Never audited
 
 Areas with no row above and no coverage of any kind. This list is deliberately coarse - it exists so the gap is visible, not to partition the codebase in advance. Take one, name the part you can actually cover, and add a row.

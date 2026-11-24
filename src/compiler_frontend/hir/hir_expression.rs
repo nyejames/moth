@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ValueBlock, ValueCatchBlock,
+    ValueBlock, ValueCatchBlock, optional_cast_catch_target,
 };
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{
@@ -967,19 +967,10 @@ impl<'a> HirBuilder<'a> {
         };
         let err_type = self.lower_type_id(error_type_id)?;
 
-        // The direct catch root joins cast target values before applying an optional receiving
-        // wrap. Nested casts keep their receiving type because a parent expression may need it.
-        let cast_with_optional_receiving_wrap = match protected.operation() {
-            ExpressionOperationView::Cast { facts, .. }
-                if facts.requires_optional_wrap_after_cast =>
-            {
-                Some(facts)
-            }
-            _ => None,
-        };
+        let optional_cast_target = optional_cast_catch_target(protected);
         let inner_result_type_ids;
-        let result_type_ids = if let Some(cast) = cast_with_optional_receiving_wrap {
-            inner_result_type_ids = [cast.target_type_id];
+        let result_type_ids = if let Some(target) = optional_cast_target {
+            inner_result_type_ids = [target];
             inner_result_type_ids.as_slice()
         } else {
             result_type_ids
@@ -1000,12 +991,10 @@ impl<'a> HirBuilder<'a> {
             },
             // Every protected shape lowers through the ordinary expression path while the
             // handler is active; producers route their error edges to that handler themselves.
-            |builder| match cast_with_optional_receiving_wrap {
-                Some(cast) => {
-                    let lowered = builder.lower_expression_with_root_cast_result_type(
-                        protected,
-                        Some(cast.target_type_id),
-                    )?;
+            |builder| match optional_cast_target {
+                Some(target) => {
+                    let lowered = builder
+                        .lower_expression_with_root_cast_result_type(protected, Some(target))?;
                     Ok(LoweredResults {
                         prelude: lowered.prelude,
                         values: vec![lowered.value],
@@ -1014,7 +1003,7 @@ impl<'a> HirBuilder<'a> {
                 None => builder.lower_expression_results(protected),
             },
         )?;
-        if cast_with_optional_receiving_wrap.is_some() {
+        if optional_cast_target.is_some() {
             let value = self.wrap_value_to_optional_type(
                 lowered.values[0],
                 protected.value_type_id()?,

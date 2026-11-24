@@ -124,33 +124,36 @@ fn collect_local_binding_roots(instructions: &[ConstInstruction], roots: &mut Fx
                 collect_local_binding_roots(body, roots);
             }
             ConstInstructionKind::ValueBlock { body, receiver } => {
-                match receiver.as_ref() {
-                    ValueReceiver::Declaration(path) => {
-                        roots.insert(*path);
-                    }
-                    ValueReceiver::MultiBind(targets) => roots.extend(
-                        targets
-                            .iter()
-                            .filter(|target| {
-                                matches!(target.kind, MultiBindTargetKind::Declaration)
-                            })
-                            .map(|target| target.id),
-                    ),
-                    ValueReceiver::Assignment(_)
-                    | ValueReceiver::Return
-                    | ValueReceiver::ReturnFromFunction => {}
-                }
+                collect_receiver_roots(receiver, roots);
                 collect_local_binding_roots(body, roots);
+            }
+            ConstInstructionKind::MultiBind { receiver, .. } => {
+                collect_receiver_roots(receiver, roots);
             }
             ConstInstructionKind::Assign { .. }
             | ConstInstructionKind::Eval(_)
             | ConstInstructionKind::Return(_)
-            | ConstInstructionKind::ReturnFromFunction(_)
+            | ConstInstructionKind::Recover(_)
             | ConstInstructionKind::Then(_)
             | ConstInstructionKind::Break
             | ConstInstructionKind::Continue
             | ConstInstructionKind::Assert { .. } => {}
         }
+    }
+}
+
+fn collect_receiver_roots(receiver: &ValueReceiver, roots: &mut FxHashSet<PathId>) {
+    match receiver {
+        ValueReceiver::Declaration(path) => {
+            roots.insert(*path);
+        }
+        ValueReceiver::MultiBind(targets) => roots.extend(
+            targets
+                .iter()
+                .filter(|target| matches!(target.kind, MultiBindTargetKind::Declaration))
+                .map(|target| target.id),
+        ),
+        ValueReceiver::Assignment(_) | ValueReceiver::Return => {}
     }
 }
 
@@ -263,6 +266,7 @@ fn collect_instruction_expression_roots(
     for instruction in instructions {
         match &instruction.kind {
             ConstInstructionKind::Bind { expression, .. }
+            | ConstInstructionKind::MultiBind { expression, .. }
             | ConstInstructionKind::Eval(expression) => roots.push_back(*expression),
             ConstInstructionKind::Assign { place, expression } => {
                 roots.push_back(*expression);
@@ -312,7 +316,7 @@ fn collect_instruction_expression_roots(
                 collect_instruction_expression_roots(body, expressions, roots)?;
             }
             ConstInstructionKind::Return(values)
-            | ConstInstructionKind::ReturnFromFunction(values)
+            | ConstInstructionKind::Recover(values)
             | ConstInstructionKind::Then(values) => {
                 roots.extend(values.iter().copied());
             }

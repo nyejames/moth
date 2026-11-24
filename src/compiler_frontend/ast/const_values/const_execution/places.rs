@@ -9,9 +9,10 @@
 
 use super::instructions::ConstInstruction;
 use super::labels;
-use super::state::{ActiveHandler, ConstInterpreter, ExecutionState, FrameBindings};
+use super::state::{ConstInterpreter, ExecutionState, FrameBindings, FrameOutcome};
 use super::{
     AliasTarget, ResolvedPlaceProjection,
+    budget::charge_new_value_text,
     values::{
         ProjectionWrite, assign_constant_projections, constant_index, fixed_scalar_is_negative,
         project_constant_value, unsupported_error,
@@ -38,14 +39,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
-
-/// The catch handler selected for one fallible collection operation.
-struct SelectedHandler {
-    body: Option<Rc<[ConstInstruction]>>,
-    error_binding: Option<PathId>,
-    /// The body came from an enclosing handled expression rather than this operation's own catch.
-    inherited: bool,
-}
 
 /// One receiver resolved to a bound collection value.
 ///
@@ -112,12 +105,7 @@ pub(super) fn unwrap_fallible_expression(
 
 /// Resolves the prepared catch body selected by one catch expression.
 ///
-/// WHAT: reads the authored catch body from the active frame, then any body carried to this
-///       expression by a rewrite that rebuilt the catch under a fresh `ExprId`.
-/// WHY: handler selection happens before rewriting on authored expressions and again on rebuilt
-///      expressions when completion evaluates them, so the prepared body has to follow both
-///      identities. An authored expression is immutable, and a rebuilt one receives its entry at
-///      the moment the rewrite produces it.
+/// The authored expression installs its prepared body before evaluating any of its children.
 pub(super) fn fallible_handler_instructions(
     builder: &AstExpressionBuilder,
     state: &ExecutionState,
@@ -139,9 +127,6 @@ pub(super) fn fallible_handler_instructions(
         .and_then(|bodies| bodies.get(&expression))
         .cloned()
     {
-        return Ok(Some(body));
-    }
-    if let Some(body) = state.rewritten_handlers.get(&expression).cloned() {
         return Ok(Some(body));
     }
     if state.handler_bodies.is_none() {
@@ -282,9 +267,10 @@ impl ConstInterpreter<'_> {
     }
 
     /// Builds the caught `Error` record that a handler error binding refers to.
-    fn caught_collection_error(
+    fn caught_error_value(
         &mut self,
         code: BuiltinErrorCode,
+        message: Option<String>,
         span: Option<SourceSpan>,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         let error_name = self.string_table.intern("Error");
@@ -319,11 +305,13 @@ impl ConstInterpreter<'_> {
             ConstValuePayload::FixedScalar(scalar),
             span,
         )?;
+        let message = match message {
+            Some(message) => self.string_table.get_or_intern(message),
+            None => self.string_table.intern(code.default_message()),
+        };
         let message_value = self.constants.insert_resolved(
             message_field.type_id,
-            ConstValuePayload::String(ConstStringValue::Text(
-                self.string_table.intern(code.default_message()),
-            )),
+            ConstValuePayload::String(ConstStringValue::Text(message)),
             span,
         )?;
         Ok(Some(self.constants.insert_resolved(
@@ -342,37 +330,37 @@ impl ConstInterpreter<'_> {
         )?))
     }
 
-    /// Executes a collection catch handler and records inherited recovery for the enclosing
-    /// expression.
     fn execute_collection_handler(
         &mut self,
-        handler_body: Option<Rc<[ConstInstruction]>>,
-        error_binding: Option<PathId>,
         error_code: BuiltinErrorCode,
-        inherited: bool,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
-        let Some(handler_body) = handler_body else {
-            return Ok(None);
+    ) -> Result<(), ConstantFoldError> {
+        self.execute_builtin_handler(error_code, None, self.budget.span, bindings)
+    }
+
+    /// Run the active handler for a discovered builtin failure. The receiving site owns delivery.
+    pub(super) fn execute_builtin_handler(
+        &mut self,
+        error_code: BuiltinErrorCode,
+        message: Option<String>,
+        span: Option<SourceSpan>,
+        bindings: &mut FrameBindings,
+    ) -> Result<(), ConstantFoldError> {
+        let active = self.state.active_handler.clone();
+        let Some(handler_body) = active.body else {
+            return Ok(());
         };
-        let span = self.budget.span;
-        if let Some(error_binding) = error_binding
-            && let Some(error) = self.caught_collection_error(error_code, span)?
+        let value_count = self.constants.value_count();
+        if let Some(error_binding) = active.error_binding
+            && let Some(error) = self.caught_error_value(error_code, message, span)?
         {
             bindings.insert(error_binding, error);
         }
-        // A failure inside a handler is not caught by the handler that is already running.
-        let saved_handler = std::mem::take(&mut self.state.active_handler);
-        let outcome = self.execute_handler_body(&handler_body, bindings);
-        self.state.active_handler = saved_handler;
-        let values = outcome?;
-        let value = values.first().copied();
-        if inherited && self.state.pending_handler_return.is_none() {
-            self.state.inherited_handler_values = values;
-            self.state.inherited_handler_recovered = true;
-            self.state.call_chain_attached = false;
-        }
-        Ok(value)
+        // Handler execution is isolated: it cannot re-enter itself.
+        let outcome = self.execute_handler_body(&handler_body, bindings)?;
+        charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+        self.state.outcome = Some(outcome);
+        Ok(())
     }
 
     /// Evaluates non-mutating collection reads that have one ordinary success value.
@@ -381,16 +369,6 @@ impl ConstInterpreter<'_> {
         expression: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
-        let own_handler = self.fallible_handler_instructions(expression)?;
-        let own_error_binding = fallible_handler_error_binding(self.builder, expression)?;
-        let inherited = own_handler.is_none()
-            && self.state.active_handler.body.is_some()
-            && !self.state.active_handler.boundary;
-        let handler = SelectedHandler {
-            body: own_handler.or_else(|| self.state.active_handler.body.clone()),
-            error_binding: own_error_binding.or(self.state.active_handler.error_binding),
-            inherited,
-        };
         let inner = unwrap_fallible_expression(expression, self.builder)?;
         let (operation, receiver, arguments, span) = {
             let view = self.builder.view(inner)?;
@@ -417,7 +395,6 @@ impl ConstInterpreter<'_> {
                 expression,
                 receiver.id(),
                 &arguments,
-                handler,
                 bindings,
             );
         }
@@ -433,14 +410,6 @@ impl ConstInterpreter<'_> {
         let Some(ConstValuePayload::Collection(items)) = self.constants.payload(collection) else {
             return Ok(None);
         };
-        self.budget.retain_values(items.len(), span)?;
-        self.budget.retain_memory_bytes(
-            items
-                .len()
-                .saturating_mul(std::mem::size_of::<ConstValueId>()),
-            span,
-        )?;
-        let items = items.clone();
         let result_type = match self.builder.view(expression)?.success() {
             SuccessShape::One(type_id) => type_id,
             _ => return Ok(None),
@@ -464,7 +433,7 @@ impl ConstInterpreter<'_> {
                 )?))
             }
             CollectionBuiltinOp::Get => {
-                self.evaluate_collection_get(items, arguments.as_slice(), handler, bindings)
+                self.evaluate_collection_get(collection, arguments.as_slice(), bindings)
             }
             _ => Ok(None),
         }
@@ -473,30 +442,32 @@ impl ConstInterpreter<'_> {
     /// Index one bound collection, running the selected handler for a non-addressable index.
     fn evaluate_collection_get(
         &mut self,
-        items: Vec<ConstValueId>,
+        collection: ConstValueId,
         arguments: &[ExprId],
-        handler: SelectedHandler,
         bindings: &mut FrameBindings,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         let [index] = arguments else {
             return Ok(None);
         };
-        let index_value = self.evaluate_with_selected_handler(*index, &handler, bindings)?;
-        if let Some(&value) = self.state.inherited_handler_values.first() {
-            return Ok(Some(value));
-        }
+        let Some(index_value) = self.evaluate_expression(*index, bindings)? else {
+            return Ok(None);
+        };
+        // Stored values are immutable, so keep the receiver's ID across index evaluation instead
+        // of copying its contents. A write through an alias creates a different value ID.
+        let Some(ConstValuePayload::Collection(items)) = self.constants.payload(collection) else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "const collection read lost its receiver value",
+            )
+            .into());
+        };
         let index = constant_index(self.constants, index_value);
         if collection_index_is_out_of_bounds(self.constants, index, index_value, items.len()) {
-            let Some(handler_body) = handler.body else {
-                return Ok(None);
-            };
-            return self.execute_collection_handler(
-                Some(handler_body),
-                handler.error_binding,
+            self.execute_collection_handler(
                 BuiltinErrorCode::CollectionIndexOutOfBounds,
-                handler.inherited,
                 bindings,
-            );
+            )?;
+            return Ok(None);
         }
         let Some(index) = index else {
             return Ok(None);
@@ -510,7 +481,6 @@ impl ConstInterpreter<'_> {
         expression: ExprId,
         receiver: ExprId,
         arguments: &[ExprId],
-        handler: SelectedHandler,
         bindings: &mut FrameBindings,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         let target = match self.resolve_collection_target(receiver, bindings)? {
@@ -540,24 +510,20 @@ impl ConstInterpreter<'_> {
         let [index] = arguments else {
             return Ok(None);
         };
-        let index_value = self.evaluate_with_selected_handler(*index, &handler, bindings)?;
-        if let Some(&value) = self.state.inherited_handler_values.first() {
-            self.budget.retain_values(items.len(), metadata.span)?;
-            return Ok(Some(value));
-        }
+        let Some(index_value) = self.evaluate_expression(*index, bindings)? else {
+            return Ok(None);
+        };
         let index = constant_index(self.constants, index_value);
         if collection_index_is_out_of_bounds(self.constants, index, index_value, items.len()) {
-            let Some(handler_body) = handler.body else {
+            if self.state.active_handler.body.is_none() {
                 return Ok(None);
-            };
+            }
             self.budget.retain_values(items.len(), metadata.span)?;
-            return self.execute_collection_handler(
-                Some(handler_body),
-                handler.error_binding,
+            self.execute_collection_handler(
                 BuiltinErrorCode::CollectionIndexOutOfBounds,
-                handler.inherited,
                 bindings,
-            );
+            )?;
+            return Ok(None);
         }
         let Some(index) = index else {
             return Ok(None);
@@ -594,23 +560,6 @@ impl ConstInterpreter<'_> {
             root_value,
             current,
         }))
-    }
-
-    /// Evaluate one expression with the selected catch handler installed.
-    ///
-    /// A failure inside the expression restores the handler before propagating, exactly like a
-    /// successful evaluation.
-    fn evaluate_with_selected_handler(
-        &mut self,
-        expression: ExprId,
-        handler: &SelectedHandler,
-        bindings: &mut FrameBindings,
-    ) -> Result<ConstValueId, ConstantFoldError> {
-        let saved_handler =
-            ActiveHandler::replace(self.state, handler.body.clone(), handler.error_binding);
-        let result = self.evaluate_expression(expression, bindings);
-        self.state.active_handler = saved_handler;
-        result
     }
 
     /// Remove `index` from resolved collection contents and write the shrunk collection back.
@@ -682,8 +631,11 @@ impl ConstInterpreter<'_> {
                     return Ok(Some((root, projections)));
                 }
                 ExpressionOperationView::Copy(place) => {
-                    let (root, mut projections) =
-                        self.evaluate_place_projections(place.id(), bindings)?;
+                    let Some((root, mut projections)) =
+                        self.evaluate_place_projections(place.id(), bindings)?
+                    else {
+                        return Ok(None);
+                    };
                     field_suffix.reverse();
                     projections.extend(field_suffix);
                     return Ok(Some(expand_alias_target(
@@ -712,8 +664,21 @@ impl ConstInterpreter<'_> {
         expression: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<bool, ConstantFoldError> {
-        let handler_body = self.fallible_handler_instructions(expression)?;
-        let handler_error_binding = fallible_handler_error_binding(self.builder, expression)?;
+        let consumed = self.with_expression_handler(expression, |interpreter| {
+            interpreter.try_collection_mutation(expression, bindings)
+        })?;
+        if consumed && matches!(self.state.outcome, Some(FrameOutcome::Recovered(_))) {
+            // Statement recovery consumes the operation even when it produces no values.
+            self.state.outcome = None;
+        }
+        Ok(consumed)
+    }
+
+    fn try_collection_mutation(
+        &mut self,
+        expression: ExprId,
+        bindings: &mut FrameBindings,
+    ) -> Result<bool, ConstantFoldError> {
         let expression = unwrap_fallible_expression(expression, self.builder)?;
         let (operation, receiver, arguments, span) = {
             let view = self.builder.view(expression)?;
@@ -745,7 +710,11 @@ impl ConstInterpreter<'_> {
                 view.span(),
             )
         };
-        let target = match self.resolve_collection_target(receiver.id(), bindings)? {
+        let target = self.resolve_collection_target(receiver.id(), bindings)?;
+        if self.state.outcome.is_some() {
+            return Ok(true);
+        }
+        let target = match target {
             CollectionTarget::Resolved(target) => target,
             CollectionTarget::NotBound => return Ok(false),
             CollectionTarget::InvalidProjection => {
@@ -756,41 +725,12 @@ impl ConstInterpreter<'_> {
                 ));
             }
         };
-        let saved_handler = std::mem::replace(
-            &mut self.state.active_handler,
-            ActiveHandler {
-                body: handler_body.clone(),
-                error_binding: handler_error_binding,
-                boundary: false,
-            },
-        );
         let mut values = Vec::with_capacity(arguments.len());
-        let mut arguments_result = Ok(());
         for argument in arguments {
-            match self.evaluate_expression(argument, bindings) {
-                Ok(value) => {
-                    values.push(value);
-                    if self.state.pending_handler_return.is_some() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    arguments_result = Err(error);
-                    break;
-                }
-            }
-        }
-        self.state.active_handler = saved_handler;
-        arguments_result?;
-        if self.state.pending_handler_return.is_some() {
-            // A handler `return` inside an argument leaves the function; the mutation must not
-            // consume the pending return value as an argument or write its target.
-            return Ok(true);
-        }
-        if self.state.inherited_handler_recovered {
-            self.state.inherited_handler_recovered = false;
-            self.state.inherited_handler_values.clear();
-            return Ok(true);
+            let Some(value) = self.evaluate_expression(argument, bindings)? else {
+                return Ok(true);
+            };
+            values.push(value);
         }
         let metadata = self
             .constants
@@ -818,15 +758,10 @@ impl ConstInterpreter<'_> {
                 self.apply_push_growable(&mut items, values.as_slice(), span)?
             }
             CollectionBuiltinOp::PushFixed => {
-                let handler = SelectedHandler {
-                    body: handler_body.clone(),
-                    error_binding: handler_error_binding,
-                    inherited: false,
-                };
+                let item_count = items.len();
                 let pushed = self.apply_push_fixed(
                     values.as_slice(),
-                    &handler,
-                    items.len(),
+                    item_count,
                     metadata.type_id,
                     span,
                     bindings,
@@ -839,13 +774,7 @@ impl ConstInterpreter<'_> {
                 }
             }
             CollectionBuiltinOp::Set => {
-                let handler = SelectedHandler {
-                    body: handler_body.clone(),
-                    error_binding: handler_error_binding,
-                    inherited: false,
-                };
-                let assigned =
-                    self.apply_set(values.as_slice(), &handler, items.len(), span, bindings)?;
+                let assigned = self.apply_set(values.as_slice(), items.len(), span, bindings)?;
                 if let Some((index, value)) = assigned {
                     items[index] = value;
                     MutationOutcome::Changed
@@ -868,13 +797,7 @@ impl ConstInterpreter<'_> {
                     *index_value,
                     items.len(),
                 ) {
-                    self.handle_collection_bounds_error(
-                        handler_body,
-                        handler_error_binding,
-                        items.len(),
-                        span,
-                        bindings,
-                    )?;
+                    self.handle_collection_bounds_error(items.len(), span, bindings)?;
                     return Ok(true);
                 }
                 let Some(index) = index else {
@@ -917,7 +840,6 @@ impl ConstInterpreter<'_> {
     fn apply_push_fixed(
         &mut self,
         values: &[ConstValueId],
-        handler: &SelectedHandler,
         item_count: usize,
         collection_type: TypeId,
         span: Option<SourceSpan>,
@@ -938,19 +860,16 @@ impl ConstInterpreter<'_> {
             ));
         };
         if item_count >= capacity {
-            let Some(handler_body) = handler.body.clone() else {
+            if self.state.active_handler.body.is_none() {
                 return Err(unsupported_error(
                     labels::FIXED_COLLECTION_PUSH,
                     span,
                     self.string_table,
                 ));
-            };
+            }
             self.budget.retain_values(item_count, span)?;
             self.execute_collection_handler(
-                Some(handler_body),
-                handler.error_binding,
                 BuiltinErrorCode::CollectionFixedCapacityExceeded,
-                false,
                 bindings,
             )?;
             return Ok(None);
@@ -961,7 +880,6 @@ impl ConstInterpreter<'_> {
     fn apply_set(
         &mut self,
         values: &[ConstValueId],
-        handler: &SelectedHandler,
         item_count: usize,
         span: Option<SourceSpan>,
         bindings: &mut FrameBindings,
@@ -975,13 +893,7 @@ impl ConstInterpreter<'_> {
         };
         let index = constant_index(self.constants, *index_value);
         if collection_index_is_out_of_bounds(self.constants, index, *index_value, item_count) {
-            self.handle_collection_bounds_error(
-                handler.body.clone(),
-                handler.error_binding,
-                item_count,
-                span,
-                bindings,
-            )?;
+            self.handle_collection_bounds_error(item_count, span, bindings)?;
             return Ok(None);
         }
         let Some(index) = index else {
@@ -997,28 +909,19 @@ impl ConstInterpreter<'_> {
     /// Report a collection bounds failure through the selected handler.
     fn handle_collection_bounds_error(
         &mut self,
-        handler_body: Option<Rc<[ConstInstruction]>>,
-        handler_error_binding: Option<PathId>,
         item_count: usize,
         span: Option<SourceSpan>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let Some(handler_body) = handler_body else {
+        if self.state.active_handler.body.is_none() {
             return Err(unsupported_error(
                 labels::COLLECTION_BOUNDS_ERROR,
                 span,
                 self.string_table,
             ));
-        };
+        }
         self.budget.retain_values(item_count, span)?;
-        self.execute_collection_handler(
-            Some(handler_body),
-            handler_error_binding,
-            BuiltinErrorCode::CollectionIndexOutOfBounds,
-            false,
-            bindings,
-        )?;
-        Ok(())
+        self.execute_collection_handler(BuiltinErrorCode::CollectionIndexOutOfBounds, bindings)
     }
 
     /// Resolves one place's field/index projections to index constants before value-graph updates.
@@ -1026,7 +929,7 @@ impl ConstInterpreter<'_> {
         &mut self,
         place: PlaceId,
         bindings: &mut FrameBindings,
-    ) -> Result<(PathId, Vec<ResolvedPlaceProjection>), ConstantFoldError> {
+    ) -> Result<Option<(PathId, Vec<ResolvedPlaceProjection>)>, ConstantFoldError> {
         let (root, projections) = {
             let place_view = self.builder.place(place)?;
             let projections = place_view
@@ -1045,7 +948,9 @@ impl ConstInterpreter<'_> {
                     resolved.push(ResolvedPlaceProjection::Field(field));
                 }
                 (_, Some(index)) => {
-                    let value = self.evaluate_expression(index, bindings)?;
+                    let Some(value) = self.evaluate_expression(index, bindings)? else {
+                        return Ok(None);
+                    };
                     let Some(index) = constant_index(self.constants, value) else {
                         return Err(unsupported_error(
                             labels::PLACE_PROJECTION,
@@ -1058,7 +963,7 @@ impl ConstInterpreter<'_> {
                 (None, None) => unreachable!("a place projection is a field or an index"),
             }
         }
-        Ok((root, resolved))
+        Ok(Some((root, resolved)))
     }
 }
 

@@ -320,8 +320,7 @@ pub(crate) struct ConstValueFieldVisit<'a, T> {
 
 /// Compiler-owned aggregate work and allocation meter for const execution.
 ///
-/// WHAT: one module-scoped accounting object shared by every required and speculative const
-///       evaluation attempt.
+/// WHAT: one module-scoped accounting object shared by required const execution attempts.
 /// WHY: per-attempt limits alone let a module with many call sites multiply the allowed work.
 ///      The store owns this meter so all evaluation entry points share one aggregate safeguard.
 #[derive(Clone, Debug, Default)]
@@ -430,6 +429,17 @@ impl ConstValueCandidate<'_> {
         expression: ExpressionView<'_>,
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(
+            id,
+            expression.occurrence_facts().map(|facts| &facts.provenance),
+        )
+    }
+
+    fn with_value_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: Option<&SyntheticInterfaceProvenance>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
@@ -437,7 +447,7 @@ impl ConstValueCandidate<'_> {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+        let Some((metadata, payload)) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
         self.insert_value(metadata, payload)
@@ -452,12 +462,9 @@ impl ConstValueCandidate<'_> {
 /// the value it resolves to, as a folded result did in the baseline.
 fn occurrence_copy(
     stored: &ConstValue,
-    expression: ExpressionView<'_>,
+    provenance: Option<&SyntheticInterfaceProvenance>,
 ) -> Option<(ConstValueMetadata, ConstValuePayload)> {
-    let facts = expression.occurrence_facts()?;
-    let metadata = stored
-        .metadata
-        .with_occurrence_provenance(&facts.provenance)?;
+    let metadata = stored.metadata.with_occurrence_provenance(provenance?)?;
     Some((metadata, stored.payload.clone()))
 }
 
@@ -922,6 +929,26 @@ impl ConstValueStore {
         expression: ExpressionView<'_>,
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(
+            id,
+            expression.occurrence_facts().map(|facts| &facts.provenance),
+        )
+    }
+
+    /// Carry combined occurrence dependencies on a result with no replacement expression.
+    pub(crate) fn with_synthetic_interface_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(id, Some(provenance))
+    }
+
+    fn with_value_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: Option<&SyntheticInterfaceProvenance>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
@@ -929,7 +956,7 @@ impl ConstValueStore {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+        let Some((metadata, payload)) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
         self.insert_value(metadata, payload)

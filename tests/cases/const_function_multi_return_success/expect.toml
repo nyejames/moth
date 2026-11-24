@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " summed=81 updated=56 picked=0,-302,408 looped=20 singles=11,-1 even=2 choose=1,2,7,8 describe=6,three,true "
+rendered_output_exact = " summed=81 updated=56 picked=0,-302,408 option=10,-1 looped=20 singles=11,-1 even=2 choose=1,2,7,8 describe=6,positive,true;-6,nonpositive,false "
