@@ -785,6 +785,9 @@ impl ConstInterpreter<'_> {
         if let Some(value) = self.evaluate_collection_read(expression, bindings)? {
             return Ok(value);
         }
+        if let Some(value) = self.evaluate_directly(expression, bindings)? {
+            return Ok(value);
+        }
         // Resolve the selected catch body before touching the inherited handler: handler lookup
         // reads only the prepared frame tables, and an infrastructure error here must not clear
         // live state.

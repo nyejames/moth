@@ -957,6 +957,10 @@ fold before HIR exists: constants, TIR, template composition and selected static
 consume their results. Invalid required execution reports a source diagnostic and has no runtime
 fallback. The executor owns no parser, type system, second value domain or second template engine;
 numeric, cast, collection and template semantics retain their established owners.
+Consumers that need only a value fold through the shared walker without committing replacement
+rows. Inside a const body, a pure expression folds directly from the frame bindings. Short-circuit
+logic, user const calls, handlers, collection effects and templates take the executor's ordered
+rewrite, which owns their evaluation order.
 
 Simple completed pure expressions may fold eagerly when their result is deterministic, their
 source evaluation is semantics-preserving and any selected fast-operation or other validation

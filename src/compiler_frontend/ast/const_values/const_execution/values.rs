@@ -14,7 +14,8 @@ use super::{
 };
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
-    ConstantValueFold, FoldRequirement, FoldServices, fold_value_with_constants,
+    ConstantValueFold, FoldRequirement, FoldServices, fold_interpreted_value,
+    fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValue, ConstValueField, ConstValueId, ConstValuePayload, ConstValueStore,
@@ -297,6 +298,46 @@ impl ConstInterpreter<'_> {
             }
         };
         charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+        Ok(Some(value))
+    }
+
+    /// Evaluate a body expression from the frame bindings alone when the fold proves it constant,
+    /// or return `None` when the interpreter's ordered rewrite must evaluate it.
+    ///
+    /// WHY: a pure expression needs no rewritten rows, only its value. Fold refusals and source
+    ///      failures fall back instead of escaping, because the probe walks eagerly while the
+    ///      rewrite path owns evaluation order and so decides which failure is reported first.
+    ///      Budget and infrastructure failures still propagate. A settled value costs one step,
+    ///      charged at the whole expression's span: the fold attempt the rewrite path would have
+    ///      made, without its separate attempt on the inner value of a catch or `!` wrapper. A
+    ///      fallback charges nothing here. New value text is charged by the enclosing
+    ///      `evaluate_expression`.
+    pub(super) fn evaluate_directly(
+        &mut self,
+        expression: ExprId,
+        bindings: &FrameBindings,
+    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
+        let value = match fold_interpreted_value(
+            expression,
+            self.builder,
+            self.constants,
+            FoldServices::new(
+                self.string_table,
+                Some(self.scope),
+                Some(self.scope.external_package_registry.as_ref()),
+            ),
+            self.types,
+            |path| bindings.get(&path).copied(),
+        ) {
+            Ok(ConstantValueFold::Value(value)) => value,
+            Ok(ConstantValueFold::NotConstant | ConstantValueFold::Refused(_))
+            | Err(ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_)) => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        self.budget.span = self.builder.view(expression)?.span();
+        self.budget.step()?;
         Ok(Some(value))
     }
 }

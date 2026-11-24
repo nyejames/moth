@@ -35,6 +35,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraft
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidCastReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 pub(crate) use crate::compiler_frontend::datatypes::const_budget::{
     ConstBudgetCategory, ConstBudgetUnit,
 };
@@ -338,23 +339,30 @@ enum FoldBoundary<'a> {
         types: &'a TypeEnvironment,
         requirement: FoldRequirement,
     },
+    /// Required content probed from a const-function body. Short-circuit logic and user const
+    /// calls settle as not constant, leaving them to the interpreter's ordered evaluation.
+    Interpreted {
+        types: &'a TypeEnvironment,
+    },
 }
 
 impl<'a> FoldBoundary<'a> {
     fn requirement(self) -> FoldRequirement {
         match self {
             Self::Runtime { requirement } | Self::Content { requirement, .. } => requirement,
+            Self::Interpreted { .. } => FoldRequirement::Required,
         }
     }
 
     fn folds_composites(self) -> bool {
-        matches!(self, Self::Content { .. })
+        !matches!(self, Self::Runtime { .. })
     }
 
-    /// The type environment that composite folds consult; only constant content boundaries carry one.
+    /// The type environment that composite folds consult; only content and interpreted boundaries
+    /// carry one.
     fn types(self) -> Result<&'a TypeEnvironment, InfrastructureFailure> {
         match self {
-            Self::Content { types, .. } => Ok(types),
+            Self::Content { types, .. } | Self::Interpreted { types } => Ok(types),
             Self::Runtime { .. } => crate::compiler_bug!(
                 CompilerStage::ConstantEvaluation,
                 "Composite constant folding requires a constant content boundary.",
@@ -670,6 +678,21 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 walk.steps.push(FoldStep::Enter(right.id()));
                 walk.steps.push(FoldStep::EnterDecPowerExponent);
                 walk.steps.push(FoldStep::Enter(left.id()));
+            }
+            // An eager walk would build values and text for an operand the interpreter may skip,
+            // and report a failure its short-circuit never reaches. A user const call never folds
+            // here either, so walking its arguments is wasted work. Settling both leaves the whole
+            // expression to the interpreter's ordered rewrite.
+            Operation::LogicalBinary { .. }
+                if matches!(self.boundary, FoldBoundary::Interpreted { .. }) =>
+            {
+                return Ok(FoldEntry::Settled(None));
+            }
+            Operation::Call(call)
+                if call.metadata().evaluation == CallableEvaluation::Const
+                    && matches!(self.boundary, FoldBoundary::Interpreted { .. }) =>
+            {
+                return Ok(FoldEntry::Settled(None));
             }
             Operation::NumericBinary { left, right, .. }
             | Operation::Compare { left, right, .. }
@@ -2109,6 +2132,30 @@ pub(crate) fn fold_value_with_constants(
         constants,
         services,
         FoldBoundary::Content { types, requirement },
+        lookup,
+        0,
+    )
+}
+
+/// Probe one const-function body expression for its value from frame bindings alone.
+///
+/// WHY: most body expressions are pure operations over bindings, so folding them directly skips
+///      the interpreter's rewrite walk. Short-circuit logic and user const calls settle as not
+///      constant, which leaves their evaluation order to the interpreter.
+pub(crate) fn fold_interpreted_value(
+    root: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    types: &TypeEnvironment,
+    lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    fold_value(
+        root,
+        builder,
+        constants,
+        services,
+        FoldBoundary::Interpreted { types },
         lookup,
         0,
     )

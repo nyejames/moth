@@ -4553,3 +4553,69 @@ fn runtime_fold_keeps_refusing_composites_that_content_values_build() {
     };
     assert_eq!(items.len(), 2);
 }
+
+#[test]
+fn interpreted_probe_leaves_an_inactive_operand_to_the_interpreter() {
+    let mut f = FoldFixture::new();
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    // Pair each binding path with the constant value its frame entry would hold for the probe.
+    let binding = |f: &mut FoldFixture, name: &str, literal: ExprId| {
+        let path = f
+            .path_fork
+            .try_intern_portable_path(name, &mut f.strings)
+            .expect("test path fits");
+        let ExpressionOperationView::Constant(value) = f
+            .builder
+            .view(literal)
+            .expect("the literal row is stored")
+            .operation()
+        else {
+            panic!("a literal is a constant row");
+        };
+        (path, value)
+    };
+    let false_literal = f.bool_literal(false, None);
+    let one = f.fixed_integer(FixedScalar::I32, 1);
+    let zero = f.fixed_integer(FixedScalar::I32, 0);
+    let bindings = [
+        binding(&mut f, "flag", false_literal),
+        binding(&mut f, "value", one),
+        binding(&mut f, "divisor", zero),
+    ];
+    let [flag, value, divisor] = bindings.map(|(path, _)| path);
+    let flag = f.reference_path(
+        flag,
+        builtin_type_ids::BOOL,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let value = f.reference_path(value, i32_type, None, ValueMode::ImmutableReference);
+    let divisor = f.reference_path(divisor, i32_type, None, ValueMode::ImmutableReference);
+    // `flag and value // divisor is 0`, where only the inactive right operand divides by zero.
+    let quotient = f.binary(value, divisor, Operator::IntDivide, None);
+    let check = f.binary(quotient, zero, Operator::Equality, None);
+    let root = f.binary(flag, check, Operator::And, None);
+    let lookup = |path| {
+        bindings
+            .iter()
+            .find_map(|&(bound, constant)| (bound == path).then_some(constant))
+    };
+
+    assert_compile_time_error(
+        f.fold_value(root, lookup)
+            .expect_err("an eager content walk evaluates the inactive operand"),
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+    let probe = fold_interpreted_value(
+        root,
+        &f.builder,
+        &mut f.constants,
+        FoldServices::new(&mut f.strings, None, None),
+        &f.types,
+        lookup,
+    )
+    .expect("the probe never evaluates an operand the interpreter may skip");
+    assert!(matches!(probe, ConstantValueFold::NotConstant));
+}

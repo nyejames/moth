@@ -55,6 +55,13 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: the interned scope-path text depends on how many scopes earlier compilations in the process created, and on thread interleaving when modules compile in parallel. Two builds of the same project in one process intern different `__scope_N` text, visible in diagnostic report `Debug` output. The parity test in `profile_parity_tests.rs` therefore numbers these components by first appearance before comparing interned text.
 - Investigate: whether any fingerprint, cache key or rendered name can read this text. If so, derive the component from a module-local counter or the scope arena frame id so identical input yields identical paths.
 
+### A caught failing cast is rejected in compile-time evaluation
+
+- Found: const evaluator Phase 2 audit, 2026-11. Confirmed with the debug CLI before and after Phase 2, so this is not a Phase 2 regression.
+- Where: `FoldContext::complete_cast` / `cast_complete` in `src/compiler_frontend/ast/const_eval/mod.rs` under a required boundary.
+- Observed: `value #I32 = cast "x" catch then 0` and a const function returning `cast value catch then 0` called with `"x"` both report MOTH-RULE-0083 ("This builtin cast failed while evaluating a compile-time expression"). The same expression at runtime yields `0`. The cast documentation says `catch` handles conversion failure and only refuses to legalise unsupported conversions or statically invalid numeric work.
+- Investigate: whether required compile-time evaluation should select the catch fallback for a value-dependent conversion failure. If it should, fix it once in the shared cast fold, so constant declarations and const-function bodies agree with runtime. If the rejection is intended, document it in the cast and constant-folding references.
+
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.

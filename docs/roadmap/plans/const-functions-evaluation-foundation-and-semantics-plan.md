@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C and Phases 0-1 complete
-**Current slice:** Phase 2, reduce repeated rewriting in const-function execution
+**Status:** Active - Foundation Phases A-C and Phases 0-2 complete
+**Current slice:** Phase 3, support match statements in const functions
 **Blockers:** None known
-**Next action:** Classify interpreter expression operations into value-only and interpreter-owned, then try `fold_value_with_constants` on the original expression at the top of `evaluate_expression_inner`.
+**Next action:** Write the Phase 3 design note: a prepared match instruction over the existing `MatchPattern` facts, then the selected-arm regression.
 
 ## Global constraints
 
@@ -438,35 +438,84 @@ The literal-only control is unchanged. Template const calls go through TIR site 
 
 ### Task 2.1: Choose the safest direct path
 
-- [ ] Classify existing expression operations into pure value evaluation and interpreter-owned operations. Start with references, scalar arithmetic, comparisons, casts and supported composites.
-- [ ] Preserve specialisation for nested user const calls, mutable collection/place writes, TIR, catch/handler propagation and lazy logical control flow until each can be proven equivalent.
-- [ ] Determine whether the current `FoldContext` nonconstant return can trigger the established fallback without emitting a premature semantic error. If not, introduce the smallest operation-level gate. Avoid a costly new whole-tree eligibility scan on every expression.
-- [ ] Keep `RewriteWalk` where program-expression rewriting is genuinely required. Do not build another general statement interpreter inside `FoldContext`.
+- [x] Classify existing expression operations into pure value evaluation and interpreter-owned operations. Start with references, scalar arithmetic, comparisons, casts and supported composites.
+- [x] Preserve specialisation for nested user const calls, mutable collection/place writes, TIR, catch/handler propagation and lazy logical control flow until each can be proven equivalent.
+- [x] Determine whether the current `FoldContext` nonconstant return can trigger the established fallback without emitting a premature semantic error. If not, introduce the smallest operation-level gate. Avoid a costly new whole-tree eligibility scan on every expression.
+- [x] Keep `RewriteWalk` where program-expression rewriting is genuinely required. Do not build another general statement interpreter inside `FoldContext`.
 
 ### Task 2.2: Protect lazy and effectful cases before changing dispatch
 
-- [ ] Write a regression with `false and rhs` and `true or rhs` where the inactive operand would fail if executed.
-- [ ] Cover nested const calls, selected versus unselected catches, early return from handlers and a projection of a mutable local composite value.
-- [ ] Verify the earlier source type/eligibility checks still run where required, independent of whether runtime execution visits a branch.
+- [x] Write a regression with `false and rhs` and `true or rhs` where the inactive operand would fail if executed.
+- [x] Cover nested const calls, selected versus unselected catches, early return from handlers and a projection of a mutable local composite value.
+- [x] Verify the earlier source type/eligibility checks still run where required, independent of whether runtime execution visits a branch.
 
 ### Task 2.3: Implement and delete redundant work
 
-- [ ] Insert the value-only path at the narrowest correct point in `evaluate_expression_inner`. Feed it existing frame bindings and retain the original `ExprId`.
-- [ ] Prefer direct `ConstValueId` projection using existing `project_constant_value` when a simple projection needs no expression reconstruction.
-- [ ] Rebuild expression children only for a case that needs altered semantic edges, call substitution, catch authority or program-level AST replacement.
-- [ ] Remove now-dead substitution/rebuild helpers and state once their users have migrated. Retain source-provenance transfer and catch-body identity where replacements remain necessary.
-- [ ] Audit evaluation-order and budget differences on every newly direct operation.
+- [x] Insert the value-only path at the narrowest correct point in `evaluate_expression_inner`. Feed it existing frame bindings and retain the original `ExprId`.
+- [x] Prefer direct `ConstValueId` projection using existing `project_constant_value` when a simple projection needs no expression reconstruction.
+- [x] Rebuild expression children only for a case that needs altered semantic edges, call substitution, catch authority or program-level AST replacement.
+- [x] Remove now-dead substitution/rebuild helpers and state once their users have migrated. Retain source-provenance transfer and catch-body identity where replacements remain necessary.
+- [x] Audit evaluation-order and budget differences on every newly direct operation.
 
 ### Task 2.4: Decide whether further architectural work pays for itself
 
-- [ ] Compare Phase 0 and Phase 1/2 time, allocations, row counts and peak memory with matched inputs.
-- [ ] Check that a fallback after direct evaluation has not introduced a second expensive traversal for common unsupported expressions.
-- [ ] If simple direct execution produces the useful win, stop. If a measured hotspot remains, record the exact operation/representation responsible before proposing a compact instruction or additional specialisation.
-- [ ] Reject unmeasured global memoisation, generic value caches, a replacement AST/IR, a second expression callback framework and general bytecode at this stage.
+- [x] Compare Phase 0 and Phase 1/2 time, allocations, row counts and peak memory with matched inputs.
+- [x] Check that a fallback after direct evaluation has not introduced a second expensive traversal for common unsupported expressions.
+- [x] If simple direct execution produces the useful win, stop. If a measured hotspot remains, record the exact operation/representation responsible before proposing a compact instruction or additional specialisation.
+- [x] Reject unmeasured global memoisation, generic value caches, a replacement AST/IR, a second expression callback framework and general bytecode at this stage.
 
 **Phase 2 exit:** Direct evaluation covers demonstrably useful pure operations without semantic drift or a competing evaluator. Measured costs and a clear stop decision are recorded.
 
 **Review:** Compare the final responsibilities of `FoldContext`, `ConstInterpreter` and `RewriteWalk`. Remove duplicated decisions and ensure each remaining layer owns a real invariant.
+
+### Phase 2 outcome
+
+**Design.**
+- `evaluate_expression_inner` first calls `ConstInterpreter::evaluate_directly`. It runs right after the existing collection-read probe and before handler setup and `RewriteWalk`.
+- `evaluate_directly` folds the original `ExprId` through `fold_interpreted_value` with the frame bindings. `fold_interpreted_value` is the Phase 1 value fold under a new private `FoldBoundary::Interpreted`.
+- That boundary is required content. `LogicalBinary` and user const calls settle as not constant immediately. The alternative, eager evaluation, would build values, text and provenance for an operand the interpreter may skip, and would walk call arguments for a call that can never fold here.
+- Any not-constant result, refusal or source diagnostic falls back to the unchanged rewrite path. That path owns evaluation order, so it decides which failure is reported.
+- No whole-tree scan was added.
+- No rewrite helper became dead: calls, catches with handler bodies, collection reads, `copy` places, templates, `#` constant roots and short-circuit logic still take the fallback.
+- `copy` reads keep their existing post-rewrite `project_constant_value` projection. Their index expressions need interpreter evaluation, and the measured workloads do not contain them.
+- Source type and eligibility checks run at body preparation, before execution, so they are unaffected.
+
+**Equivalence.**
+- The probe settles only constants, bound references, numeric, comparison and `not` operations, trusted Text host calls, composites and foldable casts, including a catch or `!` wrapper around one. For those trees the old rewrite changed nothing but wrapper rows, and its final fold ran the same walk.
+- Handler state matters only on failure, and every failure falls back.
+- Staged values roll back on fallback, and the probe charges nothing.
+
+**Budget differences, accepted.**
+- A direct value costs one step, charged at the whole expression's span. The old path also charged one step for its final fold, plus a separate fold attempt on the inner value of a catch or `!` wrapper.
+- A const body binding `cast t catch then 0` ten times in a loop now passes with a work limit of 69 instead of 79. Pure expressions charge the same.
+- Work-limit diagnostics on direct expressions now point at the whole expression instead of the last leaf the rewrite walk entered.
+- New value text is still charged once, by `evaluate_expression`.
+
+**Tests.**
+- The unit test `interpreted_probe_leaves_an_inactive_operand_to_the_interpreter` pins the logical gate. Removing the gate fails it.
+- `const_function_logical_short_circuit_success` now covers failing pure operands, both at the root and under `not`.
+- `const_function_parameter_cast_success` covers a caught cast in a const body.
+- Existing cases cover nested calls, selected and unselected catches, early handler return (`const_function_mutation_handler_return_success`) and mutable composite projection.
+- A caught *failing* cast is rejected in every compile-time context, before and after this phase. It is recorded in `docs/bug-reports.md`.
+
+**Measurements against Phase 1.** Same method as Phase 0. The heavy workloads are local: 600 calls of a 20-statement arithmetic body, and a body with 10 `if flag and acc > k` statements.
+
+| Workload | Phase 1 (ms) | Phase 2 (ms) |
+| --- | --- | --- |
+| scalar | 15.1 | 14.5 |
+| scalar, heavy body | 33.2 | 22.2 |
+| logic, heavy body | 22.8 | 20.9 |
+| nested depth 8 | 15.3 | 15.4 |
+| other Phase 0 workloads | unchanged within noise | unchanged within noise |
+
+Row counts are unchanged, because pure expressions never appended rows. Call-dominated workloads do not regress: the probe settles a user call at its root without visiting its arguments.
+
+**Stop decision.** Stop here. Short-circuit logic and calls are the remaining interpreter-owned costs. Making `FoldContext` lazy would give short-circuit evaluation a second owner. Call execution is genuine work. No compact instruction form or cache is justified.
+
+**Layer responsibilities.**
+- `FoldContext`: the one semantic implementation of value operations.
+- `ConstInterpreter`: statements, handlers, collection effects and evaluation order.
+- `RewriteWalk`: program-site call substitution and the ordered fallback for interpreter-owned expressions.
 
 
 ---
