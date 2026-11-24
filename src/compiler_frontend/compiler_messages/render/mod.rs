@@ -65,9 +65,9 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     TypeDisplayId, type_display_snapshot::TypeDisplaySnapshot,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    IncompatibleChoiceComparisonCode, IncompatibleChoiceComparisonView, InvalidRouteOutputView,
-    UnsupportedBackendFeatureView, UnsupportedExternalFunctionView, UnsupportedOperatorTypesView,
-    incompatible_choice_comparison_field_name,
+    IncompatibleChoiceComparisonCode, IncompatibleChoiceComparisonView, InvalidConstAccessView,
+    InvalidRouteOutputView, UnsupportedBackendFeatureView, UnsupportedExternalFunctionView,
+    UnsupportedOperatorTypesView, incompatible_choice_comparison_field_name,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -75,13 +75,14 @@ use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, ExternalJsAnnotationDirective,
     ExternalJsDeclarationKind, GenericApplicationErrorReason, HirCapacityResource,
     HtmlTemplateWarning, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
-    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExportRouteReason, InvalidExpressionReason, InvalidExternalModuleReason,
-    InvalidGenericParameterReason, InvalidHtmlSlotContributionReason, InvalidImportPathReason,
-    InvalidLoopOperandReason, InvalidMapLiteralReason, InvalidMutableAccessReason,
-    InvalidOutputFolderReason, InvalidRouteOutputReason, InvalidTemplateDirectiveReason,
-    LoopOperandKind, MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind,
-    PathKind, SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
+    InvalidCompileTimePathReason, InvalidConfigReason, InvalidConstAccessReason,
+    InvalidDependencyClauseReason, InvalidExportRouteReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidHtmlSlotContributionReason,
+    InvalidImportPathReason, InvalidLoopOperandReason, InvalidMapLiteralReason,
+    InvalidMutableAccessReason, InvalidOutputFolderReason, InvalidRouteOutputReason,
+    InvalidTemplateDirectiveReason, LoopOperandKind, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, SourceSpanCapacityResource,
+    UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::display::{

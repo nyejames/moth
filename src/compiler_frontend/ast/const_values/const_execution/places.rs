@@ -202,10 +202,11 @@ impl ConstInterpreter<'_> {
             && let Some(error) = self.caught_error_value(error_code, message, span)?
         {
             let value = self.materialize_value(error, Permission::ReadOnly)?;
-            let binding = self
-                .state
-                .storage
-                .bind_slot(value, Permission::ReadOnly, self.budget)?;
+            let site = self.access_site(span);
+            let binding =
+                self.state
+                    .storage
+                    .bind_slot(value, Permission::ReadOnly, site, self.budget)?;
             bindings.insert(error_binding, binding);
         }
         // Handler execution is isolated: it cannot re-enter itself.
@@ -362,6 +363,7 @@ impl ConstInterpreter<'_> {
                 let Some(index) = arguments else {
                     return Ok(None);
                 };
+                let collection = self.acquire_shared_value(collection, span)?;
                 let Some(value) = self.evaluate_expression(index, bindings)? else {
                     return Ok(None);
                 };
@@ -378,10 +380,10 @@ impl ConstInterpreter<'_> {
                 let Some(index) = index else {
                     return Ok(None);
                 };
-                let Some(place) = self.state.storage.project(collection.read_only(), index)? else {
+                let Some(place) = self.state.storage.project(collection, index)? else {
                     return Ok(None);
                 };
-                Ok(Some(self.read_place(place, span)?.read_only()))
+                Ok(Some(self.read_place(place, span)?))
             }
             _ => Ok(None),
         }
@@ -437,7 +439,15 @@ impl ConstInterpreter<'_> {
         let Some(index) = index else {
             return Ok(None);
         };
-        self.state.storage.remove(allocation, index, self.budget)
+        self.budget.span = span;
+        let element = self.state.storage.children(allocation).nth(index);
+        if let Some(element) = element {
+            self.validate_live_value(element, span)?;
+        }
+        let site = self.access_site(span);
+        self.state
+            .storage
+            .remove(allocation, index, site, self.budget)
     }
 
     pub(super) fn execute_collection_mutation(
@@ -507,6 +517,10 @@ impl ConstInterpreter<'_> {
         }
         self.budget.span = span;
         self.validate_live_value(collection, span)?;
+        for value in values.into_iter().flatten() {
+            self.validate_live_value(value, span)?;
+        }
+        let site = self.access_site(span);
         let count = self.state.storage.children(allocation).len();
         match (operation, values) {
             (
@@ -544,7 +558,11 @@ impl ConstInterpreter<'_> {
                         return Ok(true);
                     }
                 }
-                if !self.state.storage.push(allocation, value, self.budget)? {
+                if !self
+                    .state
+                    .storage
+                    .push(allocation, value, site, self.budget)?
+                {
                     return Err(unsupported_error(
                         labels::COLLECTION_MUTATION,
                         span,
@@ -577,7 +595,7 @@ impl ConstInterpreter<'_> {
                         self.string_table,
                     ));
                 };
-                if !self.state.storage.replace(place, value, self.budget)? {
+                if !self.replace_live_place(place, value, span)? {
                     return Err(unsupported_error(
                         labels::COLLECTION_MUTATION,
                         span,
@@ -603,7 +621,9 @@ impl ConstInterpreter<'_> {
                         self.string_table,
                     ));
                 };
-                self.state.storage.remove(allocation, index, self.budget)?;
+                self.state
+                    .storage
+                    .remove(allocation, index, site, self.budget)?;
             }
             _ => return Err(collection_mutation_arity()),
         }

@@ -214,6 +214,11 @@ define_stable_reason_keys! {
     &InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess => "invalid_mutable_access.aliased_value_requires_exclusive_access",
     },
 
+    InvalidConstAccessReason => {
+    &InvalidConstAccessReason::InvalidatedReference => "invalid_const_access.invalidated_reference",
+    &InvalidConstAccessReason::ExpiredProjection => "invalid_const_access.expired_projection",
+    },
+
     UnsupportedBackendFeatureReason => {
     &UnsupportedBackendFeatureReason::ConstructorRoutes => "unsupported_backend_feature.constructor_routes",
     &UnsupportedBackendFeatureReason::HashmapConstruction => "unsupported_backend_feature.hashmap_construction",

@@ -8,6 +8,9 @@ use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldRefusalReason, FoldRequirement, FoldServices, constant_fold,
     fold_expression_with_bindings,
 };
+use crate::compiler_frontend::ast::const_values::const_execution::{
+    TirCollectionCapture, TirLiveItem,
+};
 use crate::compiler_frontend::ast::const_values::store::{
     ConstExecutionMeter, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
@@ -17,7 +20,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateFoldBinding;
+use crate::compiler_frontend::ast::templates::template_control_flow::{
+    TemplateBindingValue, TemplateFoldBinding,
+};
 use crate::compiler_frontend::ast::templates::tir::{
     FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase,
     TemplateWrapperReference, TirView, WrapperSlotRouting, prepare_tir_view,
@@ -42,16 +47,43 @@ use std::rc::Rc;
 /// WHY: a template call inside a branch or loop body can only run with that site's active
 ///      bindings; pre-rewriting every collected site would execute inactive branches and fail
 ///      loop-body references before their bindings exist.
+pub(crate) struct TirSiteInputs<'a> {
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) source_scope: Option<&'a ScopeContext>,
+    pub(crate) bindings: &'a [TemplateFoldBinding],
+}
+
 pub(crate) trait RequiredCallSiteRewriter {
     fn rewrite_site(
         &mut self,
         expression: ExprId,
-        expression_builder: &mut AstExpressionBuilder,
-        const_values: &mut ConstValueStore,
-        string_table: &mut StringTable,
-        source_scope: Option<&ScopeContext>,
-        bindings: &[TemplateFoldBinding],
+        inputs: TirSiteInputs<'_>,
     ) -> Result<ExprId, ConstantFoldError>;
+
+    fn capture_collection(
+        &mut self,
+        expression: ExprId,
+        needs_items: bool,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<TirCollectionCapture, ConstantFoldError>;
+
+    fn collection_item(
+        &mut self,
+        capture: &TirCollectionCapture,
+        index: usize,
+        span: Option<SourceSpan>,
+        provenance: &SyntheticInterfaceProvenance,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<TirLiveItem, ConstantFoldError>;
+
+    fn capture_option(
+        &mut self,
+        expression: ExprId,
+        provenance: &SyntheticInterfaceProvenance,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<(Option<TirLiveItem>, SyntheticInterfaceProvenance), ConstantFoldError>;
 }
 
 /// Byte and structural-piece ceilings supplied by a bounded consumer, with the charges already
@@ -244,11 +276,13 @@ pub(crate) fn resolve_fold_bindings_in_expression(
     if let Some(rewriter) = fold_context.required_call_rewriter.as_deref_mut() {
         expression = rewriter.rewrite_site(
             expression,
-            fold_context.expression_builder,
-            fold_context.const_values,
-            fold_context.string_table,
-            fold_context.source_scope,
-            &fold_context.bindings,
+            TirSiteInputs {
+                expression_builder: fold_context.expression_builder,
+                const_values: fold_context.const_values,
+                string_table: fold_context.string_table,
+                source_scope: fold_context.source_scope,
+                bindings: &fold_context.bindings,
+            },
         )?;
     }
     let original = fold_context.expression_builder.view(expression)?;
@@ -258,12 +292,13 @@ pub(crate) fn resolve_fold_bindings_in_expression(
             .iter()
             .rev()
             .find(|binding| binding.path == path)
+        && let Some(value) = binding.value.folded()
     {
         // A binding is already a completed value. Preserve optional wrappers and nested
         // template identity rather than evaluating or reconstructing the bound root.
-        fold_context.expression_builder.view(binding.value)?;
+        fold_context.expression_builder.view(value)?;
         return Ok(BindingFoldResult {
-            expression: binding.value,
+            expression: value,
             refusal: None,
         });
     }
@@ -288,7 +323,7 @@ pub(crate) fn resolve_fold_bindings_in_expression(
                     .iter()
                     .rev()
                     .find(|binding| binding.path == path)
-                    .map(|binding| binding.value)
+                    .and_then(|binding| binding.value.folded())
             },
         )?
     };
@@ -312,6 +347,35 @@ pub(crate) fn selected_option_capture_payload_with_provenance(
     store: &TemplateIrStore,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(Option<TemplateFoldBinding>, SyntheticInterfaceProvenance), TemplateError> {
+    let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern else {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "Template option-capture folding received a non-capture pattern.",
+        )
+        .into());
+    };
+    if let Some(rewriter) = fold_context.required_call_rewriter.as_deref_mut() {
+        let source_provenance =
+            expression_provenance(fold_context.expression_builder.view(scrutinee)?);
+        let (payload, provenance) = rewriter.capture_option(
+            scrutinee,
+            &source_provenance,
+            TirSiteInputs {
+                expression_builder: fold_context.expression_builder,
+                const_values: fold_context.const_values,
+                string_table: fold_context.string_table,
+                source_scope: fold_context.source_scope,
+                bindings: &fold_context.bindings,
+            },
+        )?;
+        return Ok((
+            payload.map(|value| TemplateFoldBinding {
+                path: *binding_path,
+                value: TemplateBindingValue::Live(value),
+            }),
+            source_provenance.union(&provenance),
+        ));
+    }
     let resolved = resolve_fold_bindings_in_expression(scrutinee, fold_context)?.expression;
     let view = fold_context.expression_builder.view(resolved)?;
     let provenance = expression_provenance(view);
@@ -368,20 +432,13 @@ pub(crate) fn selected_option_capture_payload_with_provenance(
         }
         _ => return Err(option_capture_const_deferred_error(view).into()),
     };
-    let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern else {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::AstConstruction,
-            "Template option-capture folding received a non-capture pattern.",
-        )
-        .into());
-    };
     let provenance = provenance.union(&expression_provenance(
         fold_context.expression_builder.view(payload)?,
     ));
     Ok((
         Some(TemplateFoldBinding {
             path: *binding_path,
-            value: payload,
+            value: payload.into(),
         }),
         provenance,
     ))

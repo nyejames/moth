@@ -1,10 +1,15 @@
 Guard = |done Bool|
 
 read_unchanged #|guard Guard, limit I32| -> I32:
+    other ~= true
     loop 0 to limit:
+        ~other = false
         if guard.done:
             return 0
         ;
+    ;
+    if other:
+        return 2
     ;
     return 1
 ;

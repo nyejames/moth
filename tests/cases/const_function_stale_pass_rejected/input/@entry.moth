@@ -1,0 +1,13 @@
+size #|values {I32}| -> I32:
+    return values.length()
+;
+
+stale #|| -> I32:
+    values ~= {1}
+    view = values
+    ~values.push(2)
+    return size(view)
+;
+
+result #I32 = stale()
+~[:result=[result]]

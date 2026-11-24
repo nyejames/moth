@@ -10,9 +10,10 @@ use super::{
         ExecutionBudget, MAX_PROJECTION_DEPTH, charge_new_value_text, register_precharged_value,
         value_own_allocation,
     },
-    labels,
     state::{ConstInterpreter, FrameBindings},
-    storage::{AllocationId, LiveBinding, LivePlace, LiveValue, Permission},
+    storage::{
+        AccessSite, AllocationId, LiveBinding, LivePlace, LiveValue, Permission, StorageError,
+    },
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_eval::{
@@ -35,6 +36,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, types_borrows_targets,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -103,7 +105,7 @@ fn value_invariant() -> ConstantFoldError {
     .into()
 }
 
-fn retain_scratch<T>(
+pub(super) fn retain_scratch<T>(
     budget: &mut super::budget::ExecutionBudget,
     count: usize,
 ) -> Result<(), ConstantFoldError> {
@@ -187,13 +189,25 @@ impl ConstInterpreter<'_> {
         permission: Permission,
     ) -> Result<(), ConstantFoldError> {
         self.validate_live_value(value, self.budget.span)?;
+        self.install_binding(bindings, path, value, permission)
+    }
+
+    /// Install a value whose access was checked before the receiver started.
+    pub(super) fn install_binding(
+        &mut self,
+        bindings: &mut FrameBindings,
+        path: PathId,
+        value: LiveValue,
+        permission: Permission,
+    ) -> Result<(), ConstantFoldError> {
         if !bindings.contains_key(&path) {
             retain_scratch::<(PathId, LiveBinding)>(self.budget, 1)?;
         }
+        let site = self.access_site(self.budget.span);
         let binding = self
             .state
             .storage
-            .bind_slot(value, permission, self.budget)?;
+            .bind_slot(value, permission, site, self.budget)?;
         bindings.insert(path, binding);
         Ok(())
     }
@@ -203,10 +217,12 @@ impl ConstInterpreter<'_> {
         place: LivePlace,
         span: Option<SourceSpan>,
     ) -> Result<LiveValue, ConstantFoldError> {
+        self.budget.span = span;
+        let site = self.access_site(span);
         self.state
             .storage
-            .read(place, self.budget)?
-            .ok_or_else(|| unsupported_error(labels::PROJECTED_READ, span, self.string_table))
+            .read(place, site, self.budget)
+            .map_err(|error| self.storage_error(error, span))
     }
 
     pub(super) fn validate_live_value(
@@ -214,14 +230,75 @@ impl ConstInterpreter<'_> {
         value: LiveValue,
         span: Option<SourceSpan>,
     ) -> Result<(), ConstantFoldError> {
-        if !self.state.storage.validate_value(value, self.budget)? {
-            return Err(unsupported_error(
-                labels::PROJECTED_READ,
-                span,
-                self.string_table,
-            ));
+        self.budget.span = span;
+        self.state
+            .storage
+            .validate_value(value, self.budget)
+            .map_err(|error| self.storage_error(error, span))
+    }
+
+    pub(super) fn acquire_shared_value(
+        &mut self,
+        value: LiveValue,
+        span: Option<SourceSpan>,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.validate_live_value(value, span)?;
+        let site = self.access_site(span);
+        self.state.storage.share(value, site, self.budget)
+    }
+
+    pub(super) fn replace_live_place(
+        &mut self,
+        place: LivePlace,
+        value: LiveValue,
+        span: Option<SourceSpan>,
+    ) -> Result<bool, ConstantFoldError> {
+        self.budget.span = span;
+        let site = self.access_site(span);
+        self.state
+            .storage
+            .replace(place, value, site, self.budget)
+            .map_err(|error| self.storage_error(error, span))
+    }
+
+    pub(super) fn access_site(&self, span: Option<SourceSpan>) -> AccessSite {
+        AccessSite {
+            span,
+            body: self.state.current_body,
         }
-        Ok(())
+    }
+
+    pub(super) fn storage_error(
+        &self,
+        error: StorageError,
+        use_span: Option<SourceSpan>,
+    ) -> ConstantFoldError {
+        let access = match error {
+            StorageError::InvalidAccess(access) => access,
+            StorageError::Execution(error) => return error,
+        };
+        let mut draft = types_borrows_targets::invalid_const_access(access.reason, use_span);
+        // Fix each source domain independently. Donor unwind must not change
+        // a caller-local acquisition into a span owned by the callee.
+        draft.replace_primary_frozen_identity_handle(
+            self.body_donor_identity(self.state.current_body),
+        );
+        for (site, label) in [
+            (access.acquired, LabelDraftMessage::ConstReferenceAcquired),
+            (
+                access.invalidated,
+                LabelDraftMessage::ConstInvalidatingWrite,
+            ),
+        ] {
+            if let Some(site) = site {
+                let index = draft.label_count();
+                draft = draft.with_label(site.span, Some(label));
+                if let Some(owner) = self.body_donor_identity(site.body) {
+                    draft = draft.with_label_frozen_identity_handle(index, owner);
+                }
+            }
+        }
+        ConstantFoldError::Diagnostic(draft)
     }
 
     pub(super) fn mutable_access_error(

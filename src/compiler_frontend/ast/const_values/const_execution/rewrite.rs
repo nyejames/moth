@@ -16,7 +16,7 @@ use super::values::{
     attach_live_provenance, commit_call_result, constant_index, expression_with_value,
     project_constant_value, unsupported_error, validate_call_results,
 };
-use super::{ProjectedConstant, ResolvedPlaceProjection};
+use super::{ConstFunctionExecutable, ProjectedConstant, ResolvedPlaceProjection};
 use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
 use crate::compiler_frontend::ast::expressions::expression_rewrite::rewrite_expression_children;
@@ -93,6 +93,10 @@ enum RewriteStep {
         base: usize,
         call: ConstCallSite,
     },
+    HoldOperand {
+        expression: ExprId,
+        access: OperandAccess,
+    },
     CompleteLogical {
         expression: ExprId,
         base: usize,
@@ -104,6 +108,12 @@ enum RewriteStep {
         base: usize,
         slots: Vec<usize>,
     },
+}
+
+#[derive(Clone, Copy)]
+enum OperandAccess {
+    SharedArgument,
+    StoredValue,
 }
 
 /// One iterative typed-expression rewrite.
@@ -206,6 +216,31 @@ impl RewriteWalk<'_, '_> {
         Ok(())
     }
 
+    fn hold_operand(
+        &mut self,
+        expression: ExprId,
+        access: OperandAccess,
+    ) -> Result<(), ConstantFoldError> {
+        let span = self.interpreter.builder.view(expression)?.span();
+        let value = self
+            .live_results
+            .last_mut()
+            .ok_or_else(live_operand_mismatch)?;
+        *value = match access {
+            OperandAccess::SharedArgument => self.interpreter.acquire_shared_value(*value, span)?,
+            OperandAccess::StoredValue => {
+                self.interpreter.budget.span = span;
+                let site = self.interpreter.access_site(span);
+                self.interpreter.state.storage.hold_operand(
+                    *value,
+                    site,
+                    self.interpreter.budget,
+                )?
+            }
+        };
+        Ok(())
+    }
+
     fn annotate_live_value(
         &mut self,
         expression: ExprId,
@@ -251,6 +286,9 @@ impl RewriteWalk<'_, '_> {
                     if let Some(slots) = self.complete_call(expression, base, &call)? {
                         return Ok(RewriteOutput::CallResults(slots));
                     }
+                }
+                RewriteStep::HoldOperand { expression, access } => {
+                    self.hold_operand(expression, access)?
                 }
                 RewriteStep::CompleteLogical {
                     expression,
@@ -580,6 +618,9 @@ impl RewriteWalk<'_, '_> {
             });
             return Ok(());
         }
+        let argument_access = const_call
+            .is_some()
+            .then_some(OperandAccess::SharedArgument);
         match const_call {
             Some(call) => self.steps.push(RewriteStep::CompleteCall {
                 expression,
@@ -589,33 +630,52 @@ impl RewriteWalk<'_, '_> {
             None => self.steps.push(RewriteStep::Complete { expression, base }),
         }
         if self.mode.folds_auxiliary() {
-            let ordered = match view.operation() {
-                ExpressionOperationView::Call(call) => schedule_authored_operands(
-                    &mut self.steps,
-                    self.interpreter.budget,
-                    &mut self.scratch_bytes,
-                    base,
-                    || {
-                        call.arguments().iter().map(|argument| {
-                            (argument.value().id(), argument.metadata().authored_ordinal)
-                        })
-                    },
-                )?,
+            let operands = match view.operation() {
+                ExpressionOperationView::Call(call) => {
+                    schedule_authored_operands(
+                        &mut self.steps,
+                        self.interpreter.budget,
+                        &mut self.scratch_bytes,
+                        base,
+                        argument_access,
+                        || {
+                            call.arguments().iter().map(|argument| {
+                                (argument.value().id(), argument.metadata().authored_ordinal)
+                            })
+                        },
+                    )?;
+                    true
+                }
                 ExpressionOperationView::Struct { fields }
-                | ExpressionOperationView::Choice { fields, .. } => schedule_authored_operands(
-                    &mut self.steps,
-                    self.interpreter.budget,
-                    &mut self.scratch_bytes,
-                    base,
-                    || {
-                        fields
-                            .iter()
-                            .map(|field| (field.value().id(), field.authored_ordinal()))
-                    },
-                )?,
+                | ExpressionOperationView::Choice { fields, .. } => {
+                    schedule_authored_operands(
+                        &mut self.steps,
+                        self.interpreter.budget,
+                        &mut self.scratch_bytes,
+                        base,
+                        Some(OperandAccess::StoredValue),
+                        || {
+                            fields
+                                .iter()
+                                .map(|field| (field.value().id(), field.authored_ordinal()))
+                        },
+                    )?;
+                    true
+                }
+                ExpressionOperationView::Collection(items) => {
+                    schedule_authored_operands(
+                        &mut self.steps,
+                        self.interpreter.budget,
+                        &mut self.scratch_bytes,
+                        base,
+                        Some(OperandAccess::StoredValue),
+                        || items.iter().map(|item| (item.id(), None)),
+                    )?;
+                    true
+                }
                 _ => false,
             };
-            if ordered {
+            if operands {
                 return Ok(());
             }
         }
@@ -757,7 +817,6 @@ impl RewriteWalk<'_, '_> {
                 return Err(required_call_error(call, self.interpreter.string_table));
             }
             for (&value, &(path, _)) in arguments.iter().zip(&executable.parameters) {
-                self.interpreter.validate_live_value(value, call.span)?;
                 if let Some(metadata) = self.interpreter.constants.metadata(value.shape) {
                     provenance.merge(&metadata.synthetic_interface_provenance);
                 }
@@ -768,39 +827,14 @@ impl RewriteWalk<'_, '_> {
                     Permission::ReadOnly,
                 )?;
             }
-        } else {
-            let arguments = &self.results[base..];
-            let Some(values) =
-                Self::fold_call_arguments(self.interpreter, self.bindings, call, arguments)?
-            else {
-                return Ok(None);
-            };
-            if values.len() != executable.parameters.len() {
-                return Err(required_call_error(call, self.interpreter.string_table));
-            }
-            for (((original, replacement), value), &(path, _)) in
-                arguments.iter().zip(values).zip(&executable.parameters)
-            {
-                for argument in [original, replacement] {
-                    if let Some(facts) =
-                        self.interpreter.builder.view(*argument)?.occurrence_facts()
-                    {
-                        provenance.merge(&facts.provenance);
-                    }
-                }
-                if let Some(metadata) = self.interpreter.constants.metadata(value) {
-                    provenance.merge(&metadata.synthetic_interface_provenance);
-                }
-                let value = self
-                    .interpreter
-                    .materialize_value(value, Permission::ReadOnly)?;
-                self.interpreter.bind_slot(
-                    &mut parameter_values,
-                    path,
-                    value,
-                    Permission::ReadOnly,
-                )?;
-            }
+        } else if !self.bind_folded_call_arguments(
+            call,
+            base,
+            executable,
+            &mut parameter_values,
+            &mut provenance,
+        )? {
+            return Ok(None);
         }
         self.interpreter.enter_call(call.span)?;
         let returns = self
@@ -808,9 +842,57 @@ impl RewriteWalk<'_, '_> {
             .execute_body(Some(call.path), executable, parameter_values)
             .map_err(|error| self.interpreter.attach_call_chain(error));
         self.interpreter.budget.leave_call();
-        let mut returns = returns?;
-        self.interpreter.budget.span = call.span;
+        self.finish_call(expression, base, executable, returns?, provenance)
+    }
+
+    fn bind_folded_call_arguments(
+        &mut self,
+        call: &ConstCallSite,
+        base: usize,
+        executable: &ConstFunctionExecutable,
+        parameter_values: &mut FrameBindings,
+        provenance: &mut SyntheticInterfaceProvenance,
+    ) -> Result<bool, ConstantFoldError> {
+        let arguments = &self.results[base..];
+        let Some(values) =
+            Self::fold_call_arguments(self.interpreter, self.bindings, call, arguments)?
+        else {
+            return Ok(false);
+        };
+        if values.len() != executable.parameters.len() {
+            return Err(required_call_error(call, self.interpreter.string_table));
+        }
+        for (((original, replacement), value), &(path, _)) in
+            arguments.iter().zip(values).zip(&executable.parameters)
+        {
+            for argument in [original, replacement] {
+                if let Some(facts) = self.interpreter.builder.view(*argument)?.occurrence_facts() {
+                    provenance.merge(&facts.provenance);
+                }
+            }
+            if let Some(metadata) = self.interpreter.constants.metadata(value) {
+                provenance.merge(&metadata.synthetic_interface_provenance);
+            }
+            let value = self
+                .interpreter
+                .materialize_value(value, Permission::ReadOnly)?;
+            self.interpreter
+                .bind_slot(parameter_values, path, value, Permission::ReadOnly)?;
+        }
+        Ok(true)
+    }
+
+    /// Do not keep publication scratch on the native stack across a nested call.
+    fn finish_call(
+        &mut self,
+        expression: ExprId,
+        base: usize,
+        executable: &ConstFunctionExecutable,
+        mut returns: Vec<LiveValue>,
+        mut provenance: SyntheticInterfaceProvenance,
+    ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
         let view = self.interpreter.builder.view(expression)?;
+        self.interpreter.budget.span = view.span();
         validate_call_results(
             self.interpreter.constants,
             view.success_types(),
@@ -959,14 +1041,35 @@ fn schedule_authored_operands<I: ExactSizeIterator<Item = (ExprId, Option<NonZer
     budget: &mut ExecutionBudget,
     scratch_bytes: &mut usize,
     base: usize,
+    access: Option<OperandAccess>,
     operands: impl Fn() -> I,
-) -> Result<bool, ConstantFoldError> {
+) -> Result<(), ConstantFoldError> {
     let ordinal = |value: Option<NonZeroU32>| value.map_or(u32::MAX, NonZeroU32::get);
-    if operands().map(|(_, order)| ordinal(order)).is_sorted() {
-        return Ok(false);
-    }
     let count = operands().len();
-    budget.reserve_scratch(steps, count + 1, scratch_bytes)?;
+    let push_operand = |steps: &mut Vec<RewriteStep>, expression, position| {
+        steps.push(RewriteStep::Enter { expression });
+        if let Some(access) = access
+            && (matches!(access, OperandAccess::SharedArgument) || position + 1 < count)
+        {
+            steps.push(RewriteStep::HoldOperand { expression, access });
+        }
+    };
+    let child_steps = count
+        + match access {
+            Some(OperandAccess::SharedArgument) => count,
+            Some(OperandAccess::StoredValue) => count.saturating_sub(1),
+            None => 0,
+        };
+    if operands().map(|(_, order)| ordinal(order)).is_sorted() {
+        budget.reserve_scratch(steps, child_steps, scratch_bytes)?;
+        let start = steps.len();
+        for (position, (expression, _)) in operands().enumerate() {
+            push_operand(steps, expression, position);
+        }
+        steps[start..].reverse();
+        return Ok(());
+    }
+    budget.reserve_scratch(steps, child_steps + 1, scratch_bytes)?;
     let sort_bytes = count * std::mem::size_of::<(u32, usize, ExprId)>();
     let permutation_bytes = count * std::mem::size_of::<usize>();
     budget.charge_scratch(scratch_bytes, sort_bytes + permutation_bytes)?;
@@ -977,15 +1080,14 @@ fn schedule_authored_operands<I: ExactSizeIterator<Item = (ExprId, Option<NonZer
     scheduled.sort_unstable_by_key(|&(order, slot, _)| (order, slot));
     let slots = scheduled.iter().map(|&(_, slot, _)| slot).collect();
     steps.push(RewriteStep::RestoreSlots { base, slots });
-    steps.extend(
-        scheduled
-            .into_iter()
-            .rev()
-            .map(|(_, _, expression)| RewriteStep::Enter { expression }),
-    );
+    let start = steps.len();
+    for (position, (_, _, expression)) in scheduled.into_iter().enumerate() {
+        push_operand(steps, expression, position);
+    }
+    steps[start..].reverse();
     *scratch_bytes -= sort_bytes;
     budget.release_memory_bytes(sort_bytes);
-    Ok(true)
+    Ok(())
 }
 
 fn live_operand_mismatch() -> ConstantFoldError {

@@ -10,6 +10,7 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
+use crate::compiler_frontend::ast::const_values::const_execution::TirLiveItem;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OccurrenceFacts,
@@ -28,14 +29,33 @@ use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 /// One binding introduced by const template folding.
 ///
-/// WHAT: maps a loop-bound or option-capture name to the compile-time expression
-///       that should replace references to that name during folding.
-/// WHY: folding substitutes these bindings into body expressions before passing
-///       the resolved expressions to the constant folder or string coercion path.
+/// A binding is either a published expression or an executor-owned, attempt-local item.
+/// Live items are observed only when the executor rewrites a selected expression.
 #[derive(Clone)]
 pub(crate) struct TemplateFoldBinding {
     pub(crate) path: PathId,
-    pub(crate) value: ExprId,
+    pub(crate) value: TemplateBindingValue,
+}
+
+#[derive(Clone)]
+pub(crate) enum TemplateBindingValue {
+    Folded(ExprId),
+    Live(TirLiveItem),
+}
+
+impl From<ExprId> for TemplateBindingValue {
+    fn from(value: ExprId) -> Self {
+        Self::Folded(value)
+    }
+}
+
+impl TemplateBindingValue {
+    pub(crate) fn folded(&self) -> Option<ExprId> {
+        match self {
+            Self::Folded(value) => Some(*value),
+            Self::Live(_) => None,
+        }
+    }
 }
 
 // -------------------------
@@ -717,7 +737,7 @@ pub(crate) fn build_range_iteration_bindings(
         let value = iteration_constant(expressions, constant, item, range_provenance.clone())?;
         fold_bindings.push(TemplateFoldBinding {
             path: item.id,
-            value,
+            value: value.into(),
         });
     }
     if let Some(index) = &bindings.index {
@@ -734,7 +754,7 @@ pub(crate) fn build_range_iteration_bindings(
 
 pub(crate) fn build_collection_iteration_bindings(
     bindings: &LoopBindings,
-    item_value: ExprId,
+    item_value: Option<TemplateBindingValue>,
     source_index: usize,
     iterable_provenance: &SyntheticInterfaceProvenance,
     expressions: &mut AstExpressionBuilder,
@@ -742,22 +762,32 @@ pub(crate) fn build_collection_iteration_bindings(
 ) -> Result<Vec<TemplateFoldBinding>, TemplateError> {
     let mut fold_bindings = Vec::with_capacity(2);
     if let Some(item) = &bindings.item {
-        let mut input = expressions
-            .view(item_value)?
-            .to_completed_input(expressions)?;
-        input.span = item.binding_span;
-        let provenance = input.occurrence.as_ref().map_or_else(
-            || iterable_provenance.clone(),
-            |facts| facts.provenance.union(iterable_provenance),
-        );
-        input.occurrence = Some(OccurrenceFacts {
-            provenance,
-            diagnostic_spelling: None,
-        });
-        let value = expressions.commit_replacement(input)?;
+        let value = match item_value.ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "TIR fold: collection item binding has no selected value.",
+            )
+        })? {
+            TemplateBindingValue::Folded(item_value) => {
+                let mut input = expressions
+                    .view(item_value)?
+                    .to_completed_input(expressions)?;
+                input.span = item.binding_span;
+                let provenance = input.occurrence.as_ref().map_or_else(
+                    || iterable_provenance.clone(),
+                    |facts| facts.provenance.union(iterable_provenance),
+                );
+                input.occurrence = Some(OccurrenceFacts {
+                    provenance,
+                    diagnostic_spelling: None,
+                });
+                expressions.commit_replacement(input)?.id().into()
+            }
+            live @ TemplateBindingValue::Live(_) => live,
+        };
         fold_bindings.push(TemplateFoldBinding {
             path: item.id,
-            value: value.id(),
+            value,
         });
     }
     if let Some(index) = &bindings.index {
@@ -806,7 +836,7 @@ fn iteration_index_binding(
     let value = iteration_constant(expressions, constant, index, provenance.clone())?;
     Ok(TemplateFoldBinding {
         path: index.id,
-        value,
+        value: value.into(),
     })
 }
 

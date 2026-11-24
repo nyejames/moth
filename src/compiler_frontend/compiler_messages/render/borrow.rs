@@ -166,6 +166,26 @@ pub(crate) fn render_invalid_mutable_access(
     }
 }
 
+/// Renders the particular access invalidated during const execution.
+pub(crate) fn render_invalid_const_access(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidConstAccessView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match facts.reason {
+        InvalidConstAccessReason::InvalidatedReference => {
+            "This readonly reference was invalidated by an overlapping write."
+        }
+        InvalidConstAccessReason::ExpiredProjection => {
+            "This mutable projection is no longer valid."
+        }
+    };
+    RenderedPayload {
+        message: message.to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn use_of_uninitialized_local_message(
     place: &DiagnosticPlace,
     context: DiagnosticRenderContext<'_>,

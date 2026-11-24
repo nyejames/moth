@@ -1,0 +1,13 @@
+Box = |values {I32}|
+
+stale #|| -> I32:
+    child ~= {1}
+    left ~= Box(child)
+    right ~= Box(child)
+    view = left.values
+    ~right.values.push(2)
+    return view.length()
+;
+
+result #I32 = stale()
+~[:result=[result]]

@@ -296,6 +296,15 @@ pub enum InvalidMutableAccessReason {
     AliasedValueRequiresExclusiveAccess,
 }
 
+/// Why an access is no longer valid during const execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidConstAccessReason {
+    /// An overlapping write invalidated a readonly reference.
+    InvalidatedReference,
+    /// A mutable projection was used after its access expired.
+    ExpiredProjection,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnsupportedBackendFeatureReason {
     ConstructorRoutes,

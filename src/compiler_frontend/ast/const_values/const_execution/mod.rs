@@ -75,6 +75,7 @@ mod storage;
 mod values;
 
 pub(crate) use eligibility::const_body_rejection_diagnostic;
+pub(crate) use execute::{TirCollectionCapture, TirLiveItem};
 pub(crate) use rewrite::rewrite_required_const_calls;
 pub(crate) use state::ConstExecutionServices;
 

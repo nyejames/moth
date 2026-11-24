@@ -23,8 +23,8 @@ use super::{
     },
     storage::{LiveBinding, LiveValue, Permission},
     values::{
-        constant_result_block_slots, expression_with_value, hard_limit_error, template_error,
-        unsupported_error,
+        attach_live_provenance, constant_result_block_slots, expression_with_value,
+        hard_limit_error, retain_scratch, template_error, unsupported_error,
     },
 };
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, MultiBindTargetKind, RangeLoopSpec};
@@ -36,34 +36,35 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, ExpressionOperationView, PlaceId, SuccessShape,
+    ExprId, ExpressionOperationView, PlaceId, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, optional_cast_catch_target,
 };
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, TemplateFoldBinding, const_iteration_index,
+    ConstRangeCursor, TemplateBindingValue, const_iteration_index,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    RequiredCallSiteRewriter, TemplateEmission,
+    RequiredCallSiteRewriter, TemplateEmission, TirSiteInputs,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
     fold_prepared_template, prepare_tir_view_with_source_scope_and_bindings,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_structure;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::compiler_messages::{
+    CompileTimeEvaluationErrorReason, CompilerStage, InvalidTemplateStructureReason,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -381,18 +382,23 @@ impl ConstInterpreter<'_> {
         if permission == Permission::Writable
             && let Some((root, place)) = self.resolve_live_place(expression, bindings)?
         {
-            if place.permission != Permission::Writable {
+            self.budget.span = span;
+            let target = self
+                .state
+                .storage
+                .check_place(place, self.budget)
+                .map_err(|error| self.storage_error(error, span))?;
+            if target.permission != Permission::Writable {
                 return Err(self.mutable_access_error(root, span));
             }
-            if !self.state.storage.place_is_live(place, self.budget)? {
-                return Err(unsupported_error(
-                    labels::PROJECTED_READ,
-                    span,
-                    self.string_table,
-                ));
+            if !bindings.contains_key(&path) {
+                retain_scratch::<(PathId, LiveBinding)>(self.budget, 1)?;
             }
-            bindings.insert(path, LiveBinding::Alias(place));
+            let site = self.access_site(span);
+            let alias = self.state.storage.acquire_alias(place, site, self.budget)?;
+            bindings.insert(path, alias);
         } else if let Some(value) = self.evaluate_expression(expression, bindings)? {
+            self.budget.span = span;
             self.bind_slot(bindings, path, value, permission)?;
         }
         Ok(())
@@ -427,15 +433,18 @@ impl ConstInterpreter<'_> {
             {
                 return Err(self.mutable_access_error(source_root, span));
             }
+            self.budget.span = span;
+            let site = self.access_site(span);
             if self
                 .state
                 .storage
-                .rebind_to_place(target, source, self.budget)?
+                .rebind_to_place(target, source, site, self.budget)?
             {
                 bindings.insert(root, LiveBinding::Alias(target));
             }
             return Ok(());
         }
+        self.validate_live_value(value, span)?;
         self.write_through(root, &projections, value, span, bindings)
     }
 
@@ -453,6 +462,7 @@ impl ConstInterpreter<'_> {
             .place(place)
             .ok()
             .and_then(|view| view.metadata().span);
+        self.validate_live_value(value, span)?;
         self.write_through(root, &projections, value, span, bindings)
     }
 
@@ -467,7 +477,8 @@ impl ConstInterpreter<'_> {
     ) -> Result<(), ConstantFoldError> {
         let Some(binding) = bindings.get(&root).copied() else {
             if projections.is_empty() {
-                return self.bind_slot(bindings, root, value, Permission::Writable);
+                self.budget.span = span;
+                return self.install_binding(bindings, root, value, Permission::Writable);
             }
             return Err(unsupported_error(
                 labels::ASSIGNMENT_TARGET,
@@ -485,7 +496,7 @@ impl ConstInterpreter<'_> {
         if place.permission != Permission::Writable {
             return Err(self.mutable_access_error(root, span));
         }
-        if !self.state.storage.replace(place, value, self.budget)? {
+        if !self.replace_live_place(place, value, span)? {
             return Err(unsupported_error(
                 labels::ASSIGNMENT_TARGET,
                 span,
@@ -527,7 +538,7 @@ impl ConstInterpreter<'_> {
     fn receive_values(
         &mut self,
         receiver: &ValueReceiver,
-        slots: Vec<LiveValue>,
+        mut slots: Vec<LiveValue>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
         match receiver {
@@ -547,10 +558,23 @@ impl ConstInterpreter<'_> {
                 if targets.len() != slots.len() {
                     return Err(receiver_slot_mismatch());
                 }
+                // Read the inputs and acquire immutable receivers before
+                // any writes. A receiver may invalidate a sibling's witness
+                // without error until that sibling is used.
+                for (target, value) in targets.iter().zip(&mut slots) {
+                    if matches!(target.kind, MultiBindTargetKind::Declaration)
+                        && Permission::from(target.value_mode) == Permission::ReadOnly
+                    {
+                        *value = self.acquire_shared_value(*value, target.span)?;
+                    } else {
+                        self.validate_live_value(*value, target.span)?;
+                    }
+                }
                 for (target, &value) in targets.iter().zip(&slots) {
+                    self.budget.span = target.span;
                     match target.kind {
                         MultiBindTargetKind::Declaration => {
-                            self.bind_slot(
+                            self.install_binding(
                                 bindings,
                                 target.id,
                                 value,
@@ -683,6 +707,13 @@ impl ConstInterpreter<'_> {
             self.state.storage.children(allocation).len()
         });
         if end != 0 {
+            // An item cursor retains shared access between visits. A count-only
+            // loop uses just the already captured length.
+            let iterable = if loop_bindings.item.is_some() {
+                self.acquire_shared_value(iterable, span)?
+            } else {
+                iterable
+            };
             frames.push(ExecFrame::Collection(CollectionFrame {
                 iterable,
                 next: 0,
@@ -702,13 +733,15 @@ impl ConstInterpreter<'_> {
         values: &[ExprId],
         bindings: &mut FrameBindings,
     ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
+        let receiver_span = self.budget.span;
         if let [expression] = values
             && self.has_multiple_success_slots(*expression)?
         {
             return self.evaluate_result_block(*expression, bindings);
         }
         let mut slots = Vec::with_capacity(values.len());
-        for &expression in values {
+        for (index, &expression) in values.iter().enumerate() {
+            let first = slots.len();
             if self.has_multiple_success_slots(expression)? {
                 let Some(produced) = self.evaluate_result_block(expression, bindings)? else {
                     return Ok(None);
@@ -720,6 +753,19 @@ impl ConstInterpreter<'_> {
                 };
                 slots.push(value);
             }
+            if index + 1 < values.len() {
+                let span = self.builder.view(expression)?.span();
+                for value in &mut slots[first..] {
+                    self.budget.span = span;
+                    let site = self.access_site(span);
+                    *value = self.state.storage.hold_operand(*value, site, self.budget)?;
+                }
+            }
+        }
+        self.budget.span = receiver_span;
+        for value in &mut slots {
+            self.validate_live_value(*value, receiver_span)?;
+            value.release_operand();
         }
         Ok(Some(slots))
     }
@@ -819,6 +865,8 @@ impl ConstInterpreter<'_> {
         }
         let count = self.constants.value_count();
         if let Some(item) = &frame.loop_bindings.item {
+            self.budget.span = frame.span;
+            self.validate_live_value(frame.iterable, frame.span)?;
             let place = self
                 .state
                 .storage
@@ -1254,17 +1302,20 @@ impl ConstInterpreter<'_> {
             TemplateTirPhase::Composed,
             reference.context,
         )?;
-        let mut bound_paths = bindings.keys().copied().collect::<Vec<_>>();
-        bound_paths.sort_unstable();
-        let preparation = prepare_tir_view_with_source_scope_and_bindings(
-            &tir_view,
-            self.builder,
-            self.constants,
-            TemplatePreparationMode::ConstRequired,
-            self.scope,
-            &bound_paths,
-            Some(self.executables),
-        )?;
+        let preparation = self.budget.with_scratch(|budget, scratch| {
+            budget.charge_scratch(scratch, bindings.len() * std::mem::size_of::<PathId>())?;
+            let mut bound_paths = bindings.keys().copied().collect::<Vec<_>>();
+            bound_paths.sort_unstable();
+            Ok(prepare_tir_view_with_source_scope_and_bindings(
+                &tir_view,
+                self.builder,
+                self.constants,
+                TemplatePreparationMode::ConstRequired,
+                self.scope,
+                &bound_paths,
+                Some(self.executables),
+            )?)
+        })?;
         if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable)
             || matches!(
                 preparation.facts.final_value_kind,
@@ -1319,6 +1370,20 @@ impl ConstInterpreter<'_> {
     }
 }
 
+/// An attempt-local collection source. Only the executor can inspect its live witness.
+pub(crate) struct TirCollectionCapture {
+    value: LiveValue,
+    expression: ExprId,
+    pub(crate) len: usize,
+    pub(crate) provenance: SyntheticInterfaceProvenance,
+}
+/// Selected edge retained only until its enclosing TIR iteration finishes.
+#[derive(Clone)]
+pub(crate) struct TirLiveItem {
+    binding: LiveBinding,
+    pub(crate) provenance: SyntheticInterfaceProvenance,
+}
+
 /// Executes required const calls at the selected TIR expression site with its active bindings.
 struct ExecutorSiteRewriter<'a> {
     executables: &'a FxHashMap<PathId, ConstFunctionExecutable>,
@@ -1329,27 +1394,28 @@ struct ExecutorSiteRewriter<'a> {
     live_bindings: &'a mut FrameBindings,
 }
 
-impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
-    fn rewrite_site(
+impl ExecutorSiteRewriter<'_> {
+    fn with_bindings<T>(
         &mut self,
-        expression: ExprId,
-        expression_builder: &mut AstExpressionBuilder,
-        const_values: &mut ConstValueStore,
-        string_table: &mut StringTable,
-        source_scope: Option<&ScopeContext>,
-        bindings: &[TemplateFoldBinding],
-    ) -> Result<ExprId, ConstantFoldError> {
-        let Some(scope) = source_scope else {
-            return Ok(expression);
-        };
-        // TIR owns nested traversal and charges its output to this emission.
-        // Folding here would retain an extra string per template iteration.
-        if matches!(
-            expression_builder.view(expression)?.operation(),
-            ExpressionOperationView::Template(_) | ExpressionOperationView::Constant(_)
-        ) {
-            return Ok(expression);
-        }
+        inputs: TirSiteInputs<'_>,
+        action: impl FnOnce(
+            &mut ConstInterpreter<'_>,
+            &mut FrameBindings,
+        ) -> Result<T, ConstantFoldError>,
+    ) -> Result<T, ConstantFoldError> {
+        let TirSiteInputs {
+            expression_builder,
+            const_values,
+            string_table,
+            source_scope,
+            bindings,
+        } = inputs;
+        let scope = source_scope.ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "TIR executor callback has no source scope",
+            )
+        })?;
         let mut services = ConstExecutionServices {
             builder: expression_builder,
             constants: const_values,
@@ -1362,23 +1428,98 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
         let mut interpreter = services.interpreter(&mut *self.budget, &mut *self.state);
         let saved_span = interpreter.budget.span;
         let mut saved = Vec::new();
+        let mut scratch = 0;
         let result = (|| {
             for binding in bindings {
-                let ExpressionOperationView::Constant(shape) =
-                    interpreter.builder.view(binding.value)?.operation()
-                else {
-                    continue;
+                let slot = match &binding.value {
+                    TemplateBindingValue::Folded(expression) => {
+                        let ExpressionOperationView::Constant(shape) =
+                            interpreter.builder.view(*expression)?.operation()
+                        else {
+                            continue;
+                        };
+                        let value = interpreter.materialize_value(shape, Permission::ReadOnly)?;
+                        let site =
+                            interpreter.access_site(interpreter.builder.view(*expression)?.span());
+                        interpreter.state.storage.bind_slot(
+                            value,
+                            Permission::ReadOnly,
+                            site,
+                            interpreter.budget,
+                        )?
+                    }
+                    TemplateBindingValue::Live(item) => item.binding,
                 };
-                let value = interpreter.materialize_value(shape, Permission::ReadOnly)?;
-                let slot = interpreter.state.storage.bind_slot(
-                    value,
-                    Permission::ReadOnly,
-                    interpreter.budget,
-                )?;
+                interpreter
+                    .budget
+                    .reserve_scratch(&mut saved, 1, &mut scratch)?;
                 saved.push((binding.path, self.live_bindings.insert(binding.path, slot)));
             }
-            let Some(value) = interpreter.evaluate_expression(expression, self.live_bindings)?
-            else {
+            action(&mut interpreter, self.live_bindings)
+        })();
+        interpreter.budget.span = saved_span;
+        for (path, previous) in saved.into_iter().rev() {
+            if let Some(previous) = previous {
+                self.live_bindings.insert(path, previous);
+            } else {
+                self.live_bindings.remove(&path);
+            }
+        }
+        interpreter.budget.release_memory_bytes(scratch);
+        result
+    }
+
+    fn live_item(
+        interpreter: &mut ConstInterpreter<'_>,
+        mut value: LiveValue,
+        span: Option<SourceSpan>,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<TirLiveItem, ConstantFoldError> {
+        interpreter.budget.span = span;
+        value.shape = attach_live_provenance(
+            interpreter.constants,
+            interpreter.string_table,
+            interpreter.budget,
+            value.shape,
+            provenance,
+        )?;
+        let provenance = interpreter
+            .constants
+            .metadata(value.shape)
+            .map(|metadata| metadata.synthetic_interface_provenance.clone())
+            .unwrap_or_default();
+        let site = interpreter.access_site(span);
+        let binding = interpreter.state.storage.bind_slot(
+            value,
+            Permission::ReadOnly,
+            site,
+            interpreter.budget,
+        )?;
+        Ok(TirLiveItem {
+            binding,
+            provenance,
+        })
+    }
+}
+
+impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
+    fn rewrite_site(
+        &mut self,
+        expression: ExprId,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<ExprId, ConstantFoldError> {
+        if inputs.source_scope.is_none() {
+            return Ok(expression);
+        }
+        // TIR owns nested template traversal and constant expressions already have values.
+        if matches!(
+            inputs.expression_builder.view(expression)?.operation(),
+            ExpressionOperationView::Template(_) | ExpressionOperationView::Constant(_)
+        ) {
+            return Ok(expression);
+        }
+        self.with_bindings(inputs, |interpreter, bindings| {
+            let Some(value) = interpreter.evaluate_expression(expression, bindings)? else {
                 return Ok(expression);
             };
             let view = interpreter.builder.view(expression)?;
@@ -1400,16 +1541,124 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
                     provenance,
                 )?
                 .id())
-        })();
-        interpreter.budget.span = saved_span;
-        for (path, previous) in saved.into_iter().rev() {
-            if let Some(previous) = previous {
-                self.live_bindings.insert(path, previous);
-            } else {
-                self.live_bindings.remove(&path);
+        })
+    }
+
+    fn capture_collection(
+        &mut self,
+        expression: ExprId,
+        needs_items: bool,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<TirCollectionCapture, ConstantFoldError> {
+        self.with_bindings(inputs, |interpreter, bindings| {
+            let value = interpreter.evaluate_expression(expression, bindings)?;
+            let Some(mut value) = value.filter(|value| {
+                matches!(
+                    interpreter.constants.payload(value.shape),
+                    Some(ConstValuePayload::Collection(_))
+                )
+            }) else {
+                let span = interpreter.builder.view(expression)?.span();
+                return Err(ConstantFoldError::Diagnostic(invalid_template_structure(
+                    InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
+                    span,
+                )));
+            };
+            let len = value.allocation.map_or(0, |allocation| {
+                interpreter.state.storage.children(allocation).len()
+            });
+            let span = interpreter.builder.view(expression)?.span();
+            let provenance = interpreter
+                .constants
+                .metadata(value.shape)
+                .map(|metadata| metadata.synthetic_interface_provenance.clone())
+                .unwrap_or_default();
+            if needs_items && len != 0 {
+                value = interpreter.acquire_shared_value(value, span)?;
             }
-        }
-        result
+            Ok(TirCollectionCapture {
+                value,
+                expression,
+                len,
+                provenance,
+            })
+        })
+    }
+
+    fn collection_item(
+        &mut self,
+        capture: &TirCollectionCapture,
+        index: usize,
+        span: Option<SourceSpan>,
+        provenance: &SyntheticInterfaceProvenance,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<TirLiveItem, ConstantFoldError> {
+        self.with_bindings(inputs, |interpreter, _| {
+            let span = span.or(interpreter.builder.view(capture.expression)?.span());
+            interpreter.validate_live_value(capture.value, span)?;
+            let place = interpreter
+                .state
+                .storage
+                .project(capture.value, index)?
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
+                        "TIR collection index left the captured source",
+                    )
+                })?;
+            let value = interpreter.read_place(place, span)?;
+            Self::live_item(interpreter, value, span, provenance)
+        })
+    }
+
+    fn capture_option(
+        &mut self,
+        expression: ExprId,
+        source_provenance: &SyntheticInterfaceProvenance,
+        inputs: TirSiteInputs<'_>,
+    ) -> Result<(Option<TirLiveItem>, SyntheticInterfaceProvenance), ConstantFoldError> {
+        self.with_bindings(inputs, |interpreter, bindings| {
+            let span = interpreter.builder.view(expression)?.span();
+            let value = interpreter.evaluate_expression(expression, bindings)?;
+            let Some(value) = value else {
+                return Err(ConstantFoldError::Diagnostic(invalid_template_structure(
+                    InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
+                    span,
+                )));
+            };
+            interpreter.validate_live_value(value, span)?;
+            let mut provenance = interpreter
+                .constants
+                .metadata(value.shape)
+                .map(|metadata| metadata.synthetic_interface_provenance.clone())
+                .unwrap_or_default();
+            match interpreter.constants.payload(value.shape) {
+                Some(ConstValuePayload::OptionNone) => Ok((None, provenance)),
+                Some(ConstValuePayload::OptionSome(_) | ConstValuePayload::Coerced(_)) => {
+                    let place = interpreter
+                        .state
+                        .storage
+                        .project(value, 0)?
+                        .ok_or_else(|| {
+                            InfrastructureFailure::internal(
+                                CompilerStage::ConstantEvaluation,
+                                "TIR option capture has no payload",
+                            )
+                        })?;
+                    let value = interpreter.read_place(place, span)?;
+                    if let Some(metadata) = interpreter.constants.metadata(value.shape) {
+                        provenance.merge(&metadata.synthetic_interface_provenance);
+                    }
+                    provenance.merge(source_provenance);
+                    let item = Self::live_item(interpreter, value, span, &provenance)?;
+                    Ok((Some(item), provenance))
+                }
+                _ => Err(ConstantFoldError::Diagnostic(invalid_template_structure(
+                    InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
+                    span,
+                ))),
+            }
+        })
     }
 }
 

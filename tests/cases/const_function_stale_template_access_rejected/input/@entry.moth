@@ -1,0 +1,9 @@
+stale #|| -> String:
+    value ~= 1
+    view = value
+    ~value = 2
+    return [:value=[view]]
+;
+
+result #String = stale()
+~[:[result]]

@@ -1,0 +1,10 @@
+Box = |removed I32, values {I32}|
+
+stale #|| -> I32:
+    values ~= {1, 2}
+    box = Box(values = values, removed = (~values.remove(0))) catch then Box(0, {0})
+    return box.values.length()
+;
+
+result #I32 = stale()
+~[:result=[result]]

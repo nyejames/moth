@@ -284,6 +284,8 @@ pub(crate) fn compact_label_message_text(
         }
         DurableLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
         DurableLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
+        DurableLabelMessage::ConstReferenceAcquired => "reference acquired here".to_owned(),
+        DurableLabelMessage::ConstInvalidatingWrite => "invalidating write here".to_owned(),
         #[cfg(test)]
         DurableLabelMessage::ValueMovedHere => "value moved here".to_owned(),
         DurableLabelMessage::ConfigInputOrigin { input_name, origin } => {

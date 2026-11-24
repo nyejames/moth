@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. C1 contract decisions and C2 live storage cutover complete. Dynamic invalidation and owned graph publication remain pending.
-**Current slice:** C3, projection-aware mutation generations.
+**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. C1 contract decisions, C2 live storage and C3 dynamic access validation complete. Owned graph publication and integrated checkpoint validation remain pending.
+**Current slice:** C4, required evaluation and owned graph publication.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Add dynamic access witnesses to live storage, then close runtime publication and verify the integrated checkpoint. Do not implement validation-only HIR or resume Phase 5.
+**Next action:** Preserve allocation sharing at the folded-value and runtime handoffs, then verify the integrated checkpoint. Do not implement validation-only HIR or resume Phase 5.
 
 ## Global constraints
 
@@ -761,12 +761,25 @@ runtime allocation sharing.
 
 ### C3. Implement projection-aware mutation generations
 
-- [ ] Use a checked attempt-local mutation clock or equivalent generation facts. Immutable references record their acquisition witness for resolved storage and relevant projection/containing-edge identities. Derivation preserves validity and cannot refresh a stale reference. Mutable handles remain valid across overlapping writes when their target still exists and permits mutation. Target existence is separate from access invalidation.
-- [ ] Update generations only at a successful semantic mutation commit after argument/RHS evaluation, bounds, type/access and capacity checks. Failed operations commit no invalidation. Mutating then restoring equal content still invalidates old readers. Distinguish slot rebind from allocation mutation.
-- [ ] Implement same-place, ancestor/descendant, independent sibling and shared-child overlap. A write through one path invalidates overlapping immutable references reached through another. Deriving from an already stale aggregate is invalid even if the intended field would otherwise be disjoint. Sparse direct-write/subtree-write generations are a candidate for structural locations, not a complete shared-graph algorithm. Handle parent replacement and element identity explicitly. No raw-path-only equality or blanket family invalidation for provably independent struct fields.
-- [ ] Check every actual use, including copying, passing, returning, storing/forwarding, deriving, builtin and TIR observation and pattern captures. Dropping a stale unused handle needs no validation. Reject invalid targets even for mutable handles. Centralise acquisition, use and mutation commit so later mutable invalidation could be added without replacing storage. Do not implement that stricter policy now.
-- [ ] Diagnose stale use through a typed non-catchable source diagnostic at the invalid use, with acquisition and invalidating-write labels where available and the bounded const call chain. Keep donor span identity. Distinguish access failure, unsupported operation, budget refusal and infrastructure/compiler invariants.
-- [ ] Test no-later-use acceptance, stale read/derive/copy/pass/return/store rejection, fresh reads, multiple writers, disjoint sibling reads, ancestor/descendant/whole replacement, shared children, collection edit/read rules, failed mutation with recovery, equal-value writes, selected/unselected paths and never-called bodies. Static eligibility/type errors in unselected code remain errors. Add focused generation-overflow/capacity and identity tests. Charge graph traversal, access metadata, copy, freeze and TIR against existing deterministic limits before work/growth. No new configuration or parallel budget.
+- [x] Use a checked attempt-local mutation clock or equivalent generation facts. Immutable references record their acquisition witness for resolved storage and relevant projection/containing-edge identities. Derivation preserves validity and cannot refresh a stale reference. Mutable handles remain valid across overlapping writes when their target still exists and permits mutation. Target existence is separate from access invalidation.
+- [x] Update generations only at a successful semantic mutation commit after argument/RHS evaluation, bounds, type/access and capacity checks. Failed operations commit no invalidation. Mutating then restoring equal content still invalidates old readers. Distinguish slot rebind from allocation mutation.
+- [x] Implement same-place, ancestor/descendant, independent sibling and shared-child overlap. A write through one path invalidates overlapping immutable references reached through another. Deriving from an already stale aggregate is invalid even if the intended field would otherwise be disjoint. Sparse direct-write/subtree-write generations are a candidate for structural locations, not a complete shared-graph algorithm. Handle parent replacement and element identity explicitly. No raw-path-only equality or blanket family invalidation for provably independent struct fields.
+- [x] Check every actual use, including copying, passing, returning, storing/forwarding, deriving, builtin and TIR observation and pattern captures. Dropping a stale unused handle needs no validation. Reject invalid targets even for mutable handles. Centralise acquisition, use and mutation commit so later mutable invalidation could be added without replacing storage. Do not implement that stricter policy now.
+- [x] Diagnose stale use through a typed non-catchable source diagnostic at the invalid use, with acquisition and invalidating-write labels where available and the bounded const call chain. Keep donor span identity. Distinguish access failure, unsupported operation, budget refusal and infrastructure/compiler invariants.
+- [x] Test no-later-use acceptance, stale read/derive/copy/pass/return/store rejection, fresh reads, multiple writers, disjoint sibling reads, ancestor/descendant/whole replacement, shared children, collection edit/read rules, failed mutation with recovery, equal-value writes, selected/unselected paths and never-called bodies. Static eligibility/type errors in unselected code remain errors. Add focused generation-overflow/capacity and identity tests. Charge graph traversal, access metadata, copy, freeze and TIR against existing deterministic limits before work/growth. No new configuration or parallel budget.
+
+C3 records writes at the cell or edge and follows retained allocation edges to
+find shared-child overlap. It validates earlier operands after their later
+siblings run, and reads every multi-bind result before the first receiver
+write. TIR observes live items only at selected fetches. `MOTH-BORROW-0010`
+locates the invalid use and retains acquisition, mutation and nested donor
+call sites. Regressions reproduce the earlier false acceptance of a stale
+constructor operand and the earlier false rejection of an unused result
+invalidated by its own multi-bind.
+
+The targeted C3 gate passed Rust formatting and Clippy, 23 executor tests,
+939 template tests, 202 diagnostic tests and 156 const integration cases. The
+documentation check passed for the updated progress page.
 
 ### C4. Integrate required evaluation and close publication
 

@@ -1,0 +1,9 @@
+stale #|| -> I32:
+    slot ~= 5
+    view = slot
+    ~slot = 5
+    return view + 1 catch then 0
+;
+
+result #I32 = stale()
+~[:result=[result]]

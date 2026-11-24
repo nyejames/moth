@@ -1,0 +1,16 @@
+Box = |values {I32}|
+
+identity #|view {I32}| -> {I32}:
+    return view
+;
+
+stale #|| -> I32:
+    values ~= {1}
+    box ~= Box(values)
+    ~box.values = identity(box.values)
+    ~values.push(2)
+    return box.values.length()
+;
+
+result #I32 = stale()
+~[:result=[result]]

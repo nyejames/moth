@@ -1,0 +1,13 @@
+stale #|| -> I32:
+    values ~= {1, 2}
+    total ~= 0
+    -- The loop owns a shared cursor; its next item fetch uses it after the write.
+    loop values |item|:
+        ~total = total + item
+        ~values.push(3)
+    ;
+    return total
+;
+
+result #I32 = stale()
+~[:result=[result]]

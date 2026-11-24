@@ -1,0 +1,8 @@
+stale #|ready Bool| -> I32:
+    value ~= 1
+    ~value, captured = if ready then 2, value else 3, value
+    return captured
+;
+
+result #I32 = stale(true)
+~[:result=[result]]

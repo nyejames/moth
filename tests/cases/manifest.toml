@@ -21034,6 +21034,153 @@ tags = ["integration", "functions", "const", "diagnostics"]
 contract = "language.functions.const_stale_projected_alias_rejected"
 role = "primary"
 
+[[case]]
+id = "const_function_generational_access_success"
+path = "const_function_generational_access_success"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_generational_access_follows_selected_successful_operations"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_scalar_catch_rejected"
+path = "const_function_stale_scalar_catch_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_scalar_not_recoverable"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_shared_child_rejected"
+path = "const_function_stale_shared_child_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_shared_child_write_invalidates_other_parent"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_ancestor_derivation_rejected"
+path = "const_function_stale_ancestor_derivation_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_ancestor_cannot_derive_disjoint_child"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_copy_rejected"
+path = "const_function_stale_copy_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_reference_cannot_be_copied"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_pass_rejected"
+path = "const_function_stale_pass_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_reference_cannot_be_passed"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_argument_order_rejected"
+path = "const_function_stale_argument_order_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_call_cannot_refresh_earlier_argument_after_later_mutation"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_return_rejected"
+path = "const_function_stale_return_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_reference_cannot_be_returned"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_multi_bind_receiver_rejected"
+path = "const_function_stale_multi_bind_receiver_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_multi_bind_acquires_shared_receivers_before_writes"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_store_rejected"
+path = "const_function_stale_store_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_reference_cannot_be_stored"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_donor_rejected"
+path = "const_function_stale_donor_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_access_preserves_donor_source_ownership"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_return_operand_rejected"
+path = "const_function_stale_return_operand_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_return_holds_earlier_operand_during_later_effects"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_collection_cursor_rejected"
+path = "const_function_stale_collection_cursor_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_collection_cursor_checks_access_on_each_fetch"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_retained_scalar_rejected"
+path = "const_function_stale_retained_scalar_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_retained_scalar_write_invalidates_shared_container"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_retained_projection_rejected"
+path = "const_function_stale_retained_projection_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_retained_projection_write_invalidates_shared_container"
+role = "primary"
+
+[[case]]
+id = "const_function_bounded_shared_projection_reads"
+path = "const_function_bounded_shared_projection_reads"
+tags = ["integration", "functions", "const", "budgets"]
+contract = "language.functions.const_repeated_readonly_projection_stays_within_memory_budget"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_reinstalled_projection_rejected"
+path = "const_function_stale_reinstalled_projection_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_reinstalling_readonly_value_does_not_refresh_it"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_template_access_rejected"
+path = "const_function_stale_template_access_rejected"
+tags = ["integration", "functions", "const", "templates", "diagnostics"]
+contract = "language.functions.const_selected_tir_observation_checks_readonly_witness"
+role = "primary"
+
+[[case]]
+id = "const_function_template_unvisited_stale_item_success"
+path = "const_function_template_unvisited_stale_item_success"
+tags = ["integration", "functions", "const", "templates"]
+contract = "language.functions.const_template_collection_visits_only_selected_items"
+role = "primary"
+
+[[case]]
+id = "const_function_template_visited_stale_item_rejected"
+path = "const_function_template_visited_stale_item_rejected"
+tags = ["integration", "functions", "const", "templates", "diagnostics"]
+contract = "language.functions.const_template_collection_validates_fetched_item"
+role = "primary"
+
+[[case]]
+id = "const_function_stale_constructor_operand_rejected"
+path = "const_function_stale_constructor_operand_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_constructor_holds_earlier_field_during_later_operands"
+role = "primary"
+
 
 [[case]]
 id = "const_function_parameter_cast_success"
