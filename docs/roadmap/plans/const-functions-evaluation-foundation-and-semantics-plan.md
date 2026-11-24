@@ -4,21 +4,22 @@
 
 **Goal:** Enforce profile-independent semantic compilation and validated HIR, remove optional early whole-function speculation, assess folding machinery for justified cost and necessity, then simplify and extend required const-function execution.
 
-**Architecture:** Stage 4 owns required const execution, TIR, deterministic static selection and only semantics-preserving eager folding. Identical semantic inputs produce equivalent validated HIR and semantic summaries in debug and release; profile-dependent work belongs downstream. Remove ordinary-call release speculation rather than relocating it. Retain the compact typed `ExprId` graph, `ConstValueStore` and prepared interpreter, separating value computation from AST replacement where useful.
+**Architecture:** Stage 4 owns required const execution, TIR, deterministic static selection and only semantics-preserving eager folding. Identical semantic inputs produce equivalent validated HIR and semantic summaries in debug and release; profile-dependent work belongs downstream. Remove ordinary-call release speculation rather than relocating it. Retain the compact typed `ExprId` graph, immutable `ConstValueStore` and prepared interpreter. Live const execution owns bounded storage identities and projection-aware mutation generations, separate from folded value publication. It uses dynamic access validation, not runtime HIR borrow/lifetime analysis.
 
 **Tech stack:** Rust, Moth compiler frontend, typed AST, TIR, existing integration runner and frontend benchmark instrumentation.
 
-**Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
+**Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. Phase 5 remains paused.
-**Current slice:** Corrective checkpoint before immutable const receiver methods
-**Blockers:** Const bodies bypass ordinary borrow validation. See the access design gate below.
-**Next action:** Review the validation-only borrow design and close the access gate before resuming Phase 5.
+**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. The owner has approved dynamic generational access validation instead of runtime borrow analysis. Implementation remains pending.
+**Current slice:** Corrective checkpoint C1-C5: replace live alias storage and implement generational access validation.
+**Blockers:** The current value-only frame bindings and alias refresh map cannot preserve every required reference relationship. Close the storage, projection and publication gates below before Phase 5.
+**Next action:** Start C1. Read the updated permanent authorities and trace the interpreter. Do not implement validation-only HIR or resume Phase 5 prematurely.
 
 ## Global constraints
 
 - Respect the current repository `AGENTS.md`, `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`.
-- Stage 4 owns source typing, required constant evaluation, TIR and static selection. HIR owns executable control flow and downstream constraint, borrow and lifetime verification. Do not introduce HIR const execution, another parser, another type checker or another template engine.
+- Stage 4 owns source typing, required constant evaluation, TIR, static selection and const dynamic access validation. HIR owns runtime executable control flow and downstream constraint, borrow and lifetime verification. Do not introduce validation-only HIR for const declarations, HIR const execution, another parser, another type checker or another template engine.
+- Preserve real reference semantics, explicit copies, mutation permissions and place identity inside const execution. Multiple overlapping mutable references are permitted only in const execution. A successful mutation invalidates existing overlapping immutable references. Later use is a non-recoverable source diagnostic. The permanent access-and-aliasing reference owns the semantic contract.
 - One authoritative operation/value meaning. Reuse resolved typed operations, numeric/cast/Core evaluators, `ConstValueStore` and TIR.
 - Preserve zero, one and multiple ordered success slots without tuples. Preserve a distinct error channel and distinct Never contract.
 - Preserve immutable source expression rows during evaluation. Create replacement expression rows only when a compiler consumer needs them.
@@ -53,6 +54,7 @@ Five failure classes must be covered by the phases below.
 8. Immutable non-generic const receiver methods on eligible same-file nominal struct and choice receivers, with existing receiver visibility and call syntax.
 9. Investigation of stepped collection loops. Implement only if the current collection frame can preserve the complete runtime contract without a disproportionate second execution mechanism.
 10. Realistic package-style integration and performance coverage for repeated HTML/CSS helper computation.
+11. Projection-aware generational access validation and bounded interpreter-owned live storage, with no const HIR, static borrow or lifetime analysis or const-only public borrow-summary hierarchy.
 
 ### Held outside this implementation
 
@@ -67,7 +69,7 @@ These items do **not** all have accepted future semantics. Generic const support
 
 ### Permanently enforced compile-time boundary
 
-Required const execution cannot depend on runtime values, IO or mutable application/module state, arbitrary untrusted foreign effects, runtime-only templates, macro-like AST transformation, physical target inspection or final builder-dependent URL text. Trusted registered Core constant operations remain permitted under their existing contracts. Structural resource-bearing `String` values remain valid constants without guessing their final characters.
+Required const execution cannot depend on runtime values, IO, async/channels, Wiring, mutable application/module state, arbitrary untrusted foreign effects, runtime-only templates, macro-like AST transformation, physical target inspection or final builder-dependent URL text. Local mutation is permitted. No live mutable interpreter storage or reference handle may escape the evaluation. Trusted registered Core constant operations remain permitted under their existing contracts. Structural resource-bearing `String` values remain valid constants without guessing their final characters.
 
 Keep the ordinary language's exclusions, such as tuple values, macros and operator overloading. Do not invent const-only language forms to work around an unsupported operation.
 
@@ -79,7 +81,7 @@ Keep the ordinary language's exclusions, such as tuple values, macros and operat
 - Required constant evaluation remains eager where language semantics need values. Retained pure eager folding must be deterministic, justified and preserve selected-operation evidence; never evaluate unreachable work.
 - Static branch selection uses only required const values and established deterministic eager expression folding, never optional whole-function evaluation.
 - Explicit test compilation is a semantic input. Debug/release are optimisation and instrumentation profiles, not source semantics.
-- A declaration with no calls still receives its normal static eligibility/type checks. Its parameterised body need not execute.
+- A declaration with no calls still receives its normal static eligibility/type checks. Its parameterised body need not execute. Dynamic access failures are checked only on executed paths, including when a previously unused function or branch first executes. This is an accepted source contract, not an incomplete static proof.
 
 ## Current repository map and architectural evidence
 
@@ -694,22 +696,17 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 
 **Existing bugs found and recorded in `docs/bug-reports.md`:**
 - A runtime multi-bind through a mutable alias is rejected with an internal temporary name.
-- Const bodies skip runtime borrow rules.
+- Historical finding: const bodies skip runtime borrow rules. The design now deliberately excludes runtime borrow analysis and instead requires interpreter-owned mutation permissions and dynamic generation checks.
 
 ## Corrective checkpoint before Phase 5
 
-Preserve the profile-independent frontend and the single required const evaluator. Do not resume Phase 5 until this checkpoint passes `just validate` and const source legality no longer bypasses ordinary borrow rules.
+Preserve the profile-independent frontend and the single required const evaluator. The owner has approved a different access contract for exclusively compile-time functions. The previous validation-only HIR proposal is superseded, not deferred work. The independently verified result, recovery, folding and parity corrections below remain required.
 
-1. **Access and borrow correctness.** Reproduce direct and projected alias cases, copies, result aliases and uncalled bodies. Reuse the ordinary analysis; do not make all const values independent copies.
-2. **Result ownership.** Return checked ordered values directly to interpreted receivers. Keep AST result blocks at publication boundaries. Remove unnecessary multi-bind frames. Measure expression rows, compile time and peak memory on the recorded 20,000-iteration workloads here, not in Phase 7.
-3. **Recovery and control flow.** Unify normal results, recovery and nonlocal transfers. Preserve lazy selection and handler isolation, never suppress budget or infrastructure failures, and test outer-loop exits and receiver writes.
-4. **Folding boundaries.** Share comparison policy, check Unicode scalar order and audit direct evaluation's work, fallback and value staging. Correct only relevant caught-cast and collection-initialiser defects.
-5. **Regression gate.** Exercise the real build service, use deterministic module-local scope identity, and compare package interfaces and generated sidecars without new fingerprint infrastructure.
-6. **Closeout.** Update canonical docs and audit coverage, retire resolved reports, perform the Slice review and run `just validate` before committing. Keep full validation for final merge readiness.
+Permanent semantic authority: `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf` > `Const execution: generational access validation`. Compiler ownership: `docs/compiler-design-overview.md` > `Required const execution and deterministic eager folding`. Read both before choosing a representation. The checkpoint does not change runtime memory semantics.
 
-### Access design gate
+### Access design gate (resolved)
 
-The Phase 4 binary folded writes through immutable parameter aliases, overlapping shared aliases, returned aliases and multi-return aliases. The equivalent ordinary functions all reported `MOTH-BORROW-0007`, including an uncalled declaration. Legal direct and projected mutable aliases wrote through, and explicit copy kept the original field unchanged. The minimal pair differs only in the const marker (and whether the call initializes a constant):
+The Phase 4 binary accepted writes through immutable parameter aliases, overlapping shared aliases, returned aliases and multi-return aliases that ordinary HIR rejected. The following remains invalid:
 
 ```moth
 probe #|input I32| -> I32:
@@ -719,18 +716,55 @@ probe #|input I32| -> I32:
 ;
 ```
 
-`probe(3)` folded to `4`; the ordinary version rejects `~slot`. The const
-executor's refreshed mutable aliases are not a loan checker or proof of access.
+Acquiring mutable access from a read-only place is invalid regardless of generation. Reject statically evident misuse through existing access/type owners. Dynamic permission checks enforce the same law where actual referent identity is needed.
 
-`BorrowChecker` consumes a validated `HirModule` with real places, CFG, liveness and per-callee result provenance. `finalizer.rs` currently discards the const body roots before the AST freeze, and `hir_expression.rs` rejects a surviving required call in runtime lowering. Standalone configuration also consumes the AST without the ordinary HIR gate. An AST access-marker check would only cover the first repro, not loans across control flow or returned projections.
+Multiple overlapping mutation-capable aliases are deliberately legal in const execution. A new immutable reference records the current generation of its resolved storage. A successful overlapping mutation invalidates that reference. A stale reference may remain stored or go out of scope without error, but reading, copying, projecting, passing, returning or otherwise using it is invalid. Acquiring an alias from a stale reference cannot refresh it. A fresh reference acquired through a valid source after a write is valid. Only actual execution checks generations, so an unused const declaration or unselected path can contain a dynamic failure. This is comparable to parameter-dependent checked arithmetic or an assertion, not a relaxation of static typing or eligibility.
 
-**Design for review:** retain finalised const body roots through a validation-only boundary. Use the canonical HIR lowerer and checker, then drop that representation before any runtime HIR or link publication. In that boundary only, resolve const-to-const calls through the ordinary callable access and alias summaries; imported calls need the same summary projected under their stable const origin. Preserve the runtime HIR fail-closed check. Apply the validation on every source path that publishes const results or bodies, including configuration. Do not run HIR as an evaluator or add a separate access engine. The result-summary and validation-boundary changes need review before implementation.
+The interpreter executes sequentially, with no event loop, concurrency, async, IO, external mutable state, arbitrary host execution, static lifetime topology, REC or runtime ownership planning. It retains bounded storage for one required evaluation, including nested calls, and releases that state at its owning boundary. Keep mutable parameters, mutable receivers, generic const declarations, recursive call graphs, zero success and error-slot/Never contracts outside this slice. Preserve existing unsupported declared-region and cyclic graph forms. Do not introduce a future mutable-exclusivity flag or capability-generation table.
 
-Stage 4 early const execution already supplies type-level values before a complete typed module
-exists. Do not invoke HIR from that dependency walk. A validation-only boundary after const body
-finalisation can gate publication but cannot guarantee that an earlier required
-evaluation error will not be reported first. Review that diagnostic precedence separately. Also resolve the
-ordinary multi-bind false conflict through its HIR owner rather than treating it as const policy.
+### C1. Audit live storage, projection and publication contracts
+
+- [ ] Read the routed authorities, executor, shared fold and TIR owners. Trace `state.rs::FrameBindings` and `ExecutionState::aliases`, `execute.rs::{execute_body,execute_bind,receive_values,write_through}`, `places.rs::{direct_alias_target,expand_alias_target,canonical_alias_root,write_binding_value}`, `values.rs::{project_constant_value,assign_constant_projections,fold_to_constant}`, `rewrite.rs::complete_call`, captures, loop bindings and imported body materialisation. Record actual supported shapes rather than assuming all ordinary operations are supported.
+- [ ] Establish a small reference/slot contract for direct aliases, fresh binding cells, allocation identity, scalar places, aggregate children, returned projections, detached stored values, assignments and rebinds. Compare ordinary legal cases against canonical source semantics and runtime output. A result has a fresh binding even if it shares an allocation. A mutable alias writes through. Rebinding an independent slot does not mutate its old allocation. No-shadowing simplifies lookup, but a declaration path is not a dynamic cell/allocation identity. Calls, loop iterations and scope re-entry issue distinct instances.
+- [ ] Distinguish a read-only slot, the permission of a reference to storage and a writable fresh slot holding a value from a shared result. Rebinding that slot must not grant mutation of an immutable referent or launder stale access. Derive the exact permission rules from the ordinary source contract, including stored children. If ordinary rules are incomplete or contradictory, present a concrete example and ask the owner before inventing a permission upgrade or implicit copy.
+- [ ] Resolve projection overlap through actual storage identity. Test ancestor/descendant, independent siblings, nested paths, two paths to one stored child, replaced parents, collection reads and structural edits. A tree of authored field names is insufficient for a graph with shared children. Choose a bounded representation that detects overlap through retained references without scanning active aliases. Structural collection edits may conservatively invalidate collection-origin projections. Pin the distinction between detached values and interior projections.
+- [ ] Establish the publication boundary. Nested calls and value-block/multi-bind receivers carry live references, not independent folded snapshots. Outer required evaluation freezes only validated finite data through the existing constant owner. Test whether existing folded projection/materialisation preserves result-to-result and internal sharing when materialised into runtime bindings. The owner has excluded live interpreter references escaping to runtime, but has not approved erasing observable allocation relationships across that boundary. If existing folded data cannot represent a required relationship, present a minimal reproducer and ask the owner to choose between explicit snapshot-boundary semantics and a compatible owned projection. Do not silently duplicate allocations, generalise public constants to cyclic graphs or add an ABI.
+- [ ] Audit all read paths, particularly expression substitution, fold callbacks, template interpolation/captures, collection/pattern reads, named argument order, lazy logic, handlers and default values. An immutable cached ConstValueId or copied binding map must not bypass a stale-reference check or read pre-mutation state. Identify any ordinary HIR operand-order bugs separately rather than importing them.
+- [ ] Review the prepared instruction vocabulary and the permissive default in `eligibility.rs::classify_const_expression`. Keep one static declaration eligibility owner, including never-called declarations and unselected authored paths. Make operation coverage exhaustive or otherwise prove new unsupported expression variants cannot silently slip through. No second type checker.
+- [ ] Decide the exact Rust layout and accounting from these traces. Prefer a bounded dense arena with typed attempt-local IDs and sparse projection metadata over per-reference objects, a reference registry, collector or general object system. Reuse the existing immutable typed value vocabulary and evaluator for numeric, cast, comparison, Text and TIR operations. If the storage model would require a substantial second value language, pause for evidence-based alternatives. Record C1 findings and resolve any outstanding observable contract before C2.
+
+### C2. Replace alias refresh with one live storage owner
+
+- [ ] Write red tests for multiple mutable aliases, immutable-parameter mutation rejection, scope/call/iteration freshness, projected write-through, rebind, nested/imported calls, return and multi-result aliases and copies. Assert exact values and diagnostics. Use ordinary-function controls where contracts agree and explicit contrasts where they differ.
+- [ ] Make frame bindings resolve through one live storage/handle owner. Separate binding-instance identity from allocation identity and projected location. Share storage across nested frames in one evaluation. References may outlive the lexical binding that named them. Do not use donor-local indices or static declaration paths as storage roots.
+- [ ] Preserve relationships through projections, aggregate insertion, arguments, match and loop captures, returns, value blocks, multi-bind and collection reads. Explicit deep copies preserve internal topology but share no mutable storage with the source. Elide storage identity only when provably unobservable, not merely because payload IDs match.
+- [ ] Route read, reference acquisition, derivation, write commit and copy through the live owner. Shared fold operations consume resolved values at the authored evaluation point. Do not reconstruct whole expression graphs or freeze nested results to transport them. Preserve native ordered slots, frame outcomes and lazy handlers.
+- [ ] Delete `ExecutionState::aliases`, alias refresh scans, root-chain chasing, duplicate snapshots and superseded helpers once their consumers move. Keep legitimate direct value folding and immutable constant projection. No compatibility fallback, validation-only HIR or public borrow summaries.
+- [ ] Retain storage under the bounded owning evaluation. No inferred regions, affine cleanup, REC, alias release counts or tracing collector. Charge actual storage, retained values, edges and work. Do not silently support cyclic graphs or broaden declared-region support. If admitted constructs can form a cycle, reject the unsupported graph deterministically before committing or publishing it. Bound graph checking and cleanup.
+
+### C3. Implement projection-aware mutation generations
+
+- [ ] Use a checked attempt-local mutation clock or equivalent generation facts. Immutable references record their acquisition witness for resolved storage and relevant projection/containing-edge identities. Derivation preserves validity and cannot refresh a stale reference. Mutable handles remain valid across overlapping writes when their target still exists and permits mutation. Target existence is separate from access invalidation.
+- [ ] Update generations only at a successful semantic mutation commit after argument/RHS evaluation, bounds, type/access and capacity checks. Failed operations commit no invalidation. Mutating then restoring equal content still invalidates old readers. Distinguish slot rebind from allocation mutation.
+- [ ] Implement same-place, ancestor/descendant, independent sibling and shared-child overlap. A write through one path invalidates overlapping immutable references reached through another. Deriving from an already stale aggregate is invalid even if the intended field would otherwise be disjoint. Sparse direct-write/subtree-write generations are a candidate for structural locations, not a complete shared-graph algorithm. Handle parent replacement and element identity explicitly. No raw-path-only equality or blanket family invalidation for provably independent struct fields.
+- [ ] Check every actual use, including copying, passing, returning, storing/forwarding, deriving, builtin and TIR observation and pattern captures. Dropping a stale unused handle needs no validation. Reject invalid targets even for mutable handles. Centralise acquisition, use and mutation commit so later mutable invalidation could be added without replacing storage. Do not implement that stricter policy now.
+- [ ] Diagnose stale use through a typed non-catchable source diagnostic at the invalid use, with acquisition and invalidating-write labels where available and the bounded const call chain. Keep donor span identity. Distinguish access failure, unsupported operation, budget refusal and infrastructure/compiler invariants.
+- [ ] Test no-later-use acceptance, stale read/derive/copy/pass/return/store rejection, fresh reads, multiple writers, disjoint sibling reads, ancestor/descendant/whole replacement, shared children, collection edit/read rules, failed mutation with recovery, equal-value writes, selected/unselected paths and never-called bodies. Static eligibility/type errors in unselected code remain errors. Add focused generation-overflow/capacity and identity tests. Charge graph traversal, access metadata, copy, freeze and TIR against existing deterministic limits before work/growth. No new configuration or parallel budget.
+
+### C4. Integrate required evaluation and close publication
+
+- [ ] Run the same access owner in type-level evaluation, initialisers, defaults, const fragments, TIR, imported/package const calls and any short compiler service that actually executes source const bodies. Config currently excludes source function declarations and imports. Keep it that way, without HIR. Direct template services invoking provider const functions use the same access checks.
+- [ ] Implement the C1-approved outer publication contract. Freeze validated finite data into the existing `ConstValueStore`/owned public projection, preserving types, structural resource strings, configuration/project provenance, slot order and const-record restrictions. Never publish storage IDs, generations or borrowed graphs. Release temporary state at the owning boundary. A failed required evaluation publishes no partial semantic success.
+- [ ] Keep imported callable materialisation on stable origins and retained syntax/context. No provider HIR or const borrow summaries. Check private helper chains and donor diagnostic sites. Ensure provider semantic changes invalidate consumer folded results through existing interface/materialisation compatibility facts, not another fingerprint domain.
+- [ ] Extend the real build-service parity fixtures with valid and invalid const access, imports/packages, structural results and type-level evaluation. Verify identical debug/release diagnostics, output and runtime handoff. No const function, target requirement or link edge reaches runtime. Preserve the fail-closed runtime HIR guard. Runtime borrow rules still reject conflicting mutable aliases.
+- [ ] Retain the ordinary multi-bind false-conflict report as independent runtime work. The new const policy neither fixes nor justifies that bug. Fix separately in its ordinary HIR/borrow owner with approval, preserving simultaneous RHS evaluation and the distinction between fresh slots and fresh allocations.
+
+### C5. Checkpoint verification and simplification
+
+- [ ] Repeat the existing 20,000-iteration scalar and multi-result workloads against the independent checkpoint. Add alias/projection-heavy shared-child, write and copy workloads. Record expression census, time and RSS and bounded live-storage/edge/projection accounting if needed. Attribute growth to real work, not alias holders or unnecessary frozen intermediates. Keep the ordinary no-const control. Do not invent a performance gate from one noisy run.
+- [ ] Review code size, duplicated representation, unmetered work, stage boundaries and dead helpers/tests. No const HIR, static solver, event loop, speculative evaluator, allocator framework, GC, reference-count registry or future-exclusivity scaffolding. Reuse the current frame, value operation and TIR owners.
+- [ ] Update progress for implemented support, retain canonical design and retire the const-access bug report only when replacement reproductions pass. Keep independent reports/audit records accurate. Run affected Rust and integration tests, relevant feature lanes and `just validate` at the checkpoint. Record exact evidence, perform the Slice review and commit independently. `just validate-full` remains the final merge-readiness gate.
+- [ ] Resume Phase 5 only after C1-C5, all observable contract decisions and integrated checkpoint validation are complete. The owner-approved generational model is final for this slice. Raise only specific unresolved observable contracts, not the superseded question of whether to use runtime borrow checking.
 
 ### Independent corrections
 
@@ -777,8 +811,7 @@ Targeted checks passed: 341 const Rust tests, 131 const integration checks and b
 of the ordinary optional cast recovery case. `just validate` passed, including 3,856
 integration checks and the docs build. `just validate-full` remains a merge-readiness gate.
 
-The access gate is still open. These checks verify the independent corrections, not
-ordinary borrow-rule enforcement in const declarations.
+These are historical checkpoint results. They verify the independent corrections, not the newly accepted generational access model. C1-C5 must supply new verification.
 
 ## Phase 5: Support immutable const receiver methods
 
@@ -805,7 +838,7 @@ ordinary borrow-rule enforcement in const declarations.
 ### Task 5.3: Execute through the existing callable path
 
 - [ ] Extend `const_execution/rewrite.rs::const_call_site` beyond `ExpressionOperationView::Call` to recognise the eligible `MethodCall` target, and update `eligibility.rs` without admitting arbitrary receiver calls. Align the declaration and source-method resolution gates identified in Task 5.1.
-- [ ] Evaluate the separately stored receiver once, before explicit arguments, then bind it as parameter zero through the existing parameter/binding machinery. Preserve provenance and normal method resolution without constructing a synthetic second receiver evaluation.
+- [ ] Evaluate the separately stored receiver once, before explicit arguments, then bind it as shared parameter zero through the C1-C5 live storage/access owner. Preserve actual identity, generation witness, permissions, provenance and normal method resolution without a synthetic second evaluation.
 - [ ] Reuse `ConstInterpreter::execute_body` and existing budgets. Do not build separate method frames, method registries or a method-specific value representation.
 - [ ] Reuse Phase 4 result-slot completion for a const method returning multiple values.
 - [ ] Confirm imported nominal methods execute from stable semantic interface facts without donor-local `ExprId` or `TypeId` leakage.
@@ -816,7 +849,7 @@ ordinary borrow-rule enforcement in const declarations.
 - [ ] Add or extend cases for nominal struct and choice receivers, explicit parameters, nested const calls, composite returns and multiple returns.
 - [ ] Cover imported receiver types, method visibility, runtime receiver refusal, mutable receiver rejection, generic rejection and invalid ownership. Add positive/negative regressions for every declaration, resolution, eligibility and call-rewrite gate, including ordinary runtime methods on data-only const records.
 - [ ] Cover template/string values returned by a const receiver method without making runtime templates legal.
-- [ ] Check receiver and argument evaluation order, failures and source provenance.
+- [ ] Check receiver and argument evaluation order, failures and source provenance. Cover projected receivers, stale receiver access, returned aliases, imported methods and copies through the same dynamic checks.
 
 **Phase 5 exit:** Eligible immutable const methods use the same prepared executable and value evaluator as free const functions. No parallel dispatch or execution representation exists.
 
@@ -857,7 +890,7 @@ The runtime contract must remain exact:
 
 - [ ] Extend the existing collection instruction/frame with only the state these rules need.
 - [ ] Add positive, negative, omitted, overshoot, empty, dynamic-zero, boundary, nested, `break`/`continue` and index-binding parity cases.
-- [ ] Preserve the ordinary runtime policy for collection mutation and captured length.
+- [ ] Preserve the ordinary evaluation and captured-length contract and accepted const dynamic projection/access rules. Do not let a structural edit silently retarget a live projection or bypass validation.
 - [ ] Remove the explicit stepped-loop rejection only when all parity tests pass.
 
 **Phase 6 exit:** Either correct stepped-loop execution with meaningful tests, or an evidence-backed deferral. A partial independent stepping contract is unacceptable.
@@ -903,7 +936,7 @@ Review changed modules under repository `AGENTS.md`, its routed style guide and 
 - stage leaks, global registries and reintroduced HIR/TIR authority in the executor
 
 - [ ] Review direct-value execution against the original provenance/handler/budget tests.
-- [ ] Review match guards/captures and multi-result aliases for control-flow leaks.
+- [ ] Review match guards/captures and multi-result aliases for control-flow leaks, dynamic binding identity and preserved generation witnesses. Check that no live interpreter storage escapes.
 - [ ] Review immutable method publication against cross-module identity rules.
 - [ ] Run selected integration cases and Rust tests, then `just validate` at the integrated checkpoint.
 - [ ] Run `just validate-full` on the final integrated tree before merge readiness. Report exact commands and results, never unrun gates.
@@ -976,4 +1009,4 @@ Important boundaries:
 
 ## Completion definition
 
-Const functions execute against one typed AST/value foundation. Value-only computation no longer requires a temporary replacement expression. Necessary call/handler/template execution remains explicit and lazy. Match statements, multiple success slots, multi-bind and eligible immutable receiver methods work through established compiler owners. Stepped collection loops have either landed with full parity or a concrete deferred decision. Optional whole-function speculation remains removed, profile-independent HIR is guarded by tests, packages demonstrate useful const helpers and the codebase carries less redundant state and rewriting.
+Const functions execute against one typed AST/value foundation. The interpreter owns bounded live storage and projection-aware generational access validation, preserving ordinary reference and copy semantics with deliberately relaxed mutable alias exclusivity. Runtime static borrow and lifetime validation remain mandatory for executable bodies. Value-only computation no longer requires a temporary replacement expression. Necessary call/handler/template execution remains explicit and lazy. Match statements, multiple success slots, multi-bind and eligible immutable receiver methods work through established compiler owners. Stepped collection loops have either landed with full parity or a concrete deferred decision. Optional whole-function speculation remains removed, profile-independent HIR is guarded by tests, packages demonstrate useful const helpers and the codebase carries less redundant state and rewriting.

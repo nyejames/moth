@@ -121,6 +121,8 @@ For a new shared binding `x = y`:
 
 ## Alias activity and last potential use
 
+This section describes runtime executable code. Const functions use the dynamic contract below instead of static exclusivity and last-use analysis.
+
 Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
 that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
 exclusive capability may be elided remains an explicit experimental question; the reference
@@ -167,7 +169,7 @@ Borrow-checker slot and alias states are analysis concepts, not source-visible r
 
 `alias ~= source`, or an equivalent typed mutable declaration from an existing place, creates an exclusive mutable alias. The source stays unmarked: `alias ~= ~source` is invalid.
 
-- The source place must permit mutation and no conflicting live access may exist.
+- The source place must permit mutation and, in runtime code, no conflicting live access may exist. Const execution uses the generation contract below.
 - Assignment through a mutable alias, such as `~alias = value`, writes through to the referent.
 - Assignment must not silently detach or rebind the alias.
 
@@ -181,6 +183,32 @@ A mutable declaration initialized from a fresh value creates an independent muta
 `~` on the declaration marks the binding as mutation-capable. A direct or compound write prefixes the whole existing place with `~`, as in `~count = 1` or `~count += 1`. In a multi-bind, each existing target carries its own marker, as in `~count, message = next()`. Unmarked targets define new bindings. The incoming results are evaluated once before existing targets are written.
 
 Mutable binding syntax differs from call-site exclusive access. Mutability is an access property, not separate semantic type identity.
+
+## Const execution: generational access validation
+
+A source const function executes only at compile time, sequentially and within a bounded evaluation owned by the compiler. It retains Moth's reference, mutation, projection and explicit-copy semantics. It can mutate local evaluation state, but cannot perform IO, asynchronous work, channels, Wiring, external mutable-state access or other externally observable effects. Existing const callable restrictions remain in force. The runtime borrow checker and static lifetime-topology rules do not apply to these bodies.
+
+### Access permissions and invalidation
+
+A mutable alias may be created only from a place that permits mutation. An immutable reference or parameter grants read-only access. A writable slot that holds an existing value does not by itself grant mutation of an immutable referent. Ordinary definitions, updates, write-through aliases, fresh result bindings, rebindings and explicit copies keep their source meanings.
+
+Multiple overlapping mutation-capable references may coexist inside const execution. Creating a mutable alias does not invalidate an immutable reference. A successful write through any overlapping mutable place invalidates every earlier immutable reference to that storage. The write itself is permitted even when such references still exist. Subsequent use of an invalidated reference is a compilation error. Dropping a reference or leaving it unused is valid. A fresh reference acquired through a valid source after the write is valid. This is an intentional difference from runtime exclusivity, not an optimisation or profile option.
+
+An immutable reference records a generation witness at acquisition. Every use validates its witness against the actual storage, including reads, derivation, forwarding, passing, storing, returning, copying and observation through a builtin or template. A stale reference cannot be refreshed by rebinding or projecting it. A successful equal-value write still invalidates. A failed operation that commits no mutation does not invalidate. A generation cannot wrap into a formerly valid witness. The diagnostic points to the invalid use and relevant acquisition/write sites and is outside recoverable `catch`.
+
+### Storage and projection identity
+
+Reference identity belongs to actual dynamic storage, not spelling, declaration path, folded value ID or a frame's lexical lifetime. No-shadowing simplifies name lookup but a new call or loop iteration still creates new binding instances. Mutable write-through aliases designate the same place. A fresh returned binding can hold a reference to an existing allocation without aliasing its source binding cell. Rebinding a separate slot does not mutate the detached allocation. A reference to a location that was actually replaced or removed must not silently retarget unrelated storage. Mutable handles also require valid targets and permission, even though competing mutable writes do not invalidate them solely for exclusivity.
+
+Overlap includes the same resolved place, ancestor and descendant storage and the same shared child reached through distinct aggregate paths. A write to an independent struct field does not invalidate an existing immutable reference to a disjoint sibling. A whole-place replacement invalidates the affected projection references. A reference to an aggregate becomes invalid when overlapping descendant storage changes, including mutation through another path to a shared child. Deriving from an already-invalidated aggregate reference is invalid even if the requested field would otherwise be disjoint. Collection structural edits may conservatively invalidate collection-origin projections rather than track shifted positions. A detached stored value and a projection that still belongs to a container are distinct. Do not infer disjointness from different authored paths alone.
+
+Within an evaluation, stored and returned references preserve actual allocation relationships, including multiple results and repeated aggregate children. Explicit `copy` makes an independent graph while preserving its internal sharing. No const-only implicit-copy rule exists. Existing immutable constants and external inputs cannot be changed. The implementation retains bounded live storage for the whole required evaluation, including nested calls, so a reference may outlive the binding that named it. It releases that state at the evaluation boundary. Source-created cyclic graphs and declared-region execution remain outside the initial supported const surface. No live reference or mutable storage identity escapes into folded values or runtime code.
+
+The interpreter may use an attempt-local mutation clock and direct/subtree generations for structural places. The exact layout is an implementation choice, but must detect overlap through shared allocations as well as projection ancestors. A shared child is not automatically an independent field. Reuse the existing deterministic const work and memory limits for all storage, graph traversal, invalidation, copy and value publication. This contract needs no alias-counting registry, static control-flow analysis or runtime memory strategy.
+
+### When checks run
+
+The compiler checks signatures, types, eligibility and statically evident mutation-permission violations throughout the authored body. Generation checks run only during actual required evaluation. A function that is never called, or a branch that is never selected, may contain a dynamic access failure that has not executed. A later call that reaches the invalid use diagnoses the compilation. There is no separate static proof or attempt to explore hypothetical paths. Debug and release have identical const semantics. Runtime executable bodies still require ordinary static borrow and lifetime validation.
 
 ## Explicit copies
 
@@ -321,7 +349,7 @@ rule lives in `docs/docs/bindings/shadowing.mtf`.
 - Requiring `~` on a fresh value.
 - Using temporaries as mutable receivers.
 - Inventing source-visible temporary references.
-- Allowing mutation while a shared alias is live.
+- Allowing conflicting mutation while a shared alias is live in runtime code, or using an invalidated immutable reference during const execution.
 - Assuming `copy` may preserve mutable sharing with the source graph.
 - Making backend scalar representation define source copy semantics.
 - Treating explicit copy as merely a backend hint.

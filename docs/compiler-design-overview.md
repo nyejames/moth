@@ -70,7 +70,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - TIR is AST-local. Completed AST and HIR contain folded values or neutral owned runtime data, never TIR authority. HIR is the first backend-facing semantic IR.
 - Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types. Wiring capabilities do not turn strings into live templates.
 - Callable return contracts are `Returns` or `Never`. Never is not a `TypeId`, a value type or an empty result list. Function types may carry a Never signature without becoming Never values.
-- Borrow and lifetime-topology validation are mandatory. GC choice and build profile preserve access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
+- Borrow and lifetime-topology validation are mandatory for runtime executable bodies. Required source const functions instead use Stage 4 dynamic generational access validation over bounded interpreter-owned storage, without runtime HIR. GC choice and build profile preserve runtime access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
 - A compiler-owned validated memory plan determines each physical variant's layout, strategies, cleanup and count transitions. Lowerers only realise it. Full-control release lowering has no tracing-collector fallback.
 - User diagnostics, operational failures and proven compiler bugs have separate failure lanes. Parallelism and reuse preserve deterministic identities, diagnostics and output order.
 
@@ -121,7 +121,7 @@ bind provider interfaces
 -> validate and return the module result with its generated delta
 ```
 
-Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
+Summary-dependent source/generated work converges inside this transaction. Every published runtime source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Required const declarations publish their static contract and retained materialisation facts, not runtime HIR or borrow summaries. Their executed paths receive dynamic access validation during required evaluation. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
 A new local semantic stage belongs inside this service. API facade and entry roots, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
@@ -956,11 +956,16 @@ Templates remain ordinary strings with no hidden wire, route, subscription or re
 #### Required const execution and deterministic eager folding
 
 A source const function is prepared during Stage 4 from its canonical typed body and executed by
-one bounded frame machine over typed expressions and `ConstValueStore` values. Required calls must
+one bounded, sequential frame machine over typed expressions, live interpreter-owned storage and the existing immutable `ConstValueStore`. Required calls must
 fold before HIR exists: constants, TIR, template composition and selected static conditions
 consume their results. Invalid required execution reports a source diagnostic and has no runtime
 fallback. The executor owns no parser, type system, second value domain or second template engine;
 numeric, cast, collection and template semantics retain their established owners.
+
+The accepted const access contract lives in `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf` > `Const execution: generational access validation`. The interpreter preserves real reference relationships, including projected places, shared aggregate children, binding cells and allocation identity. Its attempt-local storage distinguishes live reference handles from immutable value IDs. A checked mutation clock (or equivalent generation facts) tracks successful overlapping writes. Mutable aliases may coexist, while subsequent use of an invalidated immutable reference is a non-catchable source diagnostic. Static type, eligibility and mutation permissions remain authoritative. No runtime HIR, static borrow or lifetime proof, affine transfer, REC or physical planning is required for const bodies. Unexecuted bodies and paths receive normal static checks but no dynamic access verdict.
+
+Nested calls, value blocks, handlers and templates resolve actual storage and preserve reference identity and access witnesses until the surrounding evaluation's required publication boundary. Freeze validated finite data into the existing folded-value owner, keeping exact types, slot order and provenance. Live storage, handles, generations and donor-local identities never enter HIR, a public folded value or a provider artefact. The exact owned-result alias projection at a runtime materialisation boundary remains an implementation-plan design gate if existing folded values cannot preserve an observable required relationship. The interpreter is not a second numeric, type, constant-value or template language. Its storage and generation machinery is bounded by the existing deterministic work and memory policy, including projection/graph work and freeze. No alias-refresh registry, event loop or future-only mutable-exclusivity machinery is required.
+
 Consumers that need only values do not publish replacement rows. In a const body, ordered
 rewriting selects the operations that actually execute; the shared fold then reads the completed
 expression and frame bindings. It does not probe executable operands speculatively. A call
@@ -1126,7 +1131,7 @@ Borrow validation resolves calls to access/effect summaries. Target validation a
 
 The live production implementation status, borrow-analysis performance investigations and Boracle-to-production implementation decisions are tracked in `docs/roadmap/plans/production-borrow-checker.md`. This section defines the solver-independent end-state handoff, not a running inventory of alpha code.
 
-Borrow validation runs for every canonical module and generated concrete function. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
+Borrow validation runs for the runtime executable bodies of every canonical module and generated concrete function. Required source const functions use the Stage 4 access contract instead and never enter validation-only HIR. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
 
 Its solver-independent output contains:
 
