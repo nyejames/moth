@@ -8,7 +8,7 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-- [AUD-0027: Host contract redundancy](./audits/open_audits/AUD-0027-host-contract-redundancy.md)
+None.
 
 ## Candidate findings
 
@@ -32,6 +32,11 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
   - `Style` | `analysis.numeric_proofs`
 - [AUD-0025-F03: `visit_statement` spells `HirWriteTarget` through crate paths](./audits/open_audits/AUD-0025-numeric-proofs-style.md#aud-0025-f03-visit_statement-spells-hirwritetarget-through-crate-paths)
   - `Style` | `analysis.numeric_proofs`
+
+- [AUD-0027-F01: Signature-slot mismatch comparison is duplicated](./audits/open_audits/AUD-0027-host-contract-redundancy.md#aud-0027-f01-signature-slot-mismatch-comparison-is-duplicated)
+  - `Redundancy` | `crates.moth_host.contracts`
+- [AUD-0027-F02: Requirement export ordering has an unobservable tie-breaker](./audits/open_audits/AUD-0027-host-contract-redundancy.md#aud-0027-f02-requirement-export-ordering-has-an-unobservable-tie-breaker)
+  - `Redundancy` | `crates.moth_host.contracts`
 
 ## Accepted
 
