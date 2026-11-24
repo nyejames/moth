@@ -8,7 +8,7 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-None.
+- [AUD-0028: Directive implementation redundancy](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md)
 
 ## Candidate findings
 
