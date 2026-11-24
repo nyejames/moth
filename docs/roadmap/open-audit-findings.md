@@ -8,7 +8,7 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-- [AUD-0028: Directive implementation redundancy](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md)
+None.
 
 ## Candidate findings
 
@@ -37,6 +37,15 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
   - `Redundancy` | `crates.moth_host.contracts`
 - [AUD-0027-F02: Requirement export ordering has an unobservable tie-breaker](./audits/open_audits/AUD-0027-host-contract-redundancy.md#aud-0027-f02-requirement-export-ordering-has-an-unobservable-tie-breaker)
   - `Redundancy` | `crates.moth_host.contracts`
+
+- [AUD-0028-F01: Directive class and source kind are encoded redundantly](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f01-directive-class-and-source-kind-are-encoded-redundantly)
+  - `Redundancy` | `frontend.directive_implementation`
+- [AUD-0028-F02: Raw and code compatibility bits have no distinct consumer](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f02-raw-and-code-compatibility-bits-have-no-distinct-consumer)
+  - `Redundancy` | `frontend.directive_implementation`
+- [AUD-0028-F03: Handler specs allow absent formatter and style identity](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f03-handler-specs-allow-absent-formatter-and-style-identity)
+  - `Redundancy` | `frontend.directive_implementation`
+- [AUD-0028-F04: Header remapping retains the removed export annotation route](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f04-header-remapping-retains-the-removed-export-annotation-route)
+  - `Redundancy` | `frontend.directive_implementation`
 
 ## Accepted
 
