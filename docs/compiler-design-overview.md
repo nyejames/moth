@@ -960,7 +960,10 @@ numeric, cast, collection and template semantics retain their established owners
 Consumers that need only a value fold through the shared walker without committing replacement
 rows. Inside a const body, a pure expression folds directly from the frame bindings. Short-circuit
 logic, user const calls, handlers, collection effects and templates take the executor's ordered
-rewrite, which owns their evaluation order.
+rewrite, which owns their evaluation order. A value-producing block, which only occurs at a
+closed receiving site, compiles to its selected-branch statements plus that receiver, so a branch
+exit unwinds the same frame stack as any statement. A multi-result call commits its ordered slots
+as one constant result block, the same replacement the host folder uses.
 
 Simple completed pure expressions may fold eagerly when their result is deterministic, their
 source evaluation is semantics-preserving and any selected fast-operation or other validation

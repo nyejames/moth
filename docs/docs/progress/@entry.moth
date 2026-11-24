@@ -201,9 +201,9 @@ init_docs_sidebar()!
         [data:
             [: Const functions]
             [: Partial]
-            [: Required const declaration/call execution, statement matches in const bodies, deterministic work and allocation budgets and cross-module publication. Ordinary calls stay runtime calls in every build profile.]
+            [: Required const declaration/call execution, statement matches, multiple success slots, multi-bind and value-producing blocks in const bodies, deterministic work and allocation budgets and cross-module publication. Ordinary calls stay runtime calls in every build profile.]
             [: Frontend]
-            [: `name #|args| -> Return:` declares a callable whose every call is executed at compile time. V1 admits immutable ordinary-value parameters and one ordinary success slot; runtime arguments, mutable parameters, fallible contracts and dependency cycles are rejected. Required calls execute the prepared typed-AST body, including statement matches with the ordinary pattern, guard and capture contract, and never emit a const-only runtime symbol. Ordinary functions are never evaluated at compile time, so debug and release builds verify identical semantics. See @../functions/function-declarations (Function declarations) and @../constants/constant-folding (Constant folding).]
+            [: `name #|args| -> Return:` declares a callable whose every call is executed at compile time. It admits immutable ordinary-value parameters and one or more ordinary success slots; zero success slots, runtime arguments, mutable parameters, fallible contracts and dependency cycles are rejected. Required calls execute the prepared typed-AST body, including statement matches with the ordinary pattern, guard and capture contract, multi-bind and value-producing blocks, and never emit a const-only runtime symbol. A multi-result call runs once and delivers its ordered slots to its receiving site. Ordinary functions are never evaluated at compile time, so debug and release builds verify identical semantics. See @../functions/function-declarations (Function declarations) and @../constants/constant-folding (Constant folding).]
         ]
 
         [data:

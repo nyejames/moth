@@ -171,16 +171,12 @@ pub(crate) fn executable_for_const_declaration(
     expressions: &AstExpressionBuilder,
     references: ConstBodyReferenceScope<'_>,
 ) -> Result<ConstFunctionExecutable, ConstBodyPreparationError> {
-    let mut executable =
-        executable_for_body(signature, body).map_err(ConstBodyPreparationError::Unsupported)?;
-    if executable.return_slots.len() != 1 {
-        let operation = if executable.return_slots.is_empty() {
-            labels::ZERO_SUCCESS_RESULTS
-        } else {
-            labels::MULTIPLE_SUCCESS_RESULTS
-        };
+    let mut executable = executable_for_body(signature, body, expressions)
+        .map_err(ConstBodyPreparationError::Unsupported)?;
+    // A call must produce a value to fold into its site; several ordered slots commit together.
+    if executable.return_slots.is_empty() {
         return Err(ConstBodyPreparationError::Unsupported(ConstBodyRejection {
-            operation,
+            operation: labels::ZERO_SUCCESS_RESULTS,
             span: None,
         }));
     }
@@ -192,6 +188,7 @@ pub(crate) fn executable_for_const_declaration(
 fn executable_for_body(
     signature: &FunctionSignature,
     body: &[AstNode],
+    expressions: &AstExpressionBuilder,
 ) -> Result<ConstFunctionExecutable, ConstBodyRejection> {
     let return_slots = signature
         .return_contract
@@ -207,7 +204,7 @@ fn executable_for_body(
             .map(|parameter| (parameter.id, parameter.type_id))
             .collect(),
         return_slots: return_slots.success().to_vec(),
-        instructions: compile_body(body)?,
+        instructions: compile_body(body, expressions)?,
         handler_bodies: Rc::new(FxHashMap::default()),
         donor_identity: None,
     })

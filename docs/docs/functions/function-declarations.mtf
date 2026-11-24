@@ -72,14 +72,23 @@ never receives a runtime body.
 - The `#` between the name and parameter list marks required compile-time
   evaluation.
 - Every argument must be a compile-time constant.
-- Const functions admit immutable ordinary-value parameters and one ordinary
-  success slot in V1. Mutable references, fallible return channels, receiver
-  methods and recursive dependency cycles are rejected.
+- Const functions admit immutable ordinary-value parameters and one or more
+  ordinary success slots. Zero success slots, mutable references, fallible
+  return channels, receiver methods and recursive dependency cycles are
+  rejected.
+- A const function with several success slots follows the ordinary
+  @#returns-and-multiple-values (multi-return rules). Each call runs once at
+  its receiving site and delivers every slot in order.
 - A const body may use statement matches with the ordinary
   @../branching/pattern-matching (pattern contract). The compiler evaluates
   the scrutinee once and tests arms in order. A guard runs only after its
   pattern matches. Unselected arms never execute, but they are still
   type-checked.
+- A const body may use multi-bind and value-producing `if`, match and `catch`
+  blocks at their ordinary receiving sites. All results are read before any
+  existing target is written. An `if` or match branch may leave through
+  `return`, `break` or `continue`; a `catch` handler may leave only through
+  `return`.
 - A call in an ordinary function is folded during compilation. A call that
   cannot be evaluated is a source error rather than a runtime fallback.
 - Invalid const operations, unresolved runtime arguments and nonterminating

@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0087"]
+message_contains = ["expected 1 success slot(s), but this expression produces 2."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0087"
+path = "input/@entry.moth"
+line = 9
+column = 11
+count = 1

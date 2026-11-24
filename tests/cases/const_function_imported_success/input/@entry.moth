@@ -1,6 +1,8 @@
 @square square
 @square Size
 @square weigh
+@square bounds
+@square packed
 
 inner #|value I32| -> I32:
     return value + 1
@@ -18,10 +20,19 @@ doubled_weight #|size Size| -> I32:
     ;
 ;
 
+-- An imported multi-result const call delivers both slots to a local multi-bind.
+width #|value I32| -> I32:
+    low, high = bounds(value)
+    return high - low
+;
+
 nested #I32 = outer(41)
 imported #I32 = square(6)
 owner_match #I32 = weigh(Size::Large(5))
 local_match #I32 = doubled_weight(Size::Large(5))
 local_default #I32 = doubled_weight(Size::Small)
+spread #I32 = width(5)
+low, high = bounds(10)
+remote #I32 = packed(3)
 
-~[: nested=[nested] imported=[imported] choices=[owner_match],[local_match],[local_default] ]
+~[: nested=[nested] imported=[imported] choices=[owner_match],[local_match],[local_default] bounds=[spread],[low],[high],[remote] ]

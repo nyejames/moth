@@ -14,7 +14,6 @@ pub(super) const RUNTIME_TEMPLATE_SLOT: &str = "runtime template slot";
 /// A returned value the executable row cannot represent.
 pub(super) const CONTENT_REFERENCE: &str = "content reference";
 pub(super) const ZERO_SUCCESS_RESULTS: &str = "with zero success results";
-pub(super) const MULTIPLE_SUCCESS_RESULTS: &str = "with multiple success results";
 
 /// Executed operations the interpreter reaches beyond its representable value vocabulary.
 pub(super) const PROJECTED_WRITE: &str = "projected write";

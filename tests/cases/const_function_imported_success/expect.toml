@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " nested=42 imported=36 choices=5,10,0 "
+rendered_output_exact = " nested=42 imported=36 choices=5,10,0 bounds=2,9,11,2931 "

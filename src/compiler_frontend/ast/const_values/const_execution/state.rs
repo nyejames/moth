@@ -104,13 +104,19 @@ pub(super) struct ExecutionState {
     pub(super) active_handler: ActiveHandler,
     /// Nested selected-handler execution depth.
     pub(super) handler_depth: usize,
-    /// Current expression evaluation nesting depth, used to consume inherited recovery once.
+    /// Current expression evaluation nesting depth across every running body, bounding native
+    /// recursion.
     pub(super) expression_depth: usize,
+    /// Expression depth at which the running instruction stream evaluates its own statements.
+    /// Inherited recovery is consumed by the evaluation at this depth: the outermost expression
+    /// of the current statement, not of a caller's statement.
+    pub(super) statement_expression_depth: usize,
     /// True when an inherited catch handler completed, including a handler with no value.
     pub(super) inherited_handler_recovered: bool,
-    /// Recovery value produced by an inherited catch handler; the whole handled expression
-    /// yields this value instead of the partially evaluated child expression.
-    pub(super) inherited_handler_value: Option<ConstValueId>,
+    /// Recovery slots produced by an inherited catch handler; the whole handled expression yields
+    /// these instead of the partially evaluated child expression. A one-slot expression reads the
+    /// first; a multi-result producer receives every slot.
+    pub(super) inherited_handler_values: Vec<ConstValueId>,
     /// A `return` executed by a selected catch handler, awaiting its owning function boundary.
     ///
     /// WHY this is a slot rather than a returned value: a handler body runs from inside expression
@@ -120,8 +126,9 @@ pub(super) struct ExecutionState {
     /// (`RequiredCallSiteRewriter`) has no channel for an early-exit variant. The pending values
     /// therefore stay visible until `execute_frames` in `FrameMode::FunctionBody` consumes them
     /// (or `execute_body` does after handler instructions run); nested handler frames only peek
-    /// so the return can cross them, and expression evaluation keeps returning its first value so
-    /// no enclosing expression continues past the handled statement.
+    /// so the return can cross them, and expression evaluation keeps returning its first value
+    /// (no slots for a several-slot producer) so no enclosing expression continues past the
+    /// handled statement.
     pub(super) pending_handler_return: Option<Vec<ConstValueId>>,
     /// Set once an escaping diagnostic has received its call-site labels.
     pub(super) call_chain_attached: bool,

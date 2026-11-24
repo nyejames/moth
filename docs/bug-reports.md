@@ -203,3 +203,17 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: `fold_signature_default` in `src/compiler_frontend/ast/statements/functions.rs` validates the rebuilt default template, and `PublicConstTemplate` in `src/compiler_frontend/folded_value.rs` carries no donor `$in` site. The primary diagnostic correctly points at the importing reference because the stored const insert is legal in its donor, but there is no related label at the authored directive.
 - Observed: `helpers/utils.moth` declares `insert #= [$in style: [: red]]`, `helpers/@mod.moth` exports `@utils insert` and `@entry.moth` uses `@helpers insert` as `render |value String = insert| -> String`. The compiler reports one MOTH-SYNTAX-0022 on the `insert` reference in the default at `@entry.moth:3:24`. It does not point to the authored `$in` at `helpers/utils.moth:2:5`.
 - Investigate: carry diagnostic provenance for the donor `$in` site on public const templates, separate from semantic equality and fingerprints. Attach it as a related label and keep the primary at the invalid use site. The fallback to the use-site span is correct when no authored site is available.
+
+### Multi-bind through a mutable alias is rejected at runtime
+
+- Found: const multi-return phase, 2026-11. Confirmed by a runtime-only probe; pre-dates this branch.
+- Where: HIR borrow checking of a multi-bind whose existing target is a mutable alias. The hidden result temporary is read while the alias is still live.
+- Observed: in an ordinary function, `base ~= value + 0`, `view ~= base`, `~view, extra = pair(3)`, then `seen = view * 10 + extra` reports MOTH-BORROW-0003 at the multi-bind: "Cannot read `__hir_tmp_2` while mutable alias `view` is still needed later". The docs say updates through mutable aliases write through to their referents. The same body in a const function evaluates and writes through (`base` becomes 3), so const and runtime acceptance diverge. The diagnostic also exposes a compiler temporary name.
+- Investigate: the result temporaries are fresh values and should not conflict with the alias. Check how multi-bind lowering orders the temporary reads against the alias write, and keep generated names out of user diagnostics.
+
+### Const function bodies skip runtime borrow rules
+
+- Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary, so it pre-dates this phase.
+- Where: const declaration preparation. A const body is executed by the typed-AST interpreter and never reaches HIR borrow checking.
+- Observed: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiles and folds, while the same body as an ordinary function reports MOTH-BORROW-0007 "Cannot mutably access immutable local `value`". The multi-bind alias entry above is a second instance of the same divergence.
+- Investigate: const bodies need the same access verdicts as runtime bodies. Options: borrow-check the const body's HIR without emitting it, or run the AST-level access rules the HIR checker enforces during const preparation.

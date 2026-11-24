@@ -13,8 +13,9 @@ use super::labels;
 use super::{
     ConstBodyPreparationError, ConstBodyReferenceScope, ConstBodyRejection,
     ConstFunctionExecutable,
-    instructions::{ConstInstruction, ConstInstructionKind, compile_handler_body},
+    instructions::{ConstInstruction, ConstInstructionKind, ValueReceiver, compile_handler_body},
 };
+use crate::compiler_frontend::ast::ast_nodes::MultiBindTargetKind;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
@@ -122,10 +123,30 @@ fn collect_local_binding_roots(instructions: &[ConstInstruction], roots: &mut Fx
                 }
                 collect_local_binding_roots(body, roots);
             }
+            ConstInstructionKind::ValueBlock { body, receiver } => {
+                match receiver.as_ref() {
+                    ValueReceiver::Declaration(path) => {
+                        roots.insert(*path);
+                    }
+                    ValueReceiver::MultiBind(targets) => roots.extend(
+                        targets
+                            .iter()
+                            .filter(|target| {
+                                matches!(target.kind, MultiBindTargetKind::Declaration)
+                            })
+                            .map(|target| target.id),
+                    ),
+                    ValueReceiver::Assignment(_)
+                    | ValueReceiver::Return
+                    | ValueReceiver::ReturnFromFunction => {}
+                }
+                collect_local_binding_roots(body, roots);
+            }
             ConstInstructionKind::Assign { .. }
             | ConstInstructionKind::Eval(_)
             | ConstInstructionKind::Return(_)
             | ConstInstructionKind::ReturnFromFunction(_)
+            | ConstInstructionKind::Then(_)
             | ConstInstructionKind::Break
             | ConstInstructionKind::Continue
             | ConstInstructionKind::Assert { .. } => {}
@@ -192,8 +213,8 @@ pub(crate) fn validate_const_body_expressions(
             if let Some(binding) = error {
                 local_roots.insert(binding.error_binding);
             }
-            let instructions =
-                compile_handler_body(body).map_err(ConstBodyPreparationError::Unsupported)?;
+            let instructions = compile_handler_body(body, expressions)
+                .map_err(ConstBodyPreparationError::Unsupported)?;
             collect_local_binding_roots(&instructions, &mut local_roots);
             handler_bodies.insert(root, Rc::clone(&instructions));
             collect_instruction_expression_roots(&instructions, expressions, &mut roots)
@@ -291,8 +312,19 @@ fn collect_instruction_expression_roots(
                 collect_instruction_expression_roots(body, expressions, roots)?;
             }
             ConstInstructionKind::Return(values)
-            | ConstInstructionKind::ReturnFromFunction(values) => {
+            | ConstInstructionKind::ReturnFromFunction(values)
+            | ConstInstructionKind::Then(values) => {
                 roots.extend(values.iter().copied());
+            }
+            ConstInstructionKind::ValueBlock { body, receiver } => {
+                if let ValueReceiver::Assignment(place) = receiver.as_ref() {
+                    expressions
+                        .store()
+                        .visit_place_index_expressions(*place, &mut |index| {
+                            roots.push_back(index)
+                        })?;
+                }
+                collect_instruction_expression_roots(body, expressions, roots)?;
             }
             ConstInstructionKind::Assert { condition, message } => {
                 roots.push_back(*condition);

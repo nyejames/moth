@@ -15,7 +15,7 @@ use super::state::{
     ActiveHandler, ConstExecutionServices, ConstInterpreter, ExecutionState, FrameBindings,
 };
 use super::values::{
-    constant_index, expression_with_value, expression_with_value_inheriting_provenance,
+    call_result_inheriting_provenance, constant_index, expression_with_value,
     project_constant_value, unsupported_error,
 };
 use super::{ProjectedConstant, ResolvedPlaceProjection};
@@ -32,18 +32,14 @@ use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReaso
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::CallableEvaluation;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 
 struct ConstCallSite {
     path: PathId,
     span: Option<SourceSpan>,
-    value_mode: ValueMode,
-    result_type: TypeId,
 }
 
 /// A prepared catch body selected for one catch expression.
@@ -159,7 +155,7 @@ impl RewriteWalk<'_, '_> {
             }
             // Discovery over an ordinary expression is not const-call work. Only execution and the
             // shared folders below consume the aggregate const-execution allowance.
-            if self.interpreter.state.inherited_handler_value.is_some()
+            if !self.interpreter.state.inherited_handler_values.is_empty()
                 || self.interpreter.state.pending_handler_return.is_some()
             {
                 return Ok(self.root);
@@ -284,31 +280,20 @@ impl RewriteWalk<'_, '_> {
     }
 
     /// Recognise a call site whose callee is a required source const function.
-    fn const_call_site(
-        &self,
-        view: &ExpressionView<'_>,
-    ) -> Result<Option<ConstCallSite>, ConstantFoldError> {
+    fn const_call_site(view: &ExpressionView<'_>) -> Option<ConstCallSite> {
         let ExpressionOperationView::Call(call) = view.operation() else {
-            return Ok(None);
+            return None;
         };
         if call.metadata().evaluation != CallableEvaluation::Const {
-            return Ok(None);
+            return None;
         }
         let ResolvedCallableTarget::Function(path) = call.metadata().target else {
-            return Ok(None);
+            return None;
         };
-        let result_type = view.success_shape().single().ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::ConstantEvaluation,
-                "const function call used before its single success slot was available",
-            )
-        })?;
-        Ok(Some(ConstCallSite {
+        Some(ConstCallSite {
             path,
             span: view.span(),
-            value_mode: view.value_mode(),
-            result_type,
-        }))
+        })
     }
 
     /// Resolve the prepared catch body for a catch expression.
@@ -340,7 +325,7 @@ impl RewriteWalk<'_, '_> {
             self.results.push((expression, replacement));
             return Ok(());
         }
-        let const_call = self.const_call_site(&view)?;
+        let const_call = Self::const_call_site(&view);
         let restores_handler = if expression != self.root
             && matches!(
                 view.operation(),
@@ -524,20 +509,18 @@ impl RewriteWalk<'_, '_> {
             .map_err(|error| self.interpreter.attach_call_chain(error));
         self.interpreter.budget.leave_call();
         let returns = returns?;
-        if returns.len() != 1 || executable.return_slots.len() != 1 {
+        if returns.len() != executable.return_slots.len() {
             return Err(required_call_error(call, self.interpreter.string_table));
         }
-        if executable.return_slots[0] != call.result_type {
+        let view = self.interpreter.builder.view(expression)?;
+        if view.success_types() != executable.return_slots.as_slice() {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
-                "const function result type disagreed with its call result slot",
+                "const function result types disagreed with its call result slots",
             )
             .into());
         }
-        let mut inherited_provenance = self
-            .interpreter
-            .builder
-            .view(expression)?
+        let mut inherited_provenance = view
             .occurrence_facts()
             .map(|facts| facts.provenance.clone())
             .unwrap_or_default();
@@ -546,13 +529,12 @@ impl RewriteWalk<'_, '_> {
                 inherited_provenance.merge(&facts.provenance);
             }
         }
-        let replacement = expression_with_value_inheriting_provenance(
+        let replacement = call_result_inheriting_provenance(
             self.interpreter.builder,
             self.interpreter.constants,
-            returns[0],
-            call.result_type,
-            call.span,
-            call.value_mode,
+            expression,
+            &returns,
+            self.interpreter.scope.scope,
             inherited_provenance,
         )?;
         self.results.push((expression, replacement));

@@ -279,7 +279,7 @@ A const function writes `#` between its name and parameter list. Every call must
     label #= [: result [double(21)]]
 ]
 
-Const declarations handle immutable ordinary-value parameters and one ordinary success slot in V1.
+Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots.
 A required const call that cannot execute is a source error, not a runtime fallback.
 Ordinary function calls stay runtime calls in every build profile, even with constant arguments.
 

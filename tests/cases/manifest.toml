@@ -21079,10 +21079,26 @@ role = "primary"
 
 
 [[case]]
-id = "const_multiple_result_slots_rejected"
-path = "const_multiple_result_slots_rejected"
-tags = ["integration", "functions", "const", "diagnostics"]
-contract = "language.functions.const_multiple_result_slots_rejected"
+id = "const_function_multi_return_success"
+path = "const_function_multi_return_success"
+tags = ["integration", "functions", "const", "multi_return"]
+contract = "language.functions.const_multiple_result_slots_execute_once_per_receiver"
+role = "primary"
+
+
+[[case]]
+id = "const_function_multi_bind_staging_success"
+path = "const_function_multi_bind_staging_success"
+tags = ["integration", "functions", "const", "multi_return"]
+contract = "language.functions.const_multi_bind_reads_results_before_writes"
+role = "primary"
+
+
+[[case]]
+id = "const_function_multi_return_arity_rejected"
+path = "const_function_multi_return_arity_rejected"
+tags = ["integration", "functions", "const", "multi_return", "diagnostics"]
+contract = "language.functions.const_multi_return_single_receiver_rejected"
 role = "primary"
 
 

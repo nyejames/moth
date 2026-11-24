@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C and Phases 0-3 complete
-**Current slice:** Phase 4, native multi-return and multi-bind
+**Status:** Active - Foundation Phases A-C and Phases 0-4 complete
+**Current slice:** Phase 5, immutable const receiver methods
 **Blockers:** None known
-**Next action:** Run Task 4.1: list every genuine single-slot restriction in the const call path.
+**Next action:** Run Task 5.1: trace receiver identity before choosing an API.
 
 ## Global constraints
 
@@ -613,58 +613,84 @@ None of these is a regression from this phase.
 
 ### Task 4.1: Locate every genuine single-slot restriction
 
-- [ ] Inspect `ConstFunctionExecutable::return_slots` and `execute_body() -> Vec<ConstValueId>`.
-- [ ] Find `executable_for_const_declaration`'s one-result check, `ConstCallSite`, `complete_call`'s `returns.len() == 1` check and every `success_shape().single()` in the const call path.
-- [ ] Separate deliberate single-value *consumers* from the arbitrary V1 restriction on *producers*. Do not widen operands that require exactly one value.
-- [ ] Inspect the existing multi-result trusted host fold and `commit_constant_result_block`. Reuse its `ValueBlock::LexicalScope` and ordered `ThenValue` slot mechanism rather than building tuples or a new carrier.
-- [ ] Confirm the complete `SuccessShape`, call provenance and source/import publication contracts survive the replacement. Check cross-module ID rules.
+- [x] Inspect `ConstFunctionExecutable::return_slots` and `execute_body() -> Vec<ConstValueId>`.
+- [x] Find `executable_for_const_declaration`'s one-result check, `ConstCallSite`, `complete_call`'s `returns.len() == 1` check and every `success_shape().single()` in the const call path.
+- [x] Separate deliberate single-value *consumers* from the arbitrary V1 restriction on *producers*. Do not widen operands that require exactly one value.
+- [x] Inspect the existing multi-result trusted host fold and `commit_constant_result_block`. Reuse its `ValueBlock::LexicalScope` and ordered `ThenValue` slot mechanism rather than building tuples or a new carrier.
+- [x] Confirm the complete `SuccessShape`, call provenance and source/import publication contracts survive the replacement. Check cross-module ID rules.
 
 ### Task 4.2: Implement multi-slot required call replacement
 
-- [ ] Extend const declaration preparation to accept two or more ordinary immutable success slots, retaining existing fallible/Never/zero restrictions.
-- [ ] Make the const call-site and result validation represent the full resolved success shape rather than a single `TypeId`.
-- [ ] Validate the executed slot count and types against the prepared executable and call shape before committing any replacement.
-- [ ] Stage and publish all result values transactionally through existing value-store operations. Commit the ordered result block using `commit_constant_result_block`.
-- [ ] Preserve per-slot provenance and the call's authored metadata. Do not merge result values into one synthetic aggregate.
-- [ ] Keep ordinary multi-result functions as ordinary runtime calls in every profile; release-only eligibility no longer exists.
+- [x] Extend const declaration preparation to accept two or more ordinary immutable success slots, retaining existing fallible/Never/zero restrictions.
+- [x] Make the const call-site and result validation represent the full resolved success shape rather than a single `TypeId`.
+- [x] Validate the executed slot count and types against the prepared executable and call shape before committing any replacement.
+- [x] Stage and publish all result values transactionally through existing value-store operations. Commit the ordered result block using `commit_constant_result_block`.
+- [x] Preserve per-slot provenance and the call's authored metadata. Do not merge result values into one synthetic aggregate.
+- [x] Keep ordinary multi-result functions as ordinary runtime calls in every profile; release-only eligibility no longer exists.
 
 ### Task 4.3: Evaluate multi-slot producers at receiving sites
 
-- [ ] Inspect `ConstInterpreter::evaluate_expression(..) -> ConstValueId`, `evaluate_expression_inner`, `execute_return`/`evaluate_return_values` and `values.rs::fold_to_constant`. Record where one `ExprId` is wrongly assumed to yield one slot. In particular, `return pair()` contains one producer expression but can supply multiple ordered slots.
-- [ ] First add failing regressions for `return pair()`, forwarding a nested multi-result call and a multi-bind consuming a single multi-result producer. Cover valid value-producing `if`, `match` and `catch` blocks with multiple result slots where ordinary AST receiving rules permit them.
-- [ ] Introduce the smallest receiving-site operation that evaluates **one producer once** and extracts all values according to its resolved `SuccessShape`. Reuse the current prepared frames, value store and evaluation/handler behaviour. A narrowly scoped `evaluate_result_slots(..) -> Vec<ConstValueId>`-style helper is acceptable if it removes duplicate logic, but avoid a second generic evaluator.
-- [ ] Keep `evaluate_expression` and scalar operands single-valued. Route return forwarding and multi-bind through multi-slot receiving without creating tuples or flattening one slot into many accidental expressions. Preserve lazy branch selection, catch/handler behaviour and the existing effect/work budget.
-- [ ] Validate slot shape, ordering and types before target mutation or AST publication. Keep the existing `commit_constant_result_block` as the only AST multi-slot replacement path. Examine alias-sensitive updates and transactional failure for receiving sites separately.
+- [x] Inspect `ConstInterpreter::evaluate_expression(..) -> ConstValueId`, `evaluate_expression_inner`, `execute_return`/`evaluate_return_values` and `values.rs::fold_to_constant`. Record where one `ExprId` is wrongly assumed to yield one slot. In particular, `return pair()` contains one producer expression but can supply multiple ordered slots.
+- [x] First add failing regressions for `return pair()`, forwarding a nested multi-result call and a multi-bind consuming a single multi-result producer. Cover valid value-producing `if`, `match` and `catch` blocks with multiple result slots where ordinary AST receiving rules permit them.
+- [x] Introduce the smallest receiving-site operation that evaluates **one producer once** and extracts all values according to its resolved `SuccessShape`. Reuse the current prepared frames, value store and evaluation/handler behaviour. A narrowly scoped `evaluate_result_slots(..) -> Vec<ConstValueId>`-style helper is acceptable if it removes duplicate logic, but avoid a second generic evaluator.
+- [x] Keep `evaluate_expression` and scalar operands single-valued. Route return forwarding and multi-bind through multi-slot receiving without creating tuples or flattening one slot into many accidental expressions. Preserve lazy branch selection, catch/handler behaviour and the existing effect/work budget.
+- [x] Validate slot shape, ordering and types before target mutation or AST publication. Keep the existing `commit_constant_result_block` as the only AST multi-slot replacement path. Examine alias-sensitive updates and transactional failure for receiving sites separately.
 
 ### Task 4.4: Implement multi-bind inside const bodies
 
-- [ ] Inspect the existing `NodeKind::MultiBind { targets, value }` and `MultiBindTarget` representation. Confirm declaration versus update targets, aliases and recorded `ValueMode`.
-- [ ] Add one prepared multi-bind instruction that retains the already-typed producer and target facts.
-- [ ] Use Task 4.3's multi-slot receiving operation to evaluate the producer exactly once and preserve ordered results. Collect all RHS values before any existing target is updated.
-- [ ] Use existing `FrameBindings`, place projection and alias-write paths for declarations and assignments. Validate target shape and avoid partially installing new bindings on a failed result producer.
-- [ ] Preserve ordinary left-to-right target update semantics where aliases overlap. Do not introduce a new binding store, runtime tuple or mutable-parameter capability.
+- [x] Inspect the existing `NodeKind::MultiBind { targets, value }` and `MultiBindTarget` representation. Confirm declaration versus update targets, aliases and recorded `ValueMode`.
+- [x] Add one prepared multi-bind instruction that retains the already-typed producer and target facts.
+- [x] Use Task 4.3's multi-slot receiving operation to evaluate the producer exactly once and preserve ordered results. Collect all RHS values before any existing target is updated.
+- [x] Use existing `FrameBindings`, place projection and alias-write paths for declarations and assignments. Validate target shape and avoid partially installing new bindings on a failed result producer.
+- [x] Preserve ordinary left-to-right target update semantics where aliases overlap. Do not introduce a new binding store, runtime tuple or mutable-parameter capability.
 
 ### Task 4.5: Preserve returns and receivers
 
-- [ ] Inspect `ConstInstructionKind::Return(Vec<ExprId>)` and the ordinary return-production owner for any assumption that one expression equals one result slot. Route each expression through Task 4.3's receiving-site operation and append its validated success slots in order, especially for `return pair()`.
-- [ ] Support returning multiple scalar/composite values, nested multi-result producers and value-producing blocks permitted by current AST receiving rules.
-- [ ] Preserve the distinction between a multi-result producer and a single-value operand. Ensure a single-target binding rejects a multi-result call with the existing arity diagnostic.
+- [x] Inspect `ConstInstructionKind::Return(Vec<ExprId>)` and the ordinary return-production owner for any assumption that one expression equals one result slot. Route each expression through Task 4.3's receiving-site operation and append its validated success slots in order, especially for `return pair()`.
+- [x] Support returning multiple scalar/composite values, nested multi-result producers and value-producing blocks permitted by current AST receiving rules.
+- [x] Preserve the distinction between a multi-result producer and a single-value operand. Ensure a single-target binding rejects a multi-result call with the existing arity diagnostic.
 
 ### Task 4.6: Assert observable parity
 
 Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in_loops`. Replace a rejection fixture only when its formerly invalid behaviour becomes supported. Keep `const_zero_result_function_rejected` as a separate current boundary.
 
-- [ ] Add a multi-result const helper with two and three distinct slots and assert exact output.
-- [ ] Cover a nested multi-result const call, `return pair()` forwarding, a multi-result producer used in multi-bind and cross-file import/publication. Check permitted multi-result `if`/`match`/`catch` receiving sites.
-- [ ] Cover new declarations, existing mutable updates, mixed targets, alias-sensitive updates and evaluated-once effects on local state. Confirm a failing producer or invalid shape never partially commits bindings or published values.
-- [ ] Assert incorrect slot count/type diagnostics at receiving sites and no silent first-slot truncation.
-- [ ] Verify ordinary multi-return calls remain runtime calls in both profiles while required const multi-return calls execute during Stage 4.
+- [x] Add a multi-result const helper with two and three distinct slots and assert exact output.
+- [x] Cover a nested multi-result const call, `return pair()` forwarding, a multi-result producer used in multi-bind and cross-file import/publication. Check permitted multi-result `if`/`match`/`catch` receiving sites.
+- [x] Cover new declarations, existing mutable updates, mixed targets, alias-sensitive updates and evaluated-once effects on local state. Confirm a failing producer or invalid shape never partially commits bindings or published values.
+- [x] Assert incorrect slot count/type diagnostics at receiving sites and no silent first-slot truncation.
+- [x] Verify ordinary multi-return calls remain runtime calls in both profiles while required const multi-return calls execute during Stage 4.
 
 **Phase 4 exit:** Required const functions support multiple ordered ordinary success slots, expression-to-result forwarding and const-body multi-bind. Multi-valued producers evaluate once at receiving sites, while scalar consumers remain single-valued. The existing native result block remains the only AST multi-result replacement representation. Zero-result, fallible, Never and generic const signatures remain outside scope.
 
 **Docs:** Update `function-declarations.mtf`, `returns-and-multiple-values.mtf` only where the const-specific contract warrants clarification and the progress matrix. Confirm required const semantics remain accurate and ordinary-call release eligibility has no remaining documentation or implementation owner.
 
 **Review:** Audit every residual `single()` assumption in affected producers, return forwarding, aliases and cross-module slot validation. This phase may pause.
+
+### Phase 4 outcome
+
+**Finding.** Value-producing `if`, match and lexical-scope blocks were unsupported in const bodies even with one slot; only `catch` executed. Multi-slot receiving needed value-block execution in general. Value blocks occur only as the root of a declaration, assignment, multi-bind or return, so the receiver is known when the body is compiled.
+
+**Design.**
+- Declarations accept one or more success slots; zero slots, fallible and Never contracts stay rejected. `labels::MULTIPLE_SUCCESS_RESULTS` is gone.
+- `complete_call` validates the slot count and every slot type against the call's success types. `values::call_result_inheriting_provenance` replaces one slot with a `Constant` and several with `commit_constant_result_block`, the host folder's replacement. The occurrence keeps the union of call, argument and evaluated provenance, as the one-slot path did.
+- The body compiler (`BodyCompiler`) compiles a value block at a receiving site to `ValueBlock { body, receiver }`: the selected-branch statements (`If`, `Match` or the flattened scope) plus a `ValueReceiver`. Branch `then` becomes `Then(values)`. Execution pushes `ExecFrame::ValueBlock(receiver)` under the body; `Then` reads every slot, unwinds to that frame and applies the receiver. `return`, `break` and `continue` unwind past it like any frame, and fallthrough is an infrastructure failure. A non-block multi-bind producer compiles to the one-statement block `[Then([value])]`, so every multi-bind receives through one path. `catch` stays an expression.
+- `evaluate_value_slots` serves `return`, `then` and multi-bind. A `SuccessShape::Multiple` value goes to `evaluate_result_block`, which rewrites the producer once and reads the committed rows back. A successful catch unwraps to its handled block, and a recovering catch takes every handler slot. A discarded multi-result call in a statement also takes this path. `evaluate_expression` stays scalar.
+- Multi-bind declarations insert and clear aliases. Assignments go through `write_through`, which is split out of `execute_assign` and follows mutable aliases to their referent, left to right after every slot is read.
+- The recovery marker became `inherited_handler_values: Vec<ConstValueId>`. `execute_frames` now gives each instruction stream its own recovery context: a statement depth, no inherited handler and no recovery. Each callee and handler body consumes its own recovery at its statement depth. This fixed two older leaks, both found in review: a callee's catch recovery escaping into its caller (`recover_inner(9) + 1` gave 50, now 51), and a handler statement's recovery corrupting the next handler statement (gave 5, now 6). Total expression depth still bounds native recursion across calls.
+
+**Tests.**
+- `const_function_multi_return_success`, written first, failed with MOTH-RULE-0053 "with multiple success results". It covers two- and three-slot helpers, `return forward(..)` forwarding, declaration and mixed multi-bind, value `if`/match returning and binding several slots, multi-bind in loops, single-slot value blocks, a branch `return`, `break`/`continue` leaving a block, and top-level runtime multi-bind from a required call.
+- `const_function_multi_bind_staging_success` covers read-before-write swaps, alias write-through, a value block inside a handler with `return`, multi-slot catch success and recovery, including inside another handler, static selection, a composite slot, cross-call recovery isolation and a discarded multi-result call.
+- `const_function_multi_return_arity_rejected` pins the existing MOTH-RULE-0087 receiver diagnostic. `const_function_imported_success` adds an imported multi-result const used both in a const body and at top level.
+- `const_multiple_result_slots_rejected` was removed because its behaviour is now supported. Ordinary multi-return calls stay `Invoke` calls in debug and release.
+
+**Measurements** (release, 15 runs). `tmp/phase3` match and if workloads are unchanged: 15.8 ms vs 16.7 ms, and 21.9 ms vs 21.7 ms. A 20,000-iteration loop making one two-slot call costs 62 ms, against 59 ms for two one-slot calls. The extra cost is the result-block rows and frames per call. Like one-slot calls, user const calls still take the ordered rewrite and commit AST rows on each execution. Those rows are not charged to the const budget. QA measured peak memory with `moth check` on 20,000 iterations: 48.5 MB for a two-slot multi-bind, against 18.5 MB for a one-slot binding. A two-slot call commits four rows (scope, `then` and two constants), where a one-slot call commits one. Phase 7's workload pass owns the decision on this pre-existing unbudgeted row growth: charge the committed rows, or carry statement-root slots out of the rewrite without rows.
+
+**Limits.** `break` and `continue` cannot leave a `catch` handler body, which runs on its own frame stack; this limit predates the phase. `then pair()` is rejected by the AST, so multi-result producers inside value blocks go through a branch multi-bind.
+
+**Existing bugs found and recorded in `docs/bug-reports.md`:**
+- A runtime multi-bind through a mutable alias is rejected with an internal temporary name.
+- Const bodies skip runtime borrow rules.
 
 ## Phase 5: Support immutable const receiver methods
 
@@ -771,6 +797,7 @@ The runtime contract must remain exact:
 - [ ] Repeat the Phase 0 cases with matched environment/toolchain and inspect the same counters.
 - [ ] Record compile time, append/rewrite counts, retained value allocation, peak memory where measured and effects on non-const ordinary source.
 - [ ] Attribute unexpected regressions to specific operations. Refactor only when the evidence identifies a real owner or responsibility problem.
+- [ ] Decide the per-execution AST rows that const calls in executing bodies commit; Phase 4 outcome records the measurement. Either charge them to the const budget or deliver statement-root slots without committing rows.
 - [ ] Do not use benchmark wins as a substitute for semantic parity.
 
 ### Task 7.3: Conduct a final simplification and correctness audit

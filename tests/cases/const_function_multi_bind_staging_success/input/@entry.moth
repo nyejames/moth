@@ -1,0 +1,125 @@
+-- Const multi-bind reads every result before writing any existing target, writes through mutable
+-- aliases, and receives multi-result catches on both the success and recovery paths, including
+-- from inside another handler. Composite slots and statically selected blocks also execute.
+
+Point = |x I32, y I32|
+
+pair #|value I32| -> I32, I32:
+    return value, value + 1
+;
+
+shape #|value I32| -> Point, I32:
+    return Point(value, value * 2), value * 3
+;
+
+alias_write #|value I32| -> I32:
+    base ~= value + 0
+    view ~= base
+    ~view, extra = pair(3)
+    seen = view * 10 + extra
+    return base * 1000 + seen
+;
+
+swap_read #|value I32| -> I32:
+    left ~= value
+    right ~= value + 10
+    ~left, ~right = if value > 0:
+        then right, left
+    else
+        then left, right
+    ;
+    return left * 100 + right
+;
+
+handler_block #|index I32| -> I32:
+    values = {1, 2}
+    found = values.get(index) catch:
+        result = if index > 5:
+            return -100
+        else
+            then index * 2
+        ;
+        then result
+    ;
+    return found
+;
+
+caught #|index I32| -> I32:
+    values = {1, 2}
+    left, right = pair(values.get(index)) catch:
+        then 40, 50
+    ;
+    return left * 100 + right
+;
+
+nested #|index I32| -> I32:
+    values = {1, 2}
+    found = values.get(index) catch:
+        left, right = pair(values.get(index + 1)) catch:
+            then 70, 80
+        ;
+        then left + right
+    ;
+    return found
+;
+
+static #|value I32| -> I32:
+    chosen = if true:
+        then value
+    else
+        then 0
+    ;
+    return chosen
+;
+
+composite #|value I32| -> I32:
+    point, tripled = shape(value)
+    return point.x + point.y + tripled
+;
+
+-- A callee's own catch recovery stays inside the callee: the caller sees its returned value.
+recover_inner #|index I32| -> I32:
+    values = {1, 2}
+    found = values.get(index) + 1 catch:
+        then 50
+    ;
+    return found
+;
+
+across #|index I32| -> I32:
+    left, right = pair(recover_inner(index))
+    return left * 100 + right
+;
+
+across_single #|index I32| -> I32:
+    return recover_inner(index) + 1
+;
+
+-- A recovery inside a handler body belongs to that handler statement, not to the next one.
+handler_statement #|index I32| -> I32:
+    values = {1, 2}
+    found = values.get(index) catch:
+        inner = values.get(index + 5) + 1 catch:
+            then 5
+        ;
+        then inner + 1
+    ;
+    return found
+;
+
+discard #|value I32| -> I32:
+    pair(value)
+    return value
+;
+
+aliased #I32 = alias_write(7)
+swapped #String = [:[swap_read(1)],[swap_read(-1)]]
+handled #String = [:[handler_block(0)],[handler_block(3)],[handler_block(9)]]
+recovered #String = [:[caught(1)],[caught(7)],[nested(0)],[nested(1)],[nested(4)]]
+crossed #String = [:[across(0)],[across(9)],[across_single(9)],[handler_statement(4)]]
+selected #I32 = static(9)
+summed #I32 = composite(4)
+discarded #I32 = discard(3)
+point, tripled = shape(5)
+
+~[: aliased=[aliased] swapped=[swapped] handled=[handled] recovered=[recovered] crossed=[crossed] selected=[selected] summed=[summed] discarded=[discarded] point=[point.x],[point.y],[tripled] ]
