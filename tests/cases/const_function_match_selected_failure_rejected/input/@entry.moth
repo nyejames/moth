@@ -1,0 +1,14 @@
+-- A failure in the selected arm reports at the failing operation. An earlier arm with its own
+-- overflow is never selected, so it reports nothing.
+
+grow #|value I32| -> I32:
+    if value is:
+        1 => return value + 2147483647 + 2147483647
+        2 => return value * 2147483647
+        else => return 0
+    ;
+;
+
+result #I32 = grow(2)
+
+~[:unreachable]

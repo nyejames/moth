@@ -28,6 +28,7 @@
 //!   snapshots.
 //! - `execute`: the one executed-frame machine, including expression evaluation,
 //!   range/collection bindings and the TIR template adapter.
+//! - `matching`: match arm selection over the AST's resolved patterns, guards and captures.
 //! - `places`: interpreted aliases, projected reads and writes, collection mutation and fallible
 //!   handler execution.
 //! - `values`: constant folding and projection/index helpers, error constructors and
@@ -66,6 +67,7 @@ mod eligibility;
 mod execute;
 mod instructions;
 mod labels;
+mod matching;
 mod places;
 mod rewrite;
 mod state;

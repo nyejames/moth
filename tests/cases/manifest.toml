@@ -21022,6 +21022,41 @@ contract = "language.functions.const_parameter_cast_matches_runtime"
 role = "primary"
 
 [[case]]
+id = "const_function_match_inactive_arm_type_rejected"
+path = "const_function_match_inactive_arm_type_rejected"
+tags = ["integration", "functions", "const", "match", "diagnostics"]
+contract = "language.functions.const_match_type_checks_every_arm"
+role = "primary"
+
+[[case]]
+id = "const_function_match_selected_arm_success"
+path = "const_function_match_selected_arm_success"
+tags = ["integration", "functions", "const", "match"]
+contract = "language.functions.const_match_executes_only_selected_arm"
+role = "primary"
+
+[[case]]
+id = "const_function_match_patterns_success"
+path = "const_function_match_patterns_success"
+tags = ["integration", "functions", "const", "match"]
+contract = "language.functions.const_match_follows_pattern_contract"
+role = "primary"
+
+[[case]]
+id = "const_function_match_selected_failure_rejected"
+path = "const_function_match_selected_failure_rejected"
+tags = ["integration", "functions", "const", "match", "diagnostics"]
+contract = "language.functions.const_match_selected_arm_failure_reports_at_operation"
+role = "primary"
+
+[[case]]
+id = "const_function_match_structural_text_rejected"
+path = "const_function_match_structural_text_rejected"
+tags = ["integration", "functions", "const", "match", "diagnostics"]
+contract = "language.functions.const_match_text_pattern_requires_final_text"
+role = "primary"
+
+[[case]]
 id = "const_function_structural_text_refusal_rejected"
 path = "const_function_structural_text_refusal_rejected"
 tags = ["integration", "functions", "const", "diagnostics"]

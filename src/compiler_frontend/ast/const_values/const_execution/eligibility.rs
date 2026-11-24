@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
+use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
@@ -87,6 +88,26 @@ fn collect_local_binding_roots(instructions: &[ConstInstruction], roots: &mut Fx
             } => {
                 collect_local_binding_roots(then_body, roots);
                 collect_local_binding_roots(else_body, roots);
+            }
+            ConstInstructionKind::Match { arms, default, .. } => {
+                for arm in arms.iter() {
+                    match &arm.pattern {
+                        MatchPattern::ChoiceVariant { captures, .. } => {
+                            roots.extend(captures.iter().map(|capture| capture.binding_path));
+                        }
+                        MatchPattern::OptionPresentCapture { binding_path, .. } => {
+                            roots.insert(*binding_path);
+                        }
+                        MatchPattern::Literal(_)
+                        | MatchPattern::OptionNone { .. }
+                        | MatchPattern::OptionValue { .. }
+                        | MatchPattern::Relational { .. } => {}
+                    }
+                    collect_local_binding_roots(&arm.body, roots);
+                }
+                if let Some(default) = default {
+                    collect_local_binding_roots(default, roots);
+                }
             }
             ConstInstructionKind::While { body, .. } => {
                 collect_local_binding_roots(body, roots);
@@ -236,6 +257,22 @@ fn collect_instruction_expression_roots(
                 roots.push_back(*condition);
                 collect_instruction_expression_roots(then_body, expressions, roots)?;
                 collect_instruction_expression_roots(else_body, expressions, roots)?;
+            }
+            ConstInstructionKind::Match {
+                scrutinee,
+                arms,
+                default,
+            } => {
+                roots.push_back(*scrutinee);
+                for arm in arms.iter() {
+                    arm.pattern
+                        .visit_expression_ids(&mut |id| roots.push_back(id));
+                    roots.extend(arm.guard);
+                    collect_instruction_expression_roots(&arm.body, expressions, roots)?;
+                }
+                if let Some(default) = default {
+                    collect_instruction_expression_roots(default, expressions, roots)?;
+                }
             }
             ConstInstructionKind::While { condition, body } => {
                 roots.push_back(*condition);

@@ -2,3 +2,17 @@ $export
 square #|value I32| -> I32:
     return value * value
 ;
+
+$export
+Size ::
+    Small,
+    Large | weight I32 |,
+;
+
+$export
+weigh #|size Size| -> I32:
+    if size is:
+        Small => return 1
+        Large(weight) => return weight
+    ;
+;

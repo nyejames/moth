@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::{ExprId, PlaceId};
+use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -39,6 +40,12 @@ pub(super) enum ConstInstructionKind {
         condition: ExprId,
         then_body: Rc<[ConstInstruction]>,
         else_body: Rc<[ConstInstruction]>,
+    },
+    /// `default` is `None` only for a choice or option match the AST proved exhaustive.
+    Match {
+        scrutinee: ExprId,
+        arms: Rc<[ConstMatchArm]>,
+        default: Option<Rc<[ConstInstruction]>>,
     },
     While {
         condition: ExprId,
@@ -73,6 +80,17 @@ pub(super) enum ConstInstructionKind {
 pub(super) struct ConstInstruction {
     pub(super) kind: ConstInstructionKind,
     pub(super) span: Option<SourceSpan>,
+}
+
+/// One prepared match arm: the AST's resolved pattern and guard, with its body compiled once.
+///
+/// WHY: the pattern is cloned once here because the AST keeps its own copy; the prepared arm is
+///      then reused for every const call of this body.
+#[derive(Debug)]
+pub(super) struct ConstMatchArm {
+    pub(super) pattern: MatchPattern,
+    pub(super) guard: Option<ExprId>,
+    pub(super) body: Rc<[ConstInstruction]>,
 }
 
 /// Which body a compiled instruction sequence belongs to.
@@ -300,8 +318,39 @@ fn compile_body_into(
             NodeKind::ReturnError(_) => {
                 return reject_const_body(rejection, "error return", node.span);
             }
-            NodeKind::Match { .. } => {
-                return reject_const_body(rejection, "match statement", node.span);
+            NodeKind::Match {
+                scrutinee,
+                arms,
+                default,
+                ..
+            } => {
+                let mut prepared_arms = Vec::with_capacity(arms.len());
+                for MatchArm {
+                    pattern,
+                    guard,
+                    body,
+                } in arms.iter()
+                {
+                    prepared_arms.push(ConstMatchArm {
+                        pattern: pattern.clone(),
+                        guard: *guard,
+                        body: compile_nested_body(body, body_context, rejection)?,
+                    });
+                }
+                let arms = Rc::from(prepared_arms);
+                let default = match default {
+                    Some(body) => Some(compile_nested_body(body, body_context, rejection)?),
+                    None => None,
+                };
+                push_instruction(
+                    instructions,
+                    node.span,
+                    ConstInstructionKind::Match {
+                        scrutinee: *scrutinee,
+                        arms,
+                        default,
+                    },
+                );
             }
             NodeKind::PushStartRuntimeFragment(_) => {
                 return reject_const_body(rejection, "runtime fragment", node.span);

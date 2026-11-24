@@ -2941,6 +2941,63 @@ fn fold_numeric_comparison(
     comparison_result(op, ordering)
 }
 
+/// Compare a match scrutinee with one pattern value of the same value type.
+///
+/// WHAT: `op` is `Equality` for a literal pattern or the relational pattern's operator. Returns
+///       `Ok(None)` when the payloads are not one comparable family.
+/// WHY: a pattern value materialises at its subject's value type, so the payload selects the
+///      comparison domain without resolved comparison facts. Text compares only as final text,
+///      exactly like an equality operator.
+pub(crate) fn fold_pattern_comparison(
+    scrutinee: &ConstValuePayload,
+    pattern: &ConstValuePayload,
+    op: &Operator,
+    span: Option<SourceSpan>,
+    strings: &mut StringTable,
+) -> Result<Option<bool>, DiagnosticDraft> {
+    let ordering = match (scrutinee, pattern) {
+        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right)) => {
+            match left.scalar().class() {
+                FixedScalarClass::BinaryFloat => match (left.as_f64(), right.as_f64()) {
+                    // An unordered NaN satisfies no pattern, like the runtime comparison.
+                    (Some(left), Some(right)) => match left.partial_cmp(&right) {
+                        Some(ordering) => Some(ordering),
+                        None => return Ok(Some(false)),
+                    },
+                    _ => None,
+                },
+                FixedScalarClass::Octet => left
+                    .as_u64()
+                    .zip(right.as_u64())
+                    .map(|(left, right)| left.cmp(&right)),
+                FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
+                    integer_value_from_payload(scrutinee)
+                        .zip(integer_value_from_payload(pattern))
+                        .map(|(left, right)| left.cmp(&right))
+                }
+            }
+        }
+        (ConstValuePayload::Number(left), ConstValuePayload::Number(right))
+            if left.scale() == right.scale() =>
+        {
+            Some(left.coefficient().cmp(right.coefficient()))
+        }
+        (ConstValuePayload::Char(left), ConstValuePayload::Char(right)) => Some(left.cmp(right)),
+        (ConstValuePayload::Bool(left), ConstValuePayload::Bool(right)) => Some(left.cmp(right)),
+        // Text has no relational patterns.
+        (ConstValuePayload::String(_), ConstValuePayload::String(_))
+            if matches!(op, Operator::Equality) =>
+        {
+            let requirement = ConstStringRequirement::EqualityComparison;
+            let left = concrete_payload_text(scrutinee, span, requirement, strings)?;
+            let right = concrete_payload_text(pattern, span, requirement, strings)?;
+            return Ok(left.zip(right).map(|(left, right)| left == right));
+        }
+        _ => None,
+    };
+    Ok(ordering.and_then(|ordering| comparison_result(op, ordering)))
+}
+
 #[cfg(test)]
 #[path = "tests/constant_folding_tests.rs"]
 mod tests;

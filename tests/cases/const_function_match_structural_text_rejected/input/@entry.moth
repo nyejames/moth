@@ -1,0 +1,13 @@
+-- A text pattern compares final text. A resource path has no final URL characters before
+-- emission, so matching it reports the structural-text refusal instead of choosing an arm.
+
+classify #|value String| -> I32:
+    if value is:
+        "value.txt" => return 1
+        else => return 0
+    ;
+;
+
+result #I32 = classify(@assets/value.txt)
+
+~[:unreachable]

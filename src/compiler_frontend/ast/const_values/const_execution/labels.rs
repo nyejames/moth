@@ -25,6 +25,7 @@ pub(super) const LOOP_BINDING: &str = "loop binding";
 pub(super) const COLLECTION_LOOP: &str = "collection loop";
 pub(super) const CONDITION: &str = "condition";
 pub(super) const LOOP_CONTROL: &str = "loop control";
+pub(super) const MATCH_PATTERN: &str = "match pattern";
 pub(super) const WITHOUT_FINAL_RETURN: &str = "without a final return";
 pub(super) const VALUE_EXPRESSION: &str = "value expression";
 pub(super) const TEMPLATE_VALUE: &str = "template value";

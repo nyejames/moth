@@ -13,7 +13,7 @@ use super::{
         CallDepthRefusal, ExecutionBudget, MAX_CALL_DEPTH, MAX_EXPRESSION_DEPTH, MAX_HANDLER_DEPTH,
         MAX_LOOP_ITERATIONS, charge_new_value_text,
     },
-    instructions::{ConstInstruction, ConstInstructionKind},
+    instructions::{ConstInstruction, ConstInstructionKind, ConstMatchArm},
     labels,
     places::{direct_alias_target, expand_alias_target, fallible_handler_error_binding},
     rewrite::RewriteMode,
@@ -263,6 +263,11 @@ impl ConstInterpreter<'_> {
                 then_body,
                 else_body,
             } => self.execute_if(*condition, then_body, else_body, frames, bindings)?,
+            ConstInstructionKind::Match {
+                scrutinee,
+                arms,
+                default,
+            } => self.execute_match(*scrutinee, arms, default.as_ref(), frames, bindings)?,
             ConstInstructionKind::While { condition, body } => {
                 self.execute_while(*condition, body, frames, bindings)?;
             }
@@ -378,6 +383,26 @@ impl ConstInterpreter<'_> {
         if !body.is_empty() {
             frames.push(ExecFrame::Program {
                 instructions: Rc::clone(body),
+                ip: 0,
+            });
+        }
+        Ok(())
+    }
+
+    fn execute_match(
+        &mut self,
+        scrutinee: ExprId,
+        arms: &[ConstMatchArm],
+        default: Option<&Rc<[ConstInstruction]>>,
+        frames: &mut Vec<ExecFrame>,
+        bindings: &mut FrameBindings,
+    ) -> Result<(), ConstantFoldError> {
+        let Some(body) = self.select_match_arm(scrutinee, arms, default, bindings)? else {
+            return Ok(());
+        };
+        if !body.is_empty() {
+            frames.push(ExecFrame::Program {
+                instructions: body,
                 ip: 0,
             });
         }
@@ -711,7 +736,7 @@ impl ConstInterpreter<'_> {
         Ok(())
     }
 
-    fn evaluate_bool(
+    pub(super) fn evaluate_bool(
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,

@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C and Phases 0-2 complete
-**Current slice:** Phase 3, support match statements in const functions
+**Status:** Active - Foundation Phases A-C and Phases 0-3 complete
+**Current slice:** Phase 4, native multi-return and multi-bind
 **Blockers:** None known
-**Next action:** Write the Phase 3 design note: a prepared match instruction over the existing `MatchPattern` facts, then the selected-arm regression.
+**Next action:** Run Task 4.1: list every genuine single-slot restriction in the const call path.
 
 ## Global constraints
 
@@ -528,33 +528,82 @@ Row counts are unchanged, because pure expressions never appended rows. Call-dom
 
 ### Task 3.1: Discover the exact matching contract
 
-- [ ] Read the canonical match/pattern documentation and inspect `NodeKind::Match { scrutinee, arms, default, exhaustiveness }` and `MatchArm { pattern, guard, body }`.
-- [ ] Enumerate the existing resolved `MatchPattern` forms: literal, option absent/value/present capture, relational and choice variant with payload captures. Inspect `PatternValueKind::Runtime` and `Constant`, choice tag identity, typed comparison and capture placement. These are internal typed-AST states, not a new authored expression-pattern grammar. Ordinary source pattern syntax stays unchanged.
-- [ ] Trace HIR match lowering solely to establish the existing observable ordering. Do not call HIR helpers from Stage 4 or recompute exhaustiveness from source syntax.
-- [ ] Design one prepared match instruction that retains resolved facts and compiles each arm/default body once. Prefer shallow existing AST-owned pattern storage or compact prepared arm entries over cloning whole statements per invocation.
+- [x] Read the canonical match/pattern documentation and inspect `NodeKind::Match { scrutinee, arms, default, exhaustiveness }` and `MatchArm { pattern, guard, body }`.
+- [x] Enumerate the existing resolved `MatchPattern` forms: literal, option absent/value/present capture, relational and choice variant with payload captures. Inspect `PatternValueKind::Runtime` and `Constant`, choice tag identity, typed comparison and capture placement. These are internal typed-AST states, not a new authored expression-pattern grammar. Ordinary source pattern syntax stays unchanged.
+- [x] Trace HIR match lowering solely to establish the existing observable ordering. Do not call HIR helpers from Stage 4 or recompute exhaustiveness from source syntax.
+- [x] Design one prepared match instruction that retains resolved facts and compiles each arm/default body once. Prefer shallow existing AST-owned pattern storage or compact prepared arm entries over cloning whole statements per invocation.
 
 ### Task 3.2: Implement arm selection through the existing frames
 
-- [ ] Before implementation, add a selected-arm diagnostic regression: a failing unselected guard/body must not execute, but authored branches must still type-check.
-- [ ] Replace the explicit `NodeKind::Match` preparation rejection with a prepared instruction and execute it through `ConstInterpreter`.
-- [ ] Evaluate the scrutinee once. Check patterns in authored order, evaluate a guard only after its pattern succeeds and execute the first arm whose pattern and guard both succeed.
-- [ ] Publish captures into the selected arm's lexical binding scope before evaluating its guard. Ensure captures cannot leak to the next arm, the default or the enclosing function.
-- [ ] Retain ordinary `return`, `break` and `continue` unwinding and the existing work budget. A guard that rejects one arm must not leave a pending handler or captured binding.
-- [ ] Consume the AST's proven exhaustiveness/default facts without adding a second exhaustiveness checker.
+- [x] Before implementation, add a selected-arm diagnostic regression: a failing unselected guard/body must not execute, but authored branches must still type-check.
+- [x] Replace the explicit `NodeKind::Match` preparation rejection with a prepared instruction and execute it through `ConstInterpreter`.
+- [x] Evaluate the scrutinee once. Check patterns in authored order, evaluate a guard only after its pattern succeeds and execute the first arm whose pattern and guard both succeed.
+- [x] Publish captures into the selected arm's lexical binding scope before evaluating its guard. Ensure captures cannot leak to the next arm, the default or the enclosing function.
+- [x] Retain ordinary `return`, `break` and `continue` unwinding and the existing work budget. A guard that rejects one arm must not leave a pending handler or captured binding.
+- [x] Consume the AST's proven exhaustiveness/default facts without adding a second exhaustiveness checker.
 
 ### Task 3.3: Complete coverage and diagnostics
 
-- [ ] Extend existing match/const tests for literals, relational patterns, exhaustive choices, choice payload capture, Option none/value/present capture, guards, default and nested matches.
-- [ ] Cover valid authored literal patterns (including contextually typed numeric literals) whose typed-AST `PatternValueKind::Runtime` may become constant only after normal resolution. Do not admit local-variable or arbitrary expression patterns through const evaluation.
-- [ ] Cover match inside a range or collection loop, early return, a nested const call, a selected failure and a failure in an inactive arm.
-- [ ] Check imported nominal choice identities and structural-text comparison refusal where the current evaluator cannot inspect final URL characters.
-- [ ] Preserve typed diagnostic codes/reasons and authored spans. Avoid generic "unsupported const expression" errors where a supported match contains a more precise failure.
+- [x] Extend existing match/const tests for literals, relational patterns, exhaustive choices, choice payload capture, Option none/value/present capture, guards, default and nested matches.
+- [x] Cover valid authored literal patterns (including contextually typed numeric literals) whose typed-AST `PatternValueKind::Runtime` may become constant only after normal resolution. Do not admit local-variable or arbitrary expression patterns through const evaluation.
+- [x] Cover match inside a range or collection loop, early return, a nested const call, a selected failure and a failure in an inactive arm.
+- [x] Check imported nominal choice identities and structural-text comparison refusal where the current evaluator cannot inspect final URL characters.
+- [x] Preserve typed diagnostic codes/reasons and authored spans. Avoid generic "unsupported const expression" errors where a supported match contains a more precise failure.
 
 **Phase 3 exit:** All supported ordinary statement pattern forms execute through the prepared const instruction machine with correct capture scope and guard order. No new pattern parser, matcher registry or general static match optimisation exists.
 
 **Docs:** Update `docs/docs/functions/function-declarations.mtf` and the Const functions progress-matrix row for actual delivered match support. The existing canonical match contract remains authoritative.
 
 **Review:** Independently inspect guard laziness, capture scope restoration, transitive failures and costs in nested matches. This phase may pause.
+
+### Phase 3 outcome
+
+**Design.**
+- `ConstInstructionKind::Match` holds the scrutinee, the prepared arms and an optional default. Each `ConstMatchArm` holds the AST's resolved `MatchPattern` (cloned once at preparation), the guard and its body, compiled once.
+- `default` is `None` exactly when the AST proved the match exhaustive (`MatchExhaustiveness::ExhaustiveChoice`, for choices and for options). No second exhaustiveness check exists. Selecting no arm without a default is an infrastructure failure.
+- `matching.rs::select_match_arm` evaluates the scrutinee once. It tests patterns in authored order and binds a matching pattern's captures before its guard runs. The first accepting arm's body goes back to the frame machine, which pushes it as an ordinary `Program` frame, so `return`, `break`, `continue` and handler `then` unwind as before.
+- The guard uses `evaluate_bool`. The pending-handler early exits mirror `if` and `assert`. Authored source cannot place a `catch` in a scrutinee or guard, so those exits are defensive.
+- Captures are not removed after a guard rejects. Capture paths are interned per match, but an arm's guard and body name only that arm's own captures, which its pattern has just rebound, and no code outside the match can name them. The audit found no observable leak.
+
+**Pattern tests.**
+- `Coerced` wrappers are transparent.
+- Options test `OptionNone` or `OptionSome`.
+- Choices compare the variant `tag` and capture payload fields positionally by `field_index`, as HIR does.
+- Literal, relational and option-value patterns call `const_eval::fold_pattern_comparison`, which sits beside `fold_numeric_comparison`. It orders same-type payloads:
+  - integers through `i128`, including `U64` above `i64::MAX`;
+  - binary floats, where NaN satisfies no pattern;
+  - `Byte`;
+  - `Dec` at one scale;
+  - `Char` by scalar value;
+  - `Bool`.
+- Text compares for equality through `concrete_payload_text`. A resource-bearing string reports `structural_string_requires_final_text` at the pattern.
+- A payload pair that cannot be compared reports the unsupported `match pattern` operation.
+- `PatternValueKind::Runtime` values fold without bindings. In every source form probed they never reached a const body, including negative, relational, option, `Dec2`/`F64`/`Byte` and body-typed numeric subjects. Pattern completion folds authored literals first, so this path is defensive.
+
+**Tests.**
+- `const_function_match_selected_arm_success` was written first; before implementation it failed with MOTH-RULE-0053 at the match.
+- `const_function_match_patterns_success` covers:
+  - literal, text, `Char`, relational, `Dec2`, `F64` and `Byte` patterns;
+  - exhaustive and guarded choices with `as` captures;
+  - option none, value, relational and capture patterns;
+  - nested matches and matches in range and collection loops;
+  - early return, a nested const call, and a match in a catch handler using `then`.
+- `const_function_match_selected_failure_rejected` and `const_function_match_structural_text_rejected` pin codes, reasons and spans.
+- `const_function_match_inactive_arm_type_rejected` pins type-checking of an arm that is never selected.
+- `const_function_imported_success` adds owner-module and importing-module matches over an imported choice.
+- The two rejection cases that used a match now use a stepped collection loop, which is still unsupported.
+- The audit compared const and runtime results for these forms and found no difference attributable to this phase.
+
+**Cost.** Over 8,008 loop iterations in `tmp/phase3`, a nested relational match took 16.9 ms and the equivalent nested `if`/`else` chain took 22.6 ms (median of 20 release builds). A match tests one payload per arm and evaluates no condition expression.
+
+**Existing bugs found and recorded in `docs/bug-reports.md`:**
+- JS relational `Char` patterns order UTF-16 code units.
+- A nested match ending without `else` fails to parse in a non-final arm.
+- A value-producing match in a const body gets a vague diagnostic.
+- A choice arm repeated after a guarded arm warns as unreachable.
+- A collection literal argument in a `#` initializer causes a compiler bug.
+
+None of these is a regression from this phase.
 
 ## Phase 4: Support native multi-return and multi-bind
 

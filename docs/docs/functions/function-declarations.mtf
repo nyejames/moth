@@ -75,6 +75,11 @@ never receives a runtime body.
 - Const functions admit immutable ordinary-value parameters and one ordinary
   success slot in V1. Mutable references, fallible return channels, receiver
   methods and recursive dependency cycles are rejected.
+- A const body may use statement matches with the ordinary
+  @../branching/pattern-matching (pattern contract). The compiler evaluates
+  the scrutinee once and tests arms in order. A guard runs only after its
+  pattern matches. Unselected arms never execute, but they are still
+  type-checked.
 - A call in an ordinary function is folded during compilation. A call that
   cannot be evaluated is a source error rather than a runtime fallback.
 - Invalid const operations, unresolved runtime arguments and nonterminating
