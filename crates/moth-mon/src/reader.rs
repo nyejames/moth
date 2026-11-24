@@ -400,7 +400,7 @@ impl<'a> Parser<'a> {
                 ));
             }
             let value = {
-                let value = self.parse_value(depth)?;
+                let value = self.parse_value(depth, None)?;
                 self.path.truncate(base_len);
                 value
             };
@@ -412,7 +412,7 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
-        let value = self.parse_value(depth)?;
+        let value = self.parse_value(depth, None)?;
         let span = value.span;
         Ok(RawArg::Positional { value, span })
     }
@@ -474,7 +474,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_value(&mut self, depth: usize) -> Result<RawValue<'a>, MonError> {
+    fn parse_value(
+        &mut self,
+        depth: usize,
+        entry_key_span: Option<Span>,
+    ) -> Result<RawValue<'a>, MonError> {
         self.skip_space_and_comments();
         let start = self.pos;
         if self.at_end() {
@@ -487,26 +491,42 @@ impl<'a> Parser<'a> {
         }
         self.budget
             .check_depth(depth, Some(Span::new(start, start)))?;
-        self.budget.charge_nodes(1, Some(Span::new(start, start)))?;
 
-        match self.peek() {
-            Some('(') => self.parse_record_value(start, depth),
-            Some('{') => self.parse_container_value(start, depth),
-            Some('"') => self.parse_string_value(start),
-            Some('\'') => self.parse_char_value(start),
+        let value_start = match self.peek() {
+            Some('(') => RawValueStart::Record,
+            Some('{') => RawValueStart::Container,
+            Some('"') => RawValueStart::String,
+            Some('\'') => RawValueStart::Char,
             Some('-')
                 if self
                     .peek_next()
                     .is_some_and(|character| character.is_ascii_digit()) =>
             {
-                self.parse_number_value(start)
+                RawValueStart::Number
             }
-            Some(character) if character.is_ascii_digit() => self.parse_number_value(start),
-            Some(':') if self.starts_with("::") => self.parse_choice_value(start, depth),
-            Some(character) if is_identifier_start(character) => {
-                self.parse_identifier_value(start, depth)
-            }
-            _ => Err(MonError::at(
+            Some('0'..='9') => RawValueStart::Number,
+            Some(':') if self.starts_with("::") => RawValueStart::Choice,
+            Some(character) if is_identifier_start(character) => RawValueStart::Identifier,
+            _ => RawValueStart::Unsupported,
+        };
+        // Charge the entry before parsing an admitted value. An unsupported token still
+        // receives its own diagnostic if the original value-node allowance covers it.
+        if let Some(key_span) = entry_key_span
+            && !matches!(value_start, RawValueStart::Unsupported)
+        {
+            self.budget.charge_nodes(1, Some(key_span))?;
+        }
+        self.budget.charge_nodes(1, Some(Span::new(start, start)))?;
+
+        match value_start {
+            RawValueStart::Record => self.parse_record_value(start, depth),
+            RawValueStart::Container => self.parse_container_value(start, depth),
+            RawValueStart::String => self.parse_string_value(start),
+            RawValueStart::Char => self.parse_char_value(start),
+            RawValueStart::Number => self.parse_number_value(start),
+            RawValueStart::Choice => self.parse_choice_value(start, depth),
+            RawValueStart::Identifier => self.parse_identifier_value(start, depth),
+            RawValueStart::Unsupported => Err(MonError::at(
                 MonErrorCode::UnexpectedToken,
                 self.current_token_span(),
                 "MON value is not a supported literal",
@@ -743,10 +763,8 @@ impl<'a> Parser<'a> {
                     "MON map entry is missing its value",
                 ));
             }
-            // Account for the entry before parsing its value or growing the raw map.
-            self.budget.charge_nodes(1, Some(first.span))?;
             let value = {
-                let value = self.parse_value(depth + 1)?;
+                let value = self.parse_value(depth + 1, Some(first.span))?;
                 self.path.truncate(base_len);
                 value
             };
@@ -799,7 +817,7 @@ impl<'a> Parser<'a> {
             let base_len = self.path.len();
             self.path.push(PathSegment::Index(index));
             let value = {
-                let value = self.parse_value(depth + 1)?;
+                let value = self.parse_value(depth + 1, None)?;
                 self.path.truncate(base_len);
                 value
             };
@@ -822,7 +840,7 @@ impl<'a> Parser<'a> {
             }
             self.pos = checkpoint;
         }
-        self.parse_value(depth)
+        self.parse_value(depth, None)
     }
 
     fn parse_map_tail(
@@ -878,15 +896,8 @@ impl<'a> Parser<'a> {
                 return Err(error);
             }
             self.require_equals_spacing(equals_start, "map entry")?;
-            self.path.truncate(base_len);
-            self.skip_space_and_comments();
-            self.path.push(PathSegment::Index(index));
-            // Preserve the missing-value error without charging an entry that cannot be parsed.
-            if !self.at_end() {
-                self.budget.charge_nodes(1, Some(key.span))?;
-            }
             let value = {
-                let value = self.parse_value(depth + 1)?;
+                let value = self.parse_value(depth + 1, Some(key.span))?;
                 self.path.truncate(base_len);
                 value
             };
@@ -1225,6 +1236,17 @@ enum RawArg<'a> {
         value: RawValue<'a>,
         span: Span,
     },
+}
+
+enum RawValueStart {
+    Record,
+    Container,
+    String,
+    Char,
+    Number,
+    Choice,
+    Identifier,
+    Unsupported,
 }
 
 fn is_number_delimiter(character: char) -> bool {

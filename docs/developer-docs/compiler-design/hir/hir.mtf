@@ -122,7 +122,7 @@ Those facts are the linking authority later stages consume.
 
 A backend-neutral **structured HIR view** may be derived when a structured lowerer needs it. It is not a second semantic authority. Cache it only as derived data.
 
-Borrow validation will read validated HIR and write side tables. It will not rewrite the IR to taste. Numeric proof analysis likewise reads validated HIR and writes statement-keyed facts before publication without rewriting the IR.
+Borrow validation reads validated HIR and writes side tables without rewriting the IR. Numeric proof analysis reads the final HIR after convergence and records facts by operation identity, including checked `Invoke` operations.
 
 ## What can fail here
 

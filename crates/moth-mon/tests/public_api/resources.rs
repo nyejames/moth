@@ -124,6 +124,29 @@ fn map_entry_nodes_are_charged_during_parsing() {
         assert_eq!(error.span, Some(moth_mon::Span { start: end, end }));
     }
 
+    for (prefix, limit, indexes) in [
+        ("(m = {{{true = ", 6, vec![0, 0, 0]),
+        ("(m = {true = false, false = ", 7, vec![1]),
+    ] {
+        let schema = prepared(limit);
+        let mut path = vec![PathSegment::Field("m".into())];
+        path.extend(indexes.into_iter().map(PathSegment::Index));
+        let start = prefix.len() as u32;
+        for invalid_start in [',', ')', ']', '}', '@', '-', ':'] {
+            let error = decode_document(&format!("{prefix}{invalid_start}"), &schema)
+                .expect_err("an unsupported literal starter cannot supply an entry value");
+            assert_eq!(error.code, MonErrorCode::UnexpectedToken, "{invalid_start}");
+            assert_eq!(error.path, path);
+            assert_eq!(
+                error.span,
+                Some(moth_mon::Span {
+                    start,
+                    end: start + 1
+                })
+            );
+        }
+    }
+
     for document in ["(m = {{{{=}}}})", "(m = {{{{}}}})"] {
         let error = decode_document(document, &prepared(5))
             .expect_err("nested empty containers reach schema validation at the exact limit");
