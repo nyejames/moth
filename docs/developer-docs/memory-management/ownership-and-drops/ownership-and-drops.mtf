@@ -255,7 +255,7 @@ These must preserve source-language semantics and the unified ownership contract
 - Using advisory sites as exact lifetimes or complete topology proof.
 - Requiring ownership proof for correctness.
 - Allowing ownership optimisation to change alias behaviour.
-- Introducing an ordinary source-visible mandatory-consuming function API. Channel send remains the accepted deferred mandatory-transfer boundary.
+- Introducing an ordinary source-visible mandatory-consuming function API. Channel send is the accepted mandatory-transfer boundary: commitment transfers the graph, failed or losing operations preserve it. Ordinary call summaries must preserve those outcome-sensitive requirements when a wrapper sends its parameter. See @../../../docs/async (Channels).
 
 ## Related reading
 

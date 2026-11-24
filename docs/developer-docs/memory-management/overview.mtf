@@ -202,6 +202,25 @@ For every accepted allocation family `A`:
 
 A full-control backend can therefore reclaim every remaining allocation in `R` without tracing runtime reachability. The proof guarantees correctness. Memory quality depends on interval precision, cleanup frontiers, affine transfer, obligation reclassification, REC selection, field splitting and physical region planning.
 
+## Structured task and channel memory boundary
+
+The accepted deferred Channels V1 contract is @../../docs/async (Channels).
+Task invocation, channel queue, pending-operation and approved host registration
+lifecycles participate in the ordinary single-owner topology. Successful send
+commits mandatory affine transfer of an independent graph; failed or losing
+operations preserve responsibility. Logical endpoint release and cancellation
+cleanup are observable lifecycle events, separate from physical reclamation.
+Suspension does not weaken access, provenance, outlives or declared-region
+rules. Non-atomic REC remains task-local under the cooperative model.
+
+Before executable Channels, close the memory design brief and deliver the
+production borrow/provenance/retention and mandatory topology foundations,
+including a conservative validated GC-native plan for HTML-JS. The remaining
+physical strategies consume the Channels continuation and cleanup requirements
+after delivery. Do not implement a second checker or use GC to legalise an
+unproven graph. The roadmap owns the sequencing; this directory owns proof and
+physical memory contracts.
+
 ## Goals and tradeoffs
 
 - Unconditional memory safety under all backends and build profiles.

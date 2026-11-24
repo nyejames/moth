@@ -11,7 +11,7 @@ These features cover the common jobs that iterator `map`, `filter`, `filter_map`
 
 The implementation stays frontend-owned. Both source forms lower to ordinary HIR locals, calls, branches and loop CFG. No iterator, generator, producer, suspension or loop-result concept crosses the AST-to-HIR boundary.
 
-`yield` is not part of this design. The async design draft already reserves `yield` for explicit coroutine suspension.
+`yield` is not part of this design. Channels uses `io.task.yield()` for voluntary scheduling, not a generator or collection contribution. The repeated statement option-capture slice is delivered before Channels stream-loop acceptance; remaining collection production stays later. Retire the completed repeated-option tasks rather than reimplementing them.
 
 ## Current-state capsule
 
@@ -54,7 +54,7 @@ Before activation, confirm these capabilities are already delivered and stable:
 - HIR validation, borrow validation and lifetime-region analysis over ordinary loop CFG
 - target validation for ordinary collection construction and mutation
 - canonical fixed-width numeric identities and bounded body-local resolution of eligible numeric leaves in known `{T}` result shapes, with completed types before HIR publication and no numeric profile selection
-- the current async design still owns `yield` as explicit suspension syntax
+- the Channels design owns voluntary scheduling through `io.task.yield()`
 
 No iterator protocol, generator support, closure support or async implementation is a prerequisite.
 
@@ -105,7 +105,7 @@ Neither feature creates an iterable object model.
 
 There is no built-in `Iterator` type, iterator trait, associated `Item` type, adapter chain or magic `next` method in this plan.
 
-There is no generator or sequence-producing `yield` form. `yield` keeps its async design meaning as an explicit suspension point.
+There is no generator or sequence-producing `yield` form. Channels uses `io.task.yield()` for voluntary scheduling.
 
 ## Collection-producing loop syntax
 
@@ -847,7 +847,7 @@ When an existing stable diagnostic code already represents the same semantic fam
 - no generator `yield`
 - no lazy collection-producing loops
 - no coroutine or async implementation
-- no change to async `yield`
+- no change to `io.task.yield()`
 - no arbitrary choice-pattern repeated loops
 - no map-producing loop result
 - no fixed-collection-producing loop result
@@ -911,7 +911,7 @@ Re-anchor this low-priority design to the compiler that exists when the plan fin
 - [ ] Read every required authority from the active worktree.
 - [ ] Record branch, HEAD, status and active worktrees in untracked working notes.
 - [ ] Confirm the hard prerequisites are delivered.
-- [ ] Confirm `yield` still belongs only to async suspension design.
+- [ ] Confirm collection production adds no generator or `yield` statement; Channels uses `io.task.yield()`.
 - [ ] Inventory every current statement and template loop-header consumer.
 - [ ] Inventory the closed receiver dispatcher for declarations, assignments, multi-bind and returns.
 - [ ] Inventory `ValueBlock`, `ThenValue`, active value-target state and all exhaustive value-block walkers.
@@ -1353,11 +1353,11 @@ Do not teach a fictional iterator object as the conceptual model.
 
 ## Async documentation
 
-Verify `docs/docs/async/@entry.moth` still reserves `yield` for explicit coroutine suspension.
+Verify the canonical `docs/docs/async/channels.mtf` reference uses general repeated option capture for stream draining and `io.task.yield()` for voluntary scheduling.
 
 Only edit it if a short distinction is needed after the new loop docs land.
 
-Do not redefine `yield`, add generator wording or imply collection-producing loops suspend.
+Do not introduce a generator or imply collection-producing loops inherently suspend.
 
 ## Memory documentation
 

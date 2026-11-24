@@ -144,8 +144,9 @@ scope. Structured control flow introduces ordinary lexical scopes, while bare
 
 Arbitrary statement labels, labelled `break`, labelled `continue` and `goto`
 remain outside scope. Unlabelled loop exits stay structural and target the
-nearest enclosing loop. Future compiler-owned scopes such as `$async:` remain
-distinct because their marker carries language-defined behaviour.
+nearest enclosing loop. Channels V1 owns child tasks by function invocation,
+not a special async block. General detached tasks, source futures and
+user-selected schedulers are outside that model.
 
 ### Source-visible RC and dynamic shared ownership
 

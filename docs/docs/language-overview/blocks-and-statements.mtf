@@ -30,7 +30,7 @@ Moth uses explicit block delimiters. A colon opens a block and a semicolon close
 - Opening punctuation inside expressions, types or templates is not a scope opener.
 - The language has no general authored lexical-block construct or control-flow labels.
 - Immediate `identifier:` headers in executable statement position are reserved for declared regions. Full declared-region semantics remain deferred.
-- Normal control-flow keywords remain ordinary language forms. Future compiler-owned directive blocks use `$async:` and `$checked:`; both spellings are deferred and are not declared regions.
+- Normal control-flow keywords remain ordinary language forms. The accepted deferred expressionless `if:` form selects channel operations (see @../async (Channels)). `$checked:` remains an open future compiler-owned block spelling, not a declared region. There is no `$async:` block in the Channels design.
 - Exact `_:` is invalid.
 
 ### Physical placement

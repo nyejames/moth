@@ -348,22 +348,14 @@ separate accepted contracts.
 
 ## Channel boundary
 
-The accepted channel construction form is:
-
-[codeblock, $code "moth":
-    reader, writer Channel of AppMessage = Channel()
-]
-
-The annotation supplies the carried type. `Channel()` receives that information
-from the immediate receiving contract, not a runtime type argument. The two
-results belong to one channel, reader first and writer second. They do not
-represent two independent channels or two bidirectional endpoints.
+The accepted V1 Channels contract lives at @../async (Channels). The contextual
+two-result constructor is `reader, writer Channel of AppMessage = Channel()`.
+It produces directional endpoints of one channel. The Channels reference owns
+endpoint typing, buffering, logical closure, communication, selection, task
+lifetimes and suspension. Wiring does not create an endpoint or implicitly
+dispatch a task or send a message.
 
 Explicit send transfers an independent graph under the async memory contract.
-Wire identity is not channel data, and route formation performs no hidden send.
-The channel construction form settles no endpoint-parameter grammar, buffering,
-cancellation, close, selection, suspension or host-event ingress rules.
-
-Async operations, `>>`, `<<`, `spawn`, `yield` and structured `$async:` scopes
-belong to separate language contracts. Channel construction requires the
-initializer shown above.
+Wire identity and Route capabilities are not channel data. Route application
+and persistent event/observer bridges still require their own accepted
+consumer contract, even after Channels is delivered.

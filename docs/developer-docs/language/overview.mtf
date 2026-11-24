@@ -178,6 +178,14 @@ constructor routes, capability restrictions and the channel-construction
 boundary. Ordinary type, call, choice and memory contracts still apply outside
 its explicit parameter-context rules.
 
+### Channels
+
+- `docs/docs/async/channels.mtf`
+
+This reference owns the accepted deferred structured-task, channel, selection,
+closure, cancellation and suspension source contract. The routed memory,
+compiler and build authorities own its safety and execution handoffs.
+
 ### Project structure
 
 - `docs/docs/project-structure/project-layout.mtf`

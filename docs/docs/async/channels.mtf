@@ -1,0 +1,159 @@
+**Accepted V1 design.** Channels and structured tasks are not implemented yet. See @../progress (Progress) for implementation and target support. The examples on this page describe the intended language, not code that the current compiler can execute.
+
+Moth uses cooperative tasks and typed channels for concurrent work. Like Go, ordinary functions can wait for communication or IO without a separate async function type. Unlike detached goroutines, Moth tasks belong to the function invocation that starts them. Static access and lifetime validation apply across every task boundary.
+
+## Tasks and suspension
+
+A task is one resumable execution of ordinary Moth functions. Start a child task by prefixing a direct function or receiver-method call with `>>`:
+
+[codeblock, $code "moth":
+    >> worker(writer)
+]
+
+The caller evaluates the arguments once in normal source order and establishes the child's validated argument and endpoint obligations before publishing the child as runnable. A failed argument evaluation starts no child. Spawning is a statement, not an expression producing a task handle. The child begins independently when scheduled. Its direct target has zero ordinary success slots. Use channels for results. A child may return builtin `Error!`; map custom errors in an ordinary wrapper before spawning.
+
+Ordinary calls execute on the current task and can suspend transitively without annotations or call-site markers. Returning from an ordinary call means that invocation and its children have completed. The entry invocation also runs under a task-capable, builder-owned execution lifecycle. Purely synchronous code needs no task machinery when none is reachable.
+
+A scheduler runs one Moth task at a time in V1. A task can suspend on channel communication, selection, an approved host operation, voluntary yielding or its function's child-completion boundary. A call that may suspend need not suspend on every execution. Spawning makes work runnable rather than implicitly waiting for it. A non-yielding computation can prevent other tasks or host events from progressing. V1 does not promise preemption or parallel execution.
+
+Scheduling operations belong to the existing `io` prelude. `io.task.yield()` voluntarily gives another ready task or the host a scheduling opportunity. It does not yield a value or create a generator. There is no `async` or `await` function modifier, `$async:` block, `spawn` keyword or standalone `yield` statement.
+
+## Creating a channel
+
+[codeblock, $code "moth":
+    reader, writer Channel of String = Channel()
+]
+
+The annotation supplies the carried type to the constructor. Its two ordered results refer to one channel, reader first and writer second. `Channel of T` is a contextual construction contract, not a bidirectional value. The initializer is required. Direction is preserved through calls and type checking.
+
+A channel is unbuffered by default. Use the same constructor for bounded buffering:
+
+[codeblock, $code "moth":
+    reader, writer Channel of String = Channel(capacity = 32)
+]
+
+Capacity zero means rendezvous: a send completes when a receiver accepts it. Positive capacity bounds the number of queued messages. A full queue suspends a sender and an empty open queue suspends a receiver. Queued values are received in FIFO order. A negative or unrepresentable capacity is invalid. Use a non-negative compile-time I32 capacity in V1. Allocation or resource exhaustion remains fatal, not a recoverable channel error. Unbounded queues are outside V1.
+
+Multiple producers and consumers may use one channel. Every message is delivered to exactly one receiver, not broadcast. Directional endpoint parameters use the compiler-owned heads `ChannelReader of T` and `ChannelWriter of T`. They use exact carried-type identity and the existing generic inference rules. They are capabilities, not ordinary shared mutable queues. They need no `~` for communication. `~` retains its ordinary exclusive-access meaning.
+
+### Endpoint lifetimes
+
+Each live sending or receiving capability contributes a logical endpoint obligation. Ordinary calls and child-task dispatch may establish scoped endpoint obligations for their receiving parameters. An invocation cannot release an obligation still needed by another invocation. An endpoint can be forwarded to a compatible parameter, including a child task. Creating, passing, explicitly releasing and automatically releasing these obligations are compiler-known operations, not general reference counting.
+
+`writer.close()` releases the writer's obligation. `reader.close()` releases the reader's obligation. Neither forcibly closes another task's endpoint. A released endpoint is no longer usable. Automatic release occurs at a defined source lifetime boundary, not when a garbage collector happens to reclaim the handle. Closing the last writer prevents further sends and wakes receivers. Already accepted messages remain available until drained. Closing the last reader prevents further delivery, wakes blocked senders with a recoverable error and releases undeliverable queued values.
+
+The memory and compiler authorities must preserve this logical release behavior independently of physical representation. The endpoint obligation representation and exact parameter/local-position rules are a pre-implementation checkpoint: the conservative V1 baseline is scoped local and parameter capabilities, separate obligations on calls and dispatch, no endpoint escape through ordinary aggregates, return slots, Wire/Route captures or messages. Ordinary payload graphs are not granted these capabilities. The implementation plan must confirm the precise release sites and alias behavior before executable support.
+
+## Sending
+
+[codeblock, $code "moth":
+    message >> writer
+]
+
+A send evaluates its operands once. It waits until the message can be accepted, or delivery fails. Successful acceptance is a single commit, either to the bounded queue or directly to a waiting receiver.
+
+Ordinary allocation graphs must be independently transferable. On success the sender relinquishes the graph and cannot subsequently use it or any alias into it. A scalar has ordinary value semantics. To retain a graph, send an independent `copy` or construct a fresh message instead.
+
+Failure before commitment preserves the sender's responsibility. Sending when no receiver remains is recoverable builtin failure. The ordinary implicit failure and error-boundary rules apply, extended to channel operations:
+
+[codeblock, $code "moth":
+    message >> writer catch |err|:
+        io.line(err.message)
+        save_locally(message)
+    ;
+]
+
+A failure handler may still use a named message that was not transferred. The successful path cannot. After a join of these paths a use is legal only if it is valid on every incoming path. This is transactional transfer, not implicit copying and not rollback of earlier operand effects. Uncommitted temporary messages are cleaned up on failure or cancellation.
+
+## Receiving and closure
+
+[codeblock, $code "moth":
+    message = << reader
+]
+
+Receive is a prefix value-producing operation, not a declaration operator. It returns `T?`: present when a message is delivered and `none` when the final sending endpoint has closed and all queued messages have been drained. A receive on an empty open channel waits. Normal closure is absence, not a recoverable error. Repeated receives after closure return `none`. Cancellation is distinct from closure and cannot silently appear as `none`.
+
+The ordinary binding, assignment, option inspection and postfix `?` rules apply. There is no second receive-binding spelling. Repeated option capture gives a natural way to drain a channel:
+
+[codeblock, $code "moth":
+    loop << reader is |message|:
+        process(message)
+    ;
+]
+
+The loop reevaluates the receive on each attempt, binds a fresh present payload and exits on absence. This uses the general statement-level repeated-option loop, not a channel iterator or generator.
+
+A top-level optional payload needs two independently representable states of absence (a sent absence and end-of-stream). V1 must not flatten them. Until a nested-option contract is accepted, use a nominal choice wrapping the optional payload instead. Nested optionals are a separate language design, not a hidden channel result shape.
+
+## Selecting a ready operation
+
+An expressionless `if:` selects one channel operation. It is a separate statement form from Boolean `if` and `if value is:` matching.
+
+[codeblock, $code "moth":
+    if:
+        incoming = << reader => handle(incoming)
+        pending >> writer => io.line("sent")
+        else => io.line("nothing ready")
+    ;
+]
+
+A receive arm binds the ordinary optional result in its own arm scope, or discards it with a bare receive. A send arm offers one send. A trailing `if` guard on a communication arm enables that candidate when its Bool is true. The guard does not inspect a not-yet-received payload.
+
+Without `else =>`, selection waits for an enabled operation to become ready. With `else =>`, it performs the fallback immediately if none are ready. If several operations can complete, arbitrate fairly rather than always preferring the first ready arm. A rotating start position is the initial implementation candidate. There is no second biased-select API. A closed reader is ready with `none`; a writer with no receivers is ready with a failed send, not a successful one. Handle or disable closed receive arms in repeated selections.
+
+Selection commits at most one operation. Readiness and commit form one scheduler transaction. Losing receive arms consume nothing and losing send arms transfer nothing. Registration, wake-up, cancellation and removal of losing operations must avoid lost wake-ups and double completion. Operand evaluation and error order remain explicit. The implementation checkpoint fixes exact guard/operand staging and arm-body grammar against ordinary expression and match rules. The baseline evaluates guards and enabled operands once in authored order, requires preparation not to suspend, commits only the winner and destroys unused fresh temporaries. Side effects performed in preparation are not undone. A selected failed send follows ordinary failure delivery and does not run its success arm.
+
+## Function-scoped concurrency
+
+[codeblock, $code "moth":
+    produce |writer ChannelWriter of String| -> Error!:
+        "Priya" >> writer
+        "Rob" >> writer
+    ;
+
+    run || -> Error!:
+        reader, writer Channel of String = Channel()
+        >> produce(writer)
+        writer.close()
+
+        loop << reader is |name|:
+            io.line(name)
+        ;
+    ;
+
+    run()!
+]
+
+Every function invocation owns the child tasks it starts, including tasks started from nested branches or loops. The owner waits for all children on normal fallthrough or return, including an optional early return. A return value is staged until that join succeeds. No task may outlive the invocation that owns it. There is no detached task, public future, task-handle result or explicit task-group syntax in V1.
+
+Logical endpoint release and cleanup are ordered around joining. Release the parent's no-longer-needed endpoint obligations before waiting, while preserving all resources still needed by children, pending returns and valid retained capabilities. In the example the parent closes its own writer before draining the channel; the child retains its own writer. The last sender closes the stream. The owner must not destroy storage a child can still legally observe.
+
+### Failure and cancellation
+
+A recoverable error escaping the parent requests cancellation of its children and waits for them to finish cleanup before delivering the original error. A child that fails requests cancellation of the other children and causes its owning invocation to fail. A parent that is suspended must be woken so it can unwind to the owning invocation. The first observed recoverable failure is primary. Further failures during shutdown may be retained for diagnostics without replacing it. No success slots are published for a failed invocation.
+
+Child failure becomes an implicit builtin failure of the owning invocation, not a result of the already-completed spawn statement. Use the existing private same-module failure lane and builtin `Error!` boundary rules. An exported callable must expose or recover escaping failure, and a custom error slot requires explicit mapping. A caller can catch failure of the owning invocation through the ordinary call boundary. A catch inside a still-executing child or parent is not a general asynchronous exception handler for a sibling's failure.
+
+`io.task.cancel_children()` requests cooperative cancellation of the current invocation's outstanding children. Normal exit still joins them. Requested cancellation is not itself a new primary error. Cancellation wakes suspended operations, withdraws pending registrations and releases their obligations exactly once. It cannot reverse a committed send or external IO. A cancelled execution unwinds its active scopes and children rather than continuing arbitrary source statements through an ordinary catch. Running code observes cancellation at defined scheduling boundaries. Fatal assertions, semantic traps and host termination keep their existing fault classification rather than becoming recoverable child errors.
+
+## Memory and access
+
+Send and task dispatch must consume validated access, provenance and lifetime facts. Ordinary payloads cannot form arbitrary shared reference graphs across independently ending tasks. V1 uses independent message graphs, ordinary scalar values and compiler-proven legal task arguments. Cross-task ordinary mutable aliasing is forbidden. The memory-foundation checkpoint must establish the exact scoped immutable-borrow/transfer contract for dispatch, including transitive retained edges and calls that send their parameters.
+
+The compiler assigns a legal bounded lifetime owner before execution. A send moves affine cleanup responsibility at its successful commit, not the semantic lifetime owner. The channel owns queued payload obligations until receive or teardown. Failed or losing operations preserve uncommitted responsibilities. Declared-region-owned graphs cannot transfer independently. Copy or construct independent storage where legal. Endpoint obligations and pending scheduler registrations have their own bounded lifecycle; they are not counted ordinary aliases.
+
+Suspension retains live values and access obligations. It never grants fresh exclusive authority or legitimises a dangling reference. Borrow and lifetime validation must cover normal returns, implicit joining, errors and cancellation. The cooperative task model preserves non-atomic REC. Physical cleanup strategies do not change observable endpoint closure or source legality, including on a GC-native backend.
+
+See @../../developer-docs/memory-management (Memory management).
+
+## Host IO and constraints
+
+Host integration is part of V1, not a future alternative execution model. The existing `io` prelude and focused host packages provide ordinary operations for waiting on timers and host IO. Trusted runtime adapters turn host completions and events into typed independent values and scheduler wake-ups, including scoped channel ingress. Browser callbacks and native wake-up mechanisms are runtime implementation details. A host must not re-enter a running Moth execution or retain an ordinary Moth reference beyond its validated boundary. Registrations belong to a real invocation or builder lifecycle, have cancellation and teardown rules and cannot wake a destroyed instance.
+
+The compiler infers whether a callable may suspend, including transitive calls and its implicit join. Ordinary runtime functions require no annotation. The optional compiler-owned `$no_suspend` constraint requests proof that the annotated function cannot suspend on any reachable path. It does not enable a different execution mode, require callers to annotate themselves or imply that the function is infallible. Unknown foreign effects cannot establish the guarantee. Const functions remain compile-time only and cannot use Channels, task operations or runtime IO.
+
+## Progress and limits
+
+A blocked task is not automatically an error. A scheduler with no runnable work and no possible internal or registered host wake-up must diagnose a proven deadlock. The runtime retains enough bounded task, channel and wait identity to explain blocked sends, receives, selections and joins. A live timer or external event source can legitimately keep a task suspended. V1 does not promise general static deadlock freedom, termination, or detection of every partial protocol deadlock.
+
+V1 includes bounded queues, multi-producer and multi-consumer endpoints, selection, cancellation, host integration and global deadlock reporting. Finer task groups, richer partial-deadlock analysis, protocol/session types and truly parallel tasks remain separate proposals. No general callbacks, closures, first-class futures, shared mutable task graphs, unbounded queues or alternative async syntax are introduced.

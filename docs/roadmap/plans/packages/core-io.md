@@ -141,9 +141,10 @@ backstop. Unreachable IO calls create no requirement.
   events and callbacks into Moth need a runtime that suspends work, returns to the host and resumes
   later. The intended route is host event, runtime host adapter, ordinary Moth value, channel,
   structured scheduler and waiting coroutine. Structured async and channels must first establish
-  scheduler, suspension, bounded task lifetime and value transfer. A later host-ingress contract must
-  then define how a host callback queues a value, wakes the scheduler, handles re-entry and tears
-  down its registration.
+  scheduler, suspension, bounded task lifetime and value transfer. The accepted Channels V1
+  includes host ingress: its implementation must define how a host callback queues an independent
+  value, wakes the scheduler without re-entry and tears down its bounded registration. The canonical
+  source contract is `docs/docs/async/channels.mtf`.
 - **No callback ABI by imitation.** Moth does not adopt JavaScript's callback architecture as its
   asynchronous model. Design a callback ABI only if channels and structured scheduling demonstrably
   cannot express an important capability.

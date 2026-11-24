@@ -198,3 +198,16 @@ The proposed `$checked:` deeper proof-budget surface remains a separate design/r
 6. **Respect owners.** Canonical memory/compiler docs define semantics and stage boundaries. Boracle docs define reference and oracle behaviour. This companion owns live production progress, implementation choices, follow-ups and the handoff from research. The main roadmap owns only the combined parallel entry and prerequisites. The progress matrix links here instead of repeating this inventory.
 
 The document is intentionally permanent. Finishing an individual patch does not complete or delete the tracker. Keep only the current small queue and accepted decisions after closeout. Git records detailed historical implementation steps.
+## Channels V1 research input
+
+Before restarting concurrency-related Boracle or memory-model research, read
+`docs/docs/async/channels.mtf` and the canonical memory authorities. The accepted
+model requires explicit task dispatch and semantic send commits, independent
+message graphs, failure-only send recovery, implicit suspension and joins,
+logical endpoint leases, selection winner/loser effects and cancellation
+cleanup. These extend the normalized runtime borrow problem and lifetime
+requirements, not the separate const interpreter access model. The memory design
+closure must establish the production prerequisites and partition early proof
+from later physical planning. Research may investigate the new operations under
+explicit activation; no change to accepted borrow rules or production solver
+activation is implied by this documentation update.

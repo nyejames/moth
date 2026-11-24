@@ -23,7 +23,7 @@ Block and branch placement follows @../language-overview/#blocks-and-statements 
 
 ### Compile-time-known statement conditions
 
-The ordinary `if` form is the only conditional source form; there is no new static-branch syntax. Both bodies are frontend-validated before a known `Bool` selects the executable body before HIR. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
+The ordinary Bool `if` form is the only static conditional source form; there is no new static-branch syntax. The accepted deferred expressionless `if:` communication selection is a separate statement form specified in @../async (Channels). Both bodies are frontend-validated before a known `Bool` selects the executable body before HIR. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
 
 [codeblock, $code "moth":
     enabled #= false

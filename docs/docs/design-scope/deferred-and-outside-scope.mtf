@@ -21,7 +21,7 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - generic external package functions and types
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
-- future compiler-owned `$async:` blocks
+- Channels V1: function-scoped cooperative tasks, directional typed endpoints, implicit suspension, selection and host integration (see @../async (Channels))
 - first-class filesystem path values, directory values and runtime filesystem access
 - source-file reflection and reading `.moth` source as text
 - constructing a file reference from a runtime `String`

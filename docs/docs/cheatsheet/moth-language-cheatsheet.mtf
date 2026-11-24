@@ -1324,3 +1324,13 @@ See @../packages/core/io (Core IO) and @../packages (Foreign binding contracts).
 
 For full syntax and semantic details, see @../language-overview (Language overview), @../memory (Memory) and the topic references above.
 For deliberately excluded features and future language directions, see @../design-scope (Design scope).
+## Channels (accepted design, deferred)
+
+Moth uses cooperative function-owned tasks with ordinary calls that may suspend.
+Prefix `>>` dispatches a direct call, infix `>>` sends a value, prefix `<<`
+receives an option and expressionless `if:` selects a ready operation.
+`reader, writer Channel of T = Channel()` constructs directional endpoints.
+Successful sends transfer independent graphs. Last-sender release closes the
+stream, normal function exit joins children and failure cancels and joins them.
+There is no async block or mandatory suspension annotation. See @../async (Channels)
+for the complete design and @../progress (Progress) for support.

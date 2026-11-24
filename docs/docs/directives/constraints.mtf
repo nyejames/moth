@@ -261,3 +261,14 @@ These combinations are invalid:
 The division failure is caught, but the handler's checked `left - 1` can
 overflow when `left` is `I32` minimum. That failure escapes the `$infallible`
 boundary.
+
+### Deferred Channels constraint
+
+The accepted Channels V1 design adds `$no_suspend` as an optional function,
+method and generic-function guarantee. It requires proof that reachable
+execution, including implicit child joins and cancellation cleanup, cannot
+suspend. It does not grant suspension permission, change ordinary call syntax
+or imply `$infallible`. Use canonical inferred suspension summaries and trusted
+provider evidence, including recursion and concrete materialisations. Unknown
+external effects cannot prove absence. Ordinary runtime functions remain
+unannotated. See @../async (Channels). This constraint is not implemented.

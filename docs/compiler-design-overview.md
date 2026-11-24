@@ -350,6 +350,7 @@ A public interface contains the complete semantic facts observable by consumers:
 - frontier-enabling retention effects and outcome-sensitive success/error effects
 - external-boundary classifications
 - summary-carried numeric constraint guarantees for fast use, semantic traps and escaping recoverable failure
+- inferred suspension, task dispatch/join, channel transfer and logical endpoint effects, with outcome-sensitive failure/cancellation and stable capability contracts for Channels V1
 - project-context provenance for every affected exported fact
 
 Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Semantic constraint guarantees and public interface facts are derived from profile-independent authored semantics, never from an optional profile-dependent executable optimisation. A future optimiser must separately maintain correct executable reachability/link facts without changing those semantic summaries. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, output routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
@@ -996,6 +997,41 @@ remove an optional fold whose compiler cost and maintained complexity are unjust
 whole-function optimisation may occur only after semantic verification and only with a measured
 advantage over backend tools; it does not change accepted source or the validated HIR.
 
+#### Channels boundary
+
+`docs/docs/async/channels.mtf` owns accepted V1 source semantics. The
+compiler resolves contextual two-result channel construction, directional
+endpoint contracts, direct-call child dispatch, send/receive and expressionless
+`if:` selection through the ordinary typed expression, callable and statement
+owners. Required const execution excludes these runtime effects. Ordinary
+runtime calls require no suspension annotation.
+
+HIR represents task dispatch and communication as explicit ordered operations
+and CFG outcomes, including successful transfer, recoverable error, suspension,
+selection commitment and internal cancellation/cleanup. Normal invocation
+completion includes joining its owned children. No source Future, task-result
+carrier or general callback ABI is introduced. Canonical suspension and child
+failure facts converge over direct, generated, recursive and imported targets
+before publication. Distinguish spawn edges from ordinary call edges, including
+implicit join effects. `$no_suspend` verifies proven absence using the existing
+constraint attachment and summary-verification infrastructure. Unknown
+foreign behavior cannot prove absence. The inferred facts feed lifetime/borrow
+analysis, link reachability and validated continuation lowering, not a second
+source type system.
+
+Stage 6 and lifetime analysis validate task argument/endpoint obligations,
+independent graph transfer and suspension-live access, including successful,
+failed, cancelled and losing-select paths. A logical endpoint release is a
+semantic lifecycle event independent of physical destruction. Link topology
+instantiates actual invocation, channel and approved host lifecycle owners
+without inventing an escape or relaxing single-owner legality. The compiler
+publishes backend-neutral continuation and cleanup requirements with the
+ordinary memory requirements. Backends consume those validated facts and the
+selected physical memory/target plan. The precise continuation representation
+and host ABI require the Channels architecture checkpoint and evidence;
+synchronous functions retain normal call lowering where no suspension is
+reachable. No profile-dependent semantic acceptance or optional GC proof.
+
 ### Stage 5: HIR and validation
 
 High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.
@@ -1234,6 +1270,7 @@ The compiler records backend-neutral facts for each source and generated functio
 
 - stable local/cross-module source calls and binding-backed calls
 - NeverCall edges as ordinary reachable calls with no successor
+- Channels dispatch edges, suspension/host wake requirements and task/channel runtime capabilities, distinct from ordinary calls
 - runtime helper and capability requirements
 - numeric/cast, map and other target-gated operations
 - required Wiring contracts/captures where execution needs a capability
