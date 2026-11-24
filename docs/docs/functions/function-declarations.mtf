@@ -82,13 +82,11 @@ never receives a runtime body.
 - A const function with no calls is still type-checked and checked for static
   eligibility, but its parameterised body does not execute.
 
-Ordinary functions remain runtime functions in all build profiles.
-Optional whole-function folding is not part of required const execution.
-The existing release-only speculative AST folding is scheduled for removal
-by the active const-function foundation plan. A future post-semantic
+Ordinary functions remain runtime functions in all build profiles; a call
+with constant arguments is still a runtime call. Optional whole-function
+folding is not part of required const execution. A future post-semantic
 optimisation may be considered after benchmarking against backend optimisers,
 but it cannot change source acceptance, static selection or constraint proof.
-Required const calls continue to report source errors when they cannot evaluate.
 
 ### Never return contract
 

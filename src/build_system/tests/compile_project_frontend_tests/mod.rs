@@ -245,6 +245,8 @@ mod const_alias_signature_identity_tests;
 mod entry_api_stability_tests;
 #[path = "package_materialisation_tests.rs"]
 mod package_materialisation_tests;
+#[path = "profile_parity_tests.rs"]
+mod profile_parity_tests;
 #[path = "provider_sources_tests.rs"]
 mod provider_sources_tests;
 #[path = "public_export_route_tests.rs"]

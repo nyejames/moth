@@ -83,7 +83,7 @@ Strings have no ordering, indexing or in-place character mutation. `Char` suppor
 A const record is a compile-time group of named, folded values. Fields have unique labels with explicit values and don't see preceding field labels
 as bindings. Runtime code may read its ordinary fields but can't pass, return or store the whole record or call methods on it.
 
-Core functions with an explicit constant-evaluation contract and declared const functions can fold calls. Release builds may also fold proven const-safe ordinary calls. MON shares record syntax but is a separate data format.
+Core functions with an explicit constant-evaluation contract and declared const functions can fold calls. Ordinary function calls stay runtime calls in every build profile. MON shares record syntax but is a separate data format.
 
 ## References, copies and lifetimes
 
@@ -281,7 +281,7 @@ A const function writes `#` between its name and parameter list. Every call must
 
 Const declarations handle immutable ordinary-value parameters and one ordinary success slot in V1.
 A required const call that cannot execute is a source error, not a runtime fallback.
-Release builds may also fold an ordinary function whose whole body proves const-safe; a refused optimisation stays a runtime call.
+Ordinary function calls stay runtime calls in every build profile, even with constant arguments.
 
 
 Mutable parameters require `~place` for existing mutable storage, including named arguments. Fresh values and explicit copies stay unmarked:

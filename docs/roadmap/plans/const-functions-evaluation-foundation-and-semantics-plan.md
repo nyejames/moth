@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phase B complete
-**Current slice:** Foundation Phase C, permanent parity verification and simplified stage contract
+**Status:** Active - Foundation Phases A-C complete
+**Current slice:** Phase 0, reassess the shared evaluator after profile cleanup
 **Blockers:** None known
-**Next action:** Design the build-level Dev/Release parity gate (the frontend no longer receives a profile), then refresh benchmarks and update the canonical docs and R1 bug report.
+**Next action:** Trace duplicate traversals, appended expression rows, staging and clones in required const execution, then measure the Phase 0 workloads with existing counters.
 
 ## Global constraints
 
@@ -250,12 +250,24 @@ Release speculation, its eligibility proofs, erased-call evidence, the release b
 
 **Files:** HIR tests and snapshot/structural validation, integration harness, semantic interface and fingerprint tests, validation configuration and canonical documentation.
 
-- [ ] Add an unfeature-gated Rust parity test under `src/build_system/tests/compile_project_frontend_tests/`. Use **one** temporary project root and identical builder semantic capability registration, then independently compile it with `BuildProfile::Dev` and `Release` using the normal `compile_project_frontend` service. The existing `compile_fixture_result` creates a fresh directory each call, so don't invoke it twice and accidentally compare different source identities. Compare every base module and generated sidecar by stable origin. Start with `HirDisplayContext::render_module` for CFG, operation kinds, numeric modes and results, and assert omitted failure/constraint/provenance and public-interface facts explicitly. The renderer's `with_type_environment` and `with_side_table` helpers are currently guarded by `#[cfg(feature = "show_hir")]`; when using them in default unit tests, relax **only those test-facing cfg gates** to `#[cfg(any(test, feature = "show_hir"))]` and provide the published artefact's paired `TypeEnvironment` and identity context. If rendering cannot consume the published identity tables without a second owner, implement the narrow comparison over HIR fields in this test module instead. No production serializer or second IR. If incidental IDs vary, establish a test-only bijective mapping that preserves references, not regex deletion of names, IDs or operations.
-- [ ] Pair structural comparison with acceptance, exact diagnostic labels and runtime output for the R1 inventory, numeric constraints, static selection, dead validation, required const/TIR, imported calls and trusted foreign summaries. Compare semantic public interfaces/fingerprints explicitly: equal rendered HIR by itself does not cover those side tables.
-- [ ] Include an explicit test-compilation semantic-input control when the test-mode implementation exists; until then, record the gate for the later testing plan without inventing test mode now. Debug/release within any mode must agree.
-- [ ] Recheck every `FrontendBuildProfile` use and profile-sensitive semantic branch in module compilation, generated materialisation and AST/HIR. Every surviving profile use must be demonstrated as downstream physical choice or genuinely observation-only; no no-op forwarding. Correct any unrelated confirmed semantic divergence before closing the foundation.
-- [ ] Refresh benchmark/allocations/expression-row baselines without release speculation. Record the concrete complexity removals and retain/simplify/remove decisions for remaining eager folding. Update permanent documentation to describe *delivered* invariants only.
-- [ ] Keep the parity comparison in the default `cargo test -p moth --lib`/normal validation lane, not under `show_hir`, benchmark flags or an opt-in matrix. Mutation-check the test comparator with one deliberate opcode/CFG difference. Run selected constraint/HIR cases and appropriate phase gates per `validation.mtf`; only claim final merge readiness after the full gate passes.
+- [x] Add an unfeature-gated Rust parity test under `src/build_system/tests/compile_project_frontend_tests/`. Use **one** temporary project root and identical builder semantic capability registration, then independently compile it with `BuildProfile::Dev` and `Release` using the normal `compile_project_frontend` service. The existing `compile_fixture_result` creates a fresh directory each call, so don't invoke it twice and accidentally compare different source identities. Compare every base module and generated sidecar by stable origin. Start with `HirDisplayContext::render_module` for CFG, operation kinds, numeric modes and results, and assert omitted failure/constraint/provenance and public-interface facts explicitly. The renderer's `with_type_environment` and `with_side_table` helpers are currently guarded by `#[cfg(feature = "show_hir")]`; when using them in default unit tests, relax **only those test-facing cfg gates** to `#[cfg(any(test, feature = "show_hir"))]` and provide the published artefact's paired `TypeEnvironment` and identity context. If rendering cannot consume the published identity tables without a second owner, implement the narrow comparison over HIR fields in this test module instead. No production serializer or second IR. If incidental IDs vary, establish a test-only bijective mapping that preserves references, not regex deletion of names, IDs or operations.
+- [x] Pair structural comparison with acceptance, exact diagnostic labels and runtime output for the R1 inventory, numeric constraints, static selection, dead validation, required const/TIR, imported calls and trusted foreign summaries. Compare semantic public interfaces/fingerprints explicitly: equal rendered HIR by itself does not cover those side tables.
+- [x] Include an explicit test-compilation semantic-input control when the test-mode implementation exists; until then, record the gate for the later testing plan without inventing test mode now. Debug/release within any mode must agree.
+- [x] Recheck every `FrontendBuildProfile` use and profile-sensitive semantic branch in module compilation, generated materialisation and AST/HIR. Every surviving profile use must be demonstrated as downstream physical choice or genuinely observation-only; no no-op forwarding. Correct any unrelated confirmed semantic divergence before closing the foundation.
+- [x] Refresh benchmark/allocations/expression-row baselines without release speculation. Record the concrete complexity removals and retain/simplify/remove decisions for remaining eager folding. Update permanent documentation to describe *delivered* invariants only.
+- [x] Keep the parity comparison in the default `cargo test -p moth --lib`/normal validation lane, not under `show_hir`, benchmark flags or an opt-in matrix. Mutation-check the test comparator with one deliberate opcode/CFG difference. Run selected constraint/HIR cases and appropriate phase gates per `validation.mtf`; only claim final merge readiness after the full gate passes.
+
+### Phase C outcome
+
+**Parity gate (deviation from the item text, recorded as pushback):** after Phase B the frontend takes no profile, so compiling twice through `compile_project_frontend` would compare identical calls. `profile_parity_tests.rs` instead builds one project root through `build_project` without and with `Flag::Release`, the only place a profile exists before backend lowering. A capturing `BackendBuilder` wraps `HtmlProjectBuilder` and records pretty `Debug` of every module and generated sidecar handed to the backend (HIR with all side tables, type environment, borrow report, numeric proofs, resources, link facts, external imports and entry metadata with folded const fragments), the project facade interfaces, the text of every interned string and the successful-build warnings. Snapshots are byte-identical between profiles without any ID mapping, so no renderer cfg gate was relaxed. The one exception is interned `__scope_N` text, drawn from the process-wide `CONTROL_FLOW_SCOPE_COUNTER` and so different between any two builds in one process; the snapshot numbers those components by first appearance, a bijection the item permits (recorded in `docs/bug-reports.md`). A rejected fixture compares root-relative rendered diagnostics (code, reason, severity, title, locations, labels, message and guidance) and pins the `trap_assertion` and `escaping_error` `MOTH-RULE-0091` records. Coverage guards assert at least three lowered modules, a facade interface and a const fragment. Mutation check: changing `value * 3` to `value + 3` in the release build reported `operator: Multiply` versus `operator: Add` at the first differing line; changing a divisor operator reported the span change.
+
+**Coverage pairing:** the accepted fixture covers required const calls, static `if` selection, authored-dead assertion validation, `$infallible` evidence beside ordinary calls, a match, imported module calls, trusted `@core/text` and `@core/random` summaries and a generated generic sidecar. Debug/release integration pairs remain the acceptance, label and runtime-output authority for the R1 inventory, numeric constraints and template folding.
+
+**Test mode:** no test-compilation mode exists yet. The later testing plan must add a test-mode semantic-input control to this gate; debug and release within each mode must agree.
+
+**Profile recheck:** no `FrontendBuildProfile` remains. `BuildProfile` lives only in `build_system/{build.rs,build_profile.rs,output/{manifest,policy}.rs}` (re-exported from `build_system/mod.rs`), `builder/{compiled_project,mod,project}.rs` and `projects/html_project/{compile_input,html_project_builder}.rs`, whose `HtmlCompileInput::build_profile` field `js_path.rs` and `wasm/artifacts.rs` read. The `moth::builder` API only turns it into `Flag::Release` for `build_project`; every other use is downstream of the frontend call: backend build, JS path, Wasm artefacts and output folders.
+
+**Measurements** (release binaries, median of 15 builds in ms, baseline `a350bec08f` versus Phase B; RSS in MiB): fold-stress dev 13.5/12.1, release 11.7/12.0; speed-test 20.6/20.4, 21.0/20.8; template-stress 12.2/12.0, 11.9/12.4; type-stress 13.0/12.8, 14.2/12.8; collection-stress 20.7/20.4, 20.8/20.6; pattern-stress 13.6/14.0, 13.6/13.4; module-graph 11.0/11.4, 10.9/11.5. All differences are within run-to-run noise (about 5%); peak RSS moved by under 1 MiB on every workload and the binary shrank by 97 KiB. Phase B removed about 4,500 lines, the `FrontendBuildProfile` chain and both pre-fold tables. Remaining eager folding keeps the Phase A retain decisions: required const calls, TIR, explicit-constant operands, static Bool selection and deterministic operator folding each have a mandatory Stage 4 consumer.
 
 **Exit:** Canonical semantic HIR, source acceptance, diagnostics, constraint guarantees and interface summaries are profile-independent and guarded by automated regression coverage. Do not start the const feature phases before this gate completes.
 
@@ -621,17 +633,13 @@ Documentation ownership follows repository `AGENTS.md` and `docs/roadmap/roadmap
 
 ### This PR and foundation implementation
 
-This PR already consolidated and activated the plan at the top of the roadmap,
-retired the separate release-folding plan and recorded optional post-HIR folding
-as deferred in the progress matrix. The canonical references now describe the
-**accepted target design**, while the progress matrix and open R1 bug explicitly
-identify the current release-only AST behaviour pending deletion.
-
-During Foundation Phases A-C, replace transitional implementation-drift
-wording with delivered facts, remove old release budget/eligibility advice and
-update progress status only when implementation changes. Close R1 only after
-the preserved probes and permanent parity gate pass. Update `index.md` only
-if a file or ownership boundary actually changes.
+This PR consolidated and activated the plan at the top of the roadmap, retired
+the separate release-folding plan and recorded optional post-HIR folding as
+deferred in the progress matrix. Foundation Phases A-C deleted the release-only
+AST behaviour, replaced the transitional wording with delivered facts, removed
+the release budget and eligibility advice and closed R1 after the preserved
+probes and permanent parity gate passed. Update `index.md` only if a file or
+ownership boundary actually changes.
 
 ### On completing a semantic phase
 

@@ -773,7 +773,7 @@ Ordinary statement and value-producing `if` use the normal folded Bool authority
 
 A known `true` selects the `then` branch. A known `false` selects the `else` branch or an empty scoped result when absent. Preserve the selected lexical scope. Runtime or unknown conditions remain ordinary `if`.
 
-Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. A condition that only release folding makes constant reaches HIR as a constant, so both branches and their evidence survive. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
+Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
 
 Structural references were already graph-active before selection. Frontend errors in inactive ordinary branches remain errors. Structural `$feature` exclusion is a different earlier contract.
 
@@ -965,12 +965,10 @@ compile-time diagnostic. `$infallible` guarantees the runtime execution boundary
 `$safe_math` is a guarantee about selected fast arithmetic even when folded. Optional evaluation
 of ordinary runtime functions never supplies a value for static source selection.
 
-The accepted foundation removes optional release-only ordinary-function evaluation from Stage 4.
-Stage 4 does not prepare speculative ordinary-call candidates or erase ordinary runtime calls for
-a build profile. The existing release-only AST rewrite, erased-call ledger and its compensating
-proof paths are implementation drift pending the active foundation plan; they are not a permanent
-compiler contract. Retain only those failure, catch, assertion, selected fast-use and authored
-control-flow facts independently required for source validation.
+Stage 4 evaluates ordinary runtime functions in no build profile. It prepares no speculative
+ordinary-call candidates and never replaces an ordinary runtime call with its result; the frontend
+receives no build profile at all. Failure, catch, assertion, selected fast-use and authored
+control-flow facts are retained exactly as source validation requires.
 
 Folding is not mandatory for every eligible expression. Prefer the smallest complete implementation:
 retain a mandatory or measured useful early fold, simplify duplicate value/AST reconstruction or
@@ -982,7 +980,7 @@ advantage over backend tools; it does not change accepted source or the validate
 
 High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.
 
-HIR is the profile-independent semantic authority. For identical semantic inputs it retains equivalent operation kinds, selected numeric modes, control-flow decisions, call targets, result/error channels, constraint evidence and function summaries in debug and release. A permanent structural equivalence gate compares these semantics and public interfaces while ignoring only incidental local IDs and presentation metadata. The validated graph cannot be optimised into a different *source* verification verdict.
+HIR is the profile-independent semantic authority. For identical semantic inputs it retains equivalent operation kinds, selected numeric modes, control-flow decisions, call targets, result/error channels, constraint evidence and function summaries in debug and release. The frontend takes no build profile, so this holds by construction: `BuildProfile` first reaches the backend builder and output policy. A permanent equivalence gate builds one project in both profiles through `build_project` and compares the semantic backend handoff (HIR with its side tables, type environments, borrow reports, numeric proofs, link facts, resources, entry metadata, project facade interfaces and interned text), successful-build warnings and rendered diagnostics. The validated graph cannot be optimised into a different *source* verification verdict.
 
 A HIR `RegionId` identifies the lexical scope tree. Source-declared lifetime regions use distinct `DeclaredRegionId` metadata, never a manufactured `TypeId` or a reused lexical-region identity.
 

@@ -30,7 +30,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 ## Sequenced work
 
 
-- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** First establish debug/release semantic HIR parity, remove release-only ordinary-call speculation and audit all early folding machinery for semantic necessity and measured cost. The same phased plan then simplifies required const evaluation and adds accepted match, multi-result and const-method support. Complete the mandatory semantic foundation gates before starting later queued compiler work.
+- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. The same phased plan now simplifies required const evaluation and adds accepted match, multi-result and const-method support.
 
 - [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
@@ -315,9 +315,9 @@ restriction-oriented name **constraints**.
 
 ## Optional post-semantic ordinary-function folding (low priority)
 
-After the profile-independent compiler foundation removes release-only AST ordinary-call
-speculation, optional whole-function folding remains an intended future optimisation,
-not a current implementation commitment. It must begin only after mandatory semantic
+Release-only AST ordinary-call speculation has been removed. Optional whole-function
+folding remains an intended future optimisation, not a current implementation
+commitment. It must begin only after mandatory semantic
 verification and must not change authored control flow, constraint verdicts, static
 selection, borrow/lifetime legality, diagnostics, semantic HIR or public interfaces.
 

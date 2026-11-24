@@ -191,10 +191,9 @@ selects it. The evidence survives folding, dead-result elimination and later
 selection. HIR-generated fast range-guard delivery is also evidence. Lowering
 also records call sites and `$fast_math` range guards from selected AST
 statements it skips: statically infallible handlers and statements after a
-terminator. Inactive static branches record no fast use. Release speculation
-records every call it erases, with its catch containment, and HIR projects
-those calls in source order beside the retained call sites. Evidence, call
-summaries and verdicts are therefore identical in debug and release builds.
+terminator. Inactive static branches record no fast use. Ordinary calls are
+never folded, so evidence, call summaries and verdicts are identical in debug
+and release builds.
 
 `PublicCallSummary` carries three monotone bits: `uses_fast_semantics`,
 `may_trap` and `may_fail`. `may_fail` covers any recoverable error escaping

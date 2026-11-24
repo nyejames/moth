@@ -118,10 +118,8 @@ never influences static source selection, constraint verification or source
 acceptance. Debug and release must construct equivalent validated HIR from the
 same semantic inputs.
 
-Optional post-semantic ordinary-function folding is **deferred and unimplemented**
-in the accepted architecture. The existing release-only AST speculation is
-implementation drift scheduled for removal by the active const-function
-foundation plan, not a semantic guarantee. A future pass needs benchmark
+The compiler performs no ordinary-function folding in any build profile.
+Optional post-semantic folding is deferred: a future pass needs benchmark
 evidence of an advantage over backend optimisation and must operate only after
 semantic verification.
 
@@ -133,5 +131,4 @@ Required const execution remains bounded by typed project settings:
   in MiB for one required call, with the same aggregate multiplier.
 
 Configured values above compiler maxima are project configuration errors.
-Exhausting a required const budget reports a source error. No release-only
-ordinary-function speculation or budget `Note` is part of the target design.
+Exhausting a required const budget reports a source error.

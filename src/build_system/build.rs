@@ -58,6 +58,8 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
 };
+#[cfg(test)]
+use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::public_interface::{
@@ -598,6 +600,13 @@ impl ProjectCompilation {
                 .iter()
                 .flat_map(|package| package.boundary.successful_module_views()),
         )
+    }
+
+    /// Iterate the project boundary's base artefacts, with their published facade interfaces, in
+    /// `ModuleId` order. Generated sidecars and source-package boundaries are not included.
+    #[cfg(test)]
+    pub(crate) fn project_artefacts(&self) -> impl Iterator<Item = &CompiledModuleArtifact> + '_ {
+        self.project.successful_artefacts_in_module_id_order()
     }
 
     /// Number of successful module views (base artefacts plus generated sidecars).
