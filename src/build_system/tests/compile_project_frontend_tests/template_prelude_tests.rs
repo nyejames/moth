@@ -46,11 +46,8 @@ const PARITY_ERROR_FILES: &[(&str, &str)] = &[
 ];
 
 fn fixture_folded_output(files: &[(&str, &str)], frontend_surface: &mut BuilderSurface) -> String {
-    let compiled = successful_compilation_value(compile_fixture_result_with_surface(
-        files,
-        BuildProfile::Dev,
-        frontend_surface,
-    ));
+    let compiled =
+        successful_compilation_value(compile_fixture_result_with_surface(files, frontend_surface));
     entry_folded_output(&compiled)
 }
 
@@ -58,7 +55,7 @@ fn fixture_error_signatures(
     files: &[(&str, &str)],
     frontend_surface: &mut BuilderSurface,
 ) -> Vec<(String, Option<String>)> {
-    match compile_fixture_result_with_surface(files, BuildProfile::Dev, frontend_surface) {
+    match compile_fixture_result_with_surface(files, frontend_surface) {
         Ok(CompilationOutcome::Diagnosed(reports)) => {
             let mut signatures = reports
                 .iter_severity(DiagnosticSeverity::Error)
@@ -144,7 +141,6 @@ fn project_local_html_support_package_does_not_replace_the_core_package() {
     let mut minimal_surface = BuilderSurface::with_mandatory_core();
     let compiled = successful_compilation_value(compile_fixture_result_with_surface(
         files,
-        BuildProfile::Dev,
         &mut minimal_surface,
     ));
 
@@ -195,7 +191,6 @@ fn nested_route_exports_stay_out_of_the_mtf_prelude_but_bind_by_explicit_provide
     let mut minimal_surface = BuilderSurface::with_mandatory_core();
     let compiled = successful_compilation_value(compile_fixture_result_with_surface(
         files,
-        BuildProfile::Dev,
         &mut minimal_surface,
     ));
 
@@ -258,7 +253,6 @@ fn single_file_template_input_materialises_both_prelude_packages() {
 
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -299,7 +293,6 @@ fn check_only_template_input_binds_both_prelude_packages() {
 
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,

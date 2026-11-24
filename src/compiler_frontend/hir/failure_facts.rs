@@ -2,13 +2,11 @@
 //!
 //! Summary convergence reads direct unhandled producers and resolved call targets here, without
 //! retaining expression trees or changing the existing runtime HIR failure delivery. Failure
-//! contributors come from the pre-fold typed AST facts with authored-unreachable tails removed;
-//! release erasure neither adds, removes nor reorders one. Constraint evidence comes from the
-//! authored boundaries plus the selected HIR, including the call sites and fast-use witnesses of
-//! skipped catch handlers and statements after a terminator. Failure facts are classified before
-//! release folding and projected onto HIR call targets during construction; constraint evidence is
-//! captured then, while the typed AST bodies still exist, so verification can read this record
-//! after they are gone.
+//! contributors come from the AST classifier's facts with authored-unreachable tails removed.
+//! Constraint evidence comes from the authored boundaries plus the selected HIR, including the
+//! call sites and fast-use witnesses of skipped catch handlers and statements after a terminator.
+//! Both are projected onto HIR call targets during construction, while the typed AST bodies still
+//! exist, so verification can read this record after they are gone.
 
 use crate::compiler_frontend::ast::AstConstraintStatementSpan;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureWitnessSite;
@@ -57,16 +55,6 @@ pub(crate) struct HirConstraintEvidence {
     ///      statement even when an earlier call to that callee is outside it. Phase B derives its
     ///      target-only edge view from this list at the consumer.
     pub(crate) selected_call_sites: Vec<HirSelectedCallSite>,
-    /// Selected call sites erased by release folding whose enclosing expression HIR lowered.
-    ///
-    /// WHAT: the release-erased calls that replaced ordinary executable source.
-    /// WHY: `selected_call_sites` intentionally carries fast-use evidence without regard to
-    ///      liveness, because fast selection is not a liveness property. A callee's trap or
-    ///      escaping-failure hazard is liveness-conditioned, though, so `$infallible` may only
-    ///      treat the erased call as executable when its surrounding expression was lowered.
-    ///      Catch handler bodies and handled subjects are excluded from release speculation, so a
-    ///      row here always belongs to lowered executable source and its failure escapes.
-    pub(crate) live_erased_call_sites: Vec<HirLiveErasedCallSite>,
 }
 
 /// One direct call site recorded before catch handlers are pruned.
@@ -81,20 +69,6 @@ pub(crate) struct HirConstraintEvidence {
 pub(crate) struct HirSelectedCallSite {
     pub(crate) target: CallTarget,
     pub(crate) span: Option<SourceSpan>,
-}
-
-/// One executable ordinary call that release folding erased.
-///
-/// WHAT: the resolved target and authored span.
-/// WHY: the erased call retains the trap and escaping-failure hazards a debug build would observe
-///      at the runtime call. Reusing [`HirSelectedCallSite`] would lose the executable distinction
-///      that skipped-handler evidence deliberately lacks. The span is required because every
-///      projected row carries its authored call site, and the producer declines to erase a
-///      spanless call.
-#[derive(Clone, Debug)]
-pub(crate) struct HirLiveErasedCallSite {
-    pub(crate) target: CallTarget,
-    pub(crate) span: SourceSpan,
 }
 
 /// The one accumulator for [`HirSelectedCallSite`] rows.

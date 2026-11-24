@@ -1102,7 +1102,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ),
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
-            build_profile: self.context.build_profile,
             source_token_owners: self.source_token_owners.clone(),
             early_const_function_signatures: Rc::clone(&self.early_const_function_signatures),
             const_function_executables: Rc::clone(&self.const_function_executables),

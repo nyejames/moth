@@ -12,16 +12,6 @@ pub(crate) enum ConstBudgetCategory {
     Memory,
 }
 
-impl ConstBudgetCategory {
-    /// The prose name for this category in advice text.
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Work => "work",
-            Self::Memory => "retained memory",
-        }
-    }
-}
-
 /// Unit in which one budget limit is expressed.
 ///
 /// WHY: configured work and memory limits share the same refusal type as structural hard limits

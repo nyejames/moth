@@ -15,7 +15,6 @@ use crate::build_system::create_project_modules::compiled_boundary::{
 use crate::build_system::create_project_modules::module_artifact_store::ProviderSlot;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
@@ -93,7 +92,6 @@ fn run_directory_lane_with_surface(
         let (strings, mut warning_sink) = warning_owner.compiler_parts_mut();
         super::super::compilation::compile_directory_frontend_in_premerge_lane(
             &config,
-            FrontendBuildProfile::Dev,
             validated_output_settings.as_ref(),
             &style_directives,
             frontend_surface,

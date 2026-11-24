@@ -1,6 +1,5 @@
 //! Rendering retained source and diagnostic identities after their producing owners end.
 
-use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
@@ -207,7 +206,6 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         let mut project_source_builder = None;
         let frontend = compile_project_frontend_with_inputs(
             &mut config,
-            BuildProfile::Dev,
             None,
             &StyleDirectiveRegistry::built_ins(),
             &mut surface,

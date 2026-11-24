@@ -5,7 +5,6 @@
 //! `Rc<AstModuleEnvironment>` instead of depending on pass-order-specific builder state.
 //! Builder state lives in `builder.rs`; this file owns only the finished data contracts.
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBody, GenericFunctionTemplate,
@@ -132,7 +131,6 @@ pub(crate) struct AstModuleLookups {
     // reference everything through one Rc<AstModuleEnvironment>.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
 }
 
 /// Final AST module environment paired with its canonical TypeEnvironment.

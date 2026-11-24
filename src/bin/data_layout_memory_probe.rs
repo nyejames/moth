@@ -325,7 +325,6 @@ fn main() {
     let result = moth::benchmarking::run_frontend_benchmark_with_report_owner(
         moth::benchmarking::FrontendBenchmarkOptions {
             entry_path: PathBuf::from(entry),
-            build_profile: moth::benchmarking::FrontendBenchmarkBuildProfile::Dev,
             build_config_inputs: Vec::new(),
         },
     );

@@ -1210,7 +1210,6 @@ fn build_ast_with_registered_types(
             sorted,
             module_anchor_path,
             synthesizes_entry_start,
-            build_profile: context.build_profile,
             capacity_estimate,
             resolved_file_references,
             module_origin,

@@ -1,0 +1,77 @@
+divisor || -> I32:
+    return 2
+;
+numerator || -> I32:
+    return 8
+;
+identity |value I32| -> I32:
+    return value
+;
+
+-- F1: a local defined from an ordinary call keeps the division runtime.
+$infallible
+probe_local |value I32| -> I32:
+    d I32 = divisor()
+    result I32 = value // d catch:
+        assert(false)
+    ;
+    return result
+;
+
+-- F2: a direct call operand keeps the division's recoverable failure.
+$infallible
+probe_direct |value I32| -> I32:
+    return value // divisor()
+;
+
+-- F3: a later call result invalidates an earlier literal proof.
+$infallible
+probe_invalidated |value I32| -> I32:
+    d I32 = 2
+    n I32 = divisor()
+    result I32 = n // d catch:
+        assert(false)
+    ;
+    return result
+;
+
+-- F4: an inferred-lane call inside an error-slot body stays an invoke.
+$infallible
+probe_invoke |value I32| -> I32, Error!:
+    d I32 = 2
+    return numerator() // d
+;
+
+-- F5: multi-return order keeps the second slot's division.
+$fast_math $infallible
+probe_multi |value I32| -> I32, I32:
+    d I32 = 2
+    return numerator(), value // d
+;
+
+-- F6: an outer call never erases its checked argument.
+$fast_math $infallible
+probe_argument || -> I32:
+    return identity(8 // divisor())
+;
+
+-- F7: a cast-wrapped call result stays runtime.
+$infallible
+probe_cast |value I32| -> I32:
+    d I32 = 2
+    n I64 = cast divisor()
+    result I32 = value // d catch:
+        assert(false)
+    ;
+    return result
+;
+
+-- F8: statement-level boundary over a handled call.
+probe_statement |value I32| -> I32:
+    d I32 = 2
+    $infallible
+    result I32 = numerator() // d catch:
+        assert(false)
+    ;
+    return result
+;

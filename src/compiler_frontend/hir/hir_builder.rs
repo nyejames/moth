@@ -240,15 +240,6 @@ pub struct HirBuilder<'a> {
     pub(super) module_constants_by_name: FxHashMap<PathId, ConstValueId>,
     pub(super) module_const_values: ConstValueStore,
 
-    /// Statement-owned `Bool` conditions the folded-Bool authority decided before release folding.
-    ///
-    /// WHAT: `assert`, `if`, value-`if` and conditional-loop conditions, keyed by their expression
-    ///       root. A condition no profile folded has no row.
-    /// WHY: release speculation can replace an ordinary call with its constant result before HIR.
-    ///      Lowering classifies conditions by this pre-optimisation selection fact so a
-    ///      release-only fold cannot skip a body or a trap that a debug build keeps.
-    pub(super) pre_fold_bool_conditions: FxHashMap<ExprId, bool>,
-
     // === Fast ID -> arena index maps ===
     pub(super) block_index_by_id: FxHashMap<BlockId, usize>,
     pub(super) function_index_by_id: FxHashMap<FunctionId, usize>,
@@ -469,7 +460,6 @@ impl<'a> HirBuilder<'a> {
             fields_by_struct_and_name: FxHashMap::default(),
             module_constants_by_name: FxHashMap::default(),
             module_const_values: ConstValueStore::default(),
-            pre_fold_bool_conditions: FxHashMap::default(),
 
             block_index_by_id: FxHashMap::default(),
             function_index_by_id: FxHashMap::default(),
@@ -665,7 +655,6 @@ impl<'a> HirBuilder<'a> {
         span_sources: SpanResolutionSources<'_>,
     ) -> Result<HirLoweringResult, PreparedFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
-        self.pre_fold_bool_conditions = std::mem::take(&mut ast.pre_fold_bool_conditions);
 
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
         for contract in self.imported_functions_by_name.values() {

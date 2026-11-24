@@ -19,8 +19,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_control_flow_statement, render_invalid_fallible_handling,
     render_invalid_loop_header, render_invalid_match_arm, render_invalid_match_guard,
     render_invalid_match_pattern, render_invalid_standalone_statement,
-    render_invalid_statement_position, render_non_exhaustive_match, render_release_folding_budget,
-    render_unreachable_match_arm,
+    render_invalid_statement_position, render_non_exhaustive_match, render_unreachable_match_arm,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticSeverity, InvalidChoiceVariantReason,
@@ -596,18 +595,6 @@ unit_code! {
     }
 }
 
-unit_code! {
-    /// Which allowance a release fold stopped at.
-    ///
-    /// WHAT: separates one call's attempt allowance from the module's shared aggregate allowance.
-    /// WHY: release advice names the scope the reader can act on; the two scopes have different
-    ///      remedies (`const_work_limit` for this call, the module's total allowance for all calls).
-    pub(crate) enum ReleaseBudgetScope {
-        Call = 1,
-        ModuleAggregate = 2,
-    }
-}
-
 diagnostic_family! {
     UNREACHABLE_MATCH_ARM {
         internal: 3022,
@@ -951,51 +938,6 @@ diagnostic_family! {
     }
 }
 
-diagnostic_family! {
-    RELEASE_FOLDING_BUDGET_STOPPED {
-        internal: 3090,
-        stable: "MOTH-RULE-0090",
-        category: DiagnosticCategory::Rule,
-        severity: DiagnosticSeverity::Note,
-        title: "Release folding budget exhausted",
-        facts: [
-            unit: UnitFact<ConstBudgetUnit>,
-            limit: OptCountFact,
-            setting: OptStringFact,
-            scope: UnitFact<ReleaseBudgetScope>,
-        ],
-        labels: [],
-        extra: None,
-        ctor: manual,
-        view: ReleaseFoldingBudgetView,
-        render: render_release_folding_budget,
-    }
-}
-
-/// Advisory Note that one release folding attempt stopped at a budget bound.
-///
-/// WHAT: keeps the exhausted allowance as typed facts: its unit, the effective limit, the setting
-///       that raises a configured limit, and the allowance's scope.
-/// WHY: the runtime call stays in place, so this is advice rather than a source error. The
-///      compact compile-time evaluation family has no fact word left for the unit, and its
-///      `operation` fact names operations, so the advice sentence must be rendered here from
-///      facts rather than pre-rendered by the producer.
-pub(crate) fn release_folding_budget_stopped(
-    unit: ConstBudgetUnit,
-    limit: usize,
-    setting: Option<StringId>,
-    scope: ReleaseBudgetScope,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
-    DiagnosticDraft::with_facts(&RELEASE_FOLDING_BUDGET_STOPPED, span, |cursor| {
-        cursor.push::<UnitFact<ConstBudgetUnit>>(&unit)?;
-        cursor.push::<OptCountFact>(&Some(limit))?;
-        cursor.push::<OptStringFact>(&setting)?;
-        cursor.push::<UnitFact<ReleaseBudgetScope>>(&scope)?;
-        Ok(())
-    })
-}
-
 /// Compile-time evaluation draft without a numeric domain.
 ///
 /// Most failures are not numeric, so they leave the optional `numeric_type` fact empty.
@@ -1082,5 +1024,4 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_FALLIBLE_HANDLING,
     INVALID_MATCH_GUARD,
     COMPILE_TIME_EVALUATION_ERROR,
-    RELEASE_FOLDING_BUDGET_STOPPED,
 ];

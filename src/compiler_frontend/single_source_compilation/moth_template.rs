@@ -62,7 +62,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
-    CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
+    CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
 
@@ -871,7 +871,6 @@ fn fold_template_ast(
             string_table,
             path_fork,
             entry_dir: entry_scope,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution,
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

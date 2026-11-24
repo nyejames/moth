@@ -178,18 +178,14 @@ fn template_budget_error(
     unit: ConstBudgetUnit,
     limit: u64,
     setting: Option<&'static str>,
-    aggregate: bool,
 ) -> TemplateError {
     TemplateError::Budget(ConstBudgetExhaustion {
         category,
         unit,
         limit,
         setting,
-        aggregate,
         span,
         span_owner: None,
-        call_span: None,
-        call_span_owner: None,
         call_chain: Vec::new(),
     })
 }
@@ -198,7 +194,6 @@ fn template_output_limit_error(
     span: Option<SourceSpan>,
     unit: ConstBudgetUnit,
     limit: usize,
-    aggregate: bool,
     setting: Option<&'static str>,
 ) -> TemplateError {
     template_budget_error(
@@ -207,7 +202,6 @@ fn template_output_limit_error(
         unit,
         limit as u64,
         setting,
-        aggregate,
     )
 }
 
@@ -316,7 +310,6 @@ impl FoldOutputState {
                 limits.span,
                 ConstBudgetUnit::Mib,
                 limits.byte_limit,
-                limits.byte_aggregate,
                 Some("const_memory_limit_mb"),
             ));
         }
@@ -334,7 +327,6 @@ impl FoldOutputState {
                 limits.span,
                 ConstBudgetUnit::Pieces,
                 limits.piece_limit,
-                limits.piece_aggregate,
                 None,
             ));
         }

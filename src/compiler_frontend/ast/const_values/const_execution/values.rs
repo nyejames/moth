@@ -2,7 +2,7 @@
 //!
 //! WHAT: folds typed expressions to constant values, projects and updates field/index paths, and
 //!       builds the constant replacements and budget/diagnostic errors used by the executor.
-//! WHY: required calls, release rewriting and interpreted writes all need the same value-domain
+//! WHY: required calls, interpreted bodies and interpreted writes all need the same value-domain
 //!      operations; one module keeps projection and error semantics consistent.
 //! MUST NOT: execute statements, resolve aliases or decide eligibility.
 
@@ -353,18 +353,14 @@ pub(super) fn limit_error(
     unit: ConstBudgetUnit,
     limit: u64,
     setting: Option<&'static str>,
-    aggregate: bool,
 ) -> ConstantFoldError {
     ConstantFoldError::Budget(ConstBudgetExhaustion {
         category,
         unit,
         limit,
         setting,
-        aggregate,
         span,
         span_owner: None,
-        call_span: None,
-        call_span_owner: None,
         call_chain: Vec::new(),
     })
 }
@@ -375,7 +371,7 @@ pub(super) fn hard_limit_error(
     unit: ConstBudgetUnit,
     limit: usize,
 ) -> ConstantFoldError {
-    limit_error(span, category, unit, limit as u64, None, false)
+    limit_error(span, category, unit, limit as u64, None)
 }
 
 pub(super) fn expression_with_value(

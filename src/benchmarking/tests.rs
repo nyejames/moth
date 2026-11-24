@@ -2,8 +2,8 @@ use crate::benchmarking::FrontendBenchmarkOutcome;
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::benchmarking::frontend::run_frontend_benchmark_with_record_limit;
 use crate::benchmarking::frontend::{
-    FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkInput,
-    FrontendBenchmarkInputValue, FrontendBenchmarkOptions, run_frontend_benchmark,
+    FrontendBenchmarkFailureKind, FrontendBenchmarkInput, FrontendBenchmarkInputValue,
+    FrontendBenchmarkOptions, run_frontend_benchmark,
 };
 use std::io::Write;
 
@@ -30,7 +30,6 @@ fn frontend_benchmark_runs_for_simple_file() {
 
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     };
 
@@ -102,7 +101,6 @@ fn frontend_benchmark_threads_typed_build_config_inputs() {
 
     run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path: file_path,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: vec![FrontendBenchmarkInput::new(
             "enabled",
             FrontendBenchmarkInputValue::Bool(true),
@@ -190,7 +188,6 @@ if value is:
 
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     };
 
@@ -230,7 +227,6 @@ if value is:
     let report = run_frontend_benchmark_with_record_limit(
         FrontendBenchmarkOptions {
             entry_path: file_path,
-            build_profile: FrontendBenchmarkBuildProfile::Dev,
             build_config_inputs: Vec::new(),
         },
         2,
@@ -279,7 +275,6 @@ fn frontend_benchmark_retains_source_package_warning() {
 
     let options = FrontendBenchmarkOptions {
         entry_path: root.to_path_buf(),
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     };
 
@@ -330,7 +325,6 @@ fn frontend_benchmark_fails_for_missing_file() {
 
     let options = FrontendBenchmarkOptions {
         entry_path: missing_file,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     };
 
@@ -365,7 +359,6 @@ fn frontend_benchmark_converts_failed_directory_compilation() {
 
     let report = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path: temp_dir.path().to_path_buf(),
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     })
     .expect("a diagnosed directory should produce a benchmark report");
@@ -395,7 +388,6 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_path_validation() {
 
     let error = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path: missing_entry,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     })
     .expect_err("busy raw benchmark should fail before the entry path is validated");
@@ -432,7 +424,6 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
 
     let error = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     })
     .expect_err("busy raw benchmark should fail before compiler work");
@@ -465,7 +456,6 @@ fn frontend_benchmark_reports_invalid_syntax() {
 
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
-        build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     };
 

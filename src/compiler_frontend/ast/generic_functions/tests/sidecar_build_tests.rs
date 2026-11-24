@@ -79,7 +79,6 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
         path_fork: &mut path_fork,
         entry_dir,
         synthesizes_entry_start: false,
-        build_profile: requester.build_profile,
         file_value_resolution: None,
         config_resolution: None,
         build_config_values: Arc::new(Default::default()),

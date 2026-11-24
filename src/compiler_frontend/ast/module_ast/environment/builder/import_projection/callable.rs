@@ -182,7 +182,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         external_package_registry: &self.context.external_package_registry,
                         style_directives: self.context.style_directives,
                         file_value_resolution: self.context.file_value_resolution.as_ref(),
-                        build_profile: self.context.build_profile,
                         template_ir_store: &self.context.template_ir_store,
                         provider_materialisations: self.context.provider_materialisations,
                         materialised_const_provider_origins: &mut self

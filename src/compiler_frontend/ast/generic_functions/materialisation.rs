@@ -22,7 +22,6 @@ mod sidecar_build;
 mod stable_types;
 mod visibility;
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstBuildResult;
 #[cfg(test)]
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
@@ -76,7 +75,6 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     /// Completed provider rows that recover imported const function bodies during generated AST
     /// construction; the boundary registry is borrowed, never copied.
     pub(crate) provider_materialisations: &'a ProviderMaterialisationRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]

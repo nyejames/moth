@@ -25,7 +25,6 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -103,7 +102,6 @@ fn single_file_rejects_wrong_extension() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -136,7 +134,6 @@ fn single_file_rejects_missing_file() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -168,7 +165,6 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -216,7 +212,6 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
 
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -258,7 +253,6 @@ fn directory_project_discovers_multiple_entry_modules() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -313,7 +307,6 @@ fn directory_project_remaps_delta_collisions_across_modules() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -408,7 +401,6 @@ fn single_file_rejects_source_package_moth_folder_collision() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -460,7 +452,6 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -524,7 +515,6 @@ fn check_project_with_root_entry_only_publishes_no_interface() {
 
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -575,7 +565,6 @@ fn compile_selected_file(
     let mut project_source_builder = None;
     compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),

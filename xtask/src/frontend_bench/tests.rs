@@ -126,7 +126,7 @@ fn report_to_observations_sums_repeated_stages_and_validates_values() {
 }
 
 #[test]
-fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
+fn frontend_case_resolves_workload_entry() {
     let manifest = BenchmarkManifest {
         workloads: vec![BenchmarkWorkload {
             id: "fixture".to_string(),
@@ -151,7 +151,6 @@ fn frontend_case_uses_typed_dev_profile_and_workload_entry() {
         invocation.entry,
         std::path::PathBuf::from("repository-root").join("fixture")
     );
-    assert_eq!(invocation.profile, FrontendBenchmarkProfile::Dev);
 
     let cli_case = BenchmarkCase {
         runner: BenchmarkRunner::Cli {

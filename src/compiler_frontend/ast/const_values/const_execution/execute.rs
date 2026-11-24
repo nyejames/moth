@@ -796,13 +796,8 @@ impl ConstInterpreter<'_> {
             error_binding: own_error_binding.or(inherited_handler.error_binding),
             boundary: false,
         };
-        let release_provenances = rustc_hash::FxHashMap::default();
-        let rewritten = self.rewrite_with_bindings(
-            expression,
-            RewriteMode::InterpretedBody,
-            &release_provenances,
-            bindings,
-        );
+        let rewritten =
+            self.rewrite_with_bindings(expression, RewriteMode::InterpretedBody, bindings);
         self.state.active_handler = inherited_handler;
         let rewritten = rewritten?;
         if let Some(value) = self.evaluate_collection_read(rewritten, bindings)? {
@@ -905,11 +900,8 @@ impl ConstInterpreter<'_> {
             unit: ConstBudgetUnit::CallFrames,
             limit: MAX_CALL_DEPTH as u64,
             setting: None,
-            aggregate: false,
             span: refusal.span,
-            span_owner: owner.clone(),
-            call_span: refusal.span,
-            call_span_owner: owner,
+            span_owner: owner,
             call_chain,
         }
     }
@@ -1091,7 +1083,6 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
                 value_bindings.insert(binding.path, value);
             }
         }
-        let release_provenances = rustc_hash::FxHashMap::default();
         let mut services = ConstExecutionServices {
             builder: expression_builder,
             constants: const_values,
@@ -1105,7 +1096,6 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
         interpreter.rewrite_with_bindings(
             expression,
             RewriteMode::InterpretedBody,
-            &release_provenances,
             &mut value_bindings,
         )
     }
@@ -1164,9 +1154,6 @@ fn attach_donor_identity(
         ConstantFoldError::Budget(mut exhaustion) => {
             if exhaustion.span_owner.is_none() {
                 exhaustion.span_owner = Some(donor_identity.clone());
-            }
-            if exhaustion.call_span_owner.is_none() {
-                exhaustion.call_span_owner = Some(donor_identity.clone());
             }
             ConstantFoldError::Budget(exhaustion)
         }

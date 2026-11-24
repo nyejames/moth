@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
     retain_bounded_witness_hops,
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
-    ConditionLookup, ControlFlowExitScratch, ControlFlowExitSummary, folded_bool_condition,
+    ControlFlowExitScratch, ControlFlowExitSummary, folded_bool_condition,
     range_ordinal_update_is_emitted, statement_exits,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -355,7 +355,7 @@ fn pending_function_failure_facts_with_call_summaries(
 /// WHAT: classifies bodies once and closes their stable escaping-call edges with a worklist.
 ///       Only catch executability consumes provisional callee activity. Those queries retain
 ///       reverse dependencies and batch affected bodies after stable activation has drained.
-///       Finalization consumes the classified facts into `Ast::pre_fold_failure_facts` after
+///       Finalization consumes the classified facts into `Ast::function_failure_facts` after
 ///       dormant-boundary validation, so HIR projects exactly this authored-order decision.
 /// WHY: known bodies begin at the lattice bottom, so origin-free recursion stays infallible.
 ///      Unknown callees remain conservative. Unrelated bodies and summary-insensitive call
@@ -485,10 +485,10 @@ impl AstBuiltinFailureSummaries {
         self.functions.get(&identity)
     }
 
-    /// Consumes the summaries into the per-callable facts retained on `Ast::pre_fold_failure_facts`.
+    /// Consumes the summaries into the per-callable facts retained on `Ast::function_failure_facts`.
     ///
-    /// WHY: HIR must project the exact pre-fold contributor order and handler liveness that the
-    ///      classifier decided, rather than reclassifying a release-folded AST.
+    /// WHY: HIR projects the exact contributor order and handler liveness that the classifier
+    ///      decided, rather than reclassifying the frozen AST.
     pub(crate) fn into_function_facts(
         self,
     ) -> HashMap<AstFunctionIdentity, PendingFunctionFailureFacts> {
@@ -720,9 +720,9 @@ impl<'a> TraversalState<'a> {
         self
     }
 
-    /// Reads the pre-fold value of one condition, when the caller supplied folded values.
+    /// Reads the folded value of one condition, when the caller supplied folded values.
     fn folded_condition(&self, condition: ExprId) -> Option<bool> {
-        folded_bool_condition(condition, self.expression_builder.store(), self.constants?)
+        folded_bool_condition(condition, self.expression_builder.store(), self.constants)
     }
 
     /// Summarises one statement's authored exits when reachability is decidable.
@@ -734,7 +734,7 @@ impl<'a> TraversalState<'a> {
         Some(statement_exits(
             statement,
             self.expression_builder.store(),
-            ConditionLookup::Constants(Some(constants)),
+            Some(constants),
             &mut self.exit_scratch,
         ))
     }
@@ -1990,7 +1990,7 @@ fn classify_nodes(
                         bindings,
                         body,
                         state.expression_builder.store(),
-                        ConditionLookup::Constants(state.constants),
+                        state.constants,
                     );
                     effect = classify_range_failure(
                         range.domain,
@@ -2045,7 +2045,7 @@ fn classify_nodes(
                 if effect.is_some() {
                     effect
                 } else if state.folded_condition(*condition) == Some(false) {
-                    // A pre-fold folded-false statement loop never runs its body in any profile.
+                    // A folded-false statement loop never runs its body.
                     // HIR lowering omits the body and records its selected evidence instead, but
                     // deferred validation obligations still need their checks.
                     collect_inactive_validation_obligations(body, template_ir_store, state)?;

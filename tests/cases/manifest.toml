@@ -20441,14 +20441,7 @@ role = "primary"
 id = "release_ordinary_scalar_alias_mutation_parity"
 path = "release_ordinary_scalar_alias_mutation_parity"
 tags = ["integration", "functions", "release", "aliasing", "const"]
-contract = "language.functions.release_folding_preserves_scalar_alias_mutation"
-role = "primary"
-
-[[case]]
-id = "release_optimisation_budget_note"
-path = "release_optimisation_budget_note"
-tags = ["integration", "functions", "release", "const", "budgets", "diagnostics"]
-contract = "language.functions.release_budget_limited_call_stays_runtime"
+contract = "language.functions.release_preserves_scalar_alias_mutation"
 role = "primary"
 
 [[case]]
@@ -21008,10 +21001,10 @@ contract = "language.functions.const_alias_mutation_matches_runtime"
 role = "primary"
 
 [[case]]
-id = "const_function_release_folding_success"
-path = "const_function_release_folding_success"
-tags = ["integration", "functions", "const", "runtime"]
-contract = "language.functions.const_release_folding_preserves_runtime_output"
+id = "ordinary_calls_release_runtime_success"
+path = "ordinary_calls_release_runtime_success"
+tags = ["integration", "functions", "release", "runtime"]
+contract = "language.functions.release_keeps_ordinary_calls_at_runtime"
 role = "primary"
 
 [[case]]
@@ -21792,14 +21785,14 @@ role = "boundary"
 id = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
 path = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
+contract = "language.directives.safe_math_rejects_folded_fast_range_ordinal"
 role = "primary"
 
 [[case]]
 id = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
 path = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
+contract = "language.directives.safe_math_rejects_folded_fast_range_ordinal"
 role = "boundary"
 
 [[case]]
@@ -21820,28 +21813,28 @@ role = "boundary"
 id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
 path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+contract = "language.directives.safe_math_rejects_folded_fast_template_range_ordinal"
 role = "primary"
 
 [[case]]
 id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
 path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+contract = "language.directives.safe_math_rejects_folded_fast_template_range_ordinal"
 role = "boundary"
 
 [[case]]
 id = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
 path = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+contract = "language.directives.safe_math_rejects_folded_fast_template_range_step"
 role = "primary"
 
 [[case]]
 id = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
 path = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
-contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+contract = "language.directives.safe_math_rejects_folded_fast_template_range_step"
 role = "boundary"
 
 [[case]]
@@ -21890,14 +21883,14 @@ role = "primary"
 id = "source_constraints_folded_call_fast_rejected_release"
 path = "source_constraints_folded_call_fast_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
-contract = "language.directives.release_folding_keeps_the_fast_callee_witness"
+contract = "language.directives.release_keeps_the_fast_callee_witness"
 role = "primary"
 
 [[case]]
 id = "source_constraints_folded_call_summary_rejected_release"
 path = "source_constraints_folded_call_summary_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
-contract = "language.directives.release_folding_keeps_transitive_fast_summaries"
+contract = "language.directives.release_keeps_transitive_fast_summaries"
 role = "primary"
 
 [[case]]
@@ -21911,7 +21904,7 @@ role = "primary"
 id = "source_constraints_folded_call_hazards_rejected_release"
 path = "source_constraints_folded_call_hazards_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
-contract = "language.directives.release_folding_keeps_callee_hazard_evidence"
+contract = "language.directives.release_keeps_callee_hazard_evidence"
 role = "primary"
 
 [[case]]
@@ -21925,7 +21918,7 @@ role = "primary"
 id = "source_constraints_folded_call_first_witness_rejected_release"
 path = "source_constraints_folded_call_first_witness_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
-contract = "language.directives.release_folded_call_witness_keeps_source_order"
+contract = "language.directives.release_call_witness_keeps_source_order"
 role = "primary"
 
 [[case]]
@@ -21939,7 +21932,7 @@ role = "primary"
 id = "source_constraints_folded_caught_call_success_release"
 path = "source_constraints_folded_caught_call_success_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
-contract = "language.directives.release_folding_keeps_caught_failure_contained"
+contract = "language.directives.release_keeps_caught_failure_contained"
 role = "primary"
 
 [[case]]
@@ -22244,17 +22237,17 @@ contract = "language.directives.function_infallible_ignores_folded_false_loop_fa
 role = "boundary"
 
 [[case]]
-id = "source_constraints_function_infallible_release_folded_false_loop_rejected"
-path = "source_constraints_function_infallible_release_folded_false_loop_rejected"
+id = "source_constraints_function_infallible_call_conditioned_loop_rejected"
+path = "source_constraints_function_infallible_call_conditioned_loop_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
-contract = "language.directives.function_infallible_sees_assertion_in_release_folded_false_loop"
+contract = "language.directives.function_infallible_sees_assertion_in_call_conditioned_loop"
 role = "primary"
 
 [[case]]
-id = "source_constraints_function_infallible_release_folded_false_loop_rejected_release"
-path = "source_constraints_function_infallible_release_folded_false_loop_rejected_release"
+id = "source_constraints_function_infallible_call_conditioned_loop_rejected_release"
+path = "source_constraints_function_infallible_call_conditioned_loop_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "release"]
-contract = "language.directives.function_infallible_sees_assertion_in_release_folded_false_loop"
+contract = "language.directives.function_infallible_sees_assertion_in_call_conditioned_loop"
 role = "boundary"
 
 [[case]]
@@ -22433,15 +22426,15 @@ contract = "language.results.dead_source_keeps_catch_eligibility_validation"
 role = "boundary"
 
 [[case]]
-id = "implicit_failure_release_erased_call_liveness_rejected"
-path = "implicit_failure_release_erased_call_liveness_rejected"
+id = "implicit_failure_call_liveness_rejected"
+path = "implicit_failure_call_liveness_rejected"
 tags = ["integration", "language", "numeric", "results", "exports", "assertions"]
 contract = "language.results.failure_liveness_is_profile_independent"
 role = "boundary"
 
 [[case]]
-id = "implicit_failure_release_erased_call_liveness_release_rejected"
-path = "implicit_failure_release_erased_call_liveness_release_rejected"
+id = "implicit_failure_call_liveness_release_rejected"
+path = "implicit_failure_call_liveness_release_rejected"
 tags = ["integration", "language", "numeric", "results", "exports", "assertions", "release"]
 contract = "language.results.failure_liveness_is_profile_independent"
 role = "boundary"
@@ -22899,4 +22892,32 @@ id = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected_release
 path = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected_release"
 tags = ["integration", "directives", "numeric", "constraints", "diagnostics", "release"]
 contract = "language.directives.infallible_auxiliary_fold_stays_runtime"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_ordinary_call_evidence_rejected"
+path = "source_constraints_ordinary_call_evidence_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.ordinary_call_results_keep_runtime_constraint_evidence"
+role = "primary"
+
+[[case]]
+id = "source_constraints_ordinary_call_evidence_rejected_release"
+path = "source_constraints_ordinary_call_evidence_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.ordinary_call_results_keep_runtime_constraint_evidence"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_ordinary_call_evidence_accepted"
+path = "source_constraints_ordinary_call_evidence_accepted"
+tags = ["integration", "directives", "numeric", "constraints"]
+contract = "language.directives.proved_operations_stay_accepted_beside_ordinary_calls"
+role = "primary"
+
+[[case]]
+id = "source_constraints_ordinary_call_evidence_accepted_release"
+path = "source_constraints_ordinary_call_evidence_accepted_release"
+tags = ["integration", "directives", "numeric", "constraints", "release"]
+contract = "language.directives.proved_operations_stay_accepted_beside_ordinary_calls"
 role = "boundary"

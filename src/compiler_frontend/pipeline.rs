@@ -15,7 +15,6 @@
 //! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
@@ -185,8 +184,8 @@ pub(crate) struct FrontendFilePrepareInput<'a> {
 
 /// Everything `headers_to_ast` needs to build one module's AST.
 ///
-/// WHAT: the sorted header set, the preparation-anchor path, build profile, arena estimate and
-///       the Stage 0 file-value facts AST interprets for value-position paths.
+/// WHAT: the sorted header set, the preparation-anchor path, arena estimate and the Stage 0
+///       file-value facts AST interprets for value-position paths.
 /// WHY: the stage outgrew a readable positional list once Stage 0 resolution joined it, and a
 ///      named group keeps every call site self-describing instead of eight bare positions.
 pub(crate) struct AstBuildRequest<'a> {
@@ -196,7 +195,6 @@ pub(crate) struct AstBuildRequest<'a> {
     pub(crate) module_anchor_path: &'a Path,
     /// Whether preparation synthesized the compiler-owned entry `start` body.
     pub(crate) synthesizes_entry_start: bool,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
@@ -549,7 +547,6 @@ impl<'a> CompilerFrontend<'a> {
             sorted,
             module_anchor_path,
             synthesizes_entry_start,
-            build_profile,
             capacity_estimate,
             resolved_file_references,
             module_origin,
@@ -612,7 +609,6 @@ impl<'a> CompilerFrontend<'a> {
                 path_fork: &mut self.path_fork,
                 synthesizes_entry_start,
                 entry_dir,
-                build_profile,
                 file_value_resolution,
                 config_resolution: None,
                 build_config_values,

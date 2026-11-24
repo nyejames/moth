@@ -173,7 +173,6 @@ pub(crate) struct CliBenchmarkInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FrontendBenchmarkInvocation {
     pub(crate) entry: PathBuf,
-    pub(crate) profile: FrontendBenchmarkProfile,
 }
 
 #[derive(Debug)]
@@ -410,13 +409,12 @@ impl BenchmarkManifest {
         let workload = self
             .workload_for(case)
             .ok_or_else(|| self.runtime_error(case, "workload relationship is invalid"))?;
-        let BenchmarkRunner::Frontend { profile } = case.runner else {
+        let BenchmarkRunner::Frontend { .. } = case.runner else {
             return Err(self.runtime_error(case, "case does not declare a frontend runner"));
         };
 
         Ok(FrontendBenchmarkInvocation {
             entry: self.repository_root.join(&workload.entry),
-            profile,
         })
     }
 

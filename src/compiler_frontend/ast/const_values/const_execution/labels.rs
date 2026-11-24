@@ -4,8 +4,7 @@
 //! WHY: declaration validation and the executor refuse the same operation at different moments. A
 //!      single name keeps both refusals readable and stops the renderer falling back to "Const
 //!      function this expression cannot be executed".
-//! MUST NOT: decide eligibility, build diagnostics or own the reasons a refusal becomes a source
-//!           error or an ineligible release candidate.
+//! MUST NOT: decide eligibility or build diagnostics.
 
 /// A typed expression form the bounded executor cannot evaluate in any context.
 pub(super) const RECEIVER_METHOD_CALL: &str = "receiver method call";

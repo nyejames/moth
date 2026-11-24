@@ -6,7 +6,6 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
@@ -397,7 +396,6 @@ fn parse_single_file_ast_build_result_inner(
             path_fork: &mut path_fork,
             string_table,
             entry_dir: entry_path,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

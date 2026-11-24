@@ -51,8 +51,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::{
-    FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
-    FrontendFilePrepareSource,
+    FrontendFilePrepareContext, FrontendFilePrepareInput, FrontendFilePrepareSource,
 };
 use crate::projects::settings::Config;
 use std::fs;
@@ -734,7 +733,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
-        build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         global_string_table: None,
@@ -944,7 +942,6 @@ fn compile_api_only_root_and_assert_boundary() {
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
-        build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(&project_path_resolver),
         global_string_table: None,
         global_path_table: None,
@@ -1140,7 +1137,6 @@ third || -> I32:
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
         options: config.frontend_options(),
-        build_profile: FrontendBuildProfile::Dev,
         project_path_resolver: Some(&project_path_resolver),
         global_string_table: None,
         global_path_table: None,

@@ -17,7 +17,6 @@ use super::stable_types::{
     MaterialisationNominalSource, StableCallableBinding, StableFunctionSignature,
     StableFunctionTarget, import_canonical_folded_value,
 };
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::const_execution::{
     ConstBodyPreparationError, ConstBodyReferenceScope, ConstFunctionExecutable,
@@ -76,7 +75,6 @@ pub(crate) struct ConstFunctionMaterialisationTarget<'a> {
     pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) file_value_resolution: Option<&'a Rc<FileValueResolutionServices>>,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_ir_store: &'a Rc<RefCell<TemplateIrStore>>,
     pub(crate) provider_materialisations: Option<&'a ProviderMaterialisationRegistry>,
     pub(crate) materialised_const_provider_origins: &'a mut FxHashMap<OriginFunctionId, PathId>,
@@ -952,7 +950,6 @@ fn materialise_const_executable(
         Rc::clone(target.template_ir_store),
     )
     .with_style_directives(target.style_directives)
-    .with_build_profile(target.build_profile)
     .with_file_visibility(Arc::new(visibility))
     .with_early_const_function_signatures(Rc::clone(target.early_const_function_signatures))
     .with_const_function_executables(Rc::clone(target.const_function_executables))

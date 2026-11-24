@@ -10,9 +10,9 @@ warnings = "forbid"
 entry_error_code = 301
 rendered_output_exact = ""
 
-# Release folds the earlier proven prelude, so the Wasm capability gate rejects the retained
-# U32 addition in increment_u32 (line 22) rather than the debug profile's narrow U8 + I8 sum.
-# Pin that exact operation so an unrelated capability rejection cannot satisfy this case.
+# Release keeps every ordinary call, so the Wasm capability gate rejects the same narrow U8 + I8
+# sum as the debug profile. Pin that exact operation so an unrelated capability rejection cannot
+# satisfy this case.
 [backends.html_wasm]
 mode = "failure"
 flags = ["release"]
@@ -21,7 +21,7 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.recoverable_numeric_failure"
+reason = "unsupported_backend_feature.checked_numeric_operations"
 path = "input/@entry.moth"
-line = 22
-column = 18
+line = 8
+column = 17

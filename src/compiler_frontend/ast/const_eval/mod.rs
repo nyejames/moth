@@ -65,8 +65,8 @@ use std::borrow::Cow;
 pub(crate) enum ConstantFoldError {
     Diagnostic(DiagnosticDraft),
     NumericFailure(DiagnosticDraft),
-    /// A bound refused evaluation. Release speculation converts this to an advisory Note and
-    /// retains the runtime call; required evaluation converts it to an Error.
+    /// A bound refused evaluation. Every evaluation path surfaces this as an error: speculative
+    /// binding folds never swallow a budget refusal, so it always reaches the module build.
     Budget(ConstBudgetExhaustion),
     Infrastructure(Box<InfrastructureErrors>),
 }
@@ -86,15 +86,10 @@ pub(crate) struct ConstBudgetExhaustion {
     pub unit: ConstBudgetUnit,
     pub limit: u64,
     pub setting: Option<&'static str>,
-    pub aggregate: bool,
     /// Innermost source location that spent the allowance.
     pub span: Option<SourceSpan>,
     /// Declaring-domain owner of `span`, when the allowance was spent in a provider body.
     pub span_owner: Option<FrozenIdentityHandle>,
-    /// Innermost refused call site, which owns Note deduplication and display.
-    pub call_span: Option<SourceSpan>,
-    /// Declaring-domain owner of `call_span`.
-    pub call_span_owner: Option<FrozenIdentityHandle>,
     /// Active const-call sites, outermost first, retained for required diagnostics.
     pub call_chain: Vec<OwnedConstCallSite>,
 }

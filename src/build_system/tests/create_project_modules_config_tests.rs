@@ -344,7 +344,6 @@ fn loads_canonical_config_file_from_project_root() {
         crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        crate::build_system::BuildProfile::Dev,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -1612,7 +1611,6 @@ fn compile_directory_project_with_loaded_config(
         crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
     compile_project_frontend_with_inputs(
         &mut config,
-        crate::build_system::BuildProfile::Dev,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -1785,7 +1783,6 @@ fn in_root_config_symlink_completes_directory_build() {
         crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        crate::build_system::BuildProfile::Dev,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

@@ -2,7 +2,6 @@
 use super::{
     FrontendCompilationMode, compile_project_frontend, compile_project_frontend_with_inputs,
 };
-use crate::build_system::BuildProfile;
 use crate::build_system::build::{BackendBuilder, Project, ProjectCompilation, build_project};
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::create_project_modules_tests::successful_compilation_value;
@@ -41,7 +40,6 @@ use crate::compiler_frontend::external_packages::{
     ExternalTypeId, ExternalTypeSpec,
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
@@ -138,7 +136,7 @@ fn write_project_fixture(files: &[(&str, &str)]) -> tempfile::TempDir {
 
 /// Compiles one directory project from the given `(relative path, source text)` files.
 fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
-    successful_compilation_value(compile_fixture_result(files, false, BuildProfile::Dev))
+    successful_compilation_value(compile_fixture_result(files, false))
 }
 
 /// Compiles one `.mtf`-bearing directory project through the real HTML builder surface.
@@ -147,28 +145,12 @@ fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
 ///      real HTML project uses rather than a bare mandatory-core surface. `.mtf` support itself
 ///      is compiler-owned and no longer depends on this builder.
 fn compile_template_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
-    compile_template_fixture_with_profile(files, BuildProfile::Dev)
-}
-
-/// Compiles one template fixture under an explicit build profile.
-fn compile_template_fixture_with_profile(
-    files: &[(&str, &str)],
-    profile: BuildProfile,
-) -> ProjectFrontendCompilation {
-    successful_compilation_value(compile_fixture_result(files, true, profile))
+    successful_compilation_value(compile_fixture_result(files, true))
 }
 
 /// Freezes the diagnostics of a `.mtf`-bearing project that must be rejected as user source.
 fn compile_template_fixture_reports(files: &[(&str, &str)]) -> DiagnosticReportSet {
-    compile_template_fixture_reports_with_profile(files, BuildProfile::Dev)
-}
-
-/// Freezes the diagnostics of a template fixture under an explicit build profile.
-fn compile_template_fixture_reports_with_profile(
-    files: &[(&str, &str)],
-    profile: BuildProfile,
-) -> DiagnosticReportSet {
-    match compile_fixture_result(files, true, profile) {
+    match compile_fixture_result(files, true) {
         Ok(CompilationOutcome::Diagnosed(reports)) => reports,
         Ok(CompilationOutcome::Success { .. }) => {
             panic!("expected qualified-reference diagnostics")
@@ -182,14 +164,13 @@ fn compile_template_fixture_reports_with_profile(
 fn compile_fixture_result(
     files: &[(&str, &str)],
     template_surface: bool,
-    profile: BuildProfile,
 ) -> CompilationResult<ProjectFrontendCompilation> {
     let mut frontend_surface = if template_surface {
         HtmlProjectBuilder::new().frontend_surface()
     } else {
         BuilderSurface::with_mandatory_core()
     };
-    compile_fixture_result_with_surface(files, profile, &mut frontend_surface)
+    compile_fixture_result_with_surface(files, &mut frontend_surface)
 }
 
 /// Compiles one directory fixture through an explicitly selected builder surface.
@@ -198,7 +179,6 @@ fn compile_fixture_result(
 ///      the HTML surface and the minimal mandatory-core surface instead of assuming one default.
 fn compile_fixture_result_with_surface(
     files: &[(&str, &str)],
-    profile: BuildProfile,
     frontend_surface: &mut BuilderSurface,
 ) -> CompilationResult<ProjectFrontendCompilation> {
     let temporary_directory = write_project_fixture(files);
@@ -207,71 +187,11 @@ fn compile_fixture_result_with_surface(
     let style_directives = StyleDirectiveRegistry::built_ins();
     compile_project_frontend(
         &mut config,
-        profile,
         None,
         &style_directives,
         frontend_surface,
         &mut warning_owner,
     )
-}
-
-/// Compiles one fixture and freezes its successful warning/Note lane.
-///
-/// WHY: the normal fixture helper asserts diagnostics, while a release budget Note is a successful
-///      outcome. This helper keeps the same project construction and returns the frozen warning
-///      reports beside the compiled value.
-fn compile_fixture_with_warnings(
-    files: &[(&str, &str)],
-    profile: BuildProfile,
-) -> (ProjectFrontendCompilation, Option<DiagnosticReportSet>) {
-    let temporary_directory = write_project_fixture(files);
-    let mut config = Config::new(temporary_directory.path().to_path_buf());
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let build_config_inputs = BuildConfigInputSet::new();
-    let mut frontend_surface = HtmlProjectBuilder::new().frontend_surface();
-    let services = ProjectConfigParseServices {
-        style_directives: &style_directives,
-        frontend_surface: &frontend_surface,
-        build_config_inputs: &build_config_inputs,
-    };
-    let mut string_table = StringTable::new();
-    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
-    let validated_output_settings = load_project_config(
-        &mut config,
-        &services,
-        &mut source_builder,
-        &mut string_table,
-    )
-    .unwrap_or_else(|_| panic!("project config should load"));
-    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
-    let compilation = compile_project_frontend(
-        &mut config,
-        profile,
-        validated_output_settings.as_ref(),
-        &style_directives,
-        &mut frontend_surface,
-        &mut warning_owner,
-    )
-    .expect("fixture compilation should not fail infrastructure");
-    let compilation = match compilation {
-        CompilationOutcome::Success { value, .. } => value,
-        CompilationOutcome::Diagnosed(reports) => {
-            panic!(
-                "the fixture must compile successfully with at most budget Notes: {:?}",
-                terse::format_terse_diagnostic_reports(&reports)
-            )
-        }
-    };
-    warning_owner.commit_successful_warnings(SuccessfulWarningBoundary::Project, None);
-    match warning_owner
-        .finish_successful_warnings(compilation)
-        .expect("successful warnings should freeze")
-    {
-        CompilationOutcome::Success { value, warnings } => (value, warnings),
-        CompilationOutcome::Diagnosed(_) => {
-            panic!("the fixture must compile successfully with at most budget Notes")
-        }
-    }
 }
 
 /// Returns the artifact that owns the fixture's single entry root.
@@ -319,33 +239,6 @@ fn entry_folded_output(compiled: &ProjectFrontendCompilation) -> String {
     entry_folded_fragments(entry_artifact(compiled)).concat()
 }
 
-/// Counts infallible and fallible calls to module-owned functions across HIR statements and
-/// terminators.
-fn entry_hir_local_call_count(artifact: &CompiledModuleArtifact) -> usize {
-    let is_local =
-        |target: &CallTarget| matches!(target, CallTarget::Local(_) | CallTarget::ModulePrivate(_));
-    let mut calls = 0;
-    for block in &artifact.module.executable.hir.blocks {
-        calls += block
-            .statements
-            .iter()
-            .filter(|statement| match &statement.kind {
-                HirStatementKind::Call { target, .. } => is_local(target),
-                _ => false,
-            })
-            .count();
-        if let HirTerminator::Invoke {
-            operation: HirFallibleOperation::Call { target, .. },
-            ..
-        } = &block.terminator
-            && is_local(target)
-        {
-            calls += 1;
-        }
-    }
-    calls
-}
-
 #[path = "const_alias_signature_identity_tests.rs"]
 mod const_alias_signature_identity_tests;
 #[path = "entry_api_stability_tests.rs"]
@@ -356,8 +249,6 @@ mod package_materialisation_tests;
 mod provider_sources_tests;
 #[path = "public_export_route_tests.rs"]
 mod public_export_route_tests;
-#[path = "release_speculation_scope_tests.rs"]
-mod release_speculation_scope_tests;
 #[path = "scheduling_budget_tests.rs"]
 mod scheduling_budget_tests;
 #[path = "single_file_directory_discovery_tests.rs"]

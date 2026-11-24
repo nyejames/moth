@@ -16,7 +16,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -43,9 +42,6 @@ pub(crate) struct ConstExecutionServices<'a> {
 
 impl<'services> ConstExecutionServices<'services> {
     /// Borrow these services for one attempt with the caller's budget and state.
-    ///
-    /// The services are reborrowed, so one bundle can start several attempts (release rewriting
-    /// starts one per expression) without rebuilding the field list.
     pub(super) fn interpreter<'attempt>(
         &'attempt mut self,
         budget: &'attempt mut ExecutionBudget,
@@ -101,17 +97,6 @@ pub(super) struct ExecutionState {
     /// authored expression must follow it. The entry is registered with the rebuild, so the
     /// identity travels with the expression instead of being guessed from an authored span.
     pub(super) rewritten_handlers: FxHashMap<ExprId, Rc<[ConstInstruction]>>,
-    /// Ordinary calls one release rewrite replaced with folded constants.
-    ///
-    /// WHAT: `(callee path, authored call span)` rows recorded only by a `Release` rewrite walk.
-    /// WHY: the walk knows the erased call but not which callable owns the expression, so the
-    ///      caller drains these rows and attributes them to the node it is rewriting. Executing a
-    ///      prepared candidate runs nested walks in `InterpretedBody` mode, which do not record;
-    ///      a callee's internal folds therefore cannot be misattributed to its caller. The span is
-    ///      required because every evidence row carries its authored call site; release
-    ///      speculation declines a spanless call instead. Catch handler bodies and handled subjects
-    ///      are never folded, so every row belongs to source HIR lowers.
-    pub(super) release_erased_calls: Vec<(PathId, SourceSpan)>,
     /// Catch handler currently available to collection failures.
     ///
     /// This is not owned by one collection operation: a larger handled expression installs its

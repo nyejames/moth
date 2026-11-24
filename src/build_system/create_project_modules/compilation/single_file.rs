@@ -14,7 +14,6 @@ use crate::compiler_frontend::module_compilation::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 
 use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureFailure,
@@ -87,11 +86,10 @@ use super::{
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "single-file compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs and mode separate"
+    reason = "single-file compilation keeps configuration, directives, mutable builder/string/source owners, extension, build-config inputs and mode separate"
 )]
 pub(crate) fn compile_single_file_frontend_with_inputs(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -104,7 +102,6 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
         let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
         compile_single_file_frontend_with_target(
             config,
-            build_profile,
             style_directives,
             builder_surface,
             extension,
@@ -144,7 +141,6 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
 #[cfg(feature = "boracle")]
 pub(crate) fn compile_single_file_boracle_frontend(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -157,7 +153,6 @@ pub(crate) fn compile_single_file_boracle_frontend(
         let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
         compile_single_file_frontend_with_target(
             config,
-            build_profile,
             style_directives,
             builder_surface,
             extension,
@@ -229,11 +224,10 @@ enum SingleFileFrontendTarget {
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "single-file target compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs, mode, optional warning sink and target selector separate"
+    reason = "single-file target compilation keeps configuration, directives, mutable builder/string/source owners, extension, build-config inputs, mode, optional warning sink and target selector separate"
 )]
 fn compile_single_file_frontend_with_target(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -515,7 +509,6 @@ fn compile_single_file_frontend_with_target(
         let mut project_budget = ProjectDiagnosticBudget::from_config(config);
         let (completed_source_packages, transient_batches) = compile_source_package_inventories(
             config,
-            build_profile,
             style_directives,
             builder_surface,
             &external_packages,
@@ -662,7 +655,6 @@ fn compile_single_file_frontend_with_target(
         )?;
         let boundary_context = canonical::BoundaryCompilationContext::new(
             config,
-            build_profile,
             &project_path_resolver,
             Arc::clone(source_files),
             style_directives,
@@ -706,7 +698,6 @@ fn compile_single_file_frontend_with_target(
                 .build_source_provider_dependencies(module_id, &prepared, None, None)?;
             let compile_context = ModuleCompilationContext {
                 options: config.frontend_options(),
-                build_profile,
                 project_path_resolver: Some(&project_path_resolver),
                 source_files,
                 style_directives,

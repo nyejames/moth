@@ -72,15 +72,6 @@ impl ScopeContext {
     }
 
     // --------------------------
-    //  Build profile
-    // --------------------------
-
-    pub fn with_build_profile(mut self, profile: FrontendBuildProfile) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).build_profile = profile;
-        self
-    }
-
-    // --------------------------
     //  Visibility and binding environment
     // --------------------------
 

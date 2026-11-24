@@ -350,35 +350,26 @@ impl ConstExecutionMeter {
         if steps > self.limits.max_attempt_steps {
             return Err(Self::work_limit_exhaustion(
                 self.limits.max_attempt_steps,
-                false,
                 span,
             ));
         }
         if self.steps > self.limits.max_total_steps {
             return Err(Self::work_limit_exhaustion(
                 self.limits.max_total_steps,
-                true,
                 span,
             ));
         }
         Ok(())
     }
 
-    fn work_limit_exhaustion(
-        limit: usize,
-        aggregate: bool,
-        span: Option<SourceSpan>,
-    ) -> ConstBudgetExhaustion {
+    fn work_limit_exhaustion(limit: usize, span: Option<SourceSpan>) -> ConstBudgetExhaustion {
         ConstBudgetExhaustion {
             category: ConstBudgetCategory::Work,
             unit: ConstBudgetUnit::Steps,
             limit: limit as u64,
             setting: Some("const_work_limit"),
-            aggregate,
             span,
             span_owner: None,
-            call_span: None,
-            call_span_owner: None,
             call_chain: Vec::new(),
         }
     }

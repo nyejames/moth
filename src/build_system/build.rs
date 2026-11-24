@@ -2127,7 +2127,6 @@ pub(crate) fn build_project<E>(
     let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(string_table);
     let frontend_outcome = match compile_project_frontend_with_inputs(
         &mut config,
-        build_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

@@ -1,8 +1,8 @@
 //! Bounded execution of prepared const functions at required call sites.
 //!
 //! WHAT: owns the executable row, the preparation entry points and this module map. Sibling
-//!       modules compile bodies, rewrite source calls, select release candidates and run the
-//!       bounded typed-AST frame machine over `ConstValueStore` values.
+//!       modules compile bodies, rewrite required source calls and run the bounded typed-AST
+//!       frame machine over `ConstValueStore` values.
 //! WHY: constant initializers and required calls fold during environment construction, before
 //!      HIR exists. The typed AST body and the canonical expression store are the only available
 //!      representation at that boundary, so execution stays over that typed vocabulary and never
@@ -19,11 +19,9 @@
 //!
 //! ## Module map
 //!
-//! - `eligibility`: the single operation eligibility policy. It validates prepared bodies, proves
-//!   release candidates pure and scalar, and removes cyclic or incomplete candidate graphs.
-//! - `rewrite`: required and release AST expression rewriting, call-target discovery and
-//!   provenance transfer. `rewrite_required_const_calls` and `rewrite_release_calls` are the
-//!   module-tree entry points for the expression evaluator and finalizer.
+//! - `eligibility`: the single operation eligibility policy that validates prepared bodies.
+//! - `rewrite`: required AST expression rewriting and provenance transfer.
+//!   `rewrite_required_const_calls` is the module-tree entry point for the expression evaluator.
 //! - `instructions`: the compiled instruction vocabulary and declaration-time body compiler.
 //! - `labels`: the operation names shared by classification and execution refusals.
 //! - `state`: the interpreter's borrowed service context, live execution state and handler
@@ -74,7 +72,7 @@ mod state;
 mod values;
 
 pub(crate) use eligibility::const_body_rejection_diagnostic;
-pub(crate) use rewrite::{rewrite_release_calls, rewrite_required_const_calls};
+pub(crate) use rewrite::rewrite_required_const_calls;
 pub(crate) use state::ConstExecutionServices;
 
 use eligibility::validate_const_body_expressions;
@@ -83,9 +81,7 @@ use instructions::{ConstInstruction, compile_body};
 /// Why one authored const body cannot become a bounded typed executable.
 ///
 /// WHAT: the first unsupported operation and its authored location, if the body supplied one.
-/// WHY: declaration preparation, imported publication and the release classifier all
-///      need the same refusal site. Callers choose whether that refusal is a source error or an
-///      ineligible runtime candidate.
+/// WHY: declaration preparation and imported publication both need the same refusal site.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstBodyRejection {
     pub(crate) operation: &'static str,
@@ -191,7 +187,7 @@ pub(crate) fn executable_for_const_declaration(
 }
 
 /// Build the executable row for one prepared body when every statement is executable.
-pub(crate) fn executable_for_body(
+fn executable_for_body(
     signature: &FunctionSignature,
     body: &[AstNode],
 ) -> Result<ConstFunctionExecutable, ConstBodyRejection> {
