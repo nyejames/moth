@@ -85,9 +85,9 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### JS projected call arguments still retarget when a later argument rebinds the base
 
-- Found: projected-alias backend audit, 2026-11. Confirmed by Node probe on the current branch; pre-dates it. Needs a design decision; see Investigate.
-- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` keeps an earlier projected or copied argument as an unevaluated place load while a later argument's nested call is flushed into the prelude before the enclosing call. The JS computed-place helpers capture their base storage when constructed (`src/backends/js/runtime/places.rs`), so the retarget comes from that construction happening after the hoisted later argument ran.
-- Observed: `read_count(holder.items, replace(~holder))` returns the replacement's length. The same ordering affects whole-place copies (`read_count(copy holder, replace_holder(~holder))` returns 3 instead of 2) and nested fields (`read_count(outer.inner.items, replace_inner(~outer.inner))`). Authored index projections cannot reach this path because places only carry field projections.
+- Found: projected-alias backend audit, 2026-11. Confirmed again on the clean `0f384a5539` compiler. Fix awaits review of the HIR prerequisite in [BC-06](./roadmap/plans/production-borrow-checker.md#bc-06-relational-production-provenance).
+- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` can leave an earlier projected or copied argument unevaluated while a later nested call runs in the prelude. The JS computed-place helpers capture their base storage when constructed (`src/backends/js/runtime/places.rs`), after the nested call has already rebound it.
+- Observed: With an old length of 2 and a replacement length of 3, `inspect(holder.items, replace(~holder))`, `inspect(outer.inner.items, replace(~outer.inner))` and `inspect(copy holder, replace(~holder))` all observed 3. The whole-copy operand cloned after `replace`. Both direct and nested `copy` of the projected collection preserved its original length on this baseline. Authored index projections cannot reach this path because places only carry field projections.
 - Attempted fix (reverted, 2026-11): capturing earlier operands into compiler locals in HIR before borrow checking fixed the runtime order but kept changing borrow verdicts relative to the existing behaviour. Four review rounds each found new divergences:
   - mutable-capture actor (`old = pair.first; set_first(~pair.first, stamp())` accepted);
   - alias liveness through a capture (`observe(writer.first, rewrite(~pair))` accepted);
@@ -99,12 +99,11 @@ Check for an existing entry before adding one. Name where the problem lives, wha
   - copy-source liveness across a branch merge;
   - `__hir_tmp_*` named in a diagnostic.
 
-  The current borrow verdicts are computed on late-evaluation HIR, so any HIR-level capture alters what the checker sees.
-- Investigate: decide where source-order operand evaluation is owned. Options:
-  - borrow-check the existing HIR unchanged, then reorder operand evaluation in a post-borrow-check lowering step consumed by the JS backend (verdicts unchanged by construction);
-  - redefine borrow verdicts under source-order evaluation as a deliberate language decision, then capture in HIR.
-
-  Either way, add Node-executed cases for the projected, copied and nested-field shapes.
+  Current borrow verdicts see late-evaluation HIR. Review the HIR producer
+  correction before changing Stage 6. Do not preserve those verdicts by moving
+  evaluation after borrow checking. Check the ordinary access rules at the
+  captured operand and keep exclusive reservation out of this change.
+  Add executed whole-copy, projected, nested-field and same-call conflict cases.
 
 ### Rooted in-memory template sources may not reach disk resources on Windows
 

@@ -6,8 +6,8 @@ The accepted source language and memory semantics remain authoritative in `docs/
 
 ## Current handoff
 
-**Status:** BC-06 investigation active on `docs/const-foundation-profile-independent-semantics`. Proposed production provenance replacement awaits review. Const publication remains paused.
-**Next action:** Approve the baseline and bounded proof slices before production changes. Retain the existing checker until a complete replacement passes the cutover gates.
+**Status:** BC-06 archived baseline and finite test-only witnesses are recorded on `docs/const-foundation-profile-independent-semantics`. The production rewrite and const publication remain paused.
+**Next action:** Review the separate Stage 5 call capture prerequisite. Keep the existing Stage 6 checker until a representative bounded proof supports a complete replacement.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -40,7 +40,7 @@ The alpha liveness decisions use point-specific CFG future-use facts and reachab
 
 The production test owners include `borrow_checker_fact_tests.rs`, `borrow_checker_call_summary_tests.rs`, `borrow_checker_loop_tests.rs`, `borrow_checker_update_tests.rs`, `borrow_checker_scope_tests.rs`, `borrow_checker_jump_tests.rs`, `borrow_checker_drop_site_tests.rs` and `state_tests.rs`. Their checked cases cover same-statement access order, shared/mutable conflicts, rebindings and scope kills, loop back edges, path-dependent optional transfer, aggregate/map storage, fallible flow, fresh/aliased results and rejected uninitialised or immutable updates. The production `state_tests.rs` exercise in-place joins and visibility narrowing directly.
 
-Boracle has its own tested normalized problem, reference solver, operational oracle, differential and reduction lanes. `boracle/tests/differential.rs` deliberately pins a known shared-alias disagreement instead of concealing it. These sources were inspected, but no fresh benchmark, complete test suite or post-cutover Boracle replay was executed for this documentation-only checkpoint. Historical validation below must not be presented as validation of later code.
+Boracle has its own tested normalised problem, reference solver, operational oracle, differential and reduction lanes. `boracle/tests/differential.rs` deliberately pins a known shared-alias disagreement. The October inventory inspected these sources without running new checks. The later BC-06 baseline records fresh measurements and targeted Boracle results, not post-cutover validation.
 
 Production borrow access checks are implemented and mandatory. The full accepted lifetime-region and escape solver, retained-edge/frontier proofs, REC and validated physical memory plans are separate undelivered analyses. Stage 6 must supply stronger solver-independent facts before those consumers can rely on them. Existing alpha drop-site emission is not evidence of a complete collector-free ownership implementation.
 
@@ -61,7 +61,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 ### BC-06: Relational production provenance
 
-**Status:** Investigation approved on `docs/const-foundation-profile-independent-semantics`. The representation and implementation slices below are proposed for review. The pairwise prototype does not meet the cutover gate. Const C4 publication and Phase 5 remain paused.
+**Status:** The owner approved a committed baseline and a test-only proof on `docs/const-foundation-profile-independent-semantics`. Neither authorises a production rewrite. The pairwise prototype does not meet the cutover gate. Const C4 publication and Phase 5 remain paused.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
 
@@ -143,13 +143,11 @@ not retire a surviving derived holder. Test incompatible and redefined
 occurrences against a surviving one. Keep the existing conservative rule
 for unobserved exclusive loans. Missing optional transfer proof means borrow.
 
-Stage 6 depends on correct input order. The reported late capture of
-projected and copied operands comes from `hir/hir_expression/calls.rs`.
-Where the trace reproduces, settle and review the HIR producer correction
-before cutover. Test `inspect(copy holder.left, replace(~holder))` for
-old-child output, plus projected-place, nested-field and same-call
-conflicts. Do not repair the order after access validation or introduce
-new exclusive reservation rules without approval.
+Stage 6 depends on correct input order. The baseline below reproduces late
+capture in `hir/hir_expression/calls.rs`. Review the HIR producer correction
+before cutover. Test whole and projected copies, projected-place and
+nested-field operands and same-call conflicts. Do not reorder operands
+after access validation or introduce new exclusive reservation rules.
 
 **Why not flat or pairwise facts?** Root unions lose both paths and binding roles. Pairwise may-share links suffice for some local queries but not for substitution, composed stores or liveness: a result can alias `a` on one exit and a different result can alias `b` on another. Substituting the same actual for both formals makes the fields appear to overlap if the links were combined. Taking transitive closure of such a union is also unsound as evidence of coexistence. Pairwise coexistence between *links* only delays the same problem when transfer needs three or more compatible facts. The state alternative keeps the equality, edge, permission and loan facts together. A demand-driven slice is a cost optimisation to consider if the measured representation needs it, not an alternate acceptance path or a second solver.
 
@@ -306,6 +304,128 @@ contract.
 
 Boracle informs the design, not the acceptance decision. Its typed origin relations separate identity, containment, copy and explicit unknown. Its operational oracle uses concrete generations, slot/alias transitions and directed edges, but bounded executions do not prove loop safety. The existing reference unions some possible origins; its proposed relational refinement, generations and richer call/store summaries are research, not production implementations. The known terminal shared-alias disagreement and unsupported unknown call/collection cases limit differential evidence. Keep the oracle independent and leave research activation, new last-use rules, deferred exclusive call access, richer index predicates and downstream lifetime work out of this checkpoint.
 
+#### Committed baseline
+
+The release compiler came from a clean `0f384a5539` archive, not the linked
+pairwise prototype. It reproduced four unexpected accepts (immutable
+parameter stored in a writable aggregate, a retained child across lexical
+exit, a zero-result store and a store before failure) and four unexpected
+rejections (disjoint copied siblings with a live observer, field
+replacement, a rebound projected alias and scalar multi-bind). The
+coexistent copied sibling correctly rejects at the push. Direct reads
+after a write confirm graph identity, not exclusivity. Copied stores
+returned `21` on success and before failure, with a missing-entry
+fallback that would return `23`. An out-of-range `set` left the
+original entry and collection length unchanged
+(`old=1 incoming=2 size=1`). The numeric fixture confirms a committed scalar
+write, not retained-edge validation.
+
+The HIR order reproducer uses `holder ~= Box({1, 2})` and a `replace(~holder)`
+call that rebinds it to `Box({4, 5, 6})`. A positional shared operand
+`holder.items` or `outer.inner.items` followed by that call read the new
+length `3`, not the captured length `2`. `inspect(copy holder, replace(~holder))`
+also read `3`. The emitted JS calls `replace` before cloning the whole
+holder. Direct and nested **projected copy** controls read the old length
+as expected. Keep the HIR prerequisite separate from Stage 6. A producer
+fix needs to verify the borrow verdicts around earlier shared occurrences,
+not preserve verdicts from late-evaluation HIR.
+
+`just boracle` passed on the same archive. Default `boracle --dump differential`
+reported canonical reference/operational agreement and `CompleteSafe` for
+the local shared-alias, Boolean reassignment and checked integer
+reassignment probes (one, one and two completed executions). The same
+gate covers the normalized unknown-call refusal and the known terminal
+shared-alias disagreement. The successful numeric probe does not replay
+the historical input from BR-06. None of these bounded runs proves
+production legality or enables experiments.
+
+A release `moth-cli` build with `detailed_timers,benchmark_counters`, Rust
+1.99.0 and an Apple M1 Pro measured 18 workload inputs. The table shows
+selected medians in milliseconds from five samples after one warm-up and
+the maximum process RSS in MiB. A separate `MOTH_TIMERS=bench` replay
+collected counters. Worklist counters describe final reports, not all
+attempted work during convergence. A dash means no emitted recheck timing.
+
+| Workload | Check | Borrow initial | Borrow converge | Generated borrow recheck | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Alias receiver chain 1024 | 15.18 | 3.36 | 3.56 | — | 23.4 |
+| Origin fanout 512 | 10.62 | 2.42 | 2.45 | — | 18.6 |
+| Copy chain 512 | 5.28 | 0.59 | 0.64 | — | 16.2 |
+| Narrow chains 128 | 19.72 | 1.32 | 13.15 | — | 59.5 |
+| Narrow chains 512 | 184.55 | 11.64 | 160.91 | — | 837.3 |
+| Generic failure chain 128 | 14.38 | 1.08 | 7.37 | <0.01 | 47.3 |
+| Sibling loops 64 | 33.89 | 15.99 | 13.30 | — | 108.9 |
+| Branches 64, borrow-neutral | 4.45 | 0.76 | 0.63 | — | 18.4 |
+
+The largest narrow-chain case dominates the absolute RSS and convergence
+figures. The borrow-neutral branch series is not an exponential
+alternative stress test. These numbers establish a comparison baseline,
+not a production performance guard. Local `tmp/bc06/baseline_measure.json`
+retains the input fingerprints and raw samples. The original replay
+included a worktree-supplied re-entry fixture so its result describes the
+archived binary, not the fixture corpus at that revision.
+
+#### Test-only proof and cutover decision
+
+The standalone Rust witnesses under local `tmp/bc06/proof/` exercise
+exact allocation and binding cells, captured fields, distinct repeated
+allocations, retained edges, permission attenuation and copies. An access
+and its keeping holder must coexist in one alternative. Call witnesses
+also preserve formal permissions separately from equality, reject
+contradictory guards after substitution, refuse to copy unresolved
+identity, and forward ordered results and writes by outcome. A mixed
+two-node dependency cycle keeps both completions and recomputes from
+bottom after a lane change. The model does not consume HIR, compute
+last-use across CFGs, create source-package interfaces or implement a
+general projection domain.
+
+A separate experiment compares eager expansion with an exact product of
+supplied independent factors. It tests all partial queries on a small
+concrete relation and a transfer that needs three facts to coexist.
+Deterministic order makes the refusal boundary invariant under
+permutation of supplied factors, not of rows within a factor.
+Twelve independent choices fit 4,096 rows after
+8,190 attempted combinations and 12 setup units. With one fewer work
+unit, the last product refuses before allocation. A thirteenth choice
+exceeds the row cap. A factored query for 24 choices takes 48 row probes
+and 24 setup units and refuses at 71 units. These are experiment counts,
+not limits for compiler inputs or a bound on allocator traffic.
+
+| Independent choices | Eager rows retained | Eager rows generated | Eager rows probed | Factored rows retained and probed | Eager median (µs) | Factored median (µs) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | 16 | 30 | 16 | 8 | 0.333 | 0.042 |
+| 12 | 4,096 | 8,190 | 4,096 | 24 | 11.166 | 0.084 |
+| 16 | 65,536 | 131,070 | 65,536 | 32 | 218.750 | 0.084 |
+
+Each trial starts with the same prebuilt two-row factors. The eager
+measurement includes construction, a last-row query and teardown. The
+factored measurement only queries its supplied factors. Medians use 31
+samples of an optimised standalone test after one warm-up. Retained
+rows count payload entries, not process RSS or total peak memory.
+The experiment doesn't infer independence. Dense constraints can force
+one component to retain exponentially many rows: an even-parity
+relation projects to every combination on each proper subset but omits
+half the combined rows.
+
+**Next review:** Review the HIR capture prerequisite on its own. Capture
+each operand once before later effects and preserve delivery into its
+parameter slot. Test old-value output for copies, authored-site
+diagnostics for overlapping live shared operands and a disjoint
+control. Include a reversed-name control if widening the change to
+named arguments. Do not add exclusive reservation or reorder operands
+after Stage 6.
+
+Do not approve the production provenance rewrite on this evidence. It
+needs a representative HIR-shaped proof of bounded selector and
+recency abstraction, compatible future uses and factor inference through
+joins, calls and failure-lane changes. Measure lost precision and work
+on that model before choosing a guard. Project away dead observations
+and factor only proven independence. If a remaining component exhausts
+its budget, keep the result unpublished and distinguish unproven
+from an observed conflict. Review the source-facing handling of that
+case separately. No new diagnostic policy, fallback checker or
+production cap follows from the scratch refusals.
+
 ## Permanent performance evidence - 2026-10-12
 
 The following is the retained content of the temporary `borrow-checker-followup-evidence.md`. It was recorded during the exact-numeric implementation review on `expression-refactor`, corrections at `2e000a073` before the squash onto `main`. Code was re-inspected on `AUDITED_MAIN`: the major mechanisms below remain present, while current line numbers may differ after future merges. Numeric/AST work is not blamed for these costs. Equivalent pre-numeric runs exhibit the same issue.
@@ -392,7 +512,7 @@ A confirmed problem accepts the **need to investigate and fix** it, not the firs
 | `BC-03` | Confirmed, implementation open | High | Avoid unnecessary whole-module `check_borrows` in changed private-failure-lane refreshes. First prove affected-function and caller-summary invalidation, side-table replacement and deterministic report publication. Preserve the existing `Unchanged` fast path and ensure generated sidecar convergence is not bypassed. |
 | `BC-04` | Confirmed, implementation open | High | Replace repeated recursive `reaches_function` searches with a single deterministic iterative SCC/recursion classification. Include long acyclic chains, self recursion and mutually recursive SCCs. Do not independently promote recursive result precision. |
 | `BC-05` | Investigate, unmeasured | Medium | Measure repeated function cloning in `finalize_public_call_summary_effects_to_fixed_point` (`self.module.functions[function_index].clone()` each iteration) and full-state equality cost. Prefer borrowing/reuse before extra caches. Avoid adding a parallel call-graph owner without evidence. |
-| `BC-06` | Investigation approved, implementation awaits design review | Blocks const C4 | Replace coarse native provenance with composable projection-aware facts that retain coexistence and permission. See the proposed slices above. No research activation or downstream lifetime work. |
+| `BC-06` | Baseline and finite witnesses recorded, rewrite gated | Blocks const C4 | Review the separate HIR capture prerequisite and prove a bounded HIR-shaped relational model before replacing coarse native provenance. No research activation or downstream lifetime work. |
 | `BC-07` | Known capability gap, gated | Later | Complete solver-independent future/last-use and affine-transfer facts required by lifetime analysis, including loop final-iteration and detached stored-result cases. Missing optional transfer never becomes a rejection. Lifetime topology, retained-edge proofs and REC retain their own downstream ownership. |
 | `BC-08` | Evidence needed | Later | Investigate broad borrow-fact compaction only after measuring fact-table cost independently of lattice cloning. Keep immutable facts outside HIR and do not merge unrelated parser/statement layouts into this effort. |
 | `BC-09` | Untriaged | Later | Reassess use of folded private-constant HIR metadata in borrow analysis and temporary-local reduction after the typed-expression foundation and its reductions merge. It was a deferred compiler follow-up, not evidence of a current bug or an accepted optimiser. |
