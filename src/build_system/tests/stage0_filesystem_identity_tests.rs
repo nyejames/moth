@@ -169,7 +169,6 @@ fn unreadable_shipped_facade_reports_a_damaged_set() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = super::compile_project_frontend(
         &mut config,
-        crate::build_system::BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -229,7 +228,6 @@ fn unreadable_shipped_check_only_source_reports_a_damaged_set() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = super::compile_project_frontend_with_inputs(
         &mut config,
-        crate::build_system::BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -322,7 +320,6 @@ fn compile_single_file_for_filesystem_test(
     let mut project_source_files = None;
     super::compilation::compile_single_file_frontend_with_inputs(
         config,
-        crate::compiler_frontend::FrontendBuildProfile::Dev,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         builder_surface,
         extension,

@@ -7,8 +7,7 @@
 //! owner in `benchmark_suite.rs`; this file stays a thin entry wrapper.
 
 use moth::benchmarking::{
-    FrontendBenchmarkBuildProfile, FrontendBenchmarkOptions, FrontendBenchmarkReport,
-    run_frontend_benchmark,
+    FrontendBenchmarkOptions, FrontendBenchmarkReport, run_frontend_benchmark,
 };
 
 use crate::bench_history::effective_thread_count;
@@ -19,7 +18,7 @@ use crate::bench_types::{
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
-use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, FrontendBenchmarkProfile};
+use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest};
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_suite::{finish_suite_run, measure_cases};
@@ -123,12 +122,8 @@ pub(crate) fn run_one_frontend_case(
     let invocation = manifest
         .frontend_invocation(case)
         .map_err(|error| error.to_string())?;
-    let build_profile = match invocation.profile {
-        FrontendBenchmarkProfile::Dev => FrontendBenchmarkBuildProfile::Dev,
-    };
     let options = FrontendBenchmarkOptions {
         entry_path: invocation.entry,
-        build_profile,
         build_config_inputs: Vec::new(),
     };
 

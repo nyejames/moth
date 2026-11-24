@@ -16,7 +16,6 @@
 //! `ScopeContext` built during body emission.
 
 use super::config_resolution::resolve_config_declaration;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, FoldServices, constant_fold,
@@ -103,7 +102,6 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     /// One canonical token owner per source, used for bounded adapters.
     pub source_token_owners: SourceTokenOwners,
-    pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
     /// Whether any const function was declared in this module.
     pub has_const_functions: bool,
@@ -564,7 +562,6 @@ impl ConstantResolutionSession {
             Rc::clone(&module_view.template_ir_store),
         )
         .with_style_directives(&module_view.style_directives)
-        .with_build_profile(module_view.build_profile)
         .with_template_const_loop_iteration_limit(module_view.template_const_loop_iteration_limit)
         // Keep full module declarations for path identity, but gate every file-local lookup
         // through the header-built visibility package so namespace bindings and aliases behave

@@ -1,0 +1,91 @@
+-- Const functions return several ordered success slots. A multi-result call runs once at its
+-- receiving site: a forwarding return or a multi-bind. Value blocks in const bodies select one
+-- branch and leave through `then`, `return`, `break` or `continue`.
+
+pair #|value I32| -> I32, I32:
+    return value, value + 1
+;
+
+describe #|value I32, label String| -> I32, String, Bool:
+    return value * 2, label, value > 0
+;
+
+forward #|value I32| -> I32, I32:
+    return pair(value * 10)
+;
+
+sum_pair #|value I32| -> I32:
+    left, right = forward(value)
+    return left + right
+;
+
+update #|value I32| -> I32:
+    total ~= 100
+    ~total, extra = pair(value)
+    return total * 10 + extra
+;
+
+choose #|flag Bool| -> I32, I32:
+    return if flag:
+        first, second = pair(1)
+        then first, second
+    else
+        then 7, 8
+    ;
+;
+
+pick #|value I32| -> I32:
+    low, high = if value is:
+        0 => then 0, 0
+        < 0 =>
+            below, above = pair(value)
+            then below, above
+        else => then value, value * 2
+    ;
+    return low * 100 + high
+;
+
+loop_sum #|limit I32| -> I32:
+    total ~= 0
+    loop 0 to limit |index|:
+        left, right = pair(index)
+        ~total = total + left * right
+    ;
+    return total
+;
+
+single #|flag Bool| -> I32:
+    value = if flag then 1 else 2
+    total ~= 10
+    ~total = if flag:
+        then total + value
+    else
+        return -1
+    ;
+    return total
+;
+
+first_even #|limit I32| -> I32:
+    found ~= -1
+    loop 0 to limit |index|:
+        ~found = if index // 2 * 2 is index and index > 0:
+            then index
+        else
+            continue
+        ;
+        break
+    ;
+    return found
+;
+
+summed #I32 = sum_pair(4)
+updated #I32 = update(5)
+picked #String = [:[pick(0)],[pick(-3)],[pick(4)]]
+looped #I32 = loop_sum(4)
+singles #String = [:[single(true)],[single(false)]]
+even #I32 = first_even(5)
+first, second = choose(true)
+third, fourth = choose(false)
+number, text, positive = describe(3, "three")
+
+~[: summed=[summed] updated=[updated] picked=[picked] looped=[looped] singles=[singles] even=[even] choose=[first],[second],[third],[fourth] describe=[number],[text],[positive] ]

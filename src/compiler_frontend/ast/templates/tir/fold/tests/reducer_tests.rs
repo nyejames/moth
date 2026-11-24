@@ -55,10 +55,8 @@ fn limits(max_bytes: usize, max_structural_pieces: usize) -> TemplateOutputLimit
     TemplateOutputLimits {
         max_bytes,
         byte_limit: max_bytes,
-        byte_aggregate: false,
         max_structural_pieces,
         piece_limit: max_structural_pieces,
-        piece_aggregate: false,
         span: None,
         meter: Rc::new(TemplateOutputMeter::default()),
     }
@@ -143,7 +141,6 @@ fn structural_piece_refusal_names_pieces() {
     assert_eq!(exhaustion.unit, ConstBudgetUnit::Pieces);
     assert_eq!(exhaustion.limit, 0);
     assert_eq!(exhaustion.setting, None);
-    assert!(!exhaustion.aggregate);
 }
 
 #[test]

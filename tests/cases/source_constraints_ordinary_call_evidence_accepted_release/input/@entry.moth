@@ -1,0 +1,77 @@
+divisor || -> I32:
+    return 2
+;
+
+numerator || -> I32:
+    return 8
+;
+
+identity |value I32| -> I32:
+    return value
+;
+
+flag || -> Bool:
+    return true
+;
+
+identity_bool |value Bool| -> Bool:
+    return value
+;
+
+half |value I32| -> I32:
+    return value // 2
+;
+
+-- A literal divisor is proved total.
+$infallible
+literal_half |value I32| -> I32:
+    return value // 2
+;
+
+-- A pure wrapper inherits the proved division.
+$infallible
+wrapped_half |value I32| -> I32:
+    return half(value)
+;
+
+-- A call after a proved division keeps the earlier proof.
+$infallible
+divide_then_call |value I32| -> I32:
+    d I32 = 2
+    q I32 = value // d
+    r I32 = identity(q)
+    return r
+;
+
+-- The same order across multi-return slots.
+$infallible
+divide_then_call_pair |value I32| -> I32, I32:
+    d I32 = 2
+    return value // d, numerator()
+;
+
+-- A literal definition after a call still proves the divisor.
+$infallible
+call_then_literal |value I32| -> I32:
+    n I32 = numerator()
+    d I32 = 2
+    return n // d
+;
+
+-- An already handled division followed by a call.
+$infallible
+handled_then_call |value I32| -> I32:
+    q I32 = value // divisor() catch then 0
+    r I32 = identity(q)
+    return r
+;
+
+-- F9: a call-shaped match guard keeps its authored CFG.
+x ~= 1
+if x is:
+    1 if identity_bool(flag() and flag()) => ~x = 2
+    else => ~x = 3
+;
+
+left, right = divide_then_call_pair(10)
+~[:literal=[literal_half(10)] wrapped=[wrapped_half(12)] statement=[divide_then_call(14)] pair=[left],[right] after=[call_then_literal(0)] handled=[handled_then_call(18)] guard=[x]]

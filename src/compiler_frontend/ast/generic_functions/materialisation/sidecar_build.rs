@@ -142,7 +142,6 @@ impl ModuleMaterialisationPreparation {
                 path_fork,
                 style_directives: &self.style_directives,
                 provider_materialisations,
-                build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
                 #[cfg(feature = "timers")]
                 timing_context,

@@ -479,7 +479,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_source_doc_publication(self.publish_source_docs)
         .with_source_constraint_boundary_sink(Rc::clone(&self.source_constraint_boundaries))
         .with_fast_operation_witness_sink(Rc::clone(&self.fast_operation_witnesses))
-        .with_build_profile(self.context.build_profile)
         .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_file_visibility(Arc::clone(&input.visibility))
         .with_resolved_type_aliases(Rc::clone(

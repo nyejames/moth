@@ -1,0 +1,14 @@
+-- A multi-result const call cannot fill a single-value receiver inside a const body; the existing
+-- arity diagnostic reports it instead of truncating to the first slot.
+
+pair #|value I32| -> I32, I32:
+    return value, value + 1
+;
+
+first #|value I32| -> I32:
+    one = pair(value)
+    return one
+;
+
+result #I32 = first(1)
+~[:[result]]

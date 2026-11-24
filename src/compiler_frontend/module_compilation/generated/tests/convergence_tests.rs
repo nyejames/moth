@@ -1,7 +1,6 @@
 use super::*;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 
-use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::builder_surface::BuilderSurface;
@@ -1903,7 +1902,6 @@ fn compile_owned_service_fixture(
     }
     let frontend = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &StyleDirectiveRegistry::built_ins(),
         &mut surface,

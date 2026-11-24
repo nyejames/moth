@@ -1,19 +1,13 @@
-//! Required and release call rewriting over typed expressions.
+//! Required const-call rewriting over typed expressions.
 //!
-//! WHAT: replaces required source const calls with folded constants, discovers ordinary call
-//!       targets for release preparation, and rewrites release-eligible calls in executable
-//!       bodies while preserving synthetic-interface provenance.
+//! WHAT: replaces required source const calls with folded constants, both in ordinary program
+//!       expressions and while a prepared const body executes.
 //! WHY: folding runs before expression freezing and HIR lowering, so the final AST must already
-//!      contain the replacement. A release attempt that cannot prove a fold restores the exact
-//!      authored runtime call and its children.
+//!      contain the replacement.
 //! MUST NOT: own executable preparation, the executed-frame machine or eligibility policy. It
 //!           invokes those owners and keeps only the AST rewrite transaction.
 
 use super::budget::ExecutionBudget;
-use super::eligibility::{
-    ReleaseCandidate, RetainedReleaseCandidates, prepare_release_executable,
-    retain_acyclic_release_candidates,
-};
 use super::instructions::ConstInstruction;
 use super::labels;
 use super::places::{fallible_handler_error_binding, unwrap_fallible_expression};
@@ -21,46 +15,31 @@ use super::state::{
     ActiveHandler, ConstExecutionServices, ConstInterpreter, ExecutionState, FrameBindings,
 };
 use super::values::{
-    constant_index, expression_with_value, expression_with_value_inheriting_provenance,
+    call_result_inheriting_provenance, constant_index, expression_with_value,
     project_constant_value, unsupported_error,
 };
-use super::{ConstBodyReferenceScope, ProjectedConstant, ResolvedPlaceProjection};
-use crate::compiler_frontend::ast::AstReleaseErasedCallSite;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use super::{ProjectedConstant, ResolvedPlaceProjection};
 use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
-use crate::compiler_frontend::ast::const_values::store::{
-    ConstValueId, ConstValuePayload, ConstValueStore,
-};
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
 use crate::compiler_frontend::ast::expressions::expression_rewrite::rewrite_expression_children;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, LogicalOperator,
     PlaceProjectionView, ResolvedCallableTarget, SuccessShape,
 };
-use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
-use crate::compiler_frontend::ast::statements::control_flow_exits::collect_unexecuted_expression_roots;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::CallableEvaluation;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
 struct ConstCallSite {
     path: PathId,
     span: Option<SourceSpan>,
-    value_mode: ValueMode,
-    result_type: TypeId,
 }
 
 /// A prepared catch body selected for one catch expression.
@@ -77,256 +56,11 @@ pub(crate) fn rewrite_required_const_calls(
     let mut budget = ExecutionBudget::new(services.constants.execution_meter());
     let mut state = ExecutionState::default();
     let mut interpreter = services.interpreter(&mut budget, &mut state);
-    let release_provenances = FxHashMap::default();
     interpreter.rewrite_with_bindings(
         root,
         RewriteMode::RequiredExpression,
-        &release_provenances,
         &mut FrameBindings::default(),
     )
-}
-
-/// Rewrite eligible ordinary calls in the final AST for a release build.
-///
-/// WHAT: prepares each reachable ordinary body once, then replaces only calls whose arguments
-///       fold to constants and whose execution succeeds. Any refusal, impurity, nonconstant
-///       argument, recursion/depth stop or folder diagnostic leaves the exact call in place.
-/// WHY: release optimisation must remain an invisible rewrite of the final AST. It runs before
-///      expression freezing and HIR lowering, so no later analysis can observe a removed call.
-///
-/// Returns deduplicated budget Notes and the selected call sites the folding erased. Call counts
-/// are not part of the release contract; the finalizer stores the erased rows on
-/// [`Ast`](crate::compiler_frontend::ast::Ast) for HIR constraint projection.
-pub(crate) fn rewrite_release_calls(
-    ast: &mut [AstNode],
-    builder: &mut AstExpressionBuilder,
-    constants: &mut ConstValueStore,
-    scope: &ScopeContext,
-    string_table: &mut StringTable,
-    types: &TypeEnvironment,
-    path_fork: &PathInternerFork,
-) -> Result<(Vec<DiagnosticDraft>, Vec<AstReleaseErasedCallSite>), Box<InfrastructureErrors>> {
-    const MAX_RELEASE_BUDGET_NOTES: usize = 3;
-    // Prepare only function bodies reachable from an actual ordinary call site. Uncalled bodies
-    // cost nothing in a release build, while the worklist still closes over callees named by a
-    // prepared body.
-    let mut bodies = FxHashMap::default();
-    for node in ast.iter() {
-        if let NodeKind::Function(path, signature, body) = &node.kind {
-            bodies.insert(*path, (signature, body.as_slice()));
-        }
-    }
-    let mut pending = release_call_targets(ast, builder)?;
-    let mut considered = FxHashSet::default();
-    let mut candidates: FxHashMap<PathId, ReleaseCandidate> = FxHashMap::default();
-    while let Some(path) = pending.pop() {
-        if !considered.insert(path) {
-            continue;
-        }
-        let Some((signature, body)) = bodies.get(&path) else {
-            continue;
-        };
-        match prepare_release_executable(
-            signature,
-            body,
-            builder,
-            types,
-            scope.external_package_registry.as_ref(),
-            ConstBodyReferenceScope {
-                scope,
-                path_fork,
-                constants: &*constants,
-            },
-        ) {
-            Ok(Some((executable, proof))) => {
-                pending.extend(proof.ordinary_calls.iter().copied());
-                candidates.insert(path, ReleaseCandidate { executable, proof });
-            }
-            Ok(None) => {}
-            Err(super::ConstBodyPreparationError::Unsupported(_)) => {}
-            Err(super::ConstBodyPreparationError::Infrastructure(error)) => return Err(error),
-        }
-    }
-    let retained = retain_acyclic_release_candidates(candidates);
-    let RetainedReleaseCandidates {
-        executables,
-        provenances: release_provenances,
-    } = retained;
-    if executables.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    // Authored-dead statements keep their runtime expressions. HIR lowering omits exactly that
-    // source and records its selected evidence, so a debug build never executes it either. A
-    // per-statement decision also keeps a const template's shared definition spans from hiding a
-    // live call: the same authored call can be dead in one use and live in another. Catch handler
-    // bodies need no entries because release speculation never enters them.
-    let mut unexecuted_expression_roots = FxHashSet::default();
-    collect_unexecuted_expression_roots(
-        ast,
-        builder.store(),
-        constants,
-        &mut unexecuted_expression_roots,
-    );
-
-    let mut services = ConstExecutionServices {
-        builder,
-        constants,
-        executables: &executables,
-        scope,
-        string_table,
-        types,
-        path_fork,
-    };
-    let meter = services.constants.execution_meter();
-    let mut notes = Vec::new();
-    let mut note_spans = FxHashSet::default();
-    let mut erased_call_sites = Vec::new();
-    let mut infrastructure_error = None;
-    for node in ast.iter_mut() {
-        // Only a callable body can own executable selected code. A fold inside a non-callable
-        // top-level declaration has no HIR function to evidence, just as in a debug build.
-        let owner = node.function_identity();
-        node.visit_expression_ids_mut(&mut |expression| {
-            if infrastructure_error.is_some() {
-                return;
-            }
-            // Discovery over an ordinary expression is not const-call work. Each expression gets
-            // its own attempt allowance, while the store keeps charging every attempt against the
-            // one aggregate module allowance.
-            let mut budget = ExecutionBudget::new(Rc::clone(&meter));
-            let mut state = ExecutionState::default();
-            let mut value_bindings = FrameBindings::default();
-            let outcome = {
-                let mut interpreter = services.interpreter(&mut budget, &mut state);
-                interpreter.rewrite_release_with_bindings(
-                    *expression,
-                    &release_provenances,
-                    &mut value_bindings,
-                    &unexecuted_expression_roots,
-                )
-            };
-            let committed = match outcome {
-                Ok(rewritten) => {
-                    let changed = rewritten != *expression;
-                    if changed {
-                        *expression = rewritten;
-                    }
-                    changed
-                }
-                Err(ConstantFoldError::Infrastructure(error)) => {
-                    infrastructure_error = Some(error);
-                    false
-                }
-                Err(ConstantFoldError::Budget(exhaustion)) => {
-                    let span = exhaustion.call_span.or(exhaustion.span);
-                    if notes.len() < MAX_RELEASE_BUDGET_NOTES && note_spans.insert(span) {
-                        let scope = if exhaustion.aggregate {
-                            choices_control_flow::ReleaseBudgetScope::ModuleAggregate
-                        } else {
-                            choices_control_flow::ReleaseBudgetScope::Call
-                        };
-                        let setting = exhaustion
-                            .setting
-                            .map(|setting| services.string_table.intern(setting));
-                        // Every producer charges its allowance as a `usize`, so the recorded
-                        // `u64` limit always fits back into one.
-                        let mut note = choices_control_flow::release_folding_budget_stopped(
-                            exhaustion.unit,
-                            usize::try_from(exhaustion.limit)
-                                .expect("const execution limits are charged as `usize`"),
-                            setting,
-                            scope,
-                            span,
-                        );
-                        let owner = if exhaustion.call_span.is_some() {
-                            exhaustion.call_span_owner
-                        } else {
-                            exhaustion.span_owner
-                        };
-                        if let Some(owner) = owner {
-                            note = note.with_primary_frozen_identity_handle(owner);
-                        }
-                        notes.push(note);
-                    }
-                    false
-                }
-                Err(ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_)) => {
-                    false
-                }
-            };
-            if committed && let Some(owner) = owner {
-                // A fresh state owns exactly this root rewrite, so every recorded row belongs to
-                // the node's callable. Nested candidate execution uses `InterpretedBody` walks,
-                // which record nothing.
-                erased_call_sites.extend(state.release_erased_calls.drain(..).map(
-                    |(target, span)| AstReleaseErasedCallSite {
-                        function: owner,
-                        target,
-                        span,
-                    },
-                ));
-            }
-        });
-    }
-    match infrastructure_error {
-        Some(error) => Err(error),
-        None => Ok((notes, erased_call_sites)),
-    }
-}
-
-/// Collect ordinary function paths named by any call expression in the final AST.
-///
-/// WHAT: one immutable typed-expression walk before candidate preparation.
-/// WHY:  release preparation compiles a body into an executable and validates every expression.
-///      A body that no source call can reach must not pay that cost. Ordinary callees discovered
-///      inside a prepared body extend the worklist until the callable closure is closed.
-fn release_call_targets(
-    ast: &[AstNode],
-    builder: &AstExpressionBuilder,
-) -> Result<Vec<PathId>, Box<InfrastructureErrors>> {
-    let mut roots = Vec::new();
-    for node in ast {
-        node.visit_expression_ids(&mut |expression| roots.push(expression));
-    }
-    let mut targets = Vec::new();
-    let mut visited = FxHashSet::default();
-    while let Some(expression) = roots.pop() {
-        if !visited.insert(expression) {
-            continue;
-        }
-        let view = builder.view(expression)?;
-        if let ExpressionOperationView::Call(call) = view.operation()
-            && call.metadata().evaluation != CallableEvaluation::Const
-            && let ResolvedCallableTarget::Function(path) = call.metadata().target
-        {
-            targets.push(path);
-        }
-        match view.operation() {
-            // Release speculation never folds a catch handler body or a handled subject, so no
-            // call under a catch needs a prepared candidate.
-            ExpressionOperationView::ValueBlock(ValueBlock::Catch(_)) => {}
-            _ => view.visit_children(|child| roots.push(child.id())),
-        }
-    }
-    Ok(targets)
-}
-
-/// Add the candidate's proven transitive provenance to a release replacement.
-///
-/// WHAT: merges the retained candidate set for one ordinary call path into the inherited
-///       provenance used by the replacement expression.
-/// WHY: execution may return a value selected from a branch or projection whose own metadata does
-///      not carry a dependency present in the authored body. The candidate set is authoritative
-///      for the dependencies erased with the call.
-pub(super) fn merge_release_candidate_provenance(
-    inherited: &mut SyntheticInterfaceProvenance,
-    path: PathId,
-    release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
-) {
-    if let Some(provenance) = release_provenances.get(&path) {
-        inherited.merge(provenance);
-    }
 }
 
 /// Why one typed-expression rewrite is running.
@@ -336,17 +70,12 @@ pub(super) enum RewriteMode {
     RequiredExpression,
     /// Execute a prepared const body: every completed expression may fold.
     InterpretedBody,
-    /// Release speculation: auxiliary folding stays inside candidate-call arguments.
-    Release,
 }
 
 impl RewriteMode {
-    fn is_release(self) -> bool {
-        self == Self::Release
-    }
-
+    /// Whether collection reads, template completion and fallible unwrapping fold on completion.
     fn folds_auxiliary(self) -> bool {
-        self != Self::RequiredExpression
+        self == Self::InterpretedBody
     }
 }
 
@@ -354,34 +83,23 @@ impl RewriteMode {
 enum RewriteStep {
     Enter {
         expression: ExprId,
-        /// Release speculation may fold auxiliary template, collection-read and
-        /// fallible-unwrap work for this subtree. It is set only below the arguments of an
-        /// eligible release call, so an unrelated runtime expression stays untouched.
-        fold_auxiliary: bool,
-        /// Whether this subtree is the handled value of an enclosing catch.
-        failure_caught: bool,
     },
     Complete {
         expression: ExprId,
         base: usize,
         /// The entry step installed a catch handler; this completion restores it.
         restores_handler: bool,
-        fold_auxiliary: bool,
     },
     CompleteCall {
         expression: ExprId,
         base: usize,
         call: ConstCallSite,
-        /// Erased-call rows present before this call's arguments were rewritten.
-        erased_calls_base: usize,
     },
     CompleteLogical {
         expression: ExprId,
         base: usize,
         right: ExprId,
         operation: LogicalOperator,
-        fold_auxiliary: bool,
-        failure_caught: bool,
     },
 }
 
@@ -392,14 +110,6 @@ enum RewriteStep {
 struct RewriteWalk<'walk, 'services> {
     interpreter: &'walk mut ConstInterpreter<'services>,
     bindings: &'walk mut FrameBindings,
-    release_provenances: &'walk FxHashMap<PathId, SyntheticInterfaceProvenance>,
-    /// Expression roots that release rewriting must leave untouched because no profile executes
-    /// them.
-    ///
-    /// WHY: skipping a dead statement's whole graph keeps the runtime call that a debug build
-    ///      would have lowered (and that HIR lowering omits with its selected evidence) instead
-    ///      of recording a live erased call.
-    unexecuted_expression_roots: Option<&'walk FxHashSet<ExprId>>,
     mode: RewriteMode,
     root: ExprId,
     steps: Vec<RewriteStep>,
@@ -420,49 +130,14 @@ impl ConstInterpreter<'_> {
         &mut self,
         root: ExprId,
         mode: RewriteMode,
-        release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
         bindings: &mut FrameBindings,
-    ) -> Result<ExprId, ConstantFoldError> {
-        self.rewrite_inner(root, mode, release_provenances, bindings, None)
-    }
-
-    /// Rewrite one release expression tree without folding roots that no profile executes.
-    pub(super) fn rewrite_release_with_bindings(
-        &mut self,
-        root: ExprId,
-        release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
-        bindings: &mut FrameBindings,
-        unexecuted_expression_roots: &FxHashSet<ExprId>,
-    ) -> Result<ExprId, ConstantFoldError> {
-        self.rewrite_inner(
-            root,
-            RewriteMode::Release,
-            release_provenances,
-            bindings,
-            Some(unexecuted_expression_roots),
-        )
-    }
-
-    fn rewrite_inner(
-        &mut self,
-        root: ExprId,
-        mode: RewriteMode,
-        release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
-        bindings: &mut FrameBindings,
-        unexecuted_expression_roots: Option<&FxHashSet<ExprId>>,
     ) -> Result<ExprId, ConstantFoldError> {
         let mut walk = RewriteWalk {
             interpreter: self,
             bindings,
-            release_provenances,
-            unexecuted_expression_roots,
             mode,
             root,
-            steps: vec![RewriteStep::Enter {
-                expression: root,
-                fold_auxiliary: false,
-                failure_caught: false,
-            }],
+            steps: vec![RewriteStep::Enter { expression: root }],
             results: Vec::new(),
             installed_handlers: Vec::new(),
         };
@@ -475,49 +150,34 @@ impl ConstInterpreter<'_> {
 impl RewriteWalk<'_, '_> {
     fn run(&mut self) -> Result<ExprId, ConstantFoldError> {
         while let Some(step) = self.steps.pop() {
-            if let RewriteStep::Enter { expression, .. } = &step {
+            if let RewriteStep::Enter { expression } = &step {
                 self.interpreter.budget.span = self.interpreter.builder.view(*expression)?.span();
             }
             // Discovery over an ordinary expression is not const-call work. Only execution and the
             // shared folders below consume the aggregate const-execution allowance.
-            if self.interpreter.state.inherited_handler_value.is_some()
+            if !self.interpreter.state.inherited_handler_values.is_empty()
                 || self.interpreter.state.pending_handler_return.is_some()
             {
                 return Ok(self.root);
             }
             match step {
-                RewriteStep::Enter {
-                    expression,
-                    fold_auxiliary,
-                    failure_caught,
-                } => self.enter(expression, fold_auxiliary, failure_caught)?,
+                RewriteStep::Enter { expression } => self.enter(expression)?,
                 RewriteStep::Complete {
                     expression,
                     base,
                     restores_handler,
-                    fold_auxiliary,
-                } => self.complete(expression, base, restores_handler, fold_auxiliary)?,
+                } => self.complete(expression, base, restores_handler)?,
                 RewriteStep::CompleteCall {
                     expression,
                     base,
                     call,
-                    erased_calls_base,
-                } => self.complete_call(expression, base, &call, erased_calls_base)?,
+                } => self.complete_call(expression, base, &call)?,
                 RewriteStep::CompleteLogical {
                     expression,
                     base,
                     right,
                     operation,
-                    fold_auxiliary,
-                    failure_caught,
-                } => self.complete_logical(
-                    expression,
-                    base,
-                    right,
-                    operation,
-                    fold_auxiliary,
-                    failure_caught,
-                )?,
+                } => self.complete_logical(expression, base, right, operation)?,
             }
         }
         Ok(self
@@ -619,71 +279,21 @@ impl RewriteWalk<'_, '_> {
         }))
     }
 
-    /// Recognise a call site whose callee is a prepared const function.
-    fn const_call_site(
-        &self,
-        view: &ExpressionView<'_>,
-        failure_caught: bool,
-    ) -> Result<Option<ConstCallSite>, ConstantFoldError> {
+    /// Recognise a call site whose callee is a required source const function.
+    fn const_call_site(view: &ExpressionView<'_>) -> Option<ConstCallSite> {
         let ExpressionOperationView::Call(call) = view.operation() else {
-            return Ok(None);
+            return None;
         };
-        let span = view.span();
-        // Every ledger row carries its authored call site so HIR can attribute and order it beside
-        // authored and skipped evidence. A spanless row could not be attributed, which would let
-        // release accept or reject `$infallible` source differently from debug, so release
-        // speculation declines a spanless call and keeps the runtime call in both profiles. No
-        // legal source or materialised callable produces one today; this owns the invariant
-        // permanently at the ledger's producer.
-        if self.mode.is_release() && span.is_none() {
-            return Ok(None);
-        }
-        if self.mode.is_release() {
-            // A direct catch subject owns the recovery facts its enclosing catch validates.
-            // Replacing it with a constant would erase that recovery channel and leave an invalid
-            // catch block, so release speculation leaves the call at runtime.
-            if view.failure_facts().is_some_and(|facts| {
-                matches!(facts.disposition, FailureDisposition::HandledByCatch { .. })
-            }) {
-                return Ok(None);
-            }
-            // A nested call inside a handled subject keeps its runtime expression too. Folding it
-            // can prove the enclosing checked operation total, which would erase the failure edge
-            // that selected the catch handler before debug HIR ever sees it. The contract requires
-            // semantic reachability to be checked before optimisation erases evidence.
-            if failure_caught {
-                return Ok(None);
-            }
-        }
-        let is_const_target = call.metadata().evaluation == CallableEvaluation::Const
-            || matches!(
-                call.metadata().target,
-                ResolvedCallableTarget::Function(path)
-                    if self.interpreter.executables.contains_key(&path)
-            );
-        if !is_const_target {
-            return Ok(None);
+        if call.metadata().evaluation != CallableEvaluation::Const {
+            return None;
         }
         let ResolvedCallableTarget::Function(path) = call.metadata().target else {
-            return Ok(None);
+            return None;
         };
-        if call.metadata().evaluation != CallableEvaluation::Const
-            && view.success_shape().single().is_none()
-        {
-            return Ok(None);
-        }
-        let result_type = view.success_shape().single().ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::ConstantEvaluation,
-                "const function call used before its single success slot was available",
-            )
-        })?;
-        Ok(Some(ConstCallSite {
+        Some(ConstCallSite {
             path,
-            span,
-            value_mode: view.value_mode(),
-            result_type,
-        }))
+            span: view.span(),
+        })
     }
 
     /// Resolve the prepared catch body for a catch expression.
@@ -701,24 +311,7 @@ impl RewriteWalk<'_, '_> {
         }))
     }
 
-    fn enter(
-        &mut self,
-        expression: ExprId,
-        fold_auxiliary: bool,
-        failure_caught: bool,
-    ) -> Result<(), ConstantFoldError> {
-        // Authored-dead statements keep their runtime expressions byte-for-byte because no profile
-        // executes them. HIR lowering omits exactly that source and preserves its selected
-        // evidence, so folding here would only invent a live erased call. Handled subjects stay at
-        // runtime for the same evidence reason: a fold can prove the protected expression total
-        // and erase the failure edge that selected its handler.
-        if self
-            .unexecuted_expression_roots
-            .is_some_and(|dead_roots| dead_roots.contains(&expression))
-        {
-            self.results.push((expression, expression));
-            return Ok(());
-        }
+    fn enter(&mut self, expression: ExprId) -> Result<(), ConstantFoldError> {
         let view = self.interpreter.builder.view(expression)?;
         self.interpreter.budget.span = view.span();
         if let Some(projected) = self.root_substitution(&view)? {
@@ -732,7 +325,7 @@ impl RewriteWalk<'_, '_> {
             self.results.push((expression, replacement));
             return Ok(());
         }
-        let const_call = self.const_call_site(&view, failure_caught)?;
+        let const_call = Self::const_call_site(&view);
         let restores_handler = if expression != self.root
             && matches!(
                 view.operation(),
@@ -757,125 +350,73 @@ impl RewriteWalk<'_, '_> {
             false
         };
         let base = self.results.len();
-        if (!self.mode.is_release() || !self.interpreter.budget.call_stack.is_empty())
-            && let ExpressionOperationView::LogicalBinary {
-                left,
-                right,
-                operation,
-            } = view.operation()
+        // The right operand of a logical operator must not be rewritten until the left operand
+        // has failed to short-circuit, so a required call on the inactive side never executes.
+        if let ExpressionOperationView::LogicalBinary {
+            left,
+            right,
+            operation,
+        } = view.operation()
         {
             self.steps.push(RewriteStep::CompleteLogical {
                 expression,
                 base,
                 right: right.id(),
                 operation,
-                fold_auxiliary,
-                failure_caught,
             });
             self.steps.push(RewriteStep::Enter {
                 expression: left.id(),
-                fold_auxiliary,
-                failure_caught,
             });
             return Ok(());
         }
-        // A release candidate's argument expressions may need the auxiliary folders to
-        // become constants (for example a scalar read from a constant collection). Every
-        // other release subtree keeps its runtime expression untouched.
-        let candidate_arguments = self.mode.is_release()
-            && matches!(
-                &const_call,
-                Some(call) if self.interpreter.executables.contains_key(&call.path)
-            );
-        let child_fold_auxiliary = fold_auxiliary || candidate_arguments;
         match const_call {
             Some(call) => self.steps.push(RewriteStep::CompleteCall {
                 expression,
                 base,
                 call,
-                erased_calls_base: self.interpreter.state.release_erased_calls.len(),
             }),
             None => self.steps.push(RewriteStep::Complete {
                 expression,
                 base,
                 restores_handler,
-                fold_auxiliary,
             }),
         }
         // Children complete from the LIFO stack, so push them in reverse source order to
         // keep the collected replacement rows aligned with the parent's child order.
-        let handled_value = match view.operation() {
-            ExpressionOperationView::ValueBlock(ValueBlock::Catch(block)) => {
-                Some(block.handled_value)
-            }
-            _ => None,
-        };
         let mut children = Vec::new();
-        match view.operation() {
-            // Release speculation never enters a catch handler body. A handler may be statically
-            // pruned once the protected value is proved total, and release folding runs before
-            // that proof, so a folded handler call could fabricate live evidence for code HIR
-            // never routes. Keeping the handler at runtime preserves both profiles' selected
-            // evidence.
-            ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
-                if self.mode.is_release() =>
-            {
-                children.push(block.handled_value);
-            }
-            _ => view.visit_children(|child| children.push(child.id())),
-        }
+        view.visit_children(|child| children.push(child.id()));
         for child in children.into_iter().rev() {
-            // Every failure inside a catch subject is recovered by that catch. A handler body is
-            // not protected by its own catch, but inherits an enclosing subject's containment.
-            let child_failure_caught = failure_caught || handled_value == Some(child);
-            self.steps.push(RewriteStep::Enter {
-                expression: child,
-                fold_auxiliary: child_fold_auxiliary,
-                failure_caught: child_failure_caught,
-            });
+            self.steps.push(RewriteStep::Enter { expression: child });
         }
         Ok(())
     }
 
     /// Fold every completed call argument.
     ///
-    /// Returns `None` when release speculation must keep the runtime call. A required call with a
-    /// non-constant argument is a source diagnostic; budget and infrastructure failures escape.
+    /// A required call with a non-constant argument is a source diagnostic; budget and
+    /// infrastructure failures escape.
     fn fold_call_arguments(
         &mut self,
         call: &ConstCallSite,
         arguments: &[(ExprId, ExprId)],
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
         let mut values = Vec::with_capacity(arguments.len());
         for (_, argument) in arguments {
-            match self.interpreter.fold_to_constant(*argument, self.bindings) {
-                Ok(Some(value)) => values.push(value),
-                Ok(None) if self.mode.is_release() => return Ok(None),
-                Ok(None) => {
-                    return Err(ConstantFoldError::Diagnostic(
-                        choices_control_flow::compile_time_evaluation_error(
-                            CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments,
-                            None,
-                            call.span,
-                        ),
-                    ));
-                }
-                Err(ConstantFoldError::Budget(mut exhaustion)) => {
-                    if exhaustion.call_span.is_none() {
-                        exhaustion.call_span = call.span;
-                        exhaustion.call_span_owner = self
-                            .interpreter
-                            .body_donor_identity(self.interpreter.state.current_body);
-                    }
-                    return Err(ConstantFoldError::Budget(exhaustion));
-                }
-                Err(error) if self.mode.is_release() && release_can_preserve_runtime(&error) => {
-                    return Ok(None);
-                }
-                Err(error) => return Err(error),
-            }
+            let Some(value) = self
+                .interpreter
+                .fold_to_constant(*argument, self.bindings)?
+            else {
+                return Err(ConstantFoldError::Diagnostic(
+                    choices_control_flow::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments,
+                        None,
+                        call.span,
+                    ),
+                ));
+            };
+            values.push(value);
         }
-        Ok(Some(values))
+        Ok(values)
     }
 
     fn complete(
@@ -883,12 +424,7 @@ impl RewriteWalk<'_, '_> {
         expression: ExprId,
         base: usize,
         restores_handler: bool,
-        fold_auxiliary: bool,
     ) -> Result<(), ConstantFoldError> {
-        // Required and interpreted rewriting fold every completed expression. Release
-        // speculation folds auxiliary work only inside a candidate call's arguments.
-        let auxiliary_folding =
-            self.mode.folds_auxiliary() && (!self.mode.is_release() || fold_auxiliary);
         // The stack does not mutate `results` below until it truncates to `base`, so the
         // parent completion can borrow its direct child pairs instead of copying them.
         let replacements = &self.results[base..];
@@ -921,12 +457,10 @@ impl RewriteWalk<'_, '_> {
                 .rewritten_handlers
                 .insert(rewritten, body);
         }
-        let projection_enabled = !self.mode.is_release() || fold_auxiliary;
         let rewritten = self.interpreter.fold_completed_value(
             rewritten,
             &mut *self.bindings,
-            auxiliary_folding,
-            projection_enabled,
+            self.mode.folds_auxiliary(),
         )?;
         if restores_handler {
             let saved_handler = self
@@ -951,35 +485,22 @@ impl RewriteWalk<'_, '_> {
         expression: ExprId,
         base: usize,
         call: &ConstCallSite,
-        erased_calls_base: usize,
     ) -> Result<(), ConstantFoldError> {
-        // Move the completed argument pairs off the scratch stack: every path below either
-        // replaces them with one completed call pair or leaves the runtime call's pair in their
-        // place.
+        // Move the completed argument pairs off the scratch stack: the completed call pushes one
+        // replacement pair in their place.
         let arguments = self.results.split_off(base);
         let Some(executable) = self.interpreter.executables.get(&call.path) else {
-            if self.mode.is_release() {
-                self.revert_refused_call(expression, erased_calls_base);
-                return Ok(());
-            }
             return Err(required_call_error(call, self.interpreter.string_table));
         };
-        let Some(argument_values) = self.fold_call_arguments(call, &arguments)? else {
-            self.revert_refused_call(expression, erased_calls_base);
-            return Ok(());
-        };
+        let argument_values = self.fold_call_arguments(call, &arguments)?;
         if argument_values.len() != executable.parameters.len() {
-            if self.mode.is_release() {
-                self.revert_refused_call(expression, erased_calls_base);
-                return Ok(());
-            }
             return Err(required_call_error(call, self.interpreter.string_table));
         }
         let parameter_values = executable
             .parameters
             .iter()
             .map(|(path, _)| *path)
-            .zip(argument_values.iter().copied())
+            .zip(argument_values)
             .collect::<FrameBindings>();
         self.interpreter.enter_call(call.span)?;
         let returns = self
@@ -987,68 +508,19 @@ impl RewriteWalk<'_, '_> {
             .execute_body(Some(call.path), executable, parameter_values)
             .map_err(|error| self.interpreter.attach_call_chain(error));
         self.interpreter.budget.leave_call();
-        let returns = match returns {
-            Ok(returns) => returns,
-            Err(ConstantFoldError::Budget(mut exhaustion)) => {
-                // The innermost refused call owns the actionable site; an outer caller
-                // must not replace it with a less specific call site.
-                if exhaustion.call_span.is_none() {
-                    exhaustion.call_span = call.span;
-                    exhaustion.call_span_owner = self
-                        .interpreter
-                        .body_donor_identity(self.interpreter.state.current_body);
-                }
-                return Err(ConstantFoldError::Budget(exhaustion));
-            }
-            Err(error) if self.mode.is_release() && release_can_preserve_runtime(&error) => {
-                self.revert_refused_call(expression, erased_calls_base);
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        };
-        if returns.len() != 1 || executable.return_slots.len() != 1 {
-            if self.mode.is_release() {
-                self.revert_refused_call(expression, erased_calls_base);
-                return Ok(());
-            }
+        let returns = returns?;
+        if returns.len() != executable.return_slots.len() {
             return Err(required_call_error(call, self.interpreter.string_table));
         }
-        if executable.return_slots[0] != call.result_type {
-            if self.mode.is_release() {
-                self.revert_refused_call(expression, erased_calls_base);
-                return Ok(());
-            }
+        let view = self.interpreter.builder.view(expression)?;
+        if view.success_types() != executable.return_slots.as_slice() {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
-                "const function result type disagreed with its call result slot",
+                "const function result types disagreed with its call result slots",
             )
             .into());
         }
-        // The call is about to be erased. Release rewriting must leave the selected call site in
-        // the AST ledger so HIR constraint evidence still sees this callee, exactly as a debug
-        // build that keeps the runtime call does. The producer declines authored-dead statements,
-        // catch handler bodies and handled subjects, so every row belongs to lowered executable
-        // source.
-        // Nested candidate execution runs interpreted walks, so a callee's internal folds are
-        // never recorded against this caller.
-        if self.mode.is_release() {
-            // `const_call_site` only recognises a release call whose expression carries an
-            // authored span, and the record's span is that same view span.
-            let Some(span) = call.span else {
-                crate::compiler_bug!(
-                    CompilerStage::ConstantEvaluation,
-                    "release erased a call site without an authored span"
-                );
-            };
-            self.interpreter
-                .state
-                .release_erased_calls
-                .push((call.path, span));
-        }
-        let mut inherited_provenance = self
-            .interpreter
-            .builder
-            .view(expression)?
+        let mut inherited_provenance = view
             .occurrence_facts()
             .map(|facts| facts.provenance.clone())
             .unwrap_or_default();
@@ -1057,43 +529,16 @@ impl RewriteWalk<'_, '_> {
                 inherited_provenance.merge(&facts.provenance);
             }
         }
-        // The executed value can come from a branch or projection whose own metadata
-        // omits a dependency that the authored return expression carried. The candidate's
-        // proven transitive set is the authoritative replacement provenance.
-        merge_release_candidate_provenance(
-            &mut inherited_provenance,
-            call.path,
-            self.release_provenances,
-        );
-        let replacement = expression_with_value_inheriting_provenance(
+        let replacement = call_result_inheriting_provenance(
             self.interpreter.builder,
             self.interpreter.constants,
-            returns[0],
-            call.result_type,
-            call.span,
-            call.value_mode,
+            expression,
+            &returns,
+            self.interpreter.scope.scope,
             inherited_provenance,
         )?;
         self.results.push((expression, replacement));
         Ok(())
-    }
-
-    /// Keep a refused release candidate's call at runtime exactly as authored.
-    ///
-    /// WHAT: completes the call as its own replacement, discarding every speculative argument
-    ///       rewrite completed for it and the erased-call rows those rewrites recorded. The
-    ///       argument pairs were already taken off the scratch stack, so dropping them is the
-    ///       whole AST restoration.
-    /// WHY: a debug build evaluates each argument as authored. Committing an auxiliary fold under
-    ///      a call that stays at runtime would expose an optimiser-created value to HIR evidence
-    ///      and the numeric proof without the runtime call debug retains, which can change
-    ///      `$infallible` verdicts in release only.
-    fn revert_refused_call(&mut self, expression: ExprId, erased_calls_base: usize) {
-        self.interpreter
-            .state
-            .release_erased_calls
-            .truncate(erased_calls_base);
-        self.results.push((expression, expression));
     }
 
     fn complete_logical(
@@ -1102,8 +547,6 @@ impl RewriteWalk<'_, '_> {
         base: usize,
         right: ExprId,
         operation: LogicalOperator,
-        fold_auxiliary: bool,
-        failure_caught: bool,
     ) -> Result<(), ConstantFoldError> {
         let left = self.results[base].1;
         let left_view = self.interpreter.builder.view(left)?;
@@ -1164,34 +607,25 @@ impl RewriteWalk<'_, '_> {
             expression,
             base,
             restores_handler: false,
-            fold_auxiliary,
         });
-        self.steps.push(RewriteStep::Enter {
-            expression: right,
-            fold_auxiliary,
-            failure_caught,
-        });
+        self.steps.push(RewriteStep::Enter { expression: right });
         Ok(())
     }
 }
 
 impl ConstInterpreter<'_> {
-    /// Apply the auxiliary folders to one completed expression.
+    /// Apply the post-completion folders to one completed expression.
     ///
-    /// Field projection, collection reads, template completion and fallible unwrapping are the
-    /// distinct post-completion folds. Release speculation scopes them to candidate arguments.
+    /// Field projection after a folded const call applies in every mode. Collection reads,
+    /// template completion and fallible unwrapping are the auxiliary folds an executing const body
+    /// needs; a required program expression keeps those operations at runtime.
     fn fold_completed_value(
         &mut self,
         mut rewritten: ExprId,
         bindings: &mut FrameBindings,
         auxiliary_folding: bool,
-        projection_enabled: bool,
     ) -> Result<ExprId, ConstantFoldError> {
-        // Field projection after a folded const call stays available in every mode; release
-        // speculation scopes it to candidate-call arguments.
-        if projection_enabled
-            && let Some(projected) = self.constant_field_projection(rewritten, bindings)?
-        {
+        if let Some(projected) = self.constant_field_projection(rewritten, bindings)? {
             rewritten = expression_with_value(
                 self.builder,
                 projected.value,
@@ -1294,14 +728,6 @@ pub(super) fn inherit_replaced_provenance(
     let rewritten =
         builder.with_synthetic_interface_provenance(builder.own(rewritten), provenance)?;
     Ok(rewritten.id())
-}
-
-/// A speculative attempt may keep these failures as runtime calls; infrastructure must still fail.
-fn release_can_preserve_runtime(error: &ConstantFoldError) -> bool {
-    matches!(
-        error,
-        ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_)
-    )
 }
 
 /// A required call whose declaration body the current executor cannot represent.

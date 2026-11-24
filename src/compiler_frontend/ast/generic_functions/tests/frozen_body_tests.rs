@@ -97,7 +97,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
     TokenizerEntryMode,
 };
-use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
+use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
 use rustc_hash::FxHashMap;
@@ -1804,7 +1804,6 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
                         string_table: &mut sibling_strings,
                         path_fork: &mut sibling_paths,
                         style_directives: &requester.style_directives,
-                        build_profile: requester.build_profile,
                         template_const_loop_iteration_limit: requester
                             .template_const_loop_iteration_limit,
                         #[cfg(feature = "timers")]
@@ -1915,7 +1914,6 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
-                    build_profile: fixture.preparation.build_profile,
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
@@ -2493,7 +2491,6 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
-                build_profile: fixture.preparation.build_profile,
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
@@ -2629,7 +2626,6 @@ fn const_template_parameter_default_survives_detach_freeze_and_sidecar_local_reb
                 string_table: &mut strings,
                 path_fork: &mut paths,
                 style_directives: &requester.style_directives,
-                build_profile: requester.build_profile,
                 template_const_loop_iteration_limit: requester.template_const_loop_iteration_limit,
                 #[cfg(feature = "timers")]
                 timing_context: None,
@@ -2854,7 +2850,6 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
-                build_profile: fixture.preparation.build_profile,
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
@@ -2947,7 +2942,6 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
-                    build_profile: fixture.preparation.build_profile,
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
@@ -3119,7 +3113,6 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
-                    build_profile: fixture.preparation.build_profile,
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
@@ -4151,7 +4144,6 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
                 sorted,
                 module_anchor_path: entry,
                 synthesizes_entry_start: true,
-                build_profile: FrontendBuildProfile::Dev,
                 capacity_estimate: Default::default(),
                 resolved_file_references: ResolvedFileReferenceTable::default(),
                 module_origin: None,

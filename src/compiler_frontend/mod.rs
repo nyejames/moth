@@ -111,12 +111,6 @@ pub enum Flag {
     HtmlWasm,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrontendBuildProfile {
-    Dev,
-    Release,
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) mod ast_fixture_support;

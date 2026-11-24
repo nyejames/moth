@@ -4,10 +4,6 @@ use super::budget::{
     ExecutionBudget, MAX_CALL_DEPTH, MAX_RETAINED_VALUES, MAX_TOTAL_RETAINED_VALUES,
     charge_new_value_text, value_own_allocation,
 };
-use super::eligibility::{
-    ReleaseCandidate, ReleaseCandidateProof, candidate_dependency_order, eligible_acyclic_paths,
-    prepare_release_executable, retain_acyclic_release_candidates, reverse_call_graph,
-};
 use super::instructions::{ConstInstruction, ConstInstructionKind};
 use super::rewrite::{RewriteMode, inherit_replaced_provenance};
 use super::state::{ActiveHandler, ConstExecutionServices, ExecutionState, FrameBindings};
@@ -16,21 +12,14 @@ use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetUnit, ConstantFoldError,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolved_operation;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExpressionOperationView, OwnedExpr, PlaceRecord,
-};
-use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::expressions::expression_store::PlaceRecord;
 use crate::compiler_frontend::ast::module_ast::environment::declaration_table::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::ContextKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ParameterContract,
-};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::datatypes::FunctionReturnContract;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -38,9 +27,6 @@ use crate::compiler_frontend::module_compilation::DEFAULT_CONST_EXECUTION_MEMORY
 use crate::compiler_frontend::source::{FrozenIdentityHandle, LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::synthetic_interface_provenance::{
-    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
-};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -55,125 +41,6 @@ fn empty_module_scope() -> ScopeContext {
         0,
         Rc::new(RefCell::new(TemplateIrStore::default())),
     )
-}
-
-/// A prepared const executable with no catch bodies or donor domain.
-fn const_executable(
-    parameters: Vec<(PathId, TypeId)>,
-    return_slots: Vec<TypeId>,
-    instructions: Vec<ConstInstruction>,
-) -> ConstFunctionExecutable {
-    ConstFunctionExecutable {
-        parameters,
-        return_slots,
-        instructions: Rc::from(instructions),
-        handler_bodies: Rc::new(FxHashMap::default()),
-        donor_identity: None,
-    }
-}
-
-/// A release candidate row with no parameters and one `I32` success slot.
-fn release_candidate(
-    ordinary_calls: impl IntoIterator<Item = PathId>,
-    provenance: SyntheticInterfaceProvenance,
-) -> ReleaseCandidate {
-    ReleaseCandidate {
-        executable: const_executable(
-            Vec::new(),
-            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
-            Vec::new(),
-        ),
-        proof: ReleaseCandidateProof {
-            ordinary_calls: ordinary_calls.into_iter().collect(),
-            body_provenance: provenance,
-        },
-    }
-}
-
-/// One release rewrite of a no-argument call to a literal-returning const callee.
-struct ReleaseCallRewrite {
-    builder: AstExpressionBuilder,
-    authored: ExprId,
-    rewritten: ExprId,
-    callee: PathId,
-    erased: Vec<(PathId, SourceSpan)>,
-}
-
-/// Rewrite one ordinary call to a literal-returning const callee in release mode.
-///
-/// WHAT: prepares the callee, attaches project-context provenance and runs the release walk.
-/// WHY: the span-present and spanless cases differ only in the call's authored span, so one
-///      fixture keeps the producer invariant and the provenance transfer on the same shape.
-fn release_rewrite_of_literal_call(call_span: Option<SourceSpan>) -> ReleaseCallRewrite {
-    let mut strings = StringTable::new();
-    let mut constants = ConstValueStore::default();
-    let mut builder = AstExpressionBuilder::new().expect("builder");
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let returned = builder
-        .fixed_scalar(
-            &mut constants,
-            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 literal"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("returned literal")
-        .id();
-    let callee = PathId::try_from_index(4).expect("callee path");
-    let executable = ConstFunctionExecutable {
-        parameters: Vec::new(),
-        return_slots: vec![i32_type],
-        instructions: Rc::from(vec![ConstInstruction {
-            kind: ConstInstructionKind::Return(vec![returned]),
-            span: None,
-        }]),
-        handler_bodies: Rc::new(FxHashMap::default()),
-        donor_identity: None,
-    };
-    let mut executables = FxHashMap::default();
-    executables.insert(callee, executable);
-    let provenance = SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::ProjectContext,
-        "project",
-        "name",
-    ));
-    let mut release_provenances = FxHashMap::default();
-    release_provenances.insert(callee, provenance);
-    let authored = builder
-        .function_call_with_typed_arguments(callee, vec![], vec![i32_type], call_span)
-        .expect("ordinary call")
-        .id();
-    let scope = empty_module_scope();
-    let paths = PathInternerFork::empty();
-    let mut state = ExecutionState::default();
-    let types = TypeEnvironment::default();
-    let rewritten = {
-        let mut budget = ExecutionBudget::new(constants.execution_meter());
-        let mut services = ConstExecutionServices {
-            builder: &mut builder,
-            constants: &mut constants,
-            executables: &executables,
-            scope: &scope,
-            string_table: &mut strings,
-            types: &types,
-            path_fork: &paths,
-        };
-        let mut interpreter = services.interpreter(&mut budget, &mut state);
-        interpreter
-            .rewrite_with_bindings(
-                authored,
-                RewriteMode::Release,
-                &release_provenances,
-                &mut FrameBindings::default(),
-            )
-            .expect("the literal-returning ordinary call is release-eligible")
-    };
-    ReleaseCallRewrite {
-        builder,
-        authored,
-        rewritten,
-        callee,
-        erased: state.release_erased_calls,
-    }
 }
 
 /// A short authored span at `offset`, distinguishable from the empty source-start span.
@@ -263,11 +130,10 @@ fn aggregate_retained_value_meter_reports_the_module_scope() {
     let ConstantFoldError::Budget(exhaustion) = error else {
         panic!("an aggregate retained-value stop is a budget refusal");
     };
-    assert!(
-        exhaustion.aggregate,
-        "a module-wide retained-value stop must not be reported as one call"
+    assert_eq!(
+        exhaustion.limit, MAX_TOTAL_RETAINED_VALUES as u64,
+        "a module-wide retained-value stop must report the module total, not the per-attempt limit"
     );
-    assert_eq!(exhaustion.limit, MAX_TOTAL_RETAINED_VALUES as u64);
 }
 
 #[test]
@@ -433,7 +299,6 @@ fn template_work_spends_the_executor_step_allowance() {
     assert_eq!(refusal.unit, ConstBudgetUnit::Steps);
     assert_eq!(refusal.limit, 4);
     assert_eq!(refusal.setting, Some("const_work_limit"));
-    assert!(!refusal.aggregate);
 }
 
 #[test]
@@ -487,15 +352,33 @@ fn call_depth_refusal_keeps_each_mixed_donor_owner() {
     let a_path = PathId::try_from_index(10).expect("package A path");
     let b_path = PathId::try_from_index(11).expect("package B path");
     let call_a_from_root = builder
-        .function_call_with_typed_arguments(a_path, vec![], vec![i32_type], Some(root_to_a_span))
+        .function_call_with_evaluation_and_typed_arguments(
+            a_path,
+            CallableEvaluation::Const,
+            vec![],
+            vec![i32_type],
+            Some(root_to_a_span),
+        )
         .expect("project call into package A")
         .id();
     let call_b_from_a = builder
-        .function_call_with_typed_arguments(b_path, vec![], vec![i32_type], Some(a_to_b_span))
+        .function_call_with_evaluation_and_typed_arguments(
+            b_path,
+            CallableEvaluation::Const,
+            vec![],
+            vec![i32_type],
+            Some(a_to_b_span),
+        )
         .expect("package A call into package B")
         .id();
     let call_a_from_b = builder
-        .function_call_with_typed_arguments(a_path, vec![], vec![i32_type], Some(b_to_a_span))
+        .function_call_with_evaluation_and_typed_arguments(
+            a_path,
+            CallableEvaluation::Const,
+            vec![],
+            vec![i32_type],
+            Some(b_to_a_span),
+        )
         .expect("package B call into package A")
         .id();
     let a_donor = FrozenIdentityHandle::new();
@@ -568,12 +451,6 @@ fn call_depth_refusal_keeps_each_mixed_donor_owner() {
         Some(&b_donor),
         "the innermost provider body owns the refusal primary"
     );
-    assert_eq!(exhaustion.call_span, Some(b_to_a_span));
-    assert_eq!(
-        exhaustion.call_span_owner.as_ref(),
-        Some(&b_donor),
-        "the refused package B call site keeps its own owner"
-    );
     assert_eq!(
         exhaustion.call_chain.len(),
         MAX_CALL_DEPTH + 1,
@@ -617,8 +494,9 @@ fn budget_refusal_after_nested_provider_call_keeps_the_callers_span_and_donor() 
     let callee_literal_span = inline_span(210, 8);
     let callee_path = PathId::try_from_index(10).expect("callee path");
     let call_callee = builder
-        .function_call_with_typed_arguments(
+        .function_call_with_evaluation_and_typed_arguments(
             callee_path,
+            CallableEvaluation::Const,
             vec![],
             vec![i32_type],
             Some(caller_to_callee_span),
@@ -709,8 +587,8 @@ fn budget_refusal_after_nested_provider_call_keeps_the_callers_span_and_donor() 
     );
 }
 
-/// An aggregate refusal on the provider body's first step must use the provider's entry span and
-/// donor, never the caller's call span under the provider's identity.
+/// A module-budget refusal on the provider body's first step must use the provider's entry span
+/// and donor, never the caller's call span under the provider's identity.
 #[test]
 fn budget_refusal_on_provider_entry_uses_the_provider_span_and_donor() {
     let mut strings = StringTable::new();
@@ -722,8 +600,9 @@ fn budget_refusal_on_provider_entry_uses_the_provider_span_and_donor() {
     let provider_literal_span = inline_span(430, 8);
     let provider_path = PathId::try_from_index(11).expect("provider path");
     let call_provider = builder
-        .function_call_with_typed_arguments(
+        .function_call_with_evaluation_and_typed_arguments(
             provider_path,
+            CallableEvaluation::Const,
             vec![],
             vec![i32_type],
             Some(caller_call_span),
@@ -770,8 +649,8 @@ fn budget_refusal_on_provider_entry_uses_the_provider_span_and_donor() {
     let mut executables = FxHashMap::default();
     executables.insert(provider_path, provider);
 
-    // The caller's entry spends the aggregate exactly; the provider's first frame is the step
-    // that must be refused.
+    // The caller's entry spends the module step allowance exactly; the provider's first frame is
+    // the step that must be refused.
     let meter = constants.execution_meter();
     {
         let mut meter = meter.borrow_mut();
@@ -795,13 +674,13 @@ fn budget_refusal_on_provider_entry_uses_the_provider_span_and_donor() {
     let mut interpreter = services.interpreter(&mut budget, &mut state);
     let error = interpreter
         .execute_body(None, &caller, FrameBindings::default())
-        .expect_err("the provider's entry step exceeds the aggregate");
+        .expect_err("the provider's entry step exceeds the module step allowance");
     let ConstantFoldError::Budget(exhaustion) = error else {
         panic!("the step allowance must stay a budget refusal");
     };
-    assert!(
-        exhaustion.aggregate,
-        "the refusal must charge the aggregate"
+    assert_eq!(
+        exhaustion.limit, 1,
+        "the refusal must report the module step limit, not the larger per-attempt allowance"
     );
     assert_eq!(
         exhaustion.span,
@@ -812,471 +691,6 @@ fn budget_refusal_on_provider_entry_uses_the_provider_span_and_donor() {
         exhaustion.span_owner.as_ref(),
         Some(&provider_donor),
         "the provider's donor must own the provider's entry span"
-    );
-}
-
-#[test]
-fn release_candidate_graph_propagates_ineligibility_in_one_pass() {
-    let mut graph: FxHashMap<PathId, FxHashSet<PathId>> = FxHashMap::default();
-    let nodes: Vec<PathId> = (0..10_000)
-        .map(|index| PathId::try_from_index(index).expect("test path"))
-        .collect();
-    for pair in nodes.windows(2) {
-        graph.insert(pair[0], [pair[1]].into_iter().collect());
-    }
-    graph.insert(
-        *nodes.last().expect("non-empty chain"),
-        [PathId::try_from_index(20_000).expect("missing path")]
-            .into_iter()
-            .collect(),
-    );
-    assert!(
-        eligible_acyclic_paths(&graph, &reverse_call_graph(&graph)).is_empty(),
-        "one missing dependency must invalidate the whole predecessor chain"
-    );
-}
-
-#[test]
-fn release_candidate_graph_removes_cyclic_components() {
-    let a = PathId::try_from_index(0).expect("path a");
-    let b = PathId::try_from_index(1).expect("path b");
-    let dependent = PathId::try_from_index(2).expect("path dependent");
-    let independent = PathId::try_from_index(3).expect("path independent");
-    let mut graph: FxHashMap<PathId, FxHashSet<PathId>> = FxHashMap::default();
-    graph.insert(a, [b].into_iter().collect());
-    graph.insert(b, [a].into_iter().collect());
-    graph.insert(dependent, [a].into_iter().collect());
-    graph.insert(independent, FxHashSet::default());
-    let eligible = eligible_acyclic_paths(&graph, &reverse_call_graph(&graph));
-    assert!(!eligible.contains(&a) && !eligible.contains(&b));
-    assert!(!eligible.contains(&dependent));
-    assert!(eligible.contains(&independent));
-}
-
-#[test]
-fn release_call_replacement_inherits_candidate_provenance() {
-    let span = inline_span(12, 20);
-    let rewrite = release_rewrite_of_literal_call(Some(span));
-    let facts = rewrite
-        .builder
-        .view(rewrite.rewritten)
-        .expect("rewritten call")
-        .occurrence_facts()
-        .expect("replacement provenance");
-    assert!(
-        facts
-            .provenance
-            .contains_class(SyntheticInterfaceClass::ProjectContext),
-        "the release replacement must inherit the candidate's transitive provenance"
-    );
-    assert_eq!(
-        rewrite.erased,
-        vec![(rewrite.callee, span)],
-        "release rewriting must record the erased call site with its authored span"
-    );
-}
-
-/// Release speculation must never erase a call whose liveness cannot be decided.
-///
-/// WHAT: a spanless ordinary call stays at runtime and records no erased-call row.
-/// WHY: HIR decides whether an erased call was live from authored source spans. Guessing on an
-///      absent span could reject `$infallible` source that debug accepts, breaking debug/release
-///      verdict parity. No legal source or materialised callable produces a spanless call today,
-///      so this unit test pins the producer invariant that the required ledger span now encodes.
-#[test]
-fn release_rewrite_declines_a_spanless_call() {
-    let rewrite = release_rewrite_of_literal_call(None);
-    assert_eq!(
-        rewrite.rewritten, rewrite.authored,
-        "a spanless call must stay at runtime in release"
-    );
-    assert!(
-        matches!(
-            rewrite
-                .builder
-                .view(rewrite.rewritten)
-                .expect("retained call")
-                .operation(),
-            ExpressionOperationView::Call(_)
-        ),
-        "the retained expression must still be the authored call"
-    );
-    assert!(
-        rewrite.erased.is_empty(),
-        "a spanless call must not enter the erased-call ledger: {:?}",
-        rewrite.erased
-    );
-}
-
-/// A refused release candidate must discard the folds it speculated in its arguments.
-///
-/// WHAT: a two-argument call with one non-constant argument and one foldable ordinary call stays
-///       byte-for-byte the authored runtime call, and no erased-call row survives.
-/// WHY: a debug build evaluates every argument as authored. Keeping the rewritten argument under
-///      a call that stays at runtime would let an optimiser-created constant reach HIR and the
-///      numeric proof without the runtime call debug retains, changing `$infallible` verdicts in
-///      release only.
-#[test]
-fn release_refused_call_discards_speculative_argument_folds() {
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let mut strings = StringTable::new();
-    let mut constants = ConstValueStore::default();
-    let mut builder = AstExpressionBuilder::new().expect("builder");
-
-    let returned = builder
-        .fixed_scalar(
-            &mut constants,
-            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 literal"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("returned literal")
-        .id();
-    let foldable = PathId::try_from_index(4).expect("foldable path");
-    let keep = PathId::try_from_index(5).expect("keep path");
-    let first_parameter = PathId::try_from_index(6).expect("first parameter");
-    let second_parameter = PathId::try_from_index(7).expect("second parameter");
-    let runtime = PathId::try_from_index(8).expect("runtime callee");
-
-    let mut executables = FxHashMap::default();
-    executables.insert(
-        foldable,
-        const_executable(
-            Vec::new(),
-            vec![i32_type],
-            vec![ConstInstruction {
-                kind: ConstInstructionKind::Return(vec![returned]),
-                span: None,
-            }],
-        ),
-    );
-    let returned_parameter = builder
-        .reference_with_type_id(
-            first_parameter,
-            i32_type,
-            None,
-            ValueMode::ImmutableOwned,
-            ConstRecordState::RuntimeValue,
-        )
-        .expect("parameter reference")
-        .id();
-    executables.insert(
-        keep,
-        const_executable(
-            vec![(first_parameter, i32_type), (second_parameter, i32_type)],
-            vec![i32_type],
-            vec![ConstInstruction {
-                kind: ConstInstructionKind::Return(vec![returned_parameter]),
-                span: None,
-            }],
-        ),
-    );
-
-    let keep_span = inline_span(40, 30);
-    let foldable_call = builder
-        .function_call_with_typed_arguments(
-            foldable,
-            Vec::<CallArgument<OwnedExpr>>::new(),
-            vec![i32_type],
-            Some(inline_span(12, 20)),
-        )
-        .expect("foldable call")
-        .id();
-    let runtime_call = builder
-        .function_call_with_typed_arguments(
-            runtime,
-            Vec::<CallArgument<OwnedExpr>>::new(),
-            vec![i32_type],
-            Some(keep_span),
-        )
-        .expect("runtime call")
-        .id();
-    let first_argument = builder.own(runtime_call);
-    let second_argument = builder.own(foldable_call);
-    let authored = builder
-        .function_call_with_typed_arguments(
-            keep,
-            vec![
-                CallArgument::positional(first_argument, CallAccessMode::Shared, None),
-                CallArgument::positional(second_argument, CallAccessMode::Shared, None),
-            ],
-            vec![i32_type],
-            Some(keep_span),
-        )
-        .expect("runtime keep call")
-        .id();
-
-    let scope = empty_module_scope();
-    let paths = PathInternerFork::empty();
-    let types = TypeEnvironment::default();
-    let release_provenances = FxHashMap::default();
-    let mut state = ExecutionState::default();
-    let rewritten = {
-        let mut budget = ExecutionBudget::new(constants.execution_meter());
-        let mut services = ConstExecutionServices {
-            builder: &mut builder,
-            constants: &mut constants,
-            executables: &executables,
-            scope: &scope,
-            string_table: &mut strings,
-            types: &types,
-            path_fork: &paths,
-        };
-        let mut interpreter = services.interpreter(&mut budget, &mut state);
-        interpreter
-            .rewrite_with_bindings(
-                authored,
-                RewriteMode::Release,
-                &release_provenances,
-                &mut FrameBindings::default(),
-            )
-            .expect("release rewriting leaves the runtime call in place")
-    };
-
-    assert_eq!(
-        rewritten, authored,
-        "a refused candidate must leave the runtime call byte-for-byte as authored"
-    );
-    assert!(
-        state.release_erased_calls.is_empty(),
-        "speculative argument folds must not enter the erased-call ledger: {:?}",
-        state.release_erased_calls
-    );
-}
-
-/// A refused release candidate must discard an auxiliary fold that leaves no ledger row.
-///
-/// WHAT: an eligible return-second call proves that a constant collection's `.length()` folds
-///       inside release speculation, then a structurally identical call with one runtime argument
-///       refuses and must restore the authored `.length()` child byte-for-byte.
-/// WHY: an ordinary argument fold records an erased-call row, but a collection read is a genuine
-///      auxiliary fold that records none. Keeping it under a call that stays at runtime is
-///      therefore invisible to erased-call evidence while still changing the AST a debug build
-///      would evaluate.
-#[test]
-fn release_refused_call_discards_an_auxiliary_collection_length_fold() {
-    use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let mut types = TypeEnvironment::new();
-    let collection_type = types.intern_collection(i32_type, None);
-    let mut strings = StringTable::new();
-    let mut paths = PathInternerFork::empty();
-    let callee = paths
-        .try_intern_portable_path("test/callee", &mut strings)
-        .expect("callee path");
-    let first_parameter = paths
-        .try_intern_portable_path("test/first", &mut strings)
-        .expect("first parameter");
-    let second_parameter = paths
-        .try_intern_portable_path("test/second", &mut strings)
-        .expect("second parameter");
-    let missing_runtime = paths
-        .try_intern_portable_path("test/missing_runtime", &mut strings)
-        .expect("missing runtime callee");
-    let mut constants = ConstValueStore::default();
-    let mut builder = AstExpressionBuilder::new().expect("builder");
-
-    let item = constants
-        .insert_resolved(
-            i32_type,
-            ConstValuePayload::FixedScalar(
-                FixedScalarValue::signed(FixedScalar::I32, 1).expect("I32 one"),
-            ),
-            None,
-        )
-        .expect("collection item");
-    let collection = constants
-        .insert_resolved(
-            collection_type,
-            ConstValuePayload::Collection(vec![item, item, item]),
-            None,
-        )
-        .expect("constant collection");
-
-    let returned_parameter = builder
-        .reference_with_type_id(
-            second_parameter,
-            i32_type,
-            None,
-            ValueMode::ImmutableOwned,
-            ConstRecordState::RuntimeValue,
-        )
-        .expect("parameter reference")
-        .id();
-    let mut executables = FxHashMap::default();
-    executables.insert(
-        callee,
-        const_executable(
-            vec![(first_parameter, i32_type), (second_parameter, i32_type)],
-            vec![i32_type],
-            vec![ConstInstruction {
-                kind: ConstInstructionKind::Return(vec![returned_parameter]),
-                span: None,
-            }],
-        ),
-    );
-
-    let length_span = inline_span(40, 20);
-    let make_length = |builder: &mut AstExpressionBuilder| {
-        let receiver = builder
-            .constant(
-                collection,
-                collection_type,
-                Some(length_span),
-                ValueMode::ImmutableOwned,
-            )
-            .expect("collection receiver");
-        builder
-            .collection_builtin_call_with_typed_arguments(
-                receiver,
-                CollectionBuiltinOp::Length,
-                Vec::<CallArgument<OwnedExpr>>::new(),
-                vec![i32_type],
-                Some(length_span),
-            )
-            .expect("length call")
-            .id()
-    };
-    let constant_argument = builder
-        .fixed_scalar(
-            &mut constants,
-            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 seven"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("constant argument")
-        .id();
-    let eligible_length = make_length(&mut builder);
-    let eligible = builder
-        .function_call_with_typed_arguments(
-            callee,
-            vec![
-                CallArgument::positional(
-                    builder.own(constant_argument),
-                    CallAccessMode::Shared,
-                    None,
-                ),
-                CallArgument::positional(
-                    builder.own(eligible_length),
-                    CallAccessMode::Shared,
-                    None,
-                ),
-            ],
-            vec![i32_type],
-            Some(inline_span(140, 40)),
-        )
-        .expect("eligible call")
-        .id();
-
-    let runtime_call = builder
-        .function_call_with_typed_arguments(
-            missing_runtime,
-            Vec::<CallArgument<OwnedExpr>>::new(),
-            vec![i32_type],
-            Some(inline_span(90, 10)),
-        )
-        .expect("runtime call")
-        .id();
-    let refused_length = make_length(&mut builder);
-    let refused = builder
-        .function_call_with_typed_arguments(
-            callee,
-            vec![
-                CallArgument::positional(builder.own(runtime_call), CallAccessMode::Shared, None),
-                CallArgument::positional(builder.own(refused_length), CallAccessMode::Shared, None),
-            ],
-            vec![i32_type],
-            Some(inline_span(140, 40)),
-        )
-        .expect("refused call")
-        .id();
-
-    let scope = empty_module_scope();
-    let release_provenances = FxHashMap::default();
-    let mut state = ExecutionState::default();
-    let eligible_rewritten = {
-        let mut budget = ExecutionBudget::new(constants.execution_meter());
-        let mut services = ConstExecutionServices {
-            builder: &mut builder,
-            constants: &mut constants,
-            executables: &executables,
-            scope: &scope,
-            string_table: &mut strings,
-            types: &types,
-            path_fork: &paths,
-        };
-        let mut interpreter = services.interpreter(&mut budget, &mut state);
-        interpreter
-            .rewrite_with_bindings(
-                eligible,
-                RewriteMode::Release,
-                &release_provenances,
-                &mut FrameBindings::default(),
-            )
-            .expect("the constant-argument call folds")
-    };
-    let ExpressionOperationView::Constant(folded) = builder
-        .view(eligible_rewritten)
-        .expect("folded view")
-        .operation()
-    else {
-        panic!("an eligible call returning its second constant argument must fold");
-    };
-    assert!(
-        matches!(
-            constants.payload(folded),
-            Some(ConstValuePayload::FixedScalar(value))
-                if *value == FixedScalarValue::signed(FixedScalar::I32, 3).expect("I32 three")
-        ),
-        "the folded value must come through the auxiliary collection-length fold"
-    );
-
-    let erased_before_refusal = state.release_erased_calls.len();
-    let refused_rewritten = {
-        let mut budget = ExecutionBudget::new(constants.execution_meter());
-        let mut services = ConstExecutionServices {
-            builder: &mut builder,
-            constants: &mut constants,
-            executables: &executables,
-            scope: &scope,
-            string_table: &mut strings,
-            types: &types,
-            path_fork: &paths,
-        };
-        let mut interpreter = services.interpreter(&mut budget, &mut state);
-        interpreter
-            .rewrite_with_bindings(
-                refused,
-                RewriteMode::Release,
-                &release_provenances,
-                &mut FrameBindings::default(),
-            )
-            .expect("a runtime argument leaves the call in place")
-    };
-    assert_eq!(
-        refused_rewritten, refused,
-        "a refused candidate must restore the whole authored call"
-    );
-    assert_eq!(
-        state.release_erased_calls.len(),
-        erased_before_refusal,
-        "a refused candidate must not add a row for the auxiliary child"
-    );
-    let ExpressionOperationView::Call(call) = builder
-        .view(refused_rewritten)
-        .expect("refused view")
-        .operation()
-    else {
-        panic!("the refused call must remain an authored call");
-    };
-    let length_argument = call.arguments().iter().nth(1).expect("second argument");
-    assert!(
-        matches!(
-            length_argument.value().operation(),
-            ExpressionOperationView::CollectionBuiltin { .. }
-        ),
-        "the auxiliary length read must stay authored under the refused call"
     );
 }
 
@@ -1381,7 +795,6 @@ fn failed_rewrite_restores_the_handler_it_replaced() {
         .rewrite_with_bindings(
             root,
             RewriteMode::InterpretedBody,
-            &FxHashMap::default(),
             &mut FrameBindings::default(),
         )
         .expect_err("the zero attempt allowance refuses the nested call");
@@ -1509,7 +922,13 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
     executables.insert(callee, callee_executable);
 
     let call = builder
-        .function_call_with_typed_arguments(callee, vec![], vec![i32_type], None)
+        .function_call_with_evaluation_and_typed_arguments(
+            callee,
+            CallableEvaluation::Const,
+            vec![],
+            vec![i32_type],
+            None,
+        )
         .expect("nested const call");
     let start = builder
         .fixed_scalar(
@@ -1693,212 +1112,5 @@ fn fold_to_constant_propagates_budget_refusals() {
     assert!(
         matches!(error, ConstantFoldError::Budget(_)),
         "fold_to_constant must not turn a refusal into `not constant`"
-    );
-}
-
-#[test]
-fn release_preparation_refuses_signatures_it_cannot_represent() {
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let aggregate_type = builtin_type_ids::STRING;
-    let parameter = |value_mode, type_id| FunctionParameter {
-        id: PathId::try_from_index(20).expect("parameter path"),
-        type_id,
-        value_mode,
-        default: None,
-        binding_span: None,
-        contract: ParameterContract::Value,
-    };
-    let scalar_contract = || FunctionReturnContract::from_slots([i32_type], None);
-
-    // Every refusal below happens before the body compiler runs, so an empty body is enough to
-    // reach the gate being pinned.
-    let cases = [
-        (
-            "a mutable parameter",
-            vec![parameter(ValueMode::MutableOwned, i32_type)],
-            scalar_contract(),
-            false,
-        ),
-        (
-            "an aggregate parameter",
-            vec![parameter(ValueMode::ImmutableOwned, aggregate_type)],
-            scalar_contract(),
-            false,
-        ),
-        (
-            "a scalar parameter and scalar result",
-            vec![parameter(ValueMode::ImmutableOwned, i32_type)],
-            scalar_contract(),
-            true,
-        ),
-        (
-            "zero success slots",
-            Vec::new(),
-            FunctionReturnContract::from_slots([], None),
-            false,
-        ),
-        (
-            "two success slots",
-            Vec::new(),
-            FunctionReturnContract::from_slots([i32_type, i32_type], None),
-            false,
-        ),
-        (
-            "an aggregate success slot",
-            Vec::new(),
-            FunctionReturnContract::from_slots([aggregate_type], None),
-            false,
-        ),
-        (
-            "an error channel",
-            Vec::new(),
-            FunctionReturnContract::from_slots([i32_type], Some(aggregate_type)),
-            false,
-        ),
-        (
-            "a Never contract",
-            Vec::new(),
-            FunctionReturnContract::Never,
-            false,
-        ),
-    ];
-
-    let constants = ConstValueStore::default();
-    let builder = AstExpressionBuilder::new().expect("builder");
-    let types = TypeEnvironment::default();
-    let registry = ExternalPackageRegistry::new();
-    let scope = empty_module_scope();
-    let paths = PathInternerFork::empty();
-    for (label, parameters, return_contract, expected) in cases {
-        let signature = FunctionSignature {
-            parameters,
-            return_contract,
-        };
-        let references = ConstBodyReferenceScope {
-            scope: &scope,
-            path_fork: &paths,
-            constants: &constants,
-        };
-        let prepared =
-            prepare_release_executable(&signature, &[], &builder, &types, &registry, references)
-                .expect("signature gates never report infrastructure failures");
-        assert_eq!(
-            prepared.is_some(),
-            expected,
-            "{label} must {} a release candidate",
-            if expected { "prepare" } else { "refuse" }
-        );
-    }
-}
-
-#[test]
-fn retained_release_candidates_merge_transitive_provenance() {
-    let callee = PathId::try_from_index(0).expect("callee path");
-    let caller = PathId::try_from_index(1).expect("caller path");
-    let callee_provenance =
-        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
-            SyntheticInterfaceClass::ProjectContext,
-            "render",
-            "callee",
-        ));
-    let caller_provenance =
-        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
-            SyntheticInterfaceClass::ProjectContext,
-            "render",
-            "caller",
-        ));
-    let mut candidates = FxHashMap::default();
-    candidates.insert(callee, release_candidate([], callee_provenance.clone()));
-    candidates.insert(
-        caller,
-        release_candidate([callee], caller_provenance.clone()),
-    );
-
-    let retained = retain_acyclic_release_candidates(candidates);
-
-    let expected = caller_provenance.union(&callee_provenance);
-    assert_eq!(
-        retained.provenances.get(&caller),
-        Some(&expected),
-        "a caller's published provenance must include its callee's transitive set"
-    );
-    assert_eq!(
-        retained.provenances.get(&callee),
-        Some(&callee_provenance),
-        "a callee keeps its own provenance"
-    );
-    assert_eq!(retained.executables.len(), 2);
-}
-
-#[test]
-fn retained_release_candidates_remove_the_dependent_closure_of_a_missing_callee() {
-    let caller = PathId::try_from_index(0).expect("caller path");
-    let callee = PathId::try_from_index(1).expect("callee path");
-    let independent = PathId::try_from_index(2).expect("independent path");
-    let missing = PathId::try_from_index(3).expect("missing path");
-    let independent_provenance =
-        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
-            SyntheticInterfaceClass::ProjectContext,
-            "render",
-            "independent",
-        ));
-    let mut candidates = FxHashMap::default();
-    candidates.insert(
-        caller,
-        release_candidate([callee], SyntheticInterfaceProvenance::default()),
-    );
-    candidates.insert(
-        callee,
-        release_candidate([missing], SyntheticInterfaceProvenance::default()),
-    );
-    candidates.insert(
-        independent,
-        release_candidate([], independent_provenance.clone()),
-    );
-
-    let retained = retain_acyclic_release_candidates(candidates);
-
-    assert_eq!(
-        retained.executables.keys().copied().collect::<Vec<_>>(),
-        vec![independent],
-        "the dependent closure of a missing callee must be removed"
-    );
-    assert_eq!(
-        retained.provenances.get(&independent),
-        Some(&independent_provenance),
-        "an unreachable candidate keeps its provenance"
-    );
-    assert!(!retained.provenances.contains_key(&caller));
-    assert!(!retained.provenances.contains_key(&callee));
-}
-
-#[test]
-fn dependency_order_finishes_shared_callee_before_its_caller() {
-    let caller = PathId::try_from_index(0).expect("caller path");
-    let caller_sibling = PathId::try_from_index(1).expect("sibling path");
-    let shared_callee = PathId::try_from_index(2).expect("shared callee path");
-    let mut graph: FxHashMap<PathId, FxHashSet<PathId>> = FxHashMap::default();
-    graph.insert(
-        caller,
-        [caller_sibling, shared_callee].into_iter().collect(),
-    );
-    graph.insert(caller_sibling, [shared_callee].into_iter().collect());
-    graph.insert(shared_callee, FxHashSet::default());
-    let eligible: FxHashSet<PathId> = graph.keys().copied().collect();
-
-    let order = candidate_dependency_order(&graph, &eligible);
-    let position = |path: PathId| {
-        order
-            .iter()
-            .position(|candidate| *candidate == path)
-            .expect("every candidate is ordered")
-    };
-    assert!(
-        position(shared_callee) < position(caller_sibling),
-        "the shared callee must be visited before its caller"
-    );
-    assert!(
-        position(caller_sibling) < position(caller),
-        "the caller must be visited after its callee"
     );
 }

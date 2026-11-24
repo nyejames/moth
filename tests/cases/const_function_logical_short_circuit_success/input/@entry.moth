@@ -1,4 +1,5 @@
--- A short-circuited right operand must not execute its const call or failing assertion.
+-- A short-circuited right operand must not execute its const call, failing assertion or failing
+-- arithmetic, including when the logical operator sits beneath another operator.
 
 verify #|value I32| -> Bool:
     assert(value > 0, "right operand executed")
@@ -13,6 +14,16 @@ either #|flag Bool, value I32| -> Bool:
     return flag or verify(value)
 ;
 
+divides #|flag Bool, value I32, divisor I32| -> Bool:
+    return flag and value // divisor is 0
+;
+
+negated #|flag Bool, value I32, divisor I32| -> Bool:
+    return not (flag or value // divisor is 0)
+;
+
 left #Bool = guard(false, 0)
 right #Bool = either(true, 0)
-~[: [left] [right]]
+pure #Bool = divides(false, 1, 0)
+nested #Bool = negated(true, 1, 0)
+~[: [left] [right] [pure] [nested]]

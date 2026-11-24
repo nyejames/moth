@@ -17,7 +17,6 @@
 
 use crate::builder_surface::config_schema::{ProjectFieldConfigPolicies, ProjectFieldConfigPolicy};
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
@@ -313,7 +312,6 @@ fn compile_prepared_config_source(
             string_table,
             path_fork,
             entry_dir: authored_scope,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
             build_config_values: std::sync::Arc::new(Default::default()),

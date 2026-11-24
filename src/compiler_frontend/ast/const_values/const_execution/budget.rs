@@ -133,7 +133,6 @@ impl ExecutionBudget {
                 ConstBudgetUnit::RetainedValues,
                 MAX_TOTAL_RETAINED_VALUES as u64,
                 None,
-                true,
             ));
         }
         Ok(())
@@ -150,25 +149,21 @@ impl ExecutionBudget {
             .limits
             .max_total_memory_bytes
             .saturating_sub(meter.retained_memory_bytes);
-        let byte_aggregate = total_bytes < attempt_bytes;
         let attempt_pieces = MAX_RETAINED_VALUES.saturating_sub(self.retained_values);
         let total_pieces = MAX_TOTAL_RETAINED_VALUES.saturating_sub(meter.retained_values);
-        let piece_aggregate = total_pieces < attempt_pieces;
         TemplateOutputLimits {
             max_bytes: attempt_bytes.min(total_bytes),
-            byte_limit: if byte_aggregate {
+            byte_limit: if total_bytes < attempt_bytes {
                 meter.limits.max_total_memory_bytes
             } else {
                 meter.limits.max_attempt_memory_bytes
             },
-            byte_aggregate,
             max_structural_pieces: attempt_pieces.min(total_pieces),
-            piece_limit: if piece_aggregate {
+            piece_limit: if total_pieces < attempt_pieces {
                 MAX_TOTAL_RETAINED_VALUES
             } else {
                 MAX_RETAINED_VALUES
             },
-            piece_aggregate,
             span,
             meter: Rc::new(TemplateOutputMeter::default()),
         }
@@ -198,7 +193,6 @@ impl ExecutionBudget {
                 ConstBudgetUnit::Mib,
                 meter.limits.max_attempt_memory_bytes as u64,
                 Some("const_memory_limit_mb"),
-                false,
             ));
         }
         if meter.retained_memory_bytes > meter.limits.max_total_memory_bytes {
@@ -208,7 +202,6 @@ impl ExecutionBudget {
                 ConstBudgetUnit::Mib,
                 meter.limits.max_total_memory_bytes as u64,
                 Some("const_memory_limit_mb"),
-                true,
             ));
         }
         Ok(())

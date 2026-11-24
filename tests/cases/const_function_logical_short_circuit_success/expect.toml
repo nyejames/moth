@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " false true"
+rendered_output_exact = " false true false false"

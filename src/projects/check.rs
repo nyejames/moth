@@ -5,7 +5,6 @@
 //! WHY: users and tooling need a fast diagnostic pass that validates source correctness while
 //! remaining backend-agnostic.
 
-use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BuildBootstrap, BuilderSelection, bootstrap_project_build, finalize_project_assembly_failure,
     finish_successful_project_warnings, validate_frontend_facade_boundaries,
@@ -212,7 +211,6 @@ fn execute_check_messages_with_warning_owner(
     let mut warning_owner = create_warning_owner(string_table);
     let frontend_outcome = match compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

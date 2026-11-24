@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-message_contains = ["match statement"]
+message_contains = ["stepped collection loop"]
 diagnostic_codes = ["MOTH-RULE-0053"]
 
 [[backends.html.diagnostic_assertions]]

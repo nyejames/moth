@@ -1,0 +1,29 @@
+-- A const-function match runs only the selected arm. A guard runs only after its own pattern
+-- matches, so a guard or an unselected body that would divide by zero never executes.
+
+pick #|value I32, divisor I32| -> I32:
+    if value is:
+        1 if 10 // divisor is 0 => return 100
+        2 => return 10 // divisor
+        3 => return 3
+        else => return 0
+    ;
+;
+
+guarded #|value I32, divisor I32| -> I32:
+    result ~= 0
+    if value is:
+        < 0 => ~result = -1
+        > 0 if 10 // divisor > 1 => ~result = 10 // divisor
+        else => ~result = 7
+    ;
+    return result
+;
+
+skipped_guard #I32 = pick(3, 0)
+default_arm #I32 = pick(9, 0)
+earlier_arm #I32 = guarded(-4, 0)
+passing_guard #I32 = guarded(5, 2)
+no_pattern #I32 = guarded(0, 0)
+
+~[: [skipped_guard] [default_arm] [earlier_arm] [passing_guard] [no_pattern] ]

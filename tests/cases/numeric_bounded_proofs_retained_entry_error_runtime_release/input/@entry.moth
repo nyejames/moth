@@ -1,8 +1,8 @@
 -- HTML executes the safe operations before the retained U32 overflow check.
 -- Its built-in Error propagates to the entry, preventing runtime fragment publication.
--- HTML-Wasm rejects a checked operation at its source before runtime: the debug profile
--- stops at the narrow I16 sum, while release folds that prelude and rejects the retained
--- U32 add in increment_u32. Neither profile reaches runtime.
+-- HTML-Wasm rejects the narrow I16 sum at its source operation before runtime in both
+-- profiles: the U8 plus I8 operation completes in I16, which the bounded Wasm scalar step
+-- does not lower.
 
 u8_sum |left U8, right I8| -> I16:
     return left + right

@@ -368,7 +368,7 @@ impl ConstInterpreter<'_> {
         let values = outcome?;
         let value = values.first().copied();
         if inherited && self.state.pending_handler_return.is_none() {
-            self.state.inherited_handler_value = value;
+            self.state.inherited_handler_values = values;
             self.state.inherited_handler_recovered = true;
             self.state.call_chain_attached = false;
         }
@@ -482,7 +482,7 @@ impl ConstInterpreter<'_> {
             return Ok(None);
         };
         let index_value = self.evaluate_with_selected_handler(*index, &handler, bindings)?;
-        if let Some(value) = self.state.inherited_handler_value {
+        if let Some(&value) = self.state.inherited_handler_values.first() {
             return Ok(Some(value));
         }
         let index = constant_index(self.constants, index_value);
@@ -541,7 +541,7 @@ impl ConstInterpreter<'_> {
             return Ok(None);
         };
         let index_value = self.evaluate_with_selected_handler(*index, &handler, bindings)?;
-        if let Some(value) = self.state.inherited_handler_value {
+        if let Some(&value) = self.state.inherited_handler_values.first() {
             self.budget.retain_values(items.len(), metadata.span)?;
             return Ok(Some(value));
         }
@@ -789,7 +789,7 @@ impl ConstInterpreter<'_> {
         }
         if self.state.inherited_handler_recovered {
             self.state.inherited_handler_recovered = false;
-            self.state.inherited_handler_value = None;
+            self.state.inherited_handler_values.clear();
             return Ok(true);
         }
         let metadata = self

@@ -99,7 +99,7 @@ use crate::compiler_frontend::tests::parse_support::{
     ast_first_error_type_display, tokenize_source_for_test,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
-use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
+use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::FxHashMap;
@@ -345,7 +345,6 @@ struct FrontendProject {
     frontend: FrontendServices,
     builder_root_slots: Option<BuilderRootSlotSchema>,
     entry_role: FileRole,
-    build_profile: FrontendBuildProfile,
     /// Environment paired with the most recent HIR lowering.
     ///
     /// WHY: borrow validation consumes semantic type classes, and tests lower HIR once then run
@@ -435,7 +434,6 @@ impl FrontendProject {
             frontend,
             builder_root_slots: None,
             entry_role,
-            build_profile: FrontendBuildProfile::Dev,
             lowered_type_environment: None,
         }
     }
@@ -443,12 +441,6 @@ impl FrontendProject {
     /// Registers the named destinations the frontend may route direct root contributions to.
     fn with_builder_root_slots(mut self, schema: BuilderRootSlotSchema) -> Self {
         self.builder_root_slots = Some(schema);
-        self
-    }
-
-    /// Select the build profile the AST request declares.
-    fn with_build_profile(mut self, build_profile: FrontendBuildProfile) -> Self {
-        self.build_profile = build_profile;
         self
     }
 
@@ -554,7 +546,6 @@ impl FrontendProject {
                     sorted,
                     module_anchor_path: &self.entry_file,
                     synthesizes_entry_start: matches!(self.entry_role, FileRole::ActiveEntryRoot),
-                    build_profile: self.build_profile,
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
                     module_origin: None,
@@ -4179,21 +4170,18 @@ fn implicit_failure_assertion_message_rejects_inferred_call_in_unreachable_code(
              ;\n",
         ),
     ] {
-        for build_profile in [FrontendBuildProfile::Dev, FrontendBuildProfile::Release] {
-            let mut project = FrontendProject::new(
-                &[("src/@entry.moth", source)],
-                "src/@entry.moth",
-                StyleDirectiveRegistry::built_ins(),
-            )
-            .with_build_profile(build_profile);
-            let messages = project
-                .failure_contract_boundary_result()
-                .expect_diagnosed(shape);
-            assert_fallible_reason(
-                &messages,
-                InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            );
-        }
+        let mut project = FrontendProject::new(
+            &[("src/@entry.moth", source)],
+            "src/@entry.moth",
+            StyleDirectiveRegistry::built_ins(),
+        );
+        let messages = project
+            .failure_contract_boundary_result()
+            .expect_diagnosed(shape);
+        assert_fallible_reason(
+            &messages,
+            InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+        );
     }
 }
 
@@ -5877,29 +5865,22 @@ fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors
 }
 
 #[test]
-fn release_keeps_authored_dead_nested_call_as_skipped_evidence() {
+fn authored_dead_nested_call_stays_skipped_selected_evidence() {
     let source = "assert_positive |value I32| -> I32:\n    assert(value > 0)\n    return value\n;\n\
                   $infallible\n\
                   probe |value I32| -> I32:\n    return 4\n\
                   dead Bool = value is assert_positive(1)\n    return 0\n;\n\
                   ~[: probe=[probe(1)] ]\n";
-    let mut debug = FrontendProject::new(
+    let mut project = FrontendProject::new(
         &[("src/@entry.moth", source)],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
-    let mut release = FrontendProject::new(
-        &[("src/@entry.moth", source)],
-        "src/@entry.moth",
-        StyleDirectiveRegistry::built_ins(),
-    )
-    .with_build_profile(FrontendBuildProfile::Release);
 
-    // Anchor on the authored call nested inside the dead comparison. Debug keeps it at runtime
-    // and has no erased-call ledger.
-    let debug_ast = debug.ast();
-    let debug_body = named_function_body(&debug, &debug_ast, "probe");
-    let comparison = initializer(&debug_ast, &debug_body[1]);
+    // Anchor on the authored call nested inside the dead comparison.
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "probe");
+    let comparison = initializer(&ast, &body[1]);
     let ExpressionOperationView::Compare { right, .. } = comparison.operation() else {
         panic!("`value is call` must be a comparison expression");
     };
@@ -5910,34 +5891,12 @@ fn release_keeps_authored_dead_nested_call_as_skipped_evidence() {
         .metadata()
         .span
         .expect("every authored call carries its parse span");
-    assert!(
-        debug_ast.release_erased_call_sites.is_empty(),
-        "debug builds erase no call"
-    );
 
-    // Release speculation leaves every authored-dead statement unfolded. The nested call keeps
-    // its runtime expression, so the entry's live call to `probe` is the only foldable site and
-    // the dead call never reaches the erased-call ledger.
-    let release_ast = release.ast();
-    assert!(
-        release_ast
-            .release_erased_call_sites
-            .iter()
-            .all(|site| site.span != authored_call_span),
-        "release must not erase the authored-dead call at {authored_call_span:?}: {:?}",
-        release_ast.release_erased_call_sites
-    );
-
-    let hir = release
-        .lower_ast_result(release_ast)
-        .expect("release HIR lowering should succeed");
-    let probe = named_hir_function(&release, &hir, "probe").id;
+    let hir = project
+        .lower_ast_result(ast)
+        .expect("HIR lowering should succeed");
+    let probe = named_hir_function(&project, &hir, "probe").id;
     let facts = &hir.function_failure_facts[&probe];
-    assert!(
-        facts.constraint.live_erased_call_sites.is_empty(),
-        "a dead nested call must not project a live erased site: {:?}",
-        facts.constraint.live_erased_call_sites
-    );
     let skipped_selected = facts
         .constraint
         .selected_call_sites
@@ -5952,6 +5911,44 @@ fn release_keeps_authored_dead_nested_call_as_skipped_evidence() {
         facts.contributors.is_empty(),
         "a dead nested call must not project an executable failure contributor: {:?}",
         facts.contributors
+    );
+}
+
+/// WHAT: an ordinary call with constant arguments stays a HIR call, while a required const call
+///       folds before HIR.
+/// WHY: constraint verification reads the calls HIR keeps. The frontend has no build-profile
+///      input, so no build may replace an ordinary call with its result before verification.
+#[test]
+fn ordinary_constant_argument_call_stays_a_hir_call_while_const_call_folds() {
+    let mut project = failure_project(
+        "double |value I32| -> I32:\n    return value * 2\n;\n\
+         triple #|value I32| -> I32:\n    return value * 3\n;\n\
+         probe || -> I32:\n    return double(2) + triple(2)\n;\n",
+    );
+    let ast = project.ast();
+    let hir = project
+        .lower_ast_result(ast)
+        .expect("ordinary and const calls must lower");
+    let probe = named_hir_function(&project, &hir, "probe");
+    let double = named_hir_function(&project, &hir, "double").id;
+    let reachable = reachable_block_ids(&hir, probe.entry);
+    let local_calls: Vec<_> = hir
+        .blocks
+        .iter()
+        .filter(|block| reachable.contains(&block.id))
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            HirStatementKind::Call {
+                target: CallTarget::Local(id),
+                ..
+            } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        local_calls,
+        vec![double],
+        "the ordinary call must stay a runtime call and the const call must fold"
     );
 }
 

@@ -225,7 +225,6 @@ fn materialise_generated_request<'build>(
                         external_package_registry: &context.external_packages,
                         style_directives: context.style_directives,
                         provider_materialisations: context.provider_materialisations,
-                        build_profile: context.build_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -245,7 +244,6 @@ fn materialise_generated_request<'build>(
                         external_package_registry: &context.external_packages,
                         style_directives: context.style_directives,
                         provider_materialisations: context.provider_materialisations,
-                        build_profile: context.build_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,

@@ -10,7 +10,6 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BuildBootstrap, BuilderSelection, bootstrap_project_build, finish_successful_project_warnings,
 };
@@ -33,15 +32,6 @@ use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
-/// Build profile selector for frontend benchmarks.
-///
-/// WHAT: a narrow public selector that converts into the build-system `BuildProfile` at the
-/// benchmark boundary without exposing internal compiler types in the benchmark API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrontendBenchmarkBuildProfile {
-    Dev,
-    Release,
-}
 /// One typed build-config input supplied to a frontend benchmark.
 ///
 /// The benchmark adapter converts this value directly into the compiler-owned primitive carrier;
@@ -75,7 +65,6 @@ impl FrontendBenchmarkInput {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontendBenchmarkOptions {
     pub entry_path: PathBuf,
-    pub build_profile: FrontendBenchmarkBuildProfile,
     pub build_config_inputs: Vec<FrontendBenchmarkInput>,
 }
 
@@ -684,14 +673,9 @@ fn run_frontend_benchmark_with_configured_warning_owner(
     let mut project_source_files = None;
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     configure_warning_owner(&mut warning_owner);
-    let build_profile = match options.build_profile {
-        FrontendBenchmarkBuildProfile::Release => BuildProfile::Release,
-        FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
-    };
 
     let (messages, retention, compilation_failed) = match compile_project_frontend_with_inputs(
         &mut config,
-        build_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

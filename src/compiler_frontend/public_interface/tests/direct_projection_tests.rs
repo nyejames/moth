@@ -25,7 +25,7 @@ use super::test_support::{
 };
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, FoldRequirement, FoldServices,
+    ConstantValueFold, FoldRequirement, FoldServices, fold_value_with_constants,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
@@ -229,9 +229,9 @@ impl FixtureConstants {
             view.operation(),
             crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(_)
         ) {
-            let folded = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
+            let fold = fold_value_with_constants(
                 root.id(),
-                &mut self.builder,
+                &self.builder,
                 &mut self.constants,
                 FoldServices::new(
                     &mut crate::compiler_frontend::symbols::string_interning::StringTable::new(),
@@ -243,21 +243,15 @@ impl FixtureConstants {
                 |_| None,
             )
             .expect("fixture default folds as content");
-            let folded = match folded {
-                ConstantFoldOutcome::Folded(root) => root,
-                ConstantFoldOutcome::NotConstant(_) => {
+            return match fold {
+                ConstantValueFold::Value(id) => id,
+                ConstantValueFold::NotConstant => {
                     panic!("fixture default should fold into a constant")
                 }
-                ConstantFoldOutcome::Refused { reason, .. } => {
+                ConstantValueFold::Refused(reason) => {
                     panic!("fixture default refused constant folding: {reason:?}")
                 }
             };
-            let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(id) =
-                self.builder.view(folded).expect("folded default belongs to builder").operation()
-            else {
-                panic!("fixture default fold must produce a bound constant occurrence");
-            };
-            return id;
         }
         let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(id) =
             view.operation()

@@ -324,8 +324,8 @@ impl ConvergenceModel {
             };
             // Exact summary availability is independent of whether HIR lowered the call. A
             // retained runtime contributor or deferred catch candidate cannot diagnose around an
-            // absent summary, so its generated target must have one installed even when a
-            // release-folded terminator removed the call. Assertion-only calls keep the existing
+            // absent summary, so its generated target must have one installed even when HIR
+            // omitted the call as skipped evidence. Assertion-only calls keep the existing
             // tolerance: an absent summary diagnoses after convergence instead of inventing a
             // false executable dependency.
             targets.retain(|target| {

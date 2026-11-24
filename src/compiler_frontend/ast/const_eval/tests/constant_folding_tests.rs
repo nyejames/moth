@@ -30,16 +30,12 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidCastView;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
-    self, CompileTimeEvaluationErrorView, ReleaseBudgetScope, ReleaseFoldingBudgetView,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, release_folding_budget_message, terminal,
-};
+use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticSeverity, InvalidCastReason,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -441,6 +437,23 @@ impl FoldFixture {
             &mut self.constants,
             FoldServices::new(&mut self.strings, None, None),
             FoldRequirement::Required,
+        )
+    }
+
+    /// Folds `root` as required const content for its value alone, as const execution does.
+    fn fold_value(
+        &mut self,
+        root: ExprId,
+        lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+    ) -> Result<ConstantValueFold, ConstantFoldError> {
+        fold_value_with_constants(
+            root,
+            &self.builder,
+            &mut self.constants,
+            FoldServices::new(&mut self.strings, None, None),
+            &self.types,
+            FoldRequirement::Required,
+            lookup,
         )
     }
 
@@ -4295,59 +4308,13 @@ fn folded_zero_result_host_call_becomes_an_empty_block_that_is_an_expression_sta
 fn configured_budget_facts_and_advice_name_typed_units() {
     use crate::compiler_frontend::compiler_messages::render::compile_time_evaluation_error_message;
 
-    /// WHAT: the one release Note the producer emits for this exhaustion, rendered from its facts.
-    /// WHY: advice text is owned by the renderer, so the test must read the same typed record the
-    ///      user sees instead of a producer-side formatting method.
-    fn release_advice(
-        exhaustion: &ConstBudgetExhaustion,
-        string_table: &mut StringTable,
-    ) -> String {
-        let scope = if exhaustion.aggregate {
-            ReleaseBudgetScope::ModuleAggregate
-        } else {
-            ReleaseBudgetScope::Call
-        };
-        let setting = exhaustion
-            .setting
-            .map(|setting| string_table.intern(setting));
-        let draft = choices_control_flow::release_folding_budget_stopped(
-            exhaustion.unit,
-            usize::try_from(exhaustion.limit)
-                .expect("const execution limits are charged as `usize`"),
-            setting,
-            scope,
-            exhaustion.call_span.or(exhaustion.span),
-        );
-        let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
-        let diagnostic = compact.first().expect("the release note is retained");
-        assert_eq!(
-            diagnostic.severity(),
-            DiagnosticSeverity::Note,
-            "release folding budget advice never stops the build"
-        );
-        let facts = diagnostic
-            .family_view::<ReleaseFoldingBudgetView>()
-            .expect("the release note keeps typed budget facts");
-        assert_eq!(facts.unit, exhaustion.unit);
-        assert_eq!(facts.limit, Some(exhaustion.limit as usize));
-        release_folding_budget_message(
-            facts.unit,
-            facts.limit,
-            facts.setting.map(|setting| string_table.resolve(setting)),
-            facts.scope,
-        )
-    }
-
     let work = ConstantFoldError::Budget(ConstBudgetExhaustion {
         category: ConstBudgetCategory::Work,
         unit: ConstBudgetUnit::Steps,
         limit: 1_000,
         setting: Some("const_work_limit"),
-        aggregate: false,
         span: None,
         span_owner: None,
-        call_span: None,
-        call_span_owner: None,
         call_chain: Vec::new(),
     });
     let facts = compile_time_error_facts(work);
@@ -4357,88 +4324,7 @@ fn configured_budget_facts_and_advice_name_typed_units() {
     );
     assert_eq!(facts.limit, Some(1_000));
 
-    let memory = ConstBudgetExhaustion {
-        category: ConstBudgetCategory::Memory,
-        unit: ConstBudgetUnit::Mib,
-        limit: 16 * 1024 * 1024,
-        setting: Some("const_memory_limit_mb"),
-        aggregate: true,
-        span: None,
-        span_owner: None,
-        call_span: None,
-        call_span_owner: None,
-        call_chain: Vec::new(),
-    };
-    let mut string_table = StringTable::new();
-    let advice = release_advice(&memory, &mut string_table);
-    assert!(advice.contains("16 MiB"), "advice was {advice}");
-    assert!(
-        advice.contains("const_memory_limit_mb"),
-        "advice was {advice}"
-    );
-    assert!(
-        advice.contains("this module's aggregate allowance"),
-        "advice was {advice}"
-    );
-
-    let retained_values = ConstBudgetExhaustion {
-        category: ConstBudgetCategory::Memory,
-        unit: ConstBudgetUnit::RetainedValues,
-        limit: 1_000_000,
-        setting: None,
-        aggregate: false,
-        span: None,
-        span_owner: None,
-        call_span: None,
-        call_span_owner: None,
-        call_chain: Vec::new(),
-    };
-    let advice = release_advice(&retained_values, &mut string_table);
-    assert!(
-        advice.contains("1000000 retained values"),
-        "advice was {advice}"
-    );
-    assert!(!advice.contains("MiB"), "advice was {advice}");
-    assert!(
-        advice.contains("fixed safety allowance"),
-        "advice was {advice}"
-    );
-
-    let pieces = ConstBudgetExhaustion {
-        category: ConstBudgetCategory::Memory,
-        unit: ConstBudgetUnit::Pieces,
-        limit: 1_000_000,
-        setting: None,
-        aggregate: false,
-        span: None,
-        span_owner: None,
-        call_span: None,
-        call_span_owner: None,
-        call_chain: Vec::new(),
-    };
-    let advice = release_advice(&pieces, &mut string_table);
-    assert!(
-        advice.contains("1000000 structural pieces"),
-        "advice was {advice}"
-    );
-    assert!(!advice.contains("bytes"), "advice was {advice}");
-
-    let call_depth = ConstBudgetExhaustion {
-        category: ConstBudgetCategory::Work,
-        unit: ConstBudgetUnit::CallFrames,
-        limit: 64,
-        setting: None,
-        aggregate: false,
-        span: None,
-        span_owner: None,
-        call_span: None,
-        call_span_owner: None,
-        call_chain: Vec::new(),
-    };
-    let advice = release_advice(&call_depth, &mut string_table);
-    assert!(advice.contains("64 call frames"), "advice was {advice}");
-    assert!(!advice.contains("steps"), "advice was {advice}");
-
+    let string_table = StringTable::new();
     let message = compile_time_evaluation_error_message(
         CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded,
         None,
@@ -4472,11 +4358,8 @@ fn fixed_safety_limit_facts_preserve_the_effective_limit() {
         unit: ConstBudgetUnit::CallFrames,
         limit: 64,
         setting: None,
-        aggregate: false,
         span: None,
         span_owner: None,
-        call_span: None,
-        call_span_owner: None,
         call_chain: Vec::new(),
     });
     let facts = compile_time_error_facts(call_depth);
@@ -4491,7 +4374,7 @@ fn fixed_safety_limit_facts_preserve_the_effective_limit() {
     );
 
     // The family's four fact words leave no room for the unit, so the message stays generic.
-    // The release advice renderer owns the unit spelling.
+    // The compiler-message renderer owns the unit spelling.
     let message = compile_time_evaluation_error_message(
         facts.reason,
         None,
@@ -4507,9 +4390,9 @@ fn fixed_safety_limit_facts_preserve_the_effective_limit() {
 
 #[test]
 fn budget_diagnostic_labels_the_call_chain_innermost_first() {
-    // `call_chain` stores the enclosing call sites outermost first, while `call_span` names the
-    // refused call itself and owns its own primary site. Labelling walks the chain in reverse so
-    // the enclosing caller nearest the refusal reads first.
+    // `call_chain` stores the enclosing call sites outermost first, while the primary `span`
+    // names the refused expression itself. Labelling walks the chain in reverse so the enclosing
+    // caller nearest the refusal reads first.
     let outer = marked_span(1);
     let inner = marked_span(2);
     let exhaustion = ConstBudgetExhaustion {
@@ -4517,11 +4400,8 @@ fn budget_diagnostic_labels_the_call_chain_innermost_first() {
         unit: ConstBudgetUnit::Steps,
         limit: 10,
         setting: Some("const_work_limit"),
-        aggregate: false,
         span: Some(inner),
         span_owner: None,
-        call_span: Some(inner),
-        call_span_owner: None,
         call_chain: vec![OwnedConstCallSite {
             span: outer,
             owner: None,
@@ -4536,11 +4416,8 @@ fn budget_diagnostic_labels_the_call_chain_innermost_first() {
         unit: ConstBudgetUnit::Steps,
         limit: 10,
         setting: Some("const_work_limit"),
-        aggregate: false,
         span: Some(inner),
         span_owner: None,
-        call_span: Some(inner),
-        call_span_owner: None,
         call_chain: vec![
             OwnedConstCallSite {
                 span: outer,
@@ -4575,4 +4452,170 @@ fn assert_call_site_labels(exhaustion: ConstBudgetExhaustion, expected: &[Source
         })
         .collect::<Vec<_>>();
     assert_eq!(labels, expected);
+}
+
+#[test]
+fn value_fold_reads_a_local_binding_without_writing_expression_rows() {
+    let mut f = FoldFixture::new();
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let local = f
+        .path_fork
+        .try_intern_portable_path("value", &mut f.strings)
+        .expect("test path fits");
+    let reference = f.reference_path(local, i32_type, None, ValueMode::ImmutableReference);
+    let two = f.fixed_integer(FixedScalar::I32, 2);
+    let root = f.binary(reference, two, Operator::Add, None);
+    let forty = f.fixed_integer(FixedScalar::I32, 40);
+    let ExpressionOperationView::Constant(bound) = f
+        .builder
+        .view(forty)
+        .expect("the literal row should be stored")
+        .operation()
+    else {
+        panic!("a literal is a constant row");
+    };
+    let rows = f.builder.len();
+
+    let ConstantValueFold::Value(value) = f
+        .fold_value(root, |path| (path == local).then_some(bound))
+        .expect("a bound local folds")
+    else {
+        panic!("a bound local folds to a value");
+    };
+
+    assert_eq!(f.builder.len(), rows, "a value fold must not append rows");
+    assert!(matches!(
+        f.builder
+            .view(root)
+            .expect("the root row should be stored")
+            .operation(),
+        ExpressionOperationView::NumericBinary { .. }
+    ));
+    let ordinary = f.folded_binary(Operator::Add, None, forty, two);
+    let Some(ConstValuePayload::FixedScalar(folded)) = f.constants.payload(value) else {
+        panic!("the value fold produces a fixed scalar");
+    };
+    assert_eq!(
+        *folded,
+        f.fixed_scalar_value(ordinary),
+        "the value fold computes what ordinary folding computes"
+    );
+}
+
+#[test]
+fn refused_value_fold_publishes_no_value_and_leaves_rows_untouched() {
+    let mut f = FoldFixture::new();
+    let lhs = f.structural_string(vec![ConstStringPiece::SiteRoot]);
+    let rhs = f.string_literal("plain");
+    let root = f.binary(lhs, rhs, Operator::Equality, None);
+    let rows = f.builder.len();
+    let values = f.constants.value_count();
+
+    let fold = f
+        .fold_value(root, |_| None)
+        .expect("a refusal is a typed outcome");
+
+    assert!(matches!(
+        fold,
+        ConstantValueFold::Refused(ConstantFoldRefusalReason::StructuralTextUnavailable(_))
+    ));
+    assert_eq!(f.builder.len(), rows);
+    assert_eq!(
+        f.constants.value_count(),
+        values,
+        "staged operand values must roll back with the refusal"
+    );
+}
+
+#[test]
+fn runtime_fold_keeps_refusing_composites_that_content_values_build() {
+    let mut f = FoldFixture::new();
+    let one = f.fixed_integer(FixedScalar::I32, 1);
+    let two = f.fixed_integer(FixedScalar::I32, 2);
+    let collection = crate::compiler_frontend::tests::type_id_fixture_support::collection_expr(
+        &mut f.builder,
+        vec![one, two],
+        None,
+        ValueMode::ImmutableOwned,
+        &mut f.types,
+    );
+
+    let runtime = f.fold(collection).expect("a runtime fold settles");
+    assert_eq!(expect_not_constant(runtime), collection);
+    let ConstantValueFold::Value(value) = f
+        .fold_value(collection, |_| None)
+        .expect("a content fold settles")
+    else {
+        panic!("content folding builds the collection value");
+    };
+    let Some(ConstValuePayload::Collection(items)) = f.constants.payload(value) else {
+        panic!("the content value is a collection");
+    };
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
+fn interpreted_probe_leaves_an_inactive_operand_to_the_interpreter() {
+    let mut f = FoldFixture::new();
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    // Pair each binding path with the constant value its frame entry would hold for the probe.
+    let binding = |f: &mut FoldFixture, name: &str, literal: ExprId| {
+        let path = f
+            .path_fork
+            .try_intern_portable_path(name, &mut f.strings)
+            .expect("test path fits");
+        let ExpressionOperationView::Constant(value) = f
+            .builder
+            .view(literal)
+            .expect("the literal row is stored")
+            .operation()
+        else {
+            panic!("a literal is a constant row");
+        };
+        (path, value)
+    };
+    let false_literal = f.bool_literal(false, None);
+    let one = f.fixed_integer(FixedScalar::I32, 1);
+    let zero = f.fixed_integer(FixedScalar::I32, 0);
+    let bindings = [
+        binding(&mut f, "flag", false_literal),
+        binding(&mut f, "value", one),
+        binding(&mut f, "divisor", zero),
+    ];
+    let [flag, value, divisor] = bindings.map(|(path, _)| path);
+    let flag = f.reference_path(
+        flag,
+        builtin_type_ids::BOOL,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let value = f.reference_path(value, i32_type, None, ValueMode::ImmutableReference);
+    let divisor = f.reference_path(divisor, i32_type, None, ValueMode::ImmutableReference);
+    // `flag and value // divisor is 0`, where only the inactive right operand divides by zero.
+    let quotient = f.binary(value, divisor, Operator::IntDivide, None);
+    let check = f.binary(quotient, zero, Operator::Equality, None);
+    let root = f.binary(flag, check, Operator::And, None);
+    let lookup = |path| {
+        bindings
+            .iter()
+            .find_map(|&(bound, constant)| (bound == path).then_some(constant))
+    };
+
+    assert_compile_time_error(
+        f.fold_value(root, lookup)
+            .expect_err("an eager content walk evaluates the inactive operand"),
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+    let probe = fold_interpreted_value(
+        root,
+        &f.builder,
+        &mut f.constants,
+        FoldServices::new(&mut f.strings, None, None),
+        &f.types,
+        lookup,
+    )
+    .expect("the probe never evaluates an operand the interpreter may skip");
+    assert!(matches!(probe, ConstantValueFold::NotConstant));
 }

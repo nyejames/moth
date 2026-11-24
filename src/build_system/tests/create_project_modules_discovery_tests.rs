@@ -1161,7 +1161,6 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     let mut project_source_files = None;
     let result = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
-        crate::compiler_frontend::FrontendBuildProfile::Dev,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),
@@ -1217,7 +1216,6 @@ fn single_file_entry_resolves_config_named_normal_module_directory() {
         let mut project_source_files = None;
         super::compilation::compile_single_file_frontend_with_inputs(
             &config,
-            crate::compiler_frontend::FrontendBuildProfile::Dev,
             &test_style_directives(),
             &mut builder_surface,
             entry.extension().expect("entry should have an extension"),
@@ -1263,7 +1261,6 @@ fn single_file_entry_without_config_normal_facade_keeps_direct_special_diagnosti
     let mut project_source_files = None;
     let result = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
-        crate::compiler_frontend::FrontendBuildProfile::Dev,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),

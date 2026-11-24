@@ -66,12 +66,10 @@ pub(crate) struct TemplateOutputLimits {
     pub(crate) max_bytes: usize,
     /// Full byte ceiling that controls the remaining allowance.
     pub(crate) byte_limit: usize,
-    pub(crate) byte_aggregate: bool,
     /// Remaining structural-piece allowance for this fold.
     pub(crate) max_structural_pieces: usize,
     /// Full structural-piece ceiling that controls the remaining allowance.
     pub(crate) piece_limit: usize,
-    pub(crate) piece_aggregate: bool,
     pub(crate) span: Option<SourceSpan>,
     /// Charges accumulated by every reducer output state below this consumer.
     ///

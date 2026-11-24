@@ -10,12 +10,9 @@
 use super::super::build_context::AstPhaseContext;
 use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
-use super::super::scope_context::{ContextKind, ScopeContext};
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::const_execution::rewrite_release_calls;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionFreezeRoots, PlaceId,
@@ -28,7 +25,6 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits_with_never_targets,
-    collect_pre_fold_bool_conditions,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
@@ -92,13 +88,13 @@ pub(in crate::compiler_frontend::ast) enum MaterialisationContextRetention {
     ForDeferredRequests,
 }
 
-/// Pre-fold facts one builtin-failure boundary pass reads.
+/// Failure facts one builtin-failure boundary pass reads.
 ///
 /// WHAT: dormant generic template bodies, completed concrete nodes, the infallible cast contracts
 ///       the pass must discharge, and whether assertion-validation requests exist.
 /// WHY: grouping the two differently-sourced node groups keeps them named at the call site. The
-///      pass reads summaries that finalization computed once and also retains for HIR, so release
-///      folding cannot change either verdict.
+///      pass reads summaries that finalization computed once and also retains for HIR, so
+///      validation and HIR projection share one classification.
 struct BuiltinFailureBoundaryInput<'a> {
     generic_template_bodies: &'a [AstNode],
     concrete_nodes: &'a [AstNode],
@@ -129,48 +125,6 @@ impl ExpressionFreezeRoots for Vec<AstNode> {
         for node in self {
             node.visit_place_ids_mut(visitor);
         }
-    }
-}
-
-/// Freeze roots that keep the pre-fold condition table's expression ids remapped with the AST.
-///
-/// WHAT: forwards the AST's root visits and rewrites every table key when its condition root is
-///       remapped.
-/// WHY: freezing compacts the expression store and remaps every durable expression id outside it.
-///      The pre-fold condition table is another owner of condition roots, and a pre-freeze id or a
-///      span match would disagree with the ids HIR later queries.
-struct PreFoldConditionRoots<'a> {
-    nodes: &'a mut Vec<AstNode>,
-    conditions: &'a mut FxHashMap<ExprId, bool>,
-}
-
-impl ExpressionFreezeRoots for PreFoldConditionRoots<'_> {
-    fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
-        self.nodes.visit_expression_ids(visitor);
-    }
-
-    fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
-        self.nodes.visit_expression_ids_mut(visitor);
-        // The condition table is the other durable owner of these roots. Freezing assigns every
-        // selected dense index before this visit, including value-block bodies, so the same
-        // remapping visitor rewrites these keys too. Keys cannot be mutated in place, so the
-        // table takes its known size in one allocation.
-        let previous = std::mem::take(self.conditions);
-        let mut remapped = FxHashMap::default();
-        remapped.reserve(previous.len());
-        for (mut id, value) in previous {
-            visitor(&mut id);
-            remapped.insert(id, value);
-        }
-        *self.conditions = remapped;
-    }
-
-    fn visit_place_ids(&self, visitor: &mut dyn FnMut(PlaceId)) {
-        self.nodes.visit_place_ids(visitor);
-    }
-
-    fn visit_place_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut PlaceId)) {
-        self.nodes.visit_place_ids_mut(visitor);
     }
 }
 
@@ -422,23 +376,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .deferred_generic_requests
             .iter()
             .any(|slot| matches!(slot, GenericRequestSlot::AssertionValidation(_)));
-        // HIR classifies `assert`, `if`, conditional-loop and value-`if` conditions by this
-        // pre-fold view. Release folding can replace an ordinary call with its constant result
-        // before HIR, and omission must follow the selection fact both build profiles share.
-        let mut pre_fold_bool_conditions = FxHashMap::default();
-        collect_pre_fold_bool_conditions(
-            &emitted.ast,
-            self.context.expression_builder.store(),
-            &self.context.const_values,
-            &mut pre_fold_bool_conditions,
-        );
         // This is the ledger's single normalization point: resolution records one push per
         // selected operation, and duplicates or unordered rows are resolved once after every
         // emitter has contributed.
         normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
-        // Semantic failure facts are fixed before release folding, which can erase a call or a
-        // whole tail. The classifier decides authored reachability per statement occurrence, so
-        // HIR projects the same contributors in both build profiles.
+        // The classifier decides authored reachability per statement occurrence, so HIR projects
+        // these contributors instead of reclassifying the frozen AST.
         let builtin_failure_summaries = {
             // Completed AST contains owned runtime handoffs, never unresolved TIR references.
             let template_ir_store = self.context.template_ir_store.borrow();
@@ -461,17 +404,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut emitted.warnings,
             string_table,
         )?;
-        // Contributor facts are fixed pre-fold and projected by HIR later. Retaining them here is
-        // what keeps release erasure from adding, removing or reordering a failure fact. Dormant
-        // generic template identities have no HIR function and are never read again, so only the
-        // concrete functions in the emitted AST keep their facts.
+        // Dormant generic template identities have no HIR function and are never read again, so
+        // only the concrete functions in the emitted AST keep their facts.
         let concrete_identities = emitted
             .ast
             .iter()
             .filter_map(AstNode::function_identity)
             .collect::<FxHashSet<_>>();
-        let mut pre_fold_failure_facts = builtin_failure_summaries.into_function_facts();
-        pre_fold_failure_facts.retain(|identity, _| concrete_identities.contains(identity));
+        let mut function_failure_facts = builtin_failure_summaries.into_function_facts();
+        function_failure_facts.retain(|identity, _| concrete_identities.contains(identity));
         let committed_generic_requests = specialization
             .commit_generic_requests(
                 std::mem::take(&mut emitted.deferred_generic_requests),
@@ -587,39 +528,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         };
 
         // ----------------------------
-        //  Fold release-only ordinary calls
-        // ----------------------------
-        // Speculation runs on the final normalised AST, after static selection and every
-        // validation that establishes runtime semantics, and before expression freezing. A
-        // refused candidate is left byte-for-byte as the runtime call. Folded call sites leave an
-        // AST ledger row because HIR constraint evidence must still see them.
-        let mut release_erased_call_sites = Vec::new();
-        if self.context.build_profile == FrontendBuildProfile::Release {
-            let scope = ScopeContext::new(
-                ContextKind::Module,
-                PathId::ROOT,
-                Rc::clone(&owned_lookups.declaration_table),
-                Arc::clone(&self.context.external_package_registry),
-                0,
-                Rc::clone(&self.context.template_ir_store),
-            )
-            .with_style_directives(self.context.style_directives)
-            .with_build_profile(self.context.build_profile);
-            let (notes, erased_call_sites) = rewrite_release_calls(
-                &mut emitted.ast,
-                &mut self.context.expression_builder,
-                &mut self.context.const_values,
-                &scope,
-                string_table,
-                &type_environment,
-                self.path_fork,
-            )
-            .map_err(PreparedFailure::Infrastructure)?;
-            emitted.warnings.extend(notes);
-            release_erased_call_sites = erased_call_sites;
-        }
-
-        // ----------------------------
         //  Merge builtin AST nodes
         // ----------------------------
         // Generic capture projects nominal inputs from resolved facts, not builtin AST nodes.
@@ -675,15 +583,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
         })?;
         drop(template_ir_store);
-        let expressions = {
-            let mut roots = PreFoldConditionRoots {
-                nodes: &mut emitted.ast,
-                conditions: &mut pre_fold_bool_conditions,
-            };
-            expression_builder
-                .freeze(&mut roots)
-                .map_err(|error| PreparedFailure::Infrastructure(error.into()))?
-        };
+        let expressions = expression_builder
+            .freeze(&mut emitted.ast)
+            .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
 
         let support_trait_environment = support_public_type_roots
             .as_ref()
@@ -718,9 +620,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 doc_fragments,
                 constraint_boundaries,
                 fast_operation_witnesses,
-                release_erased_call_sites,
-                pre_fold_failure_facts,
-                pre_fold_bool_conditions,
+                function_failure_facts,
                 constraint_pruned_regions,
                 synthesizes_entry_start,
                 const_top_level_fragments,

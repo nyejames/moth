@@ -48,7 +48,6 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -116,7 +115,6 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     let build_config_inputs = BuildConfigInputSet::new();
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
@@ -171,7 +169,6 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
     let mut builder_surface = BuilderSurface::with_mandatory_core();
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
@@ -222,7 +219,6 @@ fn unselected_preload_read_failure_stays_inert() {
     let build_config_inputs = BuildConfigInputSet::new();
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
@@ -289,7 +285,6 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -361,7 +356,6 @@ fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -426,7 +420,6 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -523,7 +516,6 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -727,7 +719,6 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -796,7 +787,6 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -857,7 +847,6 @@ fn ast_aggregate_metrics_recorded_with_timers() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -939,7 +928,6 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1056,7 +1044,6 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let result_a = compile_project_frontend(
         &mut config_a,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1082,7 +1069,6 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
                 let mut thread_surface = BuilderSurface::with_mandatory_core();
                 let thread_result = compile_project_frontend(
                     &mut thread_config,
-                    BuildProfile::Dev,
                     None,
                     &thread_style,
                     &mut thread_surface,
@@ -1107,7 +1093,6 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         BoundaryAccumulator::with_root_string_table(StringTable::new());
     let unrelated_result = compile_project_frontend(
         &mut unrelated_config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1240,7 +1225,6 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
         let result = compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),

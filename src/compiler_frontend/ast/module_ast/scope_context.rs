@@ -29,7 +29,6 @@
 //! `ExternalSymbolId` values. Expression and type resolution must use these IDs directly;
 //! they must never re-resolve names globally through the registry.
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::AstFastOperationWitness;
@@ -479,7 +478,6 @@ pub struct ScopeShared {
     // External package and frontend services.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
     /// Whether this body is a const function body whose operations must all be const-capable.
     pub(crate) const_body: bool,
     /// The authored declaration site a const-body eligibility diagnostic points back to.
@@ -1082,7 +1080,6 @@ impl ScopeContext {
             top_level_declarations,
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
-            build_profile: FrontendBuildProfile::Dev,
             const_body: false,
             const_declaration_span: None,
             file_visibility: None,

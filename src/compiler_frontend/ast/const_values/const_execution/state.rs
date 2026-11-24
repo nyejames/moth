@@ -16,7 +16,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -43,9 +42,6 @@ pub(crate) struct ConstExecutionServices<'a> {
 
 impl<'services> ConstExecutionServices<'services> {
     /// Borrow these services for one attempt with the caller's budget and state.
-    ///
-    /// The services are reborrowed, so one bundle can start several attempts (release rewriting
-    /// starts one per expression) without rebuilding the field list.
     pub(super) fn interpreter<'attempt>(
         &'attempt mut self,
         budget: &'attempt mut ExecutionBudget,
@@ -101,17 +97,6 @@ pub(super) struct ExecutionState {
     /// authored expression must follow it. The entry is registered with the rebuild, so the
     /// identity travels with the expression instead of being guessed from an authored span.
     pub(super) rewritten_handlers: FxHashMap<ExprId, Rc<[ConstInstruction]>>,
-    /// Ordinary calls one release rewrite replaced with folded constants.
-    ///
-    /// WHAT: `(callee path, authored call span)` rows recorded only by a `Release` rewrite walk.
-    /// WHY: the walk knows the erased call but not which callable owns the expression, so the
-    ///      caller drains these rows and attributes them to the node it is rewriting. Executing a
-    ///      prepared candidate runs nested walks in `InterpretedBody` mode, which do not record;
-    ///      a callee's internal folds therefore cannot be misattributed to its caller. The span is
-    ///      required because every evidence row carries its authored call site; release
-    ///      speculation declines a spanless call instead. Catch handler bodies and handled subjects
-    ///      are never folded, so every row belongs to source HIR lowers.
-    pub(super) release_erased_calls: Vec<(PathId, SourceSpan)>,
     /// Catch handler currently available to collection failures.
     ///
     /// This is not owned by one collection operation: a larger handled expression installs its
@@ -119,13 +104,19 @@ pub(super) struct ExecutionState {
     pub(super) active_handler: ActiveHandler,
     /// Nested selected-handler execution depth.
     pub(super) handler_depth: usize,
-    /// Current expression evaluation nesting depth, used to consume inherited recovery once.
+    /// Current expression evaluation nesting depth across every running body, bounding native
+    /// recursion.
     pub(super) expression_depth: usize,
+    /// Expression depth at which the running instruction stream evaluates its own statements.
+    /// Inherited recovery is consumed by the evaluation at this depth: the outermost expression
+    /// of the current statement, not of a caller's statement.
+    pub(super) statement_expression_depth: usize,
     /// True when an inherited catch handler completed, including a handler with no value.
     pub(super) inherited_handler_recovered: bool,
-    /// Recovery value produced by an inherited catch handler; the whole handled expression
-    /// yields this value instead of the partially evaluated child expression.
-    pub(super) inherited_handler_value: Option<ConstValueId>,
+    /// Recovery slots produced by an inherited catch handler; the whole handled expression yields
+    /// these instead of the partially evaluated child expression. A one-slot expression reads the
+    /// first; a multi-result producer receives every slot.
+    pub(super) inherited_handler_values: Vec<ConstValueId>,
     /// A `return` executed by a selected catch handler, awaiting its owning function boundary.
     ///
     /// WHY this is a slot rather than a returned value: a handler body runs from inside expression
@@ -135,8 +126,9 @@ pub(super) struct ExecutionState {
     /// (`RequiredCallSiteRewriter`) has no channel for an early-exit variant. The pending values
     /// therefore stay visible until `execute_frames` in `FrameMode::FunctionBody` consumes them
     /// (or `execute_body` does after handler instructions run); nested handler frames only peek
-    /// so the return can cross them, and expression evaluation keeps returning its first value so
-    /// no enclosing expression continues past the handled statement.
+    /// so the return can cross them, and expression evaluation keeps returning its first value
+    /// (no slots for a several-slot producer) so no enclosing expression continues past the
+    /// handled statement.
     pub(super) pending_handler_return: Option<Vec<ConstValueId>>,
     /// Set once an escaping diagnostic has received its call-site labels.
     pub(super) call_chain_attached: bool,

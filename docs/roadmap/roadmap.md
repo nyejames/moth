@@ -30,13 +30,11 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 ## Sequenced work
 
 
-- [Release call folding after semantic verification](./plans/release-call-folding-after-semantic-verification-plan.md) - Queued next: Move optional release call folding after HIR construction and semantic constraint verification. Preserve authored control flow, failure evidence and cross-module constraint summaries while retiring the pre-fold compensation paths.
+- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. The same phased plan now simplifies required const evaluation and adds accepted match, multi-result and const-method support.
 
-- [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after release call folding: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
+- [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after resource-only roots: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
-
-- [Const-function evaluation foundation and semantics](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - Queued after Core Math fast counterparts: Reuse direct typed-expression value evaluation, reduce redundant interpreter rewriting, then add match, multi-return/multi-bind and immutable const receiver methods. Investigate stepped collection loops conditionally and benchmark package-style helpers. Work may pause at each completed phase.
 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
@@ -314,3 +312,17 @@ matrix should retain a labelled future-design reminder, separate from accepted
 implementation rows. `$pure`, `$no_io` and `$no_wrap` are not implemented,
 accepted directive syntax or permissions granted to source. Preserve the
 restriction-oriented name **constraints**.
+
+## Optional post-semantic ordinary-function folding (low priority)
+
+Release-only AST ordinary-call speculation has been removed. Optional whole-function
+folding remains an intended future optimisation, not a current implementation
+commitment. It must begin only after mandatory semantic
+verification and must not change authored control flow, constraint verdicts, static
+selection, borrow/lifetime legality, diagnostics, semantic HIR or public interfaces.
+
+Revisit this only if matched benchmarks demonstrate a material compilation or runtime
+benefit beyond the optimisations provided by Wasm/backend tools, and justify the
+retained compiler machinery and profile costs. It may consume a derived executable
+representation instead of mutating validated semantic HIR. Required const-function
+execution, deterministic pure eager folding and TIR remain separate Stage 4 features.

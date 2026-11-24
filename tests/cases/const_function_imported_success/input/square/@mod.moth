@@ -2,3 +2,29 @@ $export
 square #|value I32| -> I32:
     return value * value
 ;
+
+$export
+Size ::
+    Small,
+    Large | weight I32 |,
+;
+
+$export
+weigh #|size Size| -> I32:
+    if size is:
+        Small => return 1
+        Large(weight) => return weight
+    ;
+;
+
+$export
+bounds #|value I32| -> I32, I32:
+    return value - 1, value + 1
+;
+
+-- The owner's own body folds a multi-result call, so the importer runs it in the owner's scope.
+$export
+packed #|value I32| -> I32:
+    low, high = bounds(value * 10)
+    return low * 100 + high
+;

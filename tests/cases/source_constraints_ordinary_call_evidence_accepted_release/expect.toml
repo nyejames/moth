@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "literal=5 wrapped=6 statement=7 pair=5,8 after=4 handled=9 guard=2"

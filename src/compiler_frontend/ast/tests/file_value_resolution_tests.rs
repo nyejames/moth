@@ -7,7 +7,6 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValuePayload,
@@ -580,7 +579,6 @@ fn compile_fixture(
                 sorted,
                 module_anchor_path: &entry_path,
                 synthesizes_entry_start: true,
-                build_profile: FrontendBuildProfile::Dev,
                 capacity_estimate: Default::default(),
                 resolved_file_references: resolved_references,
                 module_origin: Some(test_module_origin()),
