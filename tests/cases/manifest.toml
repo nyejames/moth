@@ -18030,6 +18030,13 @@ contract = "language.collections.cyclic_resolving_aliases"
 role = "primary"
 
 [[case]]
+id = "copy_preserves_shared_children_runtime"
+path = "copy_preserves_shared_children_runtime"
+tags = ["integration", "runtime"]
+contract = "language.memory.copy_preserves_internal_sharing"
+role = "primary"
+
+[[case]]
 id = "aggregate_multi_bind_known_leaf_receivers_runtime"
 path = "aggregate_multi_bind_known_leaf_receivers_runtime"
 tags = ["integration", "numeric", "inference", "collections", "maps", "multi_bind", "runtime"]

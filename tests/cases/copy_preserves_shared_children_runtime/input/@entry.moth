@@ -1,0 +1,17 @@
+Pair = |left {I32}, retained {String = {{I32}}}|
+
+probe || -> String:
+    child {I32} = {1}
+    original = Pair(child, {"item" = {child}})
+    detached ~= copy original
+    ~detached.left.push(2)
+    copied_items = detached.retained.get("item") catch then {{0, 0, 0}}
+    original_items = original.retained.get("item") catch then {{0, 0, 0}}
+    copied_child = copied_items.get(0) catch then {0, 0, 0}
+    original_child = original_items.get(0) catch then {0, 0, 0}
+    copied = copied_child.length()
+    unchanged = original_child.length()
+    return [:copied=[copied] original=[unchanged]]
+;
+
+~[:[probe()]]

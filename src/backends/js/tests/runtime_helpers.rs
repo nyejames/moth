@@ -36,31 +36,6 @@ fn computed_place_helpers_capture_base_storage() {
     );
 }
 
-/// Verifies that `__moth_clone_value` deep-copies arrays via `.map(__moth_clone_value)`. [clone]
-#[test]
-fn clone_value_uses_map_for_arrays() {
-    let source = lower_minimal_module("main");
-    let clone = helper_source(&source, "__moth_clone_value");
-
-    assert!(
-        clone.contains("Array.isArray(value)") && clone.contains("value.map(__moth_clone_value)"),
-        "__moth_clone_value must deep-copy arrays using .map(__moth_clone_value)"
-    );
-}
-
-/// Verifies that `__moth_clone_value` deep-copies plain objects key-by-key. [clone]
-#[test]
-fn clone_value_iterates_object_keys() {
-    let source = lower_minimal_module("main");
-    let clone = helper_source(&source, "__moth_clone_value");
-
-    assert!(
-        clone.contains("Object.keys(value)")
-            && clone.contains("result[key] = __moth_clone_value(value[key])"),
-        "__moth_clone_value must deep-copy objects by iterating Object.keys"
-    );
-}
-
 /// Verifies that generic string conversion does not fall through to JS object formatting for maps.
 /// [string] [map]
 #[test]
@@ -659,20 +634,6 @@ fn clone_value_has_map_branch() {
     assert!(
         clone.contains("__moth_map_is_valid(value)"),
         "__moth_clone_value must check for map validity"
-    );
-}
-
-/// Verifies that `__moth_clone_value` deep-copies map entries with recursive clone. [map] [clone]
-#[test]
-fn clone_value_deep_copies_map_entries() {
-    let source = lower_minimal_map_module("main");
-    let clone = helper_source(&source, "__moth_clone_value");
-
-    assert!(
-        clone.contains("Array.from(value.map.entries())")
-            && clone.contains("__moth_clone_value(key)")
-            && clone.contains("__moth_clone_value(item)"),
-        "__moth_clone_value must deep-copy map entries with recursive clone for keys and values"
     );
 }
 
