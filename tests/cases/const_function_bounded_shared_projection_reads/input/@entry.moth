@@ -1,0 +1,13 @@
+Guard = |done Bool|
+
+read_unchanged #|guard Guard, limit I32| -> I32:
+    loop 0 to limit:
+        if guard.done:
+            return 0
+        ;
+    ;
+    return 1
+;
+
+unchanged #I32 = read_unchanged(Guard(false), 60000)
+~[:unchanged=[unchanged]]
