@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. C1 contract decisions, C2 live storage and C3 dynamic access validation complete. Owned graph publication and integrated checkpoint validation remain pending.
-**Current slice:** C4, required evaluation and owned graph publication.
+**Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
+**Current slice:** C4 and Phase 5 paused for ordinary Stage 6 provenance correction. The owner approved investigation and an implementation proposal, not a production rewrite yet.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Close the ordinary borrow-provenance gap described in C4 before publishing shared graphs to runtime code. Do not implement validation-only HIR or resume Phase 5.
+**Next action:** Review the proposed BC-06 replacement for coarse native return provenance. Reopen C4 only when ordinary access checking preserves correlated sharing and mutation permission through joins and calls.
 
 ## Global constraints
 
@@ -800,34 +800,35 @@ escaped validation:
   `then`. The outer mutation succeeds before a later sibling read. Jump
   transfer carries the common root, but lexical scope pruning drops it.
 
-This is a Stage 6 dependency, not a change to the approved const rules. The
-[production borrow plan](production-borrow-checker.md#open-work---production)
-owns the missing provenance work (BC-06). Keep binding visibility separate
-from live allocation provenance. Track which field or entry retains the
-allocation and distinguish edge replacement from mutation of its referent.
-Do not union every child into the aggregate root: that would reject writes
-when the only later use reads an independent sibling. Reuse the production
-checker and its control-flow transfers. Keep C4 and Phase 5 gated until the
-runtime handoff passes both the conflict tests and legal replacement, copy
-and disjoint-access controls.
+This is a Stage 6 prerequisite, not a change to the const rules. BC-06 owns
+the ordinary runtime implementation. The pairwise prototype catches both
+original conflicts but loses which facts can coexist through a forwarding
+call or CFG join. A previous positive control also relied on mutating through
+a stored read-only referent. The runtime investigation now uses an explicit
+graph copy to distinguish legal disjointness from real shared-child conflicts
+without upgrading access permission.
 
-The Stage 6 prototype now rejects both original cases. The gate remains open:
-an ordinary call can hide a shared child from the checker, and the prototype
-still needs to preserve legal projected aliases. The
-[production borrow plan](production-borrow-checker.md#ordinary-call-boundary-open)
-records the executable witness and the proposed Stage 6 summary change.
-The prototype passes 164 of 164 borrow-tagged integration cases and
-161 of 162 const-tagged cases. The remaining const-tagged failure is
-the legal ordinary projected writer in
-`const_function_projected_alias_mutation_parity`. The published-graph
-and graph-copy controls pass.
+The owner paused C4 and brought forward the BC-06 production provenance
+design. Do not merge the prototype or implement receiver methods. C4 needs
+production evidence for shared children, projection and scope exits, ordinary
+and generated calls, disjoint access, replacement and permission. The
+existing-target runtime multi-bind issue remains an ordinary source
+regression, not a const-only exemption.
 
-The build-service parity tests covered a source package's shared graph, an
+Before C4 can close, validate decoded folded result slots with the existing
+canonical result contract. Review retained promotion capacity, scratch table
+growth and result-slot charges that outlive their vectors. Keep these in the
+const value, budget and receiving owners rather than adding a second budget.
+
+On the linked prototype, 500 focused Rust tests, 177 borrow-tagged checks
+and 163 const-tagged checks passed. Formatting and Clippy passed. The real
+build-service parity tests covered a source package's shared graph, an
 unresolved site-root string, type-level evaluation and a private donor
 access diagnostic. The independent JavaScript `copy` fix (`fc974cd84d`)
 preserves sharing across records, maps and nested collections. The docs
-check passed and the release build produced 95 files. `just validate`
-remains the integrated C5 gate.
+check passed and a release docs build produced 95 files. These checks do not
+close the runtime provenance gate. `just validate` remains the integrated C5
+gate.
 
 ### C5. Checkpoint verification and simplification
 
@@ -835,6 +836,39 @@ remains the integrated C5 gate.
 - [ ] Review code size, duplicated representation, unmetered work, stage boundaries and dead helpers/tests. No const HIR, static solver, event loop, speculative evaluator, allocator framework, GC, reference-count registry or future-exclusivity scaffolding. Reuse the current frame, value operation and TIR owners.
 - [ ] Update progress for implemented support, retain canonical design and retire the const-access bug report only when replacement reproductions pass. Keep independent reports/audit records accurate. Run affected Rust and integration tests, relevant feature lanes and `just validate` at the checkpoint. Record exact evidence, perform the Slice review and commit independently. `just validate-full` remains the final merge-readiness gate.
 - [ ] Resume Phase 5 only after C1-C5, all observable contract decisions and integrated checkpoint validation are complete. The owner-approved generational model is final for this slice. Raise only specific unresolved observable contracts, not the superseded question of whether to use runtime borrow checking.
+
+The first generational/publication candidate hit `MOTH-RULE-0053` at the
+unchanged 16 MiB default on both historical 20,000-iteration workloads.
+Each workload produces about 100,000 immutable scalar rows; the live
+interpreter also allocated read-only holder cells and kept charging
+already dropped callee binding maps. Check the same sources after removing
+that overhead, rather than raising the limit or accepting partial results.
+
+The independent scalar-binding change (`bf8a9e6b9a`) keeps existing cell or
+projection witnesses without allocating read-only scalar holder cells. The
+linked prototype also stops charging discarded frame binding maps. Both
+recorded workloads now compile under the same 16 MiB default and each
+renders `660026` from emitted release JavaScript. This is candidate evidence,
+not final C5 verification.
+
+Matched release counter builds, `MOTH_COUNTERS=summary`, one warm-up and
+15 `moth check` runs per binary and workload. Rows count the main module's
+pre-freeze census, time gives median wall milliseconds and RSS gives the
+maximum resident bytes. The baseline is the retained pre-generational
+counter executable, not the historical column below.
+
+| Workload | Baseline rows / ms / RSS | Linked prototype rows / ms / RSS |
+| --- | ---: | ---: |
+| Two single-result calls per iteration | 32 / 47.29 / 26,034,176 | 31 / 68.11 / 32,686,080 |
+| One two-result call per iteration | 30 / 38.92 / 25,935,872 | 29 / 62.08 / 32,718,848 |
+| Shared alias and projection writes | — | 45 / 18.90 / 19,267,584 |
+| Shared graph copy | — | 43 / 20.60 / 22,052,864 |
+| No-const ordinary control | 28 / 13.99 / 16,973,824 | 28 / 13.31 / 17,350,656 |
+
+The const workloads remain flat in expression rows but cost more time and
+memory than the retained baseline. Re-measure after the publication and
+budget fixes. Do not raise the existing const limits to make the
+checkpoint pass.
 
 ### Independent corrections
 

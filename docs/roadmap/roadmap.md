@@ -23,7 +23,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **PAUSED**
 
-- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
+- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): BC-06 production provenance design is under review before const publication can resume. Boracle research packages still need explicit activation. **ONGOING, RESEARCH RESTART PAUSED**
 
 - [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
 

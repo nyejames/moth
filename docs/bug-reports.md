@@ -155,6 +155,13 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: `render type T |value T| -> String: return [$in style: [: red]];` with no call is accepted, while `result = render("x"); ~[:[result]]` reports MOTH-SYNTAX-0022 at the helper. The same split occurs for a runtime-dependent helper: `render type T |value T, x String| -> String: return [$in style: [x]];` is accepted while unused and rejected once instantiated.
 - Investigate: validate the authored generic body once before instantiation or materialise every generic body for validation without publishing an instance. The helper shape is not type-dependent, so a pre-instantiation validation pass may suffice. Check that it does not reject generic bodies that are valid only under an instance's type arguments.
 
+### A generic fallible body cannot construct the built-in `Error`
+
+- Found: const C4 ordinary-call controls, 2026-11. Reproduced on the retained pre-C4 compiler.
+- Where: referenced built-in types surviving generic body materialisation into HIR.
+- Observed: `choose type T |value T, fail Bool| -> T, T, Error!` returns `Error("selected failure")` with `return!` on the failure branch, and `value, value` on success. `left, right = choose(1, false) catch: then 2, 3;` fails with MOTH-INFRA-0001, "Unresolved struct 'Error' during HIR lowering", even though the call selects success.
+- Investigate: why the generated body does not carry the canonical built-in `Error` constructor. Passing a concrete `Error` into a generic `E!` parameter does not reproduce the missing layout.
+
 ### Imported const template helper defaults lack a donor `$in` label
 
 - Found: runtime template helper escape fix verification, 2026-11. Confirmed by a two-module probe and pre-dates this branch.
@@ -200,8 +207,8 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 - Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary. The owner has since approved dynamic const access validation instead of runtime borrow checking.
 - Where: const execution frame bindings, mutable alias refresh, projection handling and call/result delivery.
-- Observed: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiles and folds despite its immutable parameter. This remains invalid under the accepted const model. Missing invalidation and incomplete shared-reference identity are outstanding implementation issues. Multiple overlapping mutable aliases and checks restricted to executed paths are now intentional const semantics, not bugs.
-- Investigate: implement the [corrective checkpoint](./roadmap/plans/const-functions-evaluation-foundation-and-semantics-plan.md#corrective-checkpoint-before-phase-5) with stable live storage, projection-aware generations, proper reference permission and result boundaries. Do not introduce validation-only HIR. Retire this report after C1-C5 reproduce the old failure and verify the replacement contract.
+- Observed on the earlier binary: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiled and folded despite its immutable parameter. The C3 checks now reject this and executed stale references inside const evaluation. Multiple overlapping mutable aliases and checks restricted to executed paths are intentional.
+- Still open: verify owned graph publication without weakening ordinary runtime access, then run the integrated C1-C5 gate. Runtime alias provenance and the immutable aggregate permission bypass remain separate BC-06 work. Do not introduce validation-only HIR.
 
 ### Retained stale paths can make the next output manifest invalid
 
