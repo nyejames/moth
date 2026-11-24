@@ -440,6 +440,23 @@ impl FoldFixture {
         )
     }
 
+    /// Folds `root` as required const content for its value alone, as const execution does.
+    fn fold_value(
+        &mut self,
+        root: ExprId,
+        lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+    ) -> Result<ConstantValueFold, ConstantFoldError> {
+        fold_value_with_constants(
+            root,
+            &self.builder,
+            &mut self.constants,
+            FoldServices::new(&mut self.strings, None, None),
+            &self.types,
+            FoldRequirement::Required,
+            lookup,
+        )
+    }
+
     fn fold_binary_required(
         &mut self,
         operator: Operator,
@@ -4435,4 +4452,104 @@ fn assert_call_site_labels(exhaustion: ConstBudgetExhaustion, expected: &[Source
         })
         .collect::<Vec<_>>();
     assert_eq!(labels, expected);
+}
+
+#[test]
+fn value_fold_reads_a_local_binding_without_writing_expression_rows() {
+    let mut f = FoldFixture::new();
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let local = f
+        .path_fork
+        .try_intern_portable_path("value", &mut f.strings)
+        .expect("test path fits");
+    let reference = f.reference_path(local, i32_type, None, ValueMode::ImmutableReference);
+    let two = f.fixed_integer(FixedScalar::I32, 2);
+    let root = f.binary(reference, two, Operator::Add, None);
+    let forty = f.fixed_integer(FixedScalar::I32, 40);
+    let ExpressionOperationView::Constant(bound) = f
+        .builder
+        .view(forty)
+        .expect("the literal row should be stored")
+        .operation()
+    else {
+        panic!("a literal is a constant row");
+    };
+    let rows = f.builder.len();
+
+    let ConstantValueFold::Value(value) = f
+        .fold_value(root, |path| (path == local).then_some(bound))
+        .expect("a bound local folds")
+    else {
+        panic!("a bound local folds to a value");
+    };
+
+    assert_eq!(f.builder.len(), rows, "a value fold must not append rows");
+    assert!(matches!(
+        f.builder
+            .view(root)
+            .expect("the root row should be stored")
+            .operation(),
+        ExpressionOperationView::NumericBinary { .. }
+    ));
+    let ordinary = f.folded_binary(Operator::Add, None, forty, two);
+    let Some(ConstValuePayload::FixedScalar(folded)) = f.constants.payload(value) else {
+        panic!("the value fold produces a fixed scalar");
+    };
+    assert_eq!(
+        *folded,
+        f.fixed_scalar_value(ordinary),
+        "the value fold computes what ordinary folding computes"
+    );
+}
+
+#[test]
+fn refused_value_fold_publishes_no_value_and_leaves_rows_untouched() {
+    let mut f = FoldFixture::new();
+    let lhs = f.structural_string(vec![ConstStringPiece::SiteRoot]);
+    let rhs = f.string_literal("plain");
+    let root = f.binary(lhs, rhs, Operator::Equality, None);
+    let rows = f.builder.len();
+    let values = f.constants.value_count();
+
+    let fold = f
+        .fold_value(root, |_| None)
+        .expect("a refusal is a typed outcome");
+
+    assert!(matches!(
+        fold,
+        ConstantValueFold::Refused(ConstantFoldRefusalReason::StructuralTextUnavailable(_))
+    ));
+    assert_eq!(f.builder.len(), rows);
+    assert_eq!(
+        f.constants.value_count(),
+        values,
+        "staged operand values must roll back with the refusal"
+    );
+}
+
+#[test]
+fn runtime_fold_keeps_refusing_composites_that_content_values_build() {
+    let mut f = FoldFixture::new();
+    let one = f.fixed_integer(FixedScalar::I32, 1);
+    let two = f.fixed_integer(FixedScalar::I32, 2);
+    let collection = crate::compiler_frontend::tests::type_id_fixture_support::collection_expr(
+        &mut f.builder,
+        vec![one, two],
+        None,
+        ValueMode::ImmutableOwned,
+        &mut f.types,
+    );
+
+    let runtime = f.fold(collection).expect("a runtime fold settles");
+    assert_eq!(expect_not_constant(runtime), collection);
+    let ConstantValueFold::Value(value) = f
+        .fold_value(collection, |_| None)
+        .expect("a content fold settles")
+    else {
+        panic!("content folding builds the collection value");
+    };
+    let Some(ConstValuePayload::Collection(items)) = f.constants.payload(value) else {
+        panic!("the content value is a collection");
+    };
+    assert_eq!(items.len(), 2);
 }

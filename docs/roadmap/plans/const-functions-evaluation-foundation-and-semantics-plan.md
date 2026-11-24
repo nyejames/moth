@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C and Phase 0 complete
-**Current slice:** Phase 1, extract value-only evaluation from AST replacement
+**Status:** Active - Foundation Phases A-C and Phases 0-1 complete
+**Current slice:** Phase 2, reduce repeated rewriting in const-function execution
 **Blockers:** None known
-**Next action:** Extract the value-only fold from `fold_root` and make `fold_expression_with_constants` return a value without committing a row.
+**Next action:** Classify interpreter expression operations into value-only and interpreter-owned, then try `fold_value_with_constants` on the original expression at the top of `evaluate_expression_inner`.
 
 ## Global constraints
 
@@ -371,37 +371,64 @@ A scalar call costs about 7 µs and five dead rows. Each nested call level adds 
 
 ### Task 1.1: Fix the result and ownership contract before code changes
 
-- [ ] Split current `fold_root` responsibilities on paper: read root/metadata, stage candidate values, perform `fold_walk`, retain refusal and provenance, select host multi-slot handling, and commit an AST replacement.
-- [ ] Choose the minimum internal result type or existing outcome reuse that distinguishes `Value(ConstValueId)`, `NotConstant` and `Refused(reason)`, with infrastructure failures in the existing error lane. These are conceptual variants, not mandatory new names.
-- [ ] Define an API that reads the builder immutably, accepts the current `FoldBoundary` and local binding lookup and returns the staged value without touching expression rows. Keep the existing transaction scope and `ConstValueCandidate`.
-- [ ] Retain separate treatment of multi-slot trusted host calls when they require `commit_constant_result_block`. Do not force those results into a scalar value type or duplicate `SuccessShape`.
-- [ ] Review `Dec` exponent context, occurrence provenance, catch eligibility and the runtime/content boundary before choosing final Rust signatures.
+- [x] Split current `fold_root` responsibilities on paper: read root/metadata, stage candidate values, perform `fold_walk`, retain refusal and provenance, select host multi-slot handling, and commit an AST replacement.
+- [x] Choose the minimum internal result type or existing outcome reuse that distinguishes `Value(ConstValueId)`, `NotConstant` and `Refused(reason)`, with infrastructure failures in the existing error lane. These are conceptual variants, not mandatory new names.
+- [x] Define an API that reads the builder immutably, accepts the current `FoldBoundary` and local binding lookup and returns the staged value without touching expression rows. Keep the existing transaction scope and `ConstValueCandidate`.
+- [x] Retain separate treatment of multi-slot trusted host calls when they require `commit_constant_result_block`. Do not force those results into a scalar value type or duplicate `SuccessShape`.
+- [x] Review `Dec` exponent context, occurrence provenance, catch eligibility and the runtime/content boundary before choosing final Rust signatures.
 
 ### Task 1.2: Prove the new boundary with focused tests
 
-- [ ] Add a const-eval unit test where value-only evaluation reads a local binding and leaves the original `ExprId` and expression-row count unchanged. The computed value must match ordinary folding.
-- [ ] Add refusal/error tests that assert candidate values do not publish a partial reachable result and the original AST remains untouched.
-- [ ] Add a test distinguishing a `Runtime` fold refusal for a composite operation from legal `Content` composite evaluation. Runtime folding must not silently become more powerful.
-- [ ] Verify structural resource provenance, exact fixed-width numeric/`Dec` results and the original required versus opportunistic failure policy.
+- [x] Add a const-eval unit test where value-only evaluation reads a local binding and leaves the original `ExprId` and expression-row count unchanged. The computed value must match ordinary folding.
+- [x] Add refusal/error tests that assert candidate values do not publish a partial reachable result and the original AST remains untouched.
+- [x] Add a test distinguishing a `Runtime` fold refusal for a composite operation from legal `Content` composite evaluation. Runtime folding must not silently become more powerful.
+- [x] Verify structural resource provenance, exact fixed-width numeric/`Dec` results and the original required versus opportunistic failure policy.
 
 ### Task 1.3: Implement the smallest extraction
 
-- [ ] Extract the value-computation portion of `fold_root`. Keep one actual `fold_walk` and one semantic implementation for numeric, cast, logical, comparison and trusted Core operations.
-- [ ] Make `constant_fold`, `fold_expression_with_constants` and related expression-oriented callers commit replacements only when they need a rewritten `ExprId`.
-- [ ] Change `ConstInterpreter::fold_to_constant` to consume the value directly instead of constructing `ExpressionOp::Constant` and reading the new row back.
-- [ ] Preserve per-call and aggregate work/memory accounting. Check that removing rewriting does not accidentally avoid previously charged work. Release speculative discovery and notes were removed in Foundation Phase B.
-- [ ] Remove the superseded result-extraction path and any now-unused metadata/clones. Do not leave compatibility wrappers around old signatures.
+- [x] Extract the value-computation portion of `fold_root`. Keep one actual `fold_walk` and one semantic implementation for numeric, cast, logical, comparison and trusted Core operations.
+- [x] Make `constant_fold`, `fold_expression_with_constants` and related expression-oriented callers commit replacements only when they need a rewritten `ExprId`.
+- [x] Change `ConstInterpreter::fold_to_constant` to consume the value directly instead of constructing `ExpressionOp::Constant` and reading the new row back.
+- [x] Preserve per-call and aggregate work/memory accounting. Check that removing rewriting does not accidentally avoid previously charged work. Release speculative discovery and notes were removed in Foundation Phase B.
+- [x] Remove the superseded result-extraction path and any now-unused metadata/clones. Do not leave compatibility wrappers around old signatures.
 
 ### Task 1.4: Validate and inspect the result
 
-- [ ] Run focused unit tests, required const-function integration cases and ordinary-call profile-parity cases.
-- [ ] Compare expression-row growth and elapsed time with Phase 0 for pure repeated expressions and composite values.
-- [ ] Audit new borrowing/lifetime constraints. The evaluator reads expression rows while candidate values stage, so no mutable builder borrow should leak into the walk.
-- [ ] Review whether `const_eval/mod.rs` should split by real responsibilities. A split is justified only if it removes mixed ownership or materially improves the current code.
+- [x] Run focused unit tests, required const-function integration cases and ordinary-call profile-parity cases.
+- [x] Compare expression-row growth and elapsed time with Phase 0 for pure repeated expressions and composite values.
+- [x] Audit new borrowing/lifetime constraints. The evaluator reads expression rows while candidate values stage, so no mutable builder borrow should leak into the walk.
+- [x] Review whether `const_eval/mod.rs` should split by real responsibilities. A split is justified only if it removes mixed ownership or materially improves the current code.
 
 **Phase 1 exit:** Value-only const evaluation operates over the existing typed rows and value store. Const execution no longer commits an AST constant merely to recover its value ID. Ordinary folding still commits the correct replacement when required.
 
 **Review:** Check transaction rollback, `Dec` context, provenance and runtime/content boundary parity. Phase 1 can pause here independently.
+
+### Phase 1 outcome
+
+**Code changes.**
+- `fold_root` now delegates the staged walk to `fold_value`. `fold_value` borrows the builder immutably and returns `ConstantValueFold::{Value, NotConstant, Refused}`.
+- `fold_root` keeps the multi-slot host branch and the replacement commit.
+- Occurrence facts are cloned only after a successful fold.
+- `fold_expression_with_constants` was replaced by the value-only `fold_value_with_constants`, with no wrapper. Every caller wanted a value: `fold_to_constant`, `ConstValueResolver::resolve_expression` and test fixtures. The resolver's `Constant` read-back arm was unreachable and is gone.
+- Budget accounting is unchanged. The dropped row was never charged: `budget.rs` counts value-store values and bytes, not builder rows.
+
+**Callers left as they are.** Signature defaults, TIR conditions, loop operands and output folding still commit rows. They either need the rewritten `ExprId` or read through wrapper rows when the fold returns not-constant. None of them is on the const-execution path that Phase 0 measured.
+
+**Measurements against Phase 0.** Same method as Phase 0.
+
+| Workload | Rows before | Rows after | Time before (ms) | Time after (ms) |
+| --- | --- | --- | --- | --- |
+| scalar | 4,871 | 3,071 | 16.0 | 15.1 |
+| nested depth 8 | 10,290 | 5,790 | 17.8 | 15.4 |
+| collection | 5,768 | 3,968 | 15.3 | 13.8 |
+| catch | 3,550 | 2,769 | 13.8 | 12.8 |
+| `Dec2` | 2,161 | 1,561 | 13.2 | 11.9 |
+| imported | 3,663 | 3,063 | 15.5 | 13.9 |
+| template | 2,752 | 2,752 | 12.4 | 12.4 |
+
+The literal-only control is unchanged. Template const calls go through TIR site rewriting, which Phase 2 owns.
+
+**`const_eval/mod.rs` split.** No split. The extraction separates value computation from row commit inside one owner, and the file has no mixed ownership that a split would remove.
 
 ## Phase 2: Reduce repeated rewriting in const-function execution
 

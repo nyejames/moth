@@ -14,7 +14,7 @@ use super::{
 };
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
-    ConstantFoldOutcome, FoldRequirement, FoldServices, fold_expression_with_constants,
+    ConstantValueFold, FoldRequirement, FoldServices, fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValue, ConstValueField, ConstValueId, ConstValuePayload, ConstValueStore,
@@ -277,7 +277,7 @@ impl ConstInterpreter<'_> {
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
         self.budget.step()?;
         let value_count = self.constants.value_count();
-        let outcome = fold_expression_with_constants(
+        let value = match fold_value_with_constants(
             expression,
             self.builder,
             self.constants,
@@ -289,22 +289,15 @@ impl ConstInterpreter<'_> {
             self.types,
             FoldRequirement::Required,
             |path| bindings.get(&path).copied(),
-        )?;
-        let value: Option<ConstValueId> = match outcome {
-            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => {
-                match self.builder.view(root)?.operation() {
-                    ExpressionOperationView::Constant(value) => Some(value),
-                    _ => None,
-                }
-            }
-            ConstantFoldOutcome::Refused { reason, .. } => {
+        )? {
+            ConstantValueFold::Value(value) => value,
+            ConstantValueFold::NotConstant => return Ok(None),
+            ConstantValueFold::Refused(reason) => {
                 return Err(ConstantFoldError::Diagnostic(reason.into_draft()));
             }
         };
-        if value.is_some() {
-            charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
-        }
-        Ok(value)
+        charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+        Ok(Some(value))
     }
 }
 

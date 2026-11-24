@@ -146,6 +146,14 @@ pub(crate) enum ConstantFoldOutcome {
     },
 }
 
+/// The result of folding an expression for its value alone; no expression row is written.
+#[derive(Debug)]
+pub(crate) enum ConstantValueFold {
+    Value(ConstValueId),
+    NotConstant,
+    Refused(ConstantFoldRefusalReason),
+}
+
 #[derive(Debug)]
 pub(crate) enum ConstantFoldRefusalReason {
     StructuralTextUnavailable(DiagnosticDraft),
@@ -2082,16 +2090,20 @@ pub(crate) fn fold_expression_with_bindings(
     }
 }
 
-pub(crate) fn fold_expression_with_constants(
+/// Fold `root` as constant content, returning its value without writing expression rows.
+///
+/// WHY: const execution and constant resolution consume only the value; a replacement row
+///      committed here would never be referenced.
+pub(crate) fn fold_value_with_constants(
     root: ExprId,
-    builder: &mut AstExpressionBuilder,
+    builder: &AstExpressionBuilder,
     constants: &mut ConstValueStore,
     services: FoldServices<'_>,
     types: &TypeEnvironment,
     requirement: FoldRequirement,
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
-) -> Result<ConstantFoldOutcome, ConstantFoldError> {
-    fold_root(
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    fold_value(
         root,
         builder,
         constants,
@@ -2101,6 +2113,7 @@ pub(crate) fn fold_expression_with_constants(
         0,
     )
 }
+
 /// Fold one constant-boundary expression (a declaration or signature default).
 ///
 /// Unlike [`constant_fold`], this materialises every foldable constructor (collections, records, choices,
@@ -2150,6 +2163,7 @@ fn multi_result_host_op(
     }
 }
 
+/// Fold `root` and commit the rows that carry its constant result.
 fn fold_root(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
@@ -2159,49 +2173,17 @@ fn fold_root(
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
     initial_dec_power_exponent_depth: u32,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
-    let FoldServices {
-        string_table: strings,
-        scope,
-        registry,
-    } = services;
-    let (existing_constant, success, span, value_mode, classification, occurrence) = {
-        let view = builder.view(root)?;
-        let existing = match view.operation() {
-            ExpressionOperationView::Constant(id) => Some(id),
-            _ => None,
-        };
-        (
-            existing,
-            view.success_shape(),
-            view.span(),
-            view.value_mode(),
-            view.classification(),
-            view.occurrence_facts().cloned(),
-        )
-    };
     let view = builder.view(root)?;
-    // Baseline fold_resolved_cast kept authored eligibility for every fold except a Catch with a Handler.
-    let eligibility = match view.operation() {
-        ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
-            if matches!(block.handler, FallibleHandling::Handler { .. }) =>
-        {
-            None
-        }
-        _ => view
-            .failure_facts()
-            .map(ExpressionFailureFacts::folded_constant_eligibility)
-            .filter(|facts| *facts != ExpressionFailureFacts::default()),
-    };
-    let cast_root = matches!(
-        view.operation(),
-        ExpressionOperationView::Cast { .. }
-            | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
-    );
-    let mut refusal = None;
-    if let Some(operation) = multi_result_host_op(boundary, view, registry) {
+    if let Some(operation) = multi_result_host_op(boundary, view, services.registry) {
         // A Host call with zero or several results folds into one constant result block. Its slot
         // rows commit as one unit; a refused or unsettled call leaves the authored call intact.
+        let FoldServices {
+            string_table: strings,
+            scope,
+            registry,
+        } = services;
         let block_scope = scope.map(|context| context.scope);
+        let mut refusal = None;
         let slots = constants.stage_values(|values| {
             let mut context = FoldContext {
                 values,
@@ -2229,10 +2211,102 @@ fn fold_root(
         let (Some(slots), Some(block_scope)) = (slots, block_scope) else {
             return Ok(ConstantFoldOutcome::NotConstant(root));
         };
+        let eligibility = folded_constant_eligibility(view);
         return Ok(ConstantFoldOutcome::Folded(
             commit_constant_result_block(builder, root, &slots, block_scope, eligibility)?.id(),
         ));
     }
+    let value = match fold_value(
+        root,
+        builder,
+        constants,
+        services,
+        boundary,
+        lookup,
+        initial_dec_power_exponent_depth,
+    )? {
+        ConstantValueFold::Value(value) => value,
+        ConstantValueFold::NotConstant => return Ok(ConstantFoldOutcome::NotConstant(root)),
+        ConstantValueFold::Refused(reason) => {
+            return Ok(ConstantFoldOutcome::Refused { root, reason });
+        }
+    };
+    if matches!(
+        view.operation(),
+        ExpressionOperationView::Constant(existing) if existing == value
+    ) {
+        return Ok(ConstantFoldOutcome::Folded(root));
+    }
+    // A builtin cast result, including a Catch that resolves to one, carries only its source's
+    // provenance. The handler named by a Catch occurrence is never part of the success value.
+    let cast_root = matches!(
+        view.operation(),
+        ExpressionOperationView::Cast { .. }
+            | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
+    );
+    let occurrence = view.occurrence_facts().map(|facts| {
+        let mut facts = facts.clone();
+        if cast_root {
+            facts.provenance = constants
+                .metadata(value)
+                .map(|source| source.synthetic_interface_provenance.clone())
+                .unwrap_or_default();
+        }
+        facts
+    });
+    let input = CompletedExpressionInput {
+        operation: ExpressionOp::Constant(value),
+        success: view.success_shape(),
+        error_type: None,
+        span: view.span(),
+        value_mode: view.value_mode(),
+        classification: view.classification(),
+        failure: folded_constant_eligibility(view),
+        occurrence,
+    };
+    Ok(ConstantFoldOutcome::Folded(
+        builder.commit_replacement(input)?.id(),
+    ))
+}
+
+/// The failure facts a folded replacement of `view` keeps.
+///
+/// WHY: a folded constant cannot fail at runtime, so it keeps only the authored eligibility of the
+///      operation it replaces, never origins or witnesses. A Catch with a Handler keeps none,
+///      matching baseline `fold_resolved_cast`.
+fn folded_constant_eligibility(view: ExpressionView<'_>) -> Option<ExpressionFailureFacts> {
+    match view.operation() {
+        ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
+            if matches!(block.handler, FallibleHandling::Handler { .. }) =>
+        {
+            None
+        }
+        _ => view
+            .failure_facts()
+            .map(ExpressionFailureFacts::folded_constant_eligibility)
+            .filter(|facts| *facts != ExpressionFailureFacts::default()),
+    }
+}
+
+/// Run one staged fold walk over `root` without writing expression rows.
+///
+/// The walk's reachable values commit to `constants` only when it settles to a value; a refusal
+/// or non-constant result publishes nothing.
+fn fold_value(
+    root: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    boundary: FoldBoundary<'_>,
+    lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+    initial_dec_power_exponent_depth: u32,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    let FoldServices {
+        string_table: strings,
+        scope,
+        registry,
+    } = services;
+    let mut refusal = None;
     let value = constants.stage_values(|values| {
         let mut context = FoldContext {
             values,
@@ -2241,52 +2315,22 @@ fn fold_root(
             boundary,
             scope,
             registry,
-            expressions: &*builder,
+            expressions: builder,
             refusal: None,
             external_calls: ExternalCallScratch::default(),
             dec_power_exponent_depth: initial_dec_power_exponent_depth,
         };
-        let value = context.fold_walk(view.id())?;
+        let value = context.fold_walk(root)?;
         refusal = context.refusal;
         Ok::<_, ConstantFoldError>(if refusal.is_some() { None } else { value })
     })?;
-    if let Some(reason) = refusal {
-        return Ok(ConstantFoldOutcome::Refused { root, reason });
-    }
-    let Some(value) = value else {
-        return Ok(ConstantFoldOutcome::NotConstant(root));
-    };
-    if existing_constant == Some(value) {
-        return Ok(ConstantFoldOutcome::Folded(root));
-    }
-    // A builtin cast result, including a Catch that resolves to one, carries only its source's
-    // provenance. The handler named by a Catch occurrence is never part of the success value.
-    let occurrence = match occurrence {
-        Some(mut facts) if cast_root => {
-            facts.provenance = constants
-                .metadata(value)
-                .map(|source| source.synthetic_interface_provenance.clone())
-                .unwrap_or_default();
-            Some(facts)
-        }
-        other => other,
-    };
-    // A folded constant cannot fail at runtime; it keeps only the authored eligibility of the
-    // operation it replaces, never origins or witnesses.
-    let input = CompletedExpressionInput {
-        operation: ExpressionOp::Constant(value),
-        success,
-        error_type: None,
-        span,
-        value_mode,
-        classification,
-        failure: eligibility,
-        occurrence,
-    };
-    Ok(ConstantFoldOutcome::Folded(
-        builder.commit_replacement(input)?.id(),
-    ))
+    Ok(match (refusal, value) {
+        (Some(reason), _) => ConstantValueFold::Refused(reason),
+        (None, Some(value)) => ConstantValueFold::Value(value),
+        (None, None) => ConstantValueFold::NotConstant,
+    })
 }
+
 fn attach_source_config_origin_labels(
     mut diagnostic: DiagnosticDraft,
     provenances: &[&SyntheticInterfaceProvenance],
