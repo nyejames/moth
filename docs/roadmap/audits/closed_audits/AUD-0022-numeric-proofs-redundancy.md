@@ -32,7 +32,7 @@ The audit log has no row for this area. `docs/roadmap/open-audit-findings.md` ha
 
 ### AUD-0022-F01: Interval operator arithmetic is implemented twice
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -75,7 +75,7 @@ None.
 
 ### AUD-0022-F02: JS proven narrowing re-classifies its conversion and recovers it through `expect`
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -118,7 +118,7 @@ None.
 
 ### AUD-0022-F03: Integer-domain guards repeat `NumericScalar::integer_range`
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -156,6 +156,23 @@ Non-authorising. Delete the unreachable `is_integer` test in `prove_operation` a
 #### Linked findings
 
 AUD-0022-F01 touches the same function. One fix may take both.
+
+## Resolution (2026-11-24)
+
+- **F01 accepted and closed.** Mandatory type-range discharge and optional HIR
+  proofs share checked endpoint arithmetic for add, subtract, multiply and
+  negate. Discharge still reads only canonical operand types. Divisor reasoning
+  stays in the optional proof analysis.
+- **F02 accepted and closed.** One JS proof query supplies the exact raw
+  conversion to lowering and determines helper demand and edge liveness.
+  Lowering no longer repeats classification or uses the three `expect` calls.
+- **F03 accepted and closed.** Integer range lookup owns the domain exclusions.
+  The narrowing source still checks its integer class explicitly.
+
+Independent review covered both consumers of the interval arithmetic and
+all JS proof-query callers. Numeric proof and operator tests passed, as did
+12 numeric-proof integration executions. The bounded-arithmetic fixture's
+HTML and embedded JS matched the baseline byte for byte in debug and release.
 
 ## Checked and clean
 

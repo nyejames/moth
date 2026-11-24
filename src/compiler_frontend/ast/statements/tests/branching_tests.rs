@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView, ExpressionView,
 };
+use crate::compiler_frontend::ast::numeric_construction::PendingChoicePattern;
 use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
 use crate::compiler_frontend::ast::statements::match_exhaustiveness::MatchArmCoverageTracker;
 use crate::compiler_frontend::ast::statements::match_patterns::{
@@ -27,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_count,
@@ -569,6 +571,69 @@ fn parses_choice_match_arms_with_bare_and_qualified_variants() {
         "choice match should keep explicit else default"
     );
     assert_eq!(*exhaustiveness, MatchExhaustiveness::HasDefault);
+}
+
+#[test]
+fn guarded_choice_arms_warn_only_after_unguarded_coverage() {
+    for (headers, expected_warnings) in [
+        (
+            "Ready if true => io.line(\"a\")\nReady => io.line(\"b\")",
+            0,
+        ),
+        (
+            "Ready if true => io.line(\"a\")\nReady if true => io.line(\"b\")",
+            0,
+        ),
+        (
+            "Ready => io.line(\"a\")\nReady if true => io.line(\"b\")",
+            1,
+        ),
+        ("Ready => io.line(\"a\")\nReady => io.line(\"b\")", 1),
+    ] {
+        let source = format!(
+            "Status :: Ready, Busy;\ncurrent Status = Status::Ready\nif current is:\n{headers}\nelse => io.line(\"other\")\n;\n"
+        );
+        let (ast, _, _) = parse_single_file_ast(&source);
+        let NodeKind::Match { arms, default, .. } = &start_function_body(&ast)[1].kind else {
+            panic!("expected choice match");
+        };
+        assert_eq!(arms.len(), 2);
+        assert!(default.is_some());
+        assert_eq!(
+            ast.warnings
+                .iter()
+                .filter(|warning| warning.code() == "MOTH-RULE-0022")
+                .count(),
+            expected_warnings,
+            "{headers}"
+        );
+    }
+}
+
+#[test]
+fn pending_choice_coverage_only_tracks_unguarded_variants() {
+    let pattern = DeferredArmPattern::PendingChoice(PendingChoicePattern {
+        nominal_path: PathId::ROOT,
+        tag: 0,
+        captures: vec![],
+        span: None,
+    });
+    let variant = Some(StringId::from_index(0));
+    let constants = ConstValueStore::default();
+    for (guards, expected) in [
+        ([true, false], [false, false]),
+        ([true, true], [false, false]),
+        ([false, true], [false, true]),
+        ([false, false], [false, true]),
+    ] {
+        let mut tracker = MatchArmCoverageTracker::default();
+        let actual = guards.map(|guard| {
+            tracker
+                .record_deferred_arm(&pattern, guard, variant, &constants)
+                .unreachable
+        });
+        assert_eq!(actual, expected);
+    }
 }
 
 #[test]

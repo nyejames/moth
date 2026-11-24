@@ -11,7 +11,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Found: runtime template helper escape fix review, 2026-11. Confirmed by a source probe. Reported as pre-existing.
 - Where: final-value validation of function-body constant bindings.
 - Observed: inside an ordinary function, `insert #= [$in title:Priya]` is rejected with `MOTH-SYNTAX-0022` at `$in`, even when the only use composes it into `[card:[insert]]` and `card` defines `[$slot title]`. The equivalent stored insert at module scope is accepted for composition.
-- Investigate: preserve function-local constant insert helpers until their receiving template consumes them, while still rejecting helpers that escape as runtime values.
+- Investigate: first distinguish [direct composition from runtime arguments](#stored-insert-reads-are-gated-by-context-kind-rather-than-position). Simply removing the declaration before HIR lets `return [: [show(insert)]]` reach HIR and fail with `MOTH-INFRA-0001` instead of a source diagnostic. Removing the declaration before static selection also loses the span of a helper-only inactive branch and leaks its `$fast_math` evidence into `$safe_math` validation. Preserve authored validation, then omit the helper from runtime lowering while leaving it available to composition.
 
 ### Stored inserts read through namespaces or constant records do not compose
 
@@ -53,14 +53,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
 - Where: match arm body parsing in `src/compiler_frontend/ast/statements/branching.rs`.
 - Observed: an arm `0 =>` whose body is an option match ending in `|x| => return x`, followed by `else => return 3`, reports MOTH-SYNTAX-0028. The same nested match parses when it ends with `else =>` or sits in the last arm.
-- Investigate: how the inner match's closing `;` and the outer arm boundary are recognised when the inner match's final arm is not `else`.
-
-### Choice arm repeated after a guarded arm warns as unreachable
-
-- Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
-- Where: duplicate-variant tracking in `src/compiler_frontend/ast/statements/match_exhaustiveness.rs`.
-- Observed: `Circle(radius) if radius > 5 => ...` followed by `Circle(radius) => ...` reports MOTH-RULE-0022 "Unreachable match arm", but the second arm runs when the guard rejects.
-- Investigate: whether a guarded arm should mark its variant as covered at all, and align the warning with the exhaustiveness rule that guarded choice arms require `else =>`.
+- Investigate: `parse_match_block` assumes that an arm header after `;` belongs to the match it just closed. Dropping that check for all nested matches fixes the valid outer-arm case but loses the dedicated diagnostic for a stray `;` between `none =>` and `|x| =>` in an inner option match. Decide how to detect a misplaced delimiter without treating indentation as syntax or trial-parsing the next arm against multiple subjects.
 
 ### Repeated work in single-file namespace validation
 
@@ -116,9 +109,9 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 ### Rooted in-memory template sources may not reach disk resources on Windows
 
 - Found: template path simplification review, 2026-11. Unverified hypothesis from code reading; no Windows host was available.
-- Where: `src/projects/html_project/moth_template/input.rs` resource containment for in-memory `Sources` with rooted display paths.
-- Suspected: `portable_path_text` strips the `\\?\` verbatim prefix while `fs::canonicalize` returns it, so the containment check may reject a sibling resource such as `[@logo.svg]` that the same request accepts on Unix. `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` is Unix-only for this reason.
-- Investigate: run that case on Windows. If it fails, compare both sides of the containment check in one canonical spelling.
+- Where: `prepare_file_value_bundle` in `src/projects/html_project/moth_template/bundle.rs` passes the display path's parent to `SingleFileReferenceResolver`. Its constructor clones that path as the containment root, while `resolve_physical_target_cached` compares canonical targets against it in `src/build_system/create_project_modules/file_reference_resolution.rs`.
+- Suspected: a normal drive path and the verbatim path from `fs::canonicalize` compare differently on Windows, so a sibling resource such as `[@logo.svg]` may fail containment. The Unix-only `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` test passes an ordinary display spelling.
+- Investigate: run the case on Windows. If containment fails, keep the lexical display identity separate and compare the canonical target, root and module-boundary probes in one spelling.
 
 ### Projected alias write targets keep the holder cell as a conservative identity
 

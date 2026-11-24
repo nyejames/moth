@@ -50,7 +50,7 @@ AUD-0022 F01 to F03 (Redundancy) and AUD-0023 (Performance, clean) cover this ar
 
 ### AUD-0024-F01: Proof-table timing comments name HIR validation where the contract requires final converged HIR
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Comments`
 
 #### Evidence
@@ -97,7 +97,7 @@ None.
 
 ### AUD-0024-F02: Proof-table key documentation calls Invoke operation ids statement ids
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Comments`
 
 #### Evidence
@@ -143,7 +143,7 @@ AUD-0025-F01 (Style rename of the `statement` parameters).
 
 ### AUD-0024-F03: JS branch-inspection landmark omits proven-narrowing Invokes
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Comments`
 
 #### Evidence
@@ -185,7 +185,7 @@ None.
 
 ### AUD-0024-F04: `FunctionEmission` rationale narrates implementation history
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Comments`
 
 #### Evidence
@@ -219,6 +219,15 @@ None beyond `cargo check -p moth`.
 #### Linked findings
 
 None.
+
+## Resolution (2026-11-24)
+
+**F01 through F04 accepted and closed.** The proof documentation names the
+final HIR after convergence and private-lane installation, and keys facts by
+the lowered operation's identity, including Invokes. JS branch inspection
+names both pruned Invoke kinds. The emission record explains its current
+ownership without describing the old implementation. Independent review
+traced the comments through base and sidecar publication and JS consumption.
 
 ## Checked and clean
 

@@ -619,8 +619,8 @@ impl<'hir> JsEmitter<'hir> {
                 failure,
                 ..
             } => {
-                // A scalar numeric Invoke always takes its success edge, so its handler is not a
-                // live branch body. The liveness owner decides that, never this match.
+                // A scalar numeric or proven-narrowing Invoke always takes its success edge, so
+                // its handler is not a live branch body. The liveness owner decides that.
                 if self.invoke_failure_edge_is_live(*id, operation)? {
                     self.inspect_branch_pair(*success, *failure, branch_blocks)
                 } else {

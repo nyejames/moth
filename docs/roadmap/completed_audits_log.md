@@ -8,6 +8,9 @@ Historical formal audit resolutions and the index of reports with no outstanding
 
 ## Closed reports
 
+- [AUD-0025: Numeric proof side-table style](./audits/closed_audits/AUD-0025-numeric-proofs-style.md)
+- [AUD-0024: Numeric proof side-table comments](./audits/closed_audits/AUD-0024-numeric-proofs-comments.md)
+- [AUD-0022: Numeric proof side-table redundancy](./audits/closed_audits/AUD-0022-numeric-proofs-redundancy.md)
 - [AUD-0028: Directive implementation redundancy](./audits/closed_audits/AUD-0028-directive-implementation-redundancy.md)
 - [AUD-0027: Host contract redundancy](./audits/closed_audits/AUD-0027-host-contract-redundancy.md)
 - [AUD-0026: HTML runtime-glue assembly redundancy](./audits/closed_audits/AUD-0026-runtime-glue-redundancy.md)
@@ -35,6 +38,16 @@ Historical formal audit resolutions and the index of reports with no outstanding
 - [AUD-0023: Numeric proof side-table performance](./audits/closed_audits/AUD-0023-numeric-proofs-performance.md)
 
 ## Resolution records
+
+- AUD-0022, AUD-0024 and AUD-0025 were accepted and closed. Discharge and proofs
+  share checked interval arithmetic without sharing proof facts. JS lowering,
+  helper demand and reachability use one narrowing query. Timing, identity and
+  divisor guards now describe the actual contracts. Focused tests and 12
+  numeric-proof integration executions passed. The bounded-arithmetic
+  fixture's debug and release HTML and JS matched the baseline byte for byte.
+  See [AUD-0022](./audits/closed_audits/AUD-0022-numeric-proofs-redundancy.md#resolution-2026-11-24),
+  [AUD-0024](./audits/closed_audits/AUD-0024-numeric-proofs-comments.md#resolution-2026-11-24)
+  and [AUD-0025](./audits/closed_audits/AUD-0025-numeric-proofs-style.md#resolution-2026-11-24).
 
 - AUD-0028-F01 through F04 were accepted and closed. The directive kind owns
   occurrence eligibility, formatters share one exclusivity rule and published

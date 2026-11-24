@@ -339,7 +339,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         op: HirNumericOp,
         operands: &HirNumericOperands,
-        statement: HirNodeId,
+        operation: HirNodeId,
         delivery: NumericDelivery,
     ) -> Result<(String, bool), InfrastructureFailure> {
         // Guard against arity mismatch between HIR and the backend.
@@ -360,59 +360,30 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        let lowering = self.classify_numeric_operation(op, statement, delivery)?;
+        let lowering = self.classify_numeric_operation(op, operation, delivery)?;
 
         Ok((lowering.expression(lowered_args), lowering.is_scalar()))
     }
 
-    /// Render the raw carrier conversion for a proven-safe fallible integer narrowing.
-    fn proven_narrowing_expression(
-        &self,
-        policy: BuiltinCastPolicyId,
-        value: &str,
-        statement: HirNodeId,
-    ) -> Option<String> {
-        if !self.integer_narrowing_is_proven(statement, policy) {
-            return None;
-        }
-
-        let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
-            return None;
-        };
-        let conversion = JsNumericConversion::classify(source, target)
-            .expect("proven narrowing policy must classify");
-        let source_carrier = JsNumericCarrier::for_scalar(source)
-            .expect("classified narrowing source has a JS carrier");
-        let proven = conversion
-            .proven_safe_integer_narrowing(source_carrier)
-            .expect("proven narrowing applies to checked integer conversions");
-
-        Some(proven.expression(value, source, target))
-    }
-
-    /// Whether one Invoke cast's numeric conversion is a proven-safe integer narrowing.
+    /// Return the raw carrier conversion for a proven-safe integer narrowing Invoke.
     ///
-    /// WHAT: only fallible integer-to-integer conversions proven at their Invoke node qualify.
-    /// WHY: demand scans and operation lowering must agree on elided checked helpers.
-    pub(crate) fn integer_narrowing_is_proven(
+    /// Demand scans, edge liveness and lowering share this query so they agree on both the
+    /// checked helper and the failure edge that can be omitted.
+    pub(crate) fn proven_integer_narrowing(
         &self,
-        statement: HirNodeId,
+        operation: HirNodeId,
         policy: BuiltinCastPolicyId,
-    ) -> bool {
-        let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
-            return false;
-        };
-        let Ok(conversion) = JsNumericConversion::classify(source, target) else {
-            return false;
-        };
-        if !matches!(
-            conversion,
-            JsNumericConversion::CheckedIntegerToInteger { .. }
-        ) {
-            return false;
+    ) -> Option<(JsNumericConversion, NumericScalar, NumericScalar)> {
+        if !self.numeric_proofs.integer_narrowing_is_safe(operation) {
+            return None;
         }
-
-        self.numeric_proofs.integer_narrowing_is_safe(statement)
+        let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
+            return None;
+        };
+        let conversion = JsNumericConversion::classify(source, target).ok()?;
+        let source_carrier = JsNumericCarrier::for_scalar(source)?;
+        let conversion = conversion.proven_safe_integer_narrowing(source_carrier)?;
+        Some((conversion, source, target))
     }
 
     /// Emit one range candidate, dispatching on the counter domain.
@@ -829,7 +800,10 @@ impl<'hir> JsEmitter<'hir> {
             }
             HirFallibleOperation::CastOp { policy, source } => {
                 let source = self.lower_expr(*source)?;
-                if let Some(value) = self.proven_narrowing_expression(*policy, &source, id) {
+                if let Some((conversion, source_type, target)) =
+                    self.proven_integer_narrowing(id, *policy)
+                {
+                    let value = conversion.expression(&source, source_type, target);
                     // A proven narrowing performs the same physical Number/BigInt conversion as
                     // the checked helper, but its range predicate can never fail. The same proof
                     // query makes the failure edge dead, so this is the scalar-Invoke path.

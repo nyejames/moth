@@ -2,8 +2,8 @@
 //!
 //! WHAT: an optional, operation-keyed table of proven-safe checked integer operations and
 //!       proven-safe fallible integer narrowings, computed once per validated HIR executable
-//!       from its exact numeric domains. Consumers (the scalar backends) elide redundant runtime
-//!       range predicates only where a fact exists; every unproven operation keeps its check.
+//!       from its exact numeric domains. The scalar backends use it to elide redundant range
+//!       predicates. Without a fact, they retain every otherwise-required check.
 //! WHY: backend check elision needs conservative facts that pair with the exact immutable HIR
 //!      they were derived from. HIR, AST evidence, public semantics and target capability gates
 //!      stay unchanged: this is a read-only side analysis, never a source or HIR transformation.
@@ -38,25 +38,26 @@
 //!
 //! ## Identity contract
 //!
-//! Facts are keyed by the statement or Invoke operation's own `HirNodeId` and carry no interned strings, paths or
-//! dense local layouts, so a table needs no remap when its executable is published. The table
-//! is computed inside the compiler services after HIR validation, before publication, and is
-//! consumed only together with that same executable's HIR.
+//! Facts are keyed by the statement or Invoke operation's own `HirNodeId` and carry no interned
+//! strings, paths or dense local layouts, so a table needs no remap when its executable is
+//! published. Compiler services compute it from final validated HIR after private-lane
+//! installation and convergence. Backends consume it only with that executable's HIR.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, checked_result_range, negation_domain,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::for_each_terminator_target;
 
@@ -68,10 +69,9 @@ type Interval = (i128, i128);
 
 /// Proven-safe integer operation and narrowing facts for one immutable HIR executable.
 ///
-/// WHAT: sparse operation-keyed side table paired with its executable. The empty default
-///       table retains every runtime check.
-/// WHY: backends query an operation rather than re-deriving ranges, and a missing fact
-///      degrades to fully checked behaviour.
+/// WHAT: sparse operation-keyed side table paired with its executable.
+/// WHY: backends query an operation rather than re-deriving ranges. A missing fact retains
+///      every otherwise-required check without changing mandatory HIR totality.
 #[derive(Debug, Default)]
 pub(crate) struct NumericProofs {
     /// Ordinary checked `NumericOp` statement or Invoke ids whose relevant failures are
@@ -84,16 +84,14 @@ pub(crate) struct NumericProofs {
 }
 
 impl NumericProofs {
-    /// Whether the checked integer operation recorded at `statement` cannot fail.
-    ///
-    /// The facts derive from exact numeric domains, so the lookup needs only the statement.
-    pub(crate) fn integer_operation_is_safe(&self, statement: HirNodeId) -> bool {
-        self.safe_operations.contains(&statement)
+    /// Whether the checked integer operation with this node identity cannot fail.
+    pub(crate) fn integer_operation_is_safe(&self, operation: HirNodeId) -> bool {
+        self.safe_operations.contains(&operation)
     }
 
-    /// Whether the fallible integer narrowing recorded at `statement` cannot fail.
-    pub(crate) fn integer_narrowing_is_safe(&self, statement: HirNodeId) -> bool {
-        self.safe_narrowings.contains(&statement)
+    /// Whether the fallible integer narrowing with this Invoke node identity cannot fail.
+    pub(crate) fn integer_narrowing_is_safe(&self, operation: HirNodeId) -> bool {
+        self.safe_narrowings.contains(&operation)
     }
 }
 
@@ -102,9 +100,9 @@ impl NumericProofs {
 /// WHAT: walks every block in `hir.blocks` order, deriving closed intervals from each
 ///       statement's exact numeric domains for checked integer operations and fallible integer
 ///       narrowings. A proven Invoke supplies its sole success block's entry interval.
-/// WHY: base and generated sidecar compilation each call this once after HIR validation and
-///      before publication, so every executable carries its own paired table. Post-compaction
-///      block ids are dense, so the incoming-edge table can index by `BlockId.0`.
+/// WHY: base and generated sidecar compilation each compute this from final validated HIR after
+///      private-lane installation and convergence, before publication. Post-compaction block ids
+///      are dense, so the incoming-edge table can index by `BlockId.0`.
 pub(crate) fn analyse_numeric_proofs(
     hir: &HirModule,
     environment: &TypeEnvironment,
@@ -204,17 +202,13 @@ impl BlockAnalyser<'_> {
                 // Derive the source interval before any invalidation.
                 let interval = self.expression_interval(*value);
                 let target_local = match target {
-                    crate::compiler_frontend::hir::statements::HirWriteTarget::DefineLocal(
-                        local,
-                    ) => Some(*local),
-                    crate::compiler_frontend::hir::statements::HirWriteTarget::AssignPlace(
-                        place,
-                    ) if self.expressions.projections(place.projections).is_empty() => {
+                    HirWriteTarget::DefineLocal(local) => Some(*local),
+                    HirWriteTarget::AssignPlace(place)
+                        if self.expressions.projections(place.projections).is_empty() =>
+                    {
                         Some(place.root)
                     }
-                    crate::compiler_frontend::hir::statements::HirWriteTarget::AssignPlace(_) => {
-                        None
-                    }
+                    HirWriteTarget::AssignPlace(_) => None,
                 };
                 if let Some(target_local) = target_local {
                     // Supported direct-local assignments retain only the destination's current
@@ -317,43 +311,20 @@ impl BlockAnalyser<'_> {
         operands: &HirNumericOperands,
     ) -> Option<Interval> {
         let domain = op.domain.integer_range()?;
-        if !op.domain.is_integer() {
-            return None;
-        }
 
         let interval = match op.operator {
-            NumericOperator::Add => {
+            NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {
                 let (left, right) = self.binary_intervals(operands)?;
-                (left.0.checked_add(right.0)?, left.1.checked_add(right.1)?)
-            }
-            NumericOperator::Subtract => {
-                let (left, right) = self.binary_intervals(operands)?;
-                (left.0.checked_sub(right.1)?, left.1.checked_sub(right.0)?)
-            }
-            NumericOperator::Multiply => {
-                let (left, right) = self.binary_intervals(operands)?;
-                let (mut low, mut high) = (i128::MAX, i128::MIN);
-                for left_endpoint in [left.0, left.1] {
-                    for right_endpoint in [right.0, right.1] {
-                        let product = left_endpoint.checked_mul(right_endpoint)?;
-                        low = low.min(product);
-                        high = high.max(product);
-                    }
-                }
-                (low, high)
+                checked_result_range(op.operator, left, Some(right))?
             }
             NumericOperator::IntegerDivide => {
                 let (left, right) = self.binary_intervals(operands)?;
                 // A divisor interval that may contain zero can always fail.
-                if right.0 <= 0 && 0 <= right.1 {
+                if interval_contains(right, 0) {
                     return None;
                 }
                 // Signed minimum divided by -1 overflows the domain (e.g. I64::MIN / -1).
-                if domain.0 < 0
-                    && left.0 <= domain.0
-                    && domain.0 <= left.1
-                    && right.0 <= -1
-                    && -1 <= right.1
+                if domain.0 < 0 && interval_contains(left, domain.0) && interval_contains(right, -1)
                 {
                     return None;
                 }
@@ -372,7 +343,7 @@ impl BlockAnalyser<'_> {
             NumericOperator::Remainder => {
                 let (left, right) = self.binary_intervals(operands)?;
                 // A divisor interval that may contain zero can always fail.
-                if right.0 <= 0 && 0 <= right.1 {
+                if interval_contains(right, 0) {
                     return None;
                 }
                 // Truncating remainder keeps the dividend's sign and stays strictly below the
@@ -398,8 +369,8 @@ impl BlockAnalyser<'_> {
                 let HirNumericOperands::Unary { operand } = operands else {
                     return None;
                 };
-                let (low, high) = self.expression_interval(*operand)?;
-                (high.checked_neg()?, low.checked_neg()?)
+                let interval = self.expression_interval(*operand)?;
+                checked_result_range(op.operator, interval, None)?
             }
             // Real division computes in float domains and power always retains its checks.
             NumericOperator::Divide | NumericOperator::Power => return None,
@@ -431,7 +402,7 @@ impl BlockAnalyser<'_> {
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
             return false;
         };
-        if !source.is_integer() || !target.is_integer() {
+        if !source.is_integer() {
             return false;
         }
         let Some((target_low, target_high)) = target.integer_range() else {
@@ -488,10 +459,10 @@ impl BlockAnalyser<'_> {
     /// `Byte`, floats, binary floats and `Dec` have no bounded integer range and return
     /// `None`, keeping those domains excluded from every proof.
     fn canonical_interval(&self, type_id: TypeId) -> Option<Interval> {
-        let scalar = NumericScalar::from_type_id(type_id, self.environment)?;
-        if !scalar.is_integer() {
-            return None;
-        }
-        scalar.integer_range()
+        NumericScalar::from_type_id(type_id, self.environment)?.integer_range()
     }
+}
+
+fn interval_contains((low, high): Interval, value: i128) -> bool {
+    low <= value && value <= high
 }

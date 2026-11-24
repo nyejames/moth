@@ -1,8 +1,8 @@
 //! HIR CFG reachability adapter for JS function lowering.
 //!
-//! WHAT: owns which successor edges can execute — pruning the failure edge of a numeric Invoke
-//!       whose shared classification yields a scalar — and collects block closures through the
-//!       emitter's block lookup.
+//! WHAT: owns which successor edges can execute, pruning the failure edges of scalar numeric
+//!       and proven integer-narrowing Invokes, and collects block closures through the emitter's
+//!       block lookup.
 //! WHY: emission, cycle detection, structured-branch inspection and every helper-demand scan must
 //!      agree which edges execute. A block still reached through another live edge remains a
 //!      target of that edge, so it keeps its emitted code and helper demand. Local declarations
@@ -39,7 +39,7 @@ impl<'hir> JsEmitter<'hir> {
                 .classify_numeric_operation(*op, id, NumericDelivery::Invoke)?
                 .is_scalar()),
             HirFallibleOperation::CastOp { policy, .. } => {
-                Ok(!self.integer_narrowing_is_proven(id, *policy))
+                Ok(self.proven_integer_narrowing(id, *policy).is_none())
             }
             _ => Ok(true),
         }

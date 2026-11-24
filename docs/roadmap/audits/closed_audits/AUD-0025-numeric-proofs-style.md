@@ -44,7 +44,7 @@ None is re-filed. AUD-0024-F02 covers the prose half of F01 below. No active pla
 
 ### AUD-0025-F01: Proof queries name operation ids `statement`
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Style`
 
 #### Evidence
@@ -93,7 +93,7 @@ AUD-0024-F02 (Comments). The `artefact.rs` and query-doc wording describes the s
 
 ### AUD-0025-F02: Divisor guards spell interval membership through positional endpoints
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Style`
 
 #### Evidence
@@ -135,7 +135,7 @@ AUD-0022-F01 (Redundancy). Its consolidation decides where this guard ends up.
 
 ### AUD-0025-F03: `visit_statement` spells `HirWriteTarget` through crate paths
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Style`
 
 #### Evidence
@@ -169,6 +169,13 @@ Import and formatting only.
 #### Linked findings
 
 None.
+
+## Resolution (2026-11-24)
+
+**F01 through F03 accepted and closed.** Proof queries use operation identities,
+divisor guards name interval membership and the statement visitor imports
+`HirWriteTarget` at module scope. Independent review verified the unchanged
+proof and lowering behavior. The `numeric_proof` filter passed 60 tests.
 
 ## Checked and clean
 

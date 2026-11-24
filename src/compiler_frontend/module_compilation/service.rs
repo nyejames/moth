@@ -1091,6 +1091,7 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     )?;
 
+    // Proofs must describe the final HIR after convergence and private-lane installation.
     let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 
     Ok(SemanticStageOutput::Complete(

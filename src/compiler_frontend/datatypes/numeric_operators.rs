@@ -346,7 +346,7 @@ pub(crate) fn numeric_operation_cannot_fail(
             else {
                 return false;
             };
-            let Some(result) = checked_result_range(operator, left_range, right_range) else {
+            let Some(result) = checked_result_range(operator, left_range, Some(right_range)) else {
                 return false;
             };
             result.0 >= result_range.0 && result.1 <= result_range.1
@@ -358,11 +358,7 @@ pub(crate) fn numeric_operation_cannot_fail(
             let Some(operand_range) = left.integer_range() else {
                 return false;
             };
-            let Some(result) = operand_range
-                .1
-                .checked_neg()
-                .and_then(|high| operand_range.0.checked_neg().map(|low| (high, low)))
-            else {
+            let Some(result) = checked_result_range(operator, operand_range, None) else {
                 return false;
             };
             // Negation consumes its promoted domain: the operand already carries the result
@@ -376,21 +372,26 @@ pub(crate) fn numeric_operation_cannot_fail(
     }
 }
 
-/// Mathematical result range of one dischargeable binary operator over closed `i128` intervals.
+/// Mathematical result range for add, subtract, multiply or negate over closed `i128` intervals.
 ///
-/// WHAT: `None` when a checked `i128` intermediate cannot represent the result; callers treat
-///       that as unproved, never wrapping.
-fn checked_result_range(
+/// `None` means an unsupported operator, mismatched arity or unrepresentable intermediate.
+/// Callers treat it as unproved, never wrapping.
+pub(crate) fn checked_result_range(
     operator: NumericOperator,
     left: (i128, i128),
-    right: (i128, i128),
+    right: Option<(i128, i128)>,
 ) -> Option<(i128, i128)> {
     match operator {
-        NumericOperator::Add => Some((left.0.checked_add(right.0)?, left.1.checked_add(right.1)?)),
+        NumericOperator::Add => {
+            let right = right?;
+            Some((left.0.checked_add(right.0)?, left.1.checked_add(right.1)?))
+        }
         NumericOperator::Subtract => {
+            let right = right?;
             Some((left.0.checked_sub(right.1)?, left.1.checked_sub(right.0)?))
         }
         NumericOperator::Multiply => {
+            let right = right?;
             let mut low = i128::MAX;
             let mut high = i128::MIN;
             for left_endpoint in [left.0, left.1] {
@@ -401,6 +402,9 @@ fn checked_result_range(
                 }
             }
             Some((low, high))
+        }
+        NumericOperator::Negate if right.is_none() => {
+            Some((left.1.checked_neg()?, left.0.checked_neg()?))
         }
         _ => None,
     }
