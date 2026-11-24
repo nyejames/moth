@@ -30,11 +30,10 @@ STATUS: documentation slice complete. Milestone A is closed after the final mult
   remains deferred and no phase is active.
 CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
   deferred implementation work awaiting explicit activation.
-NEXT_ACTION: Phase 0, the reopened Phase 1 consistency passes and the final memory model
-  consistency closure are complete. Do not begin Phase 2 until the borrow and last-use
-  implementation slice is explicitly activated on the roadmap.
-BLOCKERS: none for the documentation slice; implementation phases require delivered dense HIR,
-  native result channels and explicit roadmap activation in addition to their own semantic prerequisites.
+NEXT_ACTION: complete the pre-Channels final design/compatibility brief before activating
+  production borrow and lifetime foundations. Reconcile the remaining plan phases at that checkpoint.
+BLOCKERS: implementation requires the delivered runtime/const semantic separation, dense HIR,
+  native result channels, the accepted memory compatibility brief and explicit roadmap activation.
 ```
 
 ## Compiler foundation handoff

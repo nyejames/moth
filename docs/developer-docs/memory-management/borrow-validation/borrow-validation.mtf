@@ -364,3 +364,16 @@ The source, verified implementation inventory, known alpha precision limits, per
 - @../retained-edge-counting (Retained Edge Counting): why temporary aliases are never counted
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): validated HIR input
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): module ownership and exported call effects
+
+## Deferred Channels integration
+
+The accepted source contract at `docs/docs/async/channels.mtf` requires
+outcome-sensitive mandatory transfer at successful send, preservation on
+failure and losing selection arms, validated task arguments, suspension-live
+loans and explicit logical endpoint releases. The production foundation and
+Channels implementation must extend the shared borrow facts and Boracle
+input, preserving the separate topology owner. Suspension alone is not an
+alias conflict, but a conflicting access by another reachable task is never
+legal. No channel-specific checker, runtime GC proof or optional transfer
+heuristic can establish this mandatory legality. Required const bodies keep
+their separate interpreter access contract.

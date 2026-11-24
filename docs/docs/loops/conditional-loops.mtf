@@ -44,11 +44,24 @@ runtime condition to decide that the loop stays true forever.
 
 A top-level `to` marker makes the header a range loop.
 
-Without a range marker, a top-level `by` step or an explicit `|...|` suffix marks
+The accepted deferred repeated option-capture header `loop source is |value|:`
+is classified before ordinary collection bindings. Without a range marker,
+a top-level `by` step or an ordinary explicit `|...|` suffix marks
 a collection loop. Without bindings or a step, a collection-typed header is still
 a collection loop. Every other header must type-check as a `Bool` condition. A
 `by` step on a `Bool` condition is rejected instead of being treated as a
 collection loop.
+
+### Repeated option capture (accepted, deferred)
+
+A statement loop of the form `loop source is |value|:` evaluates its `T?`
+source once per attempted iteration, binds the present `T` in the body and
+exits on `none`. The binding is fresh on each iteration and cannot shadow
+another visible name. `continue` reevaluates the source and `break` exits the
+loop. This uses ordinary option control flow, not an iterator or generator.
+The general statement form is a prerequisite for draining a channel using
+`loop << reader is |message|:` in @../async (Channels). Template and
+collection-producing loop extensions do not follow from this form.
 
 ### Scope
 

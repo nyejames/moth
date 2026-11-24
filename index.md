@@ -310,6 +310,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/developer-docs/language/overview.mtf)
 - [Wiring](docs/docs/wiring/@entry.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
+- [Channels](docs/docs/async/@entry.moth) and [canonical V1 source contract](docs/docs/async/channels.mtf): function-scoped cooperative tasks, channels, selection, cancellation, suspension and host integration (implementation deferred).
 - [general directives](docs/docs/directives/directives.mtf); [directive contributor routing](docs/docs/directives/overview.mtf)
 - [entry metadata and builder slots](docs/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/developer-docs/memory-management/overview.mtf)

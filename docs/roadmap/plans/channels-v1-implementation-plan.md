@@ -153,7 +153,8 @@ need explicit review rather than guessing at lowering time.
 - [ ] Fix suspension and failure summary dependencies before HIR publication.
   Include spawn edges distinctly from ordinary calls, join, cancellation,
   select and host wait. Verify recursive SCCs, private inferred failure,
-  exported and custom error boundaries, generic instantiation, selected
+  exported and custom error boundaries (including mapping a child failure
+  by an ordinary wrapper around its owning invocation), generic instantiation, selected
   inactive code, const eligibility and existing constraint verification.
   Optional `$no_suspend` is a proof of absence, not permission to suspend.
   Unknown provider evidence cannot prove absence. Include implicitly waiting
@@ -199,7 +200,8 @@ validation; canonical language and diagnostics owners.
 - [ ] Lower direct child dispatch and channel construction to validated
   semantic operations with resolved targets and explicit native result
   slots. A child target has no ordinary success values, only zero-success
-  or builtin Error! contract. Reject custom unadapted errors and invalid
+  or builtin Error! contract. Resolve Never targets at the Phase 0 checkpoint;
+  Never is not an ordinary zero-result signature. Reject custom unadapted errors and invalid
   first-class targets. No source async function type.
 - [ ] Represent send, receive, selection, wait, join and logical endpoint
   release with explicit CFG outcomes and stable operation identities;

@@ -33,6 +33,18 @@ conflict checking consumes its `query_overlap` result.
 Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and
 analysis queries throughout the compiler's life.
 
+## Channels V1 research input
+
+The accepted deferred source contract is `docs/docs/async/channels.mtf`.
+The design and production foundation checkpoints must extend the normalized
+borrow input for dispatch, successful transfer, failed and unselected paths,
+suspension, endpoint release, joins and cancellation. Investigate these with
+the existing reference solver and bounded operational oracle, without
+changing their ownership or claiming concurrency coverage before delivery.
+Task/queue lifetimes and retained-edge proof remain the separate canonical
+lifetime-topology owner's responsibility. Runtime safety is mandatory;
+const execution keeps its independent bounded interpreter access contract.
+
 ## Core contract
 
 [table:
