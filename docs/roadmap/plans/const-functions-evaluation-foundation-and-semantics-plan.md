@@ -790,9 +790,8 @@ documentation check passed for the updated progress page.
 - [x] Retain the ordinary multi-bind false-conflict report as independent runtime work. The new const policy neither fixes nor justifies that bug. Fix separately in its ordinary HIR/borrow owner with approval, preserving simultaneous RHS evaluation and the distinction between fresh slots and fresh allocations.
 
 **Runtime publication gate (open).** The C4 candidate materialises shared
-allocations once. The straight-line `return items, items` case rejects a
-conflicting mutation. The production checker still accepts two overlapping
-accesses that must fail:
+allocations once. Before the Stage 6 prototype, two overlapping accesses
+escaped validation:
 
 - `return Box(items), items`: after receiving both results, `~items.push(2)`
   succeeds before a later read of `box.items`. Constructor transfer does not
@@ -812,9 +811,18 @@ checker and its control-flow transfers. Keep C4 and Phase 5 gated until the
 runtime handoff passes both the conflict tests and legal replacement, copy
 and disjoint-access controls.
 
-The uncommitted C4 candidate passed 160 of 162 const integration cases on
-the pinned Node version. Only the two runtime conflicts above failed. The
-build-service parity tests covered a source package's shared graph, an
+The Stage 6 prototype now rejects both original cases. The gate remains open:
+an ordinary call can hide a shared child from the checker, and the prototype
+still needs to preserve legal projected aliases. The
+[production borrow plan](production-borrow-checker.md#ordinary-call-boundary-open)
+records the executable witness and the proposed Stage 6 summary change.
+The prototype passes 164 of 164 borrow-tagged integration cases and
+161 of 162 const-tagged cases. The remaining const-tagged failure is
+the legal ordinary projected writer in
+`const_function_projected_alias_mutation_parity`. The published-graph
+and graph-copy controls pass.
+
+The build-service parity tests covered a source package's shared graph, an
 unresolved site-root string, type-level evaluation and a private donor
 access diagnostic. The independent JavaScript `copy` fix (`fc974cd84d`)
 preserves sharing across records, maps and nested collections. The docs

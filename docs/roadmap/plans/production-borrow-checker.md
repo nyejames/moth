@@ -64,6 +64,80 @@ These constraints are already established by compiler/memory authorities and exi
 
 **Implementation decisions still open:** compact root/state representation, clone elimination or ownership reuse, selective failure-lane invalidation, the exact iterative SCC implementation, production conflict-directed refinement and richer call/loop/aggregate proof domains. These are candidates or research directions until their evidence and invariants are reviewed. Existing code and accepted semantics are not approval of any one proposed data structure.
 
+### Const publication prerequisite
+
+The owner approved a bounded Stage 6 prerequisite on
+`docs/const-foundation-profile-independent-semantics`. The
+[const C4 checkpoint](const-functions-evaluation-foundation-and-semantics-plan.md#c4-integrate-required-evaluation-and-close-publication)
+records two false acceptances when shared result allocations pass through
+retained fields or branch results. This opens only the relevant part of
+BC-06. It does not activate Boracle research or change runtime access rules.
+
+1. Preserve allocation provenance through ordered jump destinations and
+   lexical exits without keeping the source binding alive. Re-entered
+   allocation sites must not conflate a fresh value with a surviving old one.
+2. Track which projection retains each known allocation in the existing
+   production transfer. Replacing a field updates its edge, not the previous
+   referent. Future use of an independent field must not block mutation.
+3. Verify ordinary forwarding, explicit copy and collection success and
+   failure paths that can carry the published graph. Missing provenance
+   must not count as proof of independence. Keep the existing runtime
+   multi-bind and immutable-parameter permission defects separate.
+
+Do not publish C4 runtime graphs until the conflicting mutation cases reject
+and the disjoint access, replacement, last-use and graph-copy controls pass.
+This work supplies borrow provenance, not final retention or lifetime facts.
+
+#### Ordinary call boundary (open)
+
+An ordinary constructor can retain a child from a materialised const graph:
+
+```moth
+Box = |items {I32}|
+
+pair #|| -> {I32}, {I32}:
+    items {I32} = {1}
+    return items, items
+;
+
+retain |value {I32}| -> Box:
+    return Box(value)
+;
+
+probe || -> I32:
+    original ~{I32}, observer {I32} = pair()
+    forwarded = retain(observer)
+    ~original.push(2)
+    return forwarded.items.length()
+;
+
+~[:[probe()]]
+```
+
+`moth check` accepts this, and `probe()` in the emitted JavaScript returns
+`2`. The later `forwarded.items` read keeps a second view of the collection
+live at the mutation. This must reject under ordinary borrow rules. The
+constructor creates a fresh box allocation, not a fresh collection.
+
+The current call summary cannot express this relationship. It gives
+`return Box(value)` a `Fresh` root and collapses `return box` and
+`return box.items` into the same parameter-root union. A caller cannot
+reconstruct either result's exact allocation relationship from those facts.
+
+Proposed next slice: extend the existing Stage 6 call-summary convergence
+with preliminary access-overlap evidence between typed projections of
+ordered success slots and arguments or other success slots. Use stable
+declaration-relative selectors across modules and generated sidecars.
+Apply the summary to the production checker's existing call transfer after
+argument evaluation, on the success edge of `Invoke`. No new compiler pass
+or const-only call path. Keep binding cells, permissions, ownership transfer
+and Stage 7 lifetime or retained-edge obligations separate.
+
+Prove the constructor case and whole-value forwarding against exact borrow
+diagnostics. Keep disjoint siblings, legal edge replacement, last use,
+explicit copy and failed calls as controls. If this scope cannot preserve
+those controls without a broader runtime design, leave C4 gated.
+
 ## Permanent performance evidence - 2026-10-12
 
 The following is the retained content of the temporary `borrow-checker-followup-evidence.md`. It was recorded during the exact-numeric implementation review on `expression-refactor`, corrections at `2e000a073` before the squash onto `main`. Code was re-inspected on `AUDITED_MAIN`: the major mechanisms below remain present, while current line numbers may differ after future merges. Numeric/AST work is not blamed for these costs. Equivalent pre-numeric runs exhibit the same issue.
