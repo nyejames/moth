@@ -18037,6 +18037,34 @@ contract = "language.memory.copy_preserves_internal_sharing"
 role = "primary"
 
 [[case]]
+id = "runtime_call_fresh_box_forward_rejected"
+path = "runtime_call_fresh_box_forward_rejected"
+tags = ["integration", "borrows", "functions", "diagnostics"]
+contract = "language.memory.stored_field_preserves_overlapping_allocation"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_identity_fields_rejected"
+path = "runtime_call_identity_fields_rejected"
+tags = ["integration", "borrows", "functions", "diagnostics"]
+contract = "language.memory.stored_field_preserves_overlapping_allocation"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_imported_nested_sibling_rejected"
+path = "runtime_call_imported_nested_sibling_rejected"
+tags = ["integration", "borrows", "functions", "dependencies", "diagnostics"]
+contract = "language.memory.stored_field_preserves_overlapping_allocation"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_disjoint_result_fields"
+path = "runtime_call_disjoint_result_fields"
+tags = ["integration", "borrows", "functions", "runtime"]
+contract = "language.memory.retained_field_replacement_and_disjoint_access"
+role = "boundary"
+
+[[case]]
 id = "aggregate_multi_bind_known_leaf_receivers_runtime"
 path = "aggregate_multi_bind_known_leaf_receivers_runtime"
 tags = ["integration", "numeric", "inference", "collections", "maps", "multi_bind", "runtime"]

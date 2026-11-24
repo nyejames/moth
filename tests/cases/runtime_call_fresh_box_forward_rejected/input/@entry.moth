@@ -1,0 +1,19 @@
+Box = |items {I32}|
+
+pair #|| -> {I32}, {I32}:
+    items {I32} = {1}
+    return items, items
+;
+
+retain |value {I32}| -> Box:
+    return Box(value)
+;
+
+probe || -> I32:
+    original ~{I32}, observer {I32} = pair()
+    forwarded = retain(observer)
+    ~original.push(2)
+    return forwarded.items.length()
+;
+
+~[:[probe()]]

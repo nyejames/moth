@@ -1,0 +1,14 @@
+Pair = |left {I32}, right {I32}|
+
+pair || -> Pair, {I32}:
+    shared = {1}
+    return Pair(shared, {2}), shared
+;
+
+probe || -> String:
+    first ~Pair, second {I32} = pair()
+    ~first.right.push(3)
+    return [:left=[first.left.length()] right=[first.right.length()] second=[second.length()]]
+;
+
+~[:[probe()]]
