@@ -20746,10 +20746,10 @@ contract = "language.functions.const_budget_failure_precedes_catch_transfer"
 role = "primary"
 
 [[case]]
-id = "const_function_value_block_receiver_memory_rejected"
-path = "const_function_value_block_receiver_memory_rejected"
-tags = ["integration", "functions", "const", "value-blocks", "budgets", "diagnostics"]
-contract = "language.functions.const_value_block_receiver_memory_rejected"
+id = "const_function_value_block_projected_assignment_bounded"
+path = "const_function_value_block_projected_assignment_bounded"
+tags = ["integration", "functions", "const", "value-blocks", "budgets"]
+contract = "language.functions.const_value_block_projected_assignment_stays_bounded"
 role = "primary"
 
 [[case]]
@@ -21027,6 +21027,13 @@ path = "const_function_projected_alias_composition_parity"
 tags = ["integration", "functions", "const", "runtime"]
 contract = "language.functions.const_projected_alias_composition_matches_runtime"
 role = "primary"
+[[case]]
+id = "const_function_stale_projected_alias_rejected"
+path = "const_function_stale_projected_alias_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_stale_projected_alias_rejected"
+role = "primary"
+
 
 [[case]]
 id = "const_function_parameter_cast_success"
@@ -22986,3 +22993,24 @@ path = "source_constraints_ordinary_call_evidence_accepted_release"
 tags = ["integration", "directives", "numeric", "constraints", "release"]
 contract = "language.directives.proved_operations_stay_accepted_beside_ordinary_calls"
 role = "boundary"
+
+[[case]]
+id = "const_function_immutable_alias_uncalled_rejected"
+path = "const_function_immutable_alias_uncalled_rejected"
+tags = ["integration", "functions", "const", "aliasing", "diagnostics"]
+contract = "language.functions.const_uncalled_body_rejects_immutable_mutable_alias"
+role = "primary"
+
+[[case]]
+id = "const_function_stored_immutable_parameter_rejected"
+path = "const_function_stored_immutable_parameter_rejected"
+tags = ["integration", "functions", "const", "aliasing", "diagnostics"]
+contract = "language.functions.const_stored_immutable_parameter_rejects_mutation"
+role = "primary"
+
+[[case]]
+id = "const_function_named_operand_order_rejected"
+path = "const_function_named_operand_order_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_named_operands_evaluate_in_source_order"
+role = "primary"

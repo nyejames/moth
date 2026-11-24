@@ -33,6 +33,7 @@ pub(super) enum ConstInstructionKind {
     BindValue {
         path: PathId,
         value: ConstValueId,
+        value_mode: ValueMode,
     },
     Assign {
         place: PlaceId,
@@ -104,7 +105,7 @@ pub(super) struct ConstInstruction {
 /// The receiving site a value block, or a multi-bind producer, delivers its slots to.
 #[derive(Clone, Debug)]
 pub(super) enum ValueReceiver {
-    Declaration(PathId),
+    Declaration { path: PathId, value_mode: ValueMode },
     Assignment(PlaceId),
     MultiBind(Box<[MultiBindTarget]>),
     Return,
@@ -179,9 +180,13 @@ impl BodyCompiler<'_> {
                 NodeKind::VariableDeclaration(declaration) => match &declaration.value {
                     DeclarationValue::Initializer(expression) => {
                         match self.value_block_body(*expression)? {
-                            Some(body) => {
-                                value_block(body, ValueReceiver::Declaration(declaration.id))
-                            }
+                            Some(body) => value_block(
+                                body,
+                                ValueReceiver::Declaration {
+                                    path: declaration.id,
+                                    value_mode: declaration.value_mode,
+                                },
+                            ),
                             None => ConstInstructionKind::Bind {
                                 path: declaration.id,
                                 expression: *expression,
@@ -192,6 +197,7 @@ impl BodyCompiler<'_> {
                     DeclarationValue::Default(value) => ConstInstructionKind::BindValue {
                         path: declaration.id,
                         value: *value,
+                        value_mode: declaration.value_mode,
                     },
                     DeclarationValue::Absent => continue,
                     DeclarationValue::StructDefinition(_) => {

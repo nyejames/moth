@@ -21,7 +21,7 @@ alias_write #|value I32| -> I32:
 ;
 
 swap_read #|value I32| -> I32:
-    left ~= value
+    left ~= copy value
     right ~= value + 10
     ~left, ~right = if value > 0:
         then right, left

@@ -32,8 +32,113 @@ runtime_copy || -> I32:
     return root.values.length() * 10 + copied.length()
 ;
 
+-- Both result slots retain the same child even though each outer result is fresh.
+Pair = |left Point, right Point|
+
+shared_results #|| -> Point, Point:
+    values ~= {1}
+    return Point(values), Point(values)
+;
+
+identity #|value Point| -> Point:
+    return value
+;
+
+const_storage #|| -> I32:
+    first ~= Point(values = {1})
+    first_alias ~= first.values
+    second_alias ~= first.values
+    ~first_alias.push(2)
+    ~second_alias.push(3)
+    aliased = first.values.length()
+
+    replacement ~= {7, 8}
+    ~first.values = replacement
+    ~first.values = first.values
+    assigned = first.values.length()
+
+    original ~= Point(values = {1})
+    separate ~= identity(original)
+    projected ~= original.values
+    ~separate = Point(values = {4})
+    ~projected.push(10)
+    rebound = original.values.length() * 10 + separate.values.length()
+
+    left, right = shared_results()
+    graph ~= Pair(left, right)
+    detached ~= copy graph
+    ~detached.left.values.push(5)
+    copied = detached.right.values.length() * 10 + graph.left.values.length()
+    return aliased * 1000000 + assigned * 10000 + rebound * 100 + copied
+;
+
+replace_parameter #|input {I32}| -> I32:
+    holder ~= Point(input)
+    ~holder.values = {8, 9}
+    return holder.values.length() * 10 + input.length()
+;
+
+projected_rebind #|| -> I32:
+    holder ~= Point(values = {1})
+    writer ~= holder.values
+    ~holder = Point(values = {7, 8})
+    ~writer.push(2)
+    return writer.length() * 10 + holder.values.length()
+;
+
+named_result #|first I32, second I32| -> I32:
+    return first * 10 + second
+;
+
+ordered_slots #|| -> I32:
+    return named_result(second = 2, first = 1)
+;
+
+const_cell_rebind #|| -> I32:
+    first ~= 1
+    second ~= 2
+    first_alias ~= first
+    ~first = second
+    ~first_alias += 3
+    return first * 100 + second * 10 + first_alias
+;
+
+logic_detaches #|| -> I32:
+    flags ~= {false, true}
+    flag = flags.get(0) catch then true
+    answer = flag and true
+    removed = ~flags.remove(0) catch then true
+    if answer or removed:
+        return 1
+    ;
+    return 2
+;
+
+iteration_cells #|| -> I32:
+    first ~= {0}
+    second ~= {0}
+    loop 0 to 2 |index|:
+        local ~= {1}
+        if index is 0:
+            ~first = local
+        else
+            ~second = local
+        ;
+    ;
+    ~first.push(2)
+    return first.length() * 10 + second.length()
+;
+
+e = const_storage()
+f = replace_parameter({1})
+
 a = const_alias()
 b = runtime_alias()
 c = const_copy()
 d = runtime_copy()
-~[: a=[a] b=[b] c=[c] d=[d]]
+g = projected_rebind()
+h = ordered_slots()
+i = const_cell_rebind()
+j = logic_detaches()
+k = iteration_cells()
+~[: a=[a] b=[b] c=[c] d=[d] e=[e] f=[f] g=[g] h=[h] i=[i] j=[j] k=[k]]

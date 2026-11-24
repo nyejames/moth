@@ -11,9 +11,10 @@ use super::budget::ExecutionBudget;
 use super::labels;
 use super::places::unwrap_fallible_expression;
 use super::state::{ConstExecutionServices, ConstInterpreter, ExecutionState, FrameBindings};
+use super::storage::{LiveValue, Permission};
 use super::values::{
-    commit_call_result, constant_index, expression_with_value, project_constant_value,
-    unsupported_error, validate_call_results,
+    attach_live_provenance, commit_call_result, constant_index, expression_with_value,
+    project_constant_value, unsupported_error, validate_call_results,
 };
 use super::{ProjectedConstant, ResolvedPlaceProjection};
 use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
@@ -33,6 +34,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use std::num::NonZeroU32;
 
 struct ConstCallSite {
     path: PathId,
@@ -73,7 +75,8 @@ impl RewriteMode {
 /// A rewrite either leaves an expression for its consumer or delivers a root call's checked slots.
 pub(super) enum RewriteOutput {
     Expression(ExprId),
-    CallResults(Vec<ConstValueId>),
+    Value(LiveValue),
+    CallResults(Vec<LiveValue>),
 }
 
 /// One pending rewriter action.
@@ -96,6 +99,11 @@ enum RewriteStep {
         right: ExprId,
         operation: LogicalOperator,
     },
+    DecExponent(bool),
+    RestoreSlots {
+        base: usize,
+        slots: Vec<usize>,
+    },
 }
 
 /// One iterative typed-expression rewrite.
@@ -111,6 +119,9 @@ struct RewriteWalk<'walk, 'services> {
     /// only after provenance inheritance has read those pairs, and the completion then pushes
     /// exactly one pair, so every parent observes only its own children.
     results: Vec<(ExprId, ExprId)>,
+    live_results: Vec<LiveValue>,
+    scratch_bytes: usize,
+    dec_depth: u32,
 }
 
 impl ConstInterpreter<'_> {
@@ -151,20 +162,73 @@ impl ConstInterpreter<'_> {
         bindings: &mut FrameBindings,
         direct_producer: Option<ExprId>,
     ) -> Result<RewriteOutput, ConstantFoldError> {
+        self.budget.span = self.builder.view(root)?.span();
         let mut walk = RewriteWalk {
             interpreter: self,
             bindings,
             mode,
             root,
             direct_producer,
-            steps: vec![RewriteStep::Enter { expression: root }],
+            steps: Vec::new(),
             results: Vec::new(),
+            live_results: Vec::new(),
+            scratch_bytes: 0,
+            dec_depth: 0,
         };
-        walk.run()
+        let result = walk
+            .push_step(RewriteStep::Enter { expression: root })
+            .and_then(|()| walk.run());
+        walk.interpreter
+            .budget
+            .release_memory_bytes(walk.scratch_bytes);
+        result
     }
 }
 
 impl RewriteWalk<'_, '_> {
+    fn push_step(&mut self, step: RewriteStep) -> Result<(), ConstantFoldError> {
+        if self.mode.folds_auxiliary() {
+            self.interpreter
+                .budget
+                .reserve_scratch(&mut self.steps, 1, &mut self.scratch_bytes)?;
+        }
+        self.steps.push(step);
+        Ok(())
+    }
+
+    fn push_live_result(&mut self, value: LiveValue) -> Result<(), ConstantFoldError> {
+        self.interpreter.budget.reserve_scratch(
+            &mut self.live_results,
+            1,
+            &mut self.scratch_bytes,
+        )?;
+        self.live_results.push(value);
+        Ok(())
+    }
+
+    fn annotate_live_value(
+        &mut self,
+        expression: ExprId,
+        value: ConstValueId,
+    ) -> Result<ConstValueId, ConstantFoldError> {
+        let view = self.interpreter.builder.view(expression)?;
+        let Some(facts) = view.occurrence_facts() else {
+            return Ok(value);
+        };
+        if matches!(view.operation(), ExpressionOperationView::Cast { .. }) {
+            // The shared cast fold carries only its evaluated source's dependencies.
+            return Ok(value);
+        }
+        self.interpreter.budget.span = view.span();
+        attach_live_provenance(
+            self.interpreter.constants,
+            self.interpreter.string_table,
+            self.interpreter.budget,
+            value,
+            &facts.provenance,
+        )
+    }
+
     fn run(&mut self) -> Result<RewriteOutput, ConstantFoldError> {
         while let Some(step) = self.steps.pop() {
             if self.interpreter.state.outcome.is_some() {
@@ -172,7 +236,13 @@ impl RewriteWalk<'_, '_> {
             }
             match step {
                 RewriteStep::Enter { expression } => self.enter(expression)?,
-                RewriteStep::Complete { expression, base } => self.complete(expression, base)?,
+                RewriteStep::Complete { expression, base } => {
+                    if self.mode.folds_auxiliary() {
+                        self.complete_live(expression, base)?;
+                    } else {
+                        self.complete(expression, base)?;
+                    }
+                }
                 RewriteStep::CompleteCall {
                     expression,
                     base,
@@ -188,7 +258,30 @@ impl RewriteWalk<'_, '_> {
                     right,
                     operation,
                 } => self.complete_logical(expression, base, right, operation)?,
+                RewriteStep::DecExponent(enter) => {
+                    if enter {
+                        self.dec_depth += 1;
+                    } else {
+                        self.dec_depth -= 1;
+                    }
+                }
+                RewriteStep::RestoreSlots { base, mut slots } => {
+                    for source in 0..slots.len() {
+                        while slots[source] != source {
+                            let destination = slots[source];
+                            self.live_results.swap(base + source, base + destination);
+                            slots.swap(source, destination);
+                        }
+                    }
+                    let bytes = slots.len() * std::mem::size_of::<usize>();
+                    drop(slots);
+                    self.scratch_bytes -= bytes;
+                    self.interpreter.budget.release_memory_bytes(bytes);
+                }
             }
+        }
+        if let Some(value) = self.live_results.pop() {
+            return Ok(RewriteOutput::Value(value));
         }
         Ok(RewriteOutput::Expression(
             self.results
@@ -221,17 +314,11 @@ impl RewriteWalk<'_, '_> {
                 (value, Vec::new())
             }
             ExpressionOperationView::Copy(place_view) => {
-                let root_value = self
-                    .bindings
-                    .get(&place_view.metadata().root)
-                    .copied()
-                    .or_else(|| {
-                        self.interpreter.scope.explicit_constant_value(
-                            &place_view.metadata().root,
-                            self.interpreter.path_fork,
-                            self.interpreter.constants,
-                        )
-                    });
+                let root_value = self.interpreter.scope.explicit_constant_value(
+                    &place_view.metadata().root,
+                    self.interpreter.path_fork,
+                    self.interpreter.constants,
+                );
                 let Some(root_value) = root_value else {
                     return Ok(None);
                 };
@@ -301,10 +388,158 @@ impl RewriteWalk<'_, '_> {
         })
     }
 
-    fn enter(&mut self, expression: ExprId) -> Result<(), ConstantFoldError> {
+    fn enter_live(&mut self, expression: ExprId) -> Result<bool, ConstantFoldError> {
         let view = self.interpreter.builder.view(expression)?;
-        self.interpreter.budget.span = view.span();
-        if let Some(projected) = self.root_substitution(&view)? {
+        let span = view.span();
+        let value = match view.operation() {
+            ExpressionOperationView::Reference(path) => {
+                if let Some(binding) = self.bindings.get(&path).copied() {
+                    Some(self.interpreter.read_place(binding.place(), span)?)
+                } else if let Some(projected) = self.root_substitution(&view)? {
+                    Some(
+                        self.interpreter
+                            .materialize_value(projected.value, Permission::ReadOnly)?,
+                    )
+                } else {
+                    return Ok(false);
+                }
+            }
+            ExpressionOperationView::Copy(place) => {
+                let place_id = place.id();
+                if let Some((root, projections)) = self
+                    .interpreter
+                    .evaluate_place_projections(place_id, self.bindings)?
+                {
+                    if let Some(binding) = self.bindings.get(&root).copied() {
+                        let target = self
+                            .interpreter
+                            .project_live_place(binding.place(), &projections, span)?
+                            .ok_or_else(|| {
+                                unsupported_error(
+                                    super::labels::PROJECTED_READ,
+                                    span,
+                                    self.interpreter.string_table,
+                                )
+                            })?;
+                        let value = self.interpreter.read_place(target, span)?;
+                        Some(self.interpreter.copy_live_value(value)?)
+                    } else {
+                        let view = self.interpreter.builder.view(expression)?;
+                        let Some(projected) = self.root_substitution(&view)? else {
+                            return Ok(false);
+                        };
+                        let value = self
+                            .interpreter
+                            .materialize_value(projected.value, Permission::ReadOnly)?;
+                        Some(self.interpreter.copy_live_value(value)?)
+                    }
+                } else {
+                    None
+                }
+            }
+            ExpressionOperationView::CollectionBuiltin { .. } => self
+                .interpreter
+                .evaluate_collection_read(expression, self.bindings)?,
+            ExpressionOperationView::Template(_) => self
+                .interpreter
+                .fold_template_with_bindings(expression, self.bindings)?,
+            ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
+                if expression != self.root
+                    && self
+                        .interpreter
+                        .fallible_handler_instructions(expression)?
+                        .is_some() =>
+            {
+                self.interpreter
+                    .evaluate_expression(expression, self.bindings)?
+            }
+            _ => return Ok(false),
+        };
+        if let Some(mut value) = value {
+            value.shape = self.annotate_live_value(expression, value.shape)?;
+            self.push_live_result(value)?;
+        } else if self.interpreter.state.outcome.is_none() {
+            return Err(unsupported_error(
+                super::labels::VALUE_EXPRESSION,
+                span,
+                self.interpreter.string_table,
+            ));
+        }
+        Ok(true)
+    }
+
+    fn complete_live(&mut self, expression: ExprId, base: usize) -> Result<(), ConstantFoldError> {
+        let view = self.interpreter.builder.view(expression)?;
+        let span = view.span();
+        self.interpreter.budget.span = span;
+        let children = &self.live_results[base..];
+        let value = match view.operation() {
+            ExpressionOperationView::FieldAccess { field, .. } => {
+                let [base] = children else {
+                    return Err(live_operand_mismatch());
+                };
+                let place = self
+                    .interpreter
+                    .project_live_value(*base, ResolvedPlaceProjection::Field(field), span)?
+                    .ok_or_else(|| {
+                        unsupported_error(
+                            super::labels::PROJECTED_READ,
+                            span,
+                            self.interpreter.string_table,
+                        )
+                    })?;
+                let mut value = self.interpreter.read_place(place, span)?;
+                if let Some(metadata) = self.interpreter.constants.metadata(base.shape)
+                    && !metadata.synthetic_interface_provenance.is_empty()
+                {
+                    let provenance = metadata.synthetic_interface_provenance.clone();
+                    value.shape = attach_live_provenance(
+                        self.interpreter.constants,
+                        self.interpreter.string_table,
+                        self.interpreter.budget,
+                        value.shape,
+                        &provenance,
+                    )?;
+                }
+                Some(value)
+            }
+            ExpressionOperationView::HandleFallible { .. }
+            | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_)) => {
+                let [value] = children else {
+                    return Err(live_operand_mismatch());
+                };
+                Some(*value)
+            }
+            _ => self.interpreter.fold_live_expression(
+                expression,
+                children,
+                self.dec_depth,
+                self.bindings,
+            )?,
+        };
+        self.live_results.truncate(base);
+        if let Some(mut value) = value {
+            value.shape = self.annotate_live_value(expression, value.shape)?;
+            self.push_live_result(value)?;
+        } else if self.interpreter.state.outcome.is_none() {
+            return Err(unsupported_error(
+                super::labels::VALUE_EXPRESSION,
+                span,
+                self.interpreter.string_table,
+            ));
+        }
+        Ok(())
+    }
+
+    fn enter(&mut self, expression: ExprId) -> Result<(), ConstantFoldError> {
+        self.interpreter.budget.span = self.interpreter.builder.view(expression)?.span();
+        if self.mode.folds_auxiliary() && self.enter_live(expression)? {
+            return Ok(());
+        }
+        let view = self.interpreter.builder.view(expression)?;
+        if !self.mode.folds_auxiliary()
+            && let Some(projected) = self.root_substitution(&view)?
+        {
             let replacement = expression_with_value(
                 self.interpreter.builder,
                 projected.value,
@@ -316,38 +551,16 @@ impl RewriteWalk<'_, '_> {
             return Ok(());
         }
         let const_call = Self::const_call_site(&view);
-        if expression != self.root
-            && self.mode.folds_auxiliary()
-            && let ExpressionOperationView::ValueBlock(ValueBlock::Catch(_)) = view.operation()
-            && let Some(result_type) = view.success_shape().single()
-            && self
-                .interpreter
-                .fallible_handler_instructions(expression)?
-                .is_some()
-        {
-            let (span, value_mode) = (view.span(), view.value_mode());
-            if let Some(value) = self
-                .interpreter
-                .evaluate_expression(expression, self.bindings)?
-            {
-                let replacement = expression_with_value(
-                    self.interpreter.builder,
-                    value,
-                    result_type,
-                    span,
-                    value_mode,
-                )?;
-                let replacement = inherit_replaced_provenance(
-                    self.interpreter.builder,
-                    expression,
-                    replacement,
-                    &[],
-                )?;
-                self.results.push((expression, replacement));
-            }
-            return Ok(());
+        let base = if self.mode.folds_auxiliary() {
+            self.live_results.len()
+        } else {
+            self.results.len()
+        };
+        if self.mode.folds_auxiliary() {
+            self.interpreter
+                .budget
+                .reserve_scratch(&mut self.steps, 2, &mut self.scratch_bytes)?;
         }
-        let base = self.results.len();
         // The right operand of a logical operator must not be rewritten until the left operand
         // has failed to short-circuit, so a required call on the inactive side never executes.
         if let ExpressionOperationView::LogicalBinary {
@@ -375,8 +588,56 @@ impl RewriteWalk<'_, '_> {
             }),
             None => self.steps.push(RewriteStep::Complete { expression, base }),
         }
+        if self.mode.folds_auxiliary() {
+            let ordered = match view.operation() {
+                ExpressionOperationView::Call(call) => schedule_authored_operands(
+                    &mut self.steps,
+                    self.interpreter.budget,
+                    &mut self.scratch_bytes,
+                    base,
+                    || {
+                        call.arguments().iter().map(|argument| {
+                            (argument.value().id(), argument.metadata().authored_ordinal)
+                        })
+                    },
+                )?,
+                ExpressionOperationView::Struct { fields }
+                | ExpressionOperationView::Choice { fields, .. } => schedule_authored_operands(
+                    &mut self.steps,
+                    self.interpreter.budget,
+                    &mut self.scratch_bytes,
+                    base,
+                    || {
+                        fields
+                            .iter()
+                            .map(|field| (field.value().id(), field.authored_ordinal()))
+                    },
+                )?,
+                _ => false,
+            };
+            if ordered {
+                return Ok(());
+            }
+        }
         // Children complete from the LIFO stack, so push them in reverse source order to
         // keep the collected replacement rows aligned with the parent's child order.
+        if self.mode.folds_auxiliary()
+            && let ExpressionOperationView::NumericBinary { left, right, facts } = view.operation()
+            && facts.is_dec_power()
+        {
+            self.interpreter
+                .budget
+                .reserve_scratch(&mut self.steps, 4, &mut self.scratch_bytes)?;
+            self.steps.push(RewriteStep::DecExponent(false));
+            self.steps.push(RewriteStep::Enter {
+                expression: right.id(),
+            });
+            self.steps.push(RewriteStep::DecExponent(true));
+            self.steps.push(RewriteStep::Enter {
+                expression: left.id(),
+            });
+            return Ok(());
+        }
         let child_start = self.steps.len();
         if self.mode.folds_auxiliary()
             && let ExpressionOperationView::ValueBlock(ValueBlock::Catch(block)) = view.operation()
@@ -387,11 +648,22 @@ impl RewriteWalk<'_, '_> {
                 expression: block.handled_value,
             });
         } else {
+            let mut reservation = Ok(());
+            let budget = &mut *self.interpreter.budget;
+            let bounded = self.mode.folds_auxiliary();
             view.visit_children(|child| {
+                if bounded && reservation.is_ok() {
+                    reservation =
+                        budget.reserve_scratch(&mut self.steps, 1, &mut self.scratch_bytes);
+                }
+                if reservation.is_err() {
+                    return;
+                }
                 self.steps.push(RewriteStep::Enter {
                     expression: child.id(),
                 });
             });
+            reservation?;
         }
         self.steps[child_start..].reverse();
         Ok(())
@@ -436,13 +708,6 @@ impl RewriteWalk<'_, '_> {
         {
             expression
         } else {
-            if self.mode.folds_auxiliary() {
-                // The rebuilt row and its copied child slots remain in the source arena.
-                self.interpreter.budget.retain_values(
-                    replacements.len().saturating_add(1),
-                    self.interpreter.builder.view(expression)?.span(),
-                )?;
-            }
             let replacement = self.interpreter.builder.own_slice(replacements);
             rewrite_expression_children(
                 self.interpreter.builder,
@@ -451,14 +716,18 @@ impl RewriteWalk<'_, '_> {
             )?
             .id()
         };
-        let rewritten = self.interpreter.fold_completed_value(
-            rewritten,
-            &mut *self.bindings,
-            self.mode.folds_auxiliary(),
-        )?;
-        if self.interpreter.state.outcome.is_some() {
-            return Ok(());
-        }
+        let rewritten =
+            if let Some(projected) = self.interpreter.constant_field_projection(rewritten)? {
+                expression_with_value(
+                    self.interpreter.builder,
+                    projected.value,
+                    projected.type_id,
+                    projected.span,
+                    projected.value_mode,
+                )?
+            } else {
+                rewritten
+            };
         let rewritten = inherit_replaced_provenance(
             self.interpreter.builder,
             expression,
@@ -475,37 +744,64 @@ impl RewriteWalk<'_, '_> {
         expression: ExprId,
         base: usize,
         call: &ConstCallSite,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
-        let arguments = &self.results[base..];
+    ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
+        self.interpreter.budget.span = call.span;
         let Some(executable) = self.interpreter.executables.get(&call.path) else {
             return Err(required_call_error(call, self.interpreter.string_table));
         };
-        let Some(argument_values) =
-            Self::fold_call_arguments(self.interpreter, self.bindings, call, arguments)?
-        else {
-            return Ok(None);
-        };
-        if argument_values.len() != executable.parameters.len() {
-            return Err(required_call_error(call, self.interpreter.string_table));
-        }
         let mut provenance = SyntheticInterfaceProvenance::default();
-        for ((original, replacement), &value) in arguments.iter().zip(&argument_values) {
-            let builder = &*self.interpreter.builder;
-            for expression in [original, replacement] {
-                if let Some(facts) = builder.view(*expression)?.occurrence_facts() {
-                    provenance.merge(&facts.provenance);
-                }
+        let mut parameter_values = FrameBindings::default();
+        if self.mode.folds_auxiliary() {
+            let arguments = &self.live_results[base..];
+            if arguments.len() != executable.parameters.len() {
+                return Err(required_call_error(call, self.interpreter.string_table));
             }
-            if let Some(metadata) = self.interpreter.constants.metadata(value) {
-                provenance.merge(&metadata.synthetic_interface_provenance);
+            for (&value, &(path, _)) in arguments.iter().zip(&executable.parameters) {
+                self.interpreter.validate_live_value(value, call.span)?;
+                if let Some(metadata) = self.interpreter.constants.metadata(value.shape) {
+                    provenance.merge(&metadata.synthetic_interface_provenance);
+                }
+                self.interpreter.bind_slot(
+                    &mut parameter_values,
+                    path,
+                    value,
+                    Permission::ReadOnly,
+                )?;
+            }
+        } else {
+            let arguments = &self.results[base..];
+            let Some(values) =
+                Self::fold_call_arguments(self.interpreter, self.bindings, call, arguments)?
+            else {
+                return Ok(None);
+            };
+            if values.len() != executable.parameters.len() {
+                return Err(required_call_error(call, self.interpreter.string_table));
+            }
+            for (((original, replacement), value), &(path, _)) in
+                arguments.iter().zip(values).zip(&executable.parameters)
+            {
+                for argument in [original, replacement] {
+                    if let Some(facts) =
+                        self.interpreter.builder.view(*argument)?.occurrence_facts()
+                    {
+                        provenance.merge(&facts.provenance);
+                    }
+                }
+                if let Some(metadata) = self.interpreter.constants.metadata(value) {
+                    provenance.merge(&metadata.synthetic_interface_provenance);
+                }
+                let value = self
+                    .interpreter
+                    .materialize_value(value, Permission::ReadOnly)?;
+                self.interpreter.bind_slot(
+                    &mut parameter_values,
+                    path,
+                    value,
+                    Permission::ReadOnly,
+                )?;
             }
         }
-        let parameter_values = executable
-            .parameters
-            .iter()
-            .map(|(path, _)| *path)
-            .zip(argument_values)
-            .collect::<FrameBindings>();
         self.interpreter.enter_call(call.span)?;
         let returns = self
             .interpreter
@@ -513,6 +809,7 @@ impl RewriteWalk<'_, '_> {
             .map_err(|error| self.interpreter.attach_call_chain(error));
         self.interpreter.budget.leave_call();
         let mut returns = returns?;
+        self.interpreter.budget.span = call.span;
         let view = self.interpreter.builder.view(expression)?;
         validate_call_results(
             self.interpreter.constants,
@@ -524,7 +821,7 @@ impl RewriteWalk<'_, '_> {
             provenance.merge(&facts.provenance);
         }
         for &slot in &returns {
-            if let Some(metadata) = self.interpreter.constants.metadata(slot) {
+            if let Some(metadata) = self.interpreter.constants.metadata(slot.shape) {
                 provenance.merge(&metadata.synthetic_interface_provenance);
             }
         }
@@ -545,18 +842,35 @@ impl RewriteWalk<'_, '_> {
                     _ => unreachable!("direct producer must be the root or its wrapped call"),
                 };
             }
+        }
+        if self.mode.folds_auxiliary() {
             for slot in &mut returns {
-                *slot = self
-                    .interpreter
-                    .constants
-                    .with_synthetic_interface_provenance(*slot, &provenance)?;
+                slot.shape = attach_live_provenance(
+                    self.interpreter.constants,
+                    self.interpreter.string_table,
+                    self.interpreter.budget,
+                    slot.shape,
+                    &provenance,
+                )?;
             }
-            return Ok(Some(returns));
+            if self.direct_producer == Some(expression) {
+                return Ok(Some(returns));
+            }
+            let [value] = returns[..] else {
+                return Err(live_operand_mismatch());
+            };
+            self.live_results.truncate(base);
+            self.push_live_result(value)?;
+            return Ok(None);
+        }
+        let mut frozen = Vec::with_capacity(returns.len());
+        for value in returns {
+            frozen.push(self.interpreter.freeze_live_value(value)?);
         }
         let replacement = commit_call_result(
             self.interpreter.builder,
             expression,
-            &returns,
+            &frozen,
             self.interpreter.scope.scope,
             provenance,
         )?;
@@ -572,20 +886,20 @@ impl RewriteWalk<'_, '_> {
         right: ExprId,
         operation: LogicalOperator,
     ) -> Result<(), ConstantFoldError> {
-        let left = self.results[base].1;
-        let left_view = self.interpreter.builder.view(left)?;
-        let left_constant = match left_view.operation() {
-            ExpressionOperationView::Constant(value) => Some(value),
-            ExpressionOperationView::Reference(path) => self.bindings.get(&path).copied(),
-            ExpressionOperationView::Call(call)
-                if call.metadata().evaluation == CallableEvaluation::Const =>
-            {
-                self.interpreter.fold_to_constant(left, self.bindings)?
+        let left_constant = if self.mode.folds_auxiliary() {
+            Some(self.live_results[base].shape)
+        } else {
+            let left = self.results[base].1;
+            let left_view = self.interpreter.builder.view(left)?;
+            match left_view.operation() {
+                ExpressionOperationView::Constant(value) => Some(value),
+                ExpressionOperationView::Call(call)
+                    if call.metadata().evaluation == CallableEvaluation::Const =>
+                {
+                    self.interpreter.fold_to_constant(left, self.bindings)?
+                }
+                _ => None,
             }
-            _ if !self.interpreter.budget.call_stack.is_empty() => {
-                self.interpreter.fold_to_constant(left, self.bindings)?
-            }
-            _ => None,
         };
         let left_bool =
             left_constant.and_then(|value| match self.interpreter.constants.payload(value) {
@@ -597,6 +911,12 @@ impl RewriteWalk<'_, '_> {
             (LogicalOperator::And, Some(false)) | (LogicalOperator::Or, Some(true))
         );
         if short_circuits {
+            if self.mode.folds_auxiliary() {
+                let value = self.annotate_live_value(expression, self.live_results[base].shape)?;
+                self.live_results[base] = LiveValue::leaf(value, Permission::Writable);
+                return Ok(());
+            }
+            let left = self.results[base].1;
             let view = self.interpreter.builder.view(expression)?;
             let result_type = view.success().single().ok_or_else(|| {
                 InfrastructureFailure::internal(
@@ -627,80 +947,53 @@ impl RewriteWalk<'_, '_> {
             self.results.push((expression, replacement));
             return Ok(());
         }
-        self.steps.push(RewriteStep::Complete { expression, base });
-        self.steps.push(RewriteStep::Enter { expression: right });
-        Ok(())
+        self.push_step(RewriteStep::Complete { expression, base })?;
+        self.push_step(RewriteStep::Enter { expression: right })
     }
 }
 
-impl ConstInterpreter<'_> {
-    /// Apply the post-completion folders to one completed expression.
-    ///
-    /// Field projection after a folded const call applies in every mode. Collection reads,
-    /// template completion and fallible unwrapping are the auxiliary folds an executing const body
-    /// needs; a required program expression keeps those operations at runtime.
-    fn fold_completed_value(
-        &mut self,
-        mut rewritten: ExprId,
-        bindings: &mut FrameBindings,
-        auxiliary_folding: bool,
-    ) -> Result<ExprId, ConstantFoldError> {
-        if let Some(projected) = self.constant_field_projection(rewritten, bindings)? {
-            rewritten = expression_with_value(
-                self.builder,
-                projected.value,
-                projected.type_id,
-                projected.span,
-                projected.value_mode,
-            )?;
-        } else if auxiliary_folding
-            && let Some(value) = self.evaluate_collection_read(rewritten, bindings)?
-        {
-            let view = self.builder.view(rewritten)?;
-            let result_type = view.success().single().ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::ConstantEvaluation,
-                    "collection read folded before its single success slot was available",
-                )
-            })?;
-            let span = view.span();
-            let value_mode = view.value_mode();
-            rewritten = expression_with_value(self.builder, value, result_type, span, value_mode)?;
-        } else if auxiliary_folding
-            && let Some(projected) = self.fold_template_with_bindings(rewritten, bindings)?
-        {
-            rewritten = expression_with_value(
-                self.builder,
-                projected.value,
-                projected.type_id,
-                projected.span,
-                projected.value_mode,
-            )?;
-        }
-        if auxiliary_folding && self.state.outcome.is_none() {
-            let inner = unwrap_fallible_expression(rewritten, self.builder)?;
-            let view = self.builder.view(rewritten)?;
-            // Fold a protected conversion as its operand completes, before visiting later
-            // operands. The shared fold returns its builtin failure to the active handler.
-            let foldable = inner != rewritten
-                || (self.state.active_handler.body.is_some()
-                    && matches!(view.operation(), ExpressionOperationView::Cast { .. }));
-            if foldable
-                && let Some(result_type) = view.success_shape().single()
-                && let Some(value) = self.fold_to_constant(inner, bindings)?
-            {
-                let view = self.builder.view(rewritten)?;
-                rewritten = expression_with_value(
-                    self.builder,
-                    value,
-                    result_type,
-                    view.span(),
-                    view.value_mode(),
-                )?;
-            }
-        }
-        Ok(rewritten)
+/// Evaluate named operands in authored order, then deliver them in resolved
+/// slot order. The common in-order path needs no additional scratch.
+fn schedule_authored_operands<I: ExactSizeIterator<Item = (ExprId, Option<NonZeroU32>)>>(
+    steps: &mut Vec<RewriteStep>,
+    budget: &mut ExecutionBudget,
+    scratch_bytes: &mut usize,
+    base: usize,
+    operands: impl Fn() -> I,
+) -> Result<bool, ConstantFoldError> {
+    let ordinal = |value: Option<NonZeroU32>| value.map_or(u32::MAX, NonZeroU32::get);
+    if operands().map(|(_, order)| ordinal(order)).is_sorted() {
+        return Ok(false);
     }
+    let count = operands().len();
+    budget.reserve_scratch(steps, count + 1, scratch_bytes)?;
+    let sort_bytes = count * std::mem::size_of::<(u32, usize, ExprId)>();
+    let permutation_bytes = count * std::mem::size_of::<usize>();
+    budget.charge_scratch(scratch_bytes, sort_bytes + permutation_bytes)?;
+    let mut scheduled = operands()
+        .enumerate()
+        .map(|(slot, (expression, order))| (ordinal(order), slot, expression))
+        .collect::<Vec<_>>();
+    scheduled.sort_unstable_by_key(|&(order, slot, _)| (order, slot));
+    let slots = scheduled.iter().map(|&(_, slot, _)| slot).collect();
+    steps.push(RewriteStep::RestoreSlots { base, slots });
+    steps.extend(
+        scheduled
+            .into_iter()
+            .rev()
+            .map(|(_, _, expression)| RewriteStep::Enter { expression }),
+    );
+    *scratch_bytes -= sort_bytes;
+    budget.release_memory_bytes(sort_bytes);
+    Ok(true)
+}
+
+fn live_operand_mismatch() -> ConstantFoldError {
+    InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "prepared const expression lost its live operand slots",
+    )
+    .into()
 }
 
 /// Keep synthetic-interface provenance when an expression replaces its children.

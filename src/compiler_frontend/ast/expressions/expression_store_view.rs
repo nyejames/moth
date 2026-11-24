@@ -35,6 +35,9 @@ impl<'a> ConstructorFieldView<'a> {
     pub(crate) fn name(self) -> PathId {
         self.record.name
     }
+    pub(crate) fn authored_ordinal(self) -> Option<std::num::NonZeroU32> {
+        self.record.authored_ordinal
+    }
 }
 
 #[derive(Clone, Copy)]

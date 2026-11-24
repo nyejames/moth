@@ -1620,6 +1620,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     const_body_rejection_diagnostic(&rejection, declaration_span, string_table),
                 ))
             }
+            Err(ConstBodyPreparationError::Diagnostic(diagnostic)) => {
+                Err(FunctionBodyFailure::Diagnosed(diagnostic))
+            }
             Err(ConstBodyPreparationError::Infrastructure(error)) => Err(
                 FunctionBodyFailure::Fatal(PreparedFailure::Infrastructure(error)),
             ),

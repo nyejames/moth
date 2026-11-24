@@ -721,11 +721,13 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
                 ConstructorField {
                     name: title_path,
                     slot: 0,
+                    authored_ordinal: None,
                     value: title_expr,
                 },
                 ConstructorField {
                     name: year_path,
                     slot: 1,
+                    authored_ordinal: None,
                     value: year_expr,
                 },
             ],
@@ -839,6 +841,7 @@ fn constant_record_owns_recursive_const_record_fields() {
             vec![ConstructorField {
                 name: depth_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: depth_expr,
             }],
             inner_type_id,
@@ -853,6 +856,7 @@ fn constant_record_owns_recursive_const_record_fields() {
             vec![ConstructorField {
                 name: inner_field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: inner_instance,
             }],
             outer_type_id,
@@ -1551,6 +1555,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
             vec![ConstructorField {
                 name: enabled_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: enabled_expr,
             }],
             marker,
@@ -1582,11 +1587,13 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
                 ConstructorField {
                     name: year_path,
                     slot: 0,
+                    authored_ordinal: None,
                     value: year_expr,
                 },
                 ConstructorField {
                     name: flags_path,
                     slot: 1,
+                    authored_ordinal: None,
                     value: nested_record,
                 },
             ],

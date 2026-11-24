@@ -130,6 +130,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
             vec![ConstructorField {
                 name: field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: expression_builder.own(field_value),
             }],
             struct_type_id,

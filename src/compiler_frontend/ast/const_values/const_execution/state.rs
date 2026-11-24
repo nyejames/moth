@@ -1,7 +1,7 @@
 //! Live interpreter state and the borrowed service context for const execution.
 //!
-//! WHAT: owns per-attempt interpreter state (frame aliases, prepared catch bodies, active handler,
-//!       pending frame outcome and nesting depths) and bundles
+//! WHAT: owns attempt-local storage, prepared catch bodies, active handlers,
+//!       pending frame outcomes and nesting depths, and bundles
 //!       the compiler services every operation reads.
 //! WHY: one context replaces long positional parameter lists, while resource limits stay in
 //!       `ExecutionBudget` and frame bindings stay explicit per function frame. Separating state
@@ -11,7 +11,8 @@
 
 use super::budget::ExecutionBudget;
 use super::instructions::ConstInstruction;
-use super::{AliasTarget, ConstFunctionExecutable, ConstValueId, ExprId, FxHashMap, PathId, Rc};
+use super::storage::{LiveBinding, LiveStorage, LiveValue};
+use super::{ConstFunctionExecutable, ExprId, FxHashMap, PathId, Rc};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
@@ -21,9 +22,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Interpreted names bound in one function frame or handler body.
 ///
-/// Bindings belong to a frame rather than to the whole interpreter: a call, a handler body and a
-/// nested template site each supply their own name-to-value map.
-pub(super) type FrameBindings = FxHashMap<PathId, ConstValueId>;
+/// Static paths select names within one frame. The selected binding designates
+/// actual storage shared by every frame of the attempt.
+pub(super) type FrameBindings = FxHashMap<PathId, LiveBinding>;
 
 /// Borrowed compiler services required by one const-execution attempt.
 ///
@@ -85,8 +86,7 @@ pub(super) struct ConstInterpreter<'a> {
 /// Interpreter control, recovery and frame state for one const-execution attempt.
 #[derive(Default)]
 pub(super) struct ExecutionState {
-    /// Mutable aliases in the active function frame; values are canonical roots plus projections.
-    pub(super) aliases: FxHashMap<PathId, AliasTarget>,
+    pub(super) storage: LiveStorage,
     /// Prepared catch bodies for the active function frame.
     pub(super) handler_bodies: Option<Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>>,
     /// Catch handler currently available to collection failures.
@@ -114,8 +114,8 @@ pub(super) struct ExecutionState {
 }
 
 pub(super) enum FrameOutcome {
-    Recovered(Vec<ConstValueId>),
-    Return(Vec<ConstValueId>),
+    Recovered(Vec<LiveValue>),
+    Return(Vec<LiveValue>),
     Break,
     Continue,
 }

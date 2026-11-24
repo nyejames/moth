@@ -1040,6 +1040,19 @@ fn materialise_const_executable(
                 ),
             ))
         }
+        // Publication validates the authored declaration first, so a semantic rejection during
+        // donor replay indicates an inconsistent published body, not a consumer-source diagnostic.
+        Err(ConstBodyPreparationError::Diagnostic(diagnostic)) => {
+            Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Published const function {:?} has an invalid body ({}) at {:?}",
+                    row.function_path,
+                    diagnostic.code(),
+                    diagnostic.primary_span()
+                ),
+            ))
+        }
         Err(ConstBodyPreparationError::Infrastructure(error)) => Err(error.primary),
     }
 }

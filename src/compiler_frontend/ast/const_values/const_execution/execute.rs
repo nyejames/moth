@@ -8,25 +8,22 @@
 //! MUST NOT: decide whether a body is eligible or rewrite an unreachable AST.
 
 use super::{
-    AliasTarget, ConstFunctionExecutable, ConstValueId, ProjectedConstant, ResolvedPlaceProjection,
+    ConstFunctionExecutable, ResolvedPlaceProjection,
     budget::{
         CallDepthRefusal, ExecutionBudget, MAX_CALL_DEPTH, MAX_EXPRESSION_DEPTH, MAX_HANDLER_DEPTH,
         MAX_LOOP_ITERATIONS, charge_new_value_text,
     },
     instructions::{ConstInstruction, ConstInstructionKind, ConstMatchArm, ValueReceiver},
     labels,
-    places::{
-        direct_alias_target, expand_alias_target, fallible_handler_error_binding,
-        unwrap_fallible_expression,
-    },
-    rewrite::{RewriteMode, RewriteOutput},
+    places::{fallible_handler_error_binding, unwrap_fallible_expression},
+    rewrite::RewriteOutput,
     state::{
         ActiveHandler, ConstExecutionServices, ConstInterpreter, ExecutionState, FrameBindings,
         FrameOutcome,
     },
+    storage::{LiveBinding, LiveValue, Permission},
     values::{
-        ProjectionWrite, assign_constant_projections, constant_result_block_slots,
-        expression_with_value, hard_limit_error, project_constant_value, template_error,
+        constant_result_block_slots, expression_with_value, hard_limit_error, template_error,
         unsupported_error,
     },
 };
@@ -95,8 +92,10 @@ enum ExecFrame {
 
 /// One active collection-loop frame.
 struct CollectionFrame {
-    iterable: ConstValueId,
+    iterable: LiveValue,
     next: usize,
+    end: usize,
+    span: Option<SourceSpan>,
     loop_bindings: Box<LoopBindings>,
     body: Rc<[ConstInstruction]>,
 }
@@ -121,8 +120,7 @@ impl ConstInterpreter<'_> {
         body: Option<PathId>,
         executable: &ConstFunctionExecutable,
         mut parameter_values: FrameBindings,
-    ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
-        let saved_aliases = std::mem::take(&mut self.state.aliases);
+    ) -> Result<Vec<LiveValue>, ConstantFoldError> {
         let saved_handler_bodies = self.state.handler_bodies.take();
         let saved_body = std::mem::replace(&mut self.state.current_body, body);
         // The budget span names the source that spends the allowance. A callee leaves its last
@@ -140,7 +138,6 @@ impl ConstInterpreter<'_> {
             FrameMode::FunctionBody,
             &mut parameter_values,
         );
-        self.state.aliases = saved_aliases;
         self.state.handler_bodies = saved_handler_bodies;
         self.state.current_body = saved_body;
         self.budget.span = saved_span;
@@ -282,8 +279,13 @@ impl ConstInterpreter<'_> {
                 expression,
                 value_mode,
             } => self.execute_bind(*path, *expression, *value_mode, bindings)?,
-            ConstInstructionKind::BindValue { path, value } => {
-                bindings.insert(*path, *value);
+            ConstInstructionKind::BindValue {
+                path,
+                value,
+                value_mode,
+            } => {
+                let value = self.materialize_value(*value, Permission::from(*value_mode))?;
+                self.bind_slot(bindings, *path, value, Permission::from(*value_mode))?;
             }
             ConstInstructionKind::Assign { place, expression } => {
                 self.execute_assign(*place, *expression, bindings)?;
@@ -374,43 +376,73 @@ impl ConstInterpreter<'_> {
         value_mode: ValueMode,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let alias_target = if value_mode.is_mutable() {
-            direct_alias_target(expression, self.builder, bindings)?
-        } else {
-            None
-        };
-        let Some(value) = self.evaluate_expression(expression, bindings)? else {
-            return Ok(());
-        };
-        if let Some((root, projections)) = alias_target {
-            let (root, projections) = expand_alias_target(root, projections, &self.state.aliases);
-            self.state
-                .aliases
-                .insert(path, AliasTarget { root, projections });
-        } else {
-            self.state.aliases.remove(&path);
+        let permission = Permission::from(value_mode);
+        let span = self.builder.view(expression)?.span();
+        if permission == Permission::Writable
+            && let Some((root, place)) = self.resolve_live_place(expression, bindings)?
+        {
+            if place.permission != Permission::Writable {
+                return Err(self.mutable_access_error(root, span));
+            }
+            if !self.state.storage.place_is_live(place, self.budget)? {
+                return Err(unsupported_error(
+                    labels::PROJECTED_READ,
+                    span,
+                    self.string_table,
+                ));
+            }
+            bindings.insert(path, LiveBinding::Alias(place));
+        } else if let Some(value) = self.evaluate_expression(expression, bindings)? {
+            self.bind_slot(bindings, path, value, permission)?;
         }
-        bindings.insert(path, value);
         Ok(())
     }
 
-    /// Assign one evaluated value through a place, refreshing the bound root and its aliases.
+    /// Evaluate a place operand once. An independent slot can receive a new
+    /// place relationship, while an existing alias always writes through.
     fn execute_assign(
         &mut self,
         place: PlaceId,
         expression: ExprId,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let Some(value) = self.evaluate_expression(expression, bindings)? else {
+        let source = self.resolve_live_place(expression, bindings)?;
+        let Some(value) = (if let Some((_, source)) = source {
+            Some(self.read_place(source, self.builder.view(expression)?.span())?)
+        } else {
+            self.evaluate_expression(expression, bindings)?
+        }) else {
             return Ok(());
         };
-        self.assign_value(place, value, bindings)
+        let Some((root, projections)) = self.evaluate_place_projections(place, bindings)? else {
+            return Ok(());
+        };
+        let span = self.builder.place(place)?.metadata().span;
+        if projections.is_empty()
+            && let Some(LiveBinding::Slot(target)) = bindings.get(&root).copied()
+            && let Some((source_root, source)) = source
+        {
+            if target.permission != Permission::Writable
+                || source.permission != Permission::Writable
+            {
+                return Err(self.mutable_access_error(source_root, span));
+            }
+            if self
+                .state
+                .storage
+                .rebind_to_place(target, source, self.budget)?
+            {
+                bindings.insert(root, LiveBinding::Alias(target));
+            }
+            return Ok(());
+        }
+        self.write_through(root, &projections, value, span, bindings)
     }
 
     fn assign_value(
         &mut self,
         place: PlaceId,
-        value: ConstValueId,
+        value: LiveValue,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
         let Some((root, projections)) = self.evaluate_place_projections(place, bindings)? else {
@@ -421,38 +453,46 @@ impl ConstInterpreter<'_> {
             .place(place)
             .ok()
             .and_then(|view| view.metadata().span);
-        self.write_through(root, projections, value, span, bindings)
+        self.write_through(root, &projections, value, span, bindings)
     }
 
-    /// Write through an existing root and its projections, following mutable aliases to their
-    /// referent and refreshing every alias of the written root.
+    /// Replace a cell or an interior edge using its own permission.
     fn write_through(
         &mut self,
         root: PathId,
-        projections: Vec<ResolvedPlaceProjection>,
-        value: ConstValueId,
+        projections: &[ResolvedPlaceProjection],
+        value: LiveValue,
         span: Option<SourceSpan>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let (root, projections) = expand_alias_target(root, projections, &self.state.aliases);
-        if projections.is_empty() {
-            // A whole-root write needs no projected constant. A declaration lowering can also
-            // assign its result to a fresh temporary place before the body has bound that place.
-            return self.write_binding_value(root, value, bindings);
-        }
-        let root_value = bindings
-            .get(&root)
-            .copied()
-            .ok_or_else(|| unsupported_error(labels::ASSIGNMENT_TARGET, span, self.string_table))?;
-        let mut projected_write = ProjectionWrite {
-            constants: &mut *self.constants,
-            path_fork: self.path_fork,
-            budget: &mut *self.budget,
-            string_table: &mut *self.string_table,
+        let Some(binding) = bindings.get(&root).copied() else {
+            if projections.is_empty() {
+                return self.bind_slot(bindings, root, value, Permission::Writable);
+            }
+            return Err(unsupported_error(
+                labels::ASSIGNMENT_TARGET,
+                span,
+                self.string_table,
+            ));
         };
-        let updated =
-            assign_constant_projections(root_value, &projections, value, &mut projected_write)?;
-        self.write_binding_value(root, updated, bindings)
+        let Some(place) = self.project_live_place(binding.place(), projections, span)? else {
+            return Err(unsupported_error(
+                labels::ASSIGNMENT_TARGET,
+                span,
+                self.string_table,
+            ));
+        };
+        if place.permission != Permission::Writable {
+            return Err(self.mutable_access_error(root, span));
+        }
+        if !self.state.storage.replace(place, value, self.budget)? {
+            return Err(unsupported_error(
+                labels::ASSIGNMENT_TARGET,
+                span,
+                self.string_table,
+            ));
+        }
+        Ok(())
     }
 
     /// Complete the innermost value block. Every slot is read before the receiver writes any
@@ -487,17 +527,15 @@ impl ConstInterpreter<'_> {
     fn receive_values(
         &mut self,
         receiver: &ValueReceiver,
-        slots: Vec<ConstValueId>,
+        slots: Vec<LiveValue>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
         match receiver {
-            ValueReceiver::Declaration(path) => {
+            ValueReceiver::Declaration { path, value_mode } => {
                 let [value] = slots[..] else {
                     return Err(receiver_slot_mismatch());
                 };
-                // A produced value is never a place, so the declaration aliases nothing.
-                self.state.aliases.remove(path);
-                bindings.insert(*path, value);
+                self.bind_slot(bindings, *path, value, Permission::from(*value_mode))?;
             }
             ValueReceiver::Assignment(place) => {
                 let [value] = slots[..] else {
@@ -512,17 +550,15 @@ impl ConstInterpreter<'_> {
                 for (target, &value) in targets.iter().zip(&slots) {
                     match target.kind {
                         MultiBindTargetKind::Declaration => {
-                            self.state.aliases.remove(&target.id);
-                            bindings.insert(target.id, value);
+                            self.bind_slot(
+                                bindings,
+                                target.id,
+                                value,
+                                Permission::from(target.value_mode),
+                            )?;
                         }
                         MultiBindTargetKind::Assignment => {
-                            self.write_through(
-                                target.id,
-                                Vec::new(),
-                                value,
-                                target.span,
-                                bindings,
-                            )?;
+                            self.write_through(target.id, &[], value, target.span, bindings)?;
                         }
                     }
                 }
@@ -636,17 +672,22 @@ impl ConstInterpreter<'_> {
         let Some(iterable) = self.evaluate_expression(iterable, bindings)? else {
             return Ok(());
         };
-        let Some(ConstValuePayload::Collection(values)) = self.constants.payload(iterable) else {
+        let Some(ConstValuePayload::Collection(_)) = self.constants.payload(iterable.shape) else {
             return Err(unsupported_error(
                 labels::COLLECTION_LOOP,
                 span,
                 self.string_table,
             ));
         };
-        if !values.is_empty() {
+        let end = iterable.allocation.map_or(0, |allocation| {
+            self.state.storage.children(allocation).len()
+        });
+        if end != 0 {
             frames.push(ExecFrame::Collection(CollectionFrame {
                 iterable,
                 next: 0,
+                end,
+                span,
                 loop_bindings: Box::new(loop_bindings.clone()),
                 body: Rc::clone(body),
             }));
@@ -660,7 +701,7 @@ impl ConstInterpreter<'_> {
         &mut self,
         values: &[ExprId],
         bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
         if let [expression] = values
             && self.has_multiple_success_slots(*expression)?
         {
@@ -773,18 +814,27 @@ impl ConstInterpreter<'_> {
         frames: &mut Vec<ExecFrame>,
         bindings: &mut FrameBindings,
     ) -> Result<(), ConstantFoldError> {
-        let Some(ConstValuePayload::Collection(values)) = self.constants.payload(frame.iterable)
-        else {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ConstantEvaluation,
-                "const collection loop lost its iterable value",
-            )
-            .into());
-        };
-        let Some(&item_value) = values.get(frame.next) else {
+        if frame.next == frame.end {
             return Ok(());
-        };
-        self.bind_collection_iteration(&frame.loop_bindings, item_value, frame.next, bindings)?;
+        }
+        let count = self.constants.value_count();
+        if let Some(item) = &frame.loop_bindings.item {
+            let place = self
+                .state
+                .storage
+                .project(frame.iterable, frame.next)?
+                .ok_or_else(|| {
+                    unsupported_error(
+                        labels::COLLECTION_BOUNDS_ERROR,
+                        frame.span,
+                        self.string_table,
+                    )
+                })?;
+            let value = self.read_place(place, frame.span)?;
+            self.bind_slot(bindings, item.id, value, Permission::ReadOnly)?;
+        }
+        self.bind_iteration_index(&frame.loop_bindings, frame.next, bindings)?;
+        charge_new_value_text(self.constants, self.string_table, count, self.budget)?;
         frame.next += 1;
         let body = Rc::clone(&frame.body);
         frames.push(ExecFrame::Collection(frame));
@@ -838,7 +888,7 @@ impl ConstInterpreter<'_> {
         let Some(value) = self.evaluate_expression(expression, bindings)? else {
             return Ok(expression);
         };
-        expression_with_value(self.builder, value, type_id, span, value_mode)
+        expression_with_value(self.builder, value.shape, type_id, span, value_mode)
     }
 
     fn bind_range_iteration(
@@ -855,24 +905,14 @@ impl ConstInterpreter<'_> {
                 ConstValuePayload::FixedScalar(counter),
                 item.binding_span,
             )?;
-            bindings.insert(item.id, value);
+            self.bind_slot(
+                bindings,
+                item.id,
+                LiveValue::leaf(value, Permission::ReadOnly),
+                Permission::ReadOnly,
+            )?;
         }
         self.bind_iteration_index(loop_bindings, zero_based_index, bindings)?;
-        charge_new_value_text(self.constants, self.string_table, count, self.budget)
-    }
-
-    fn bind_collection_iteration(
-        &mut self,
-        loop_bindings: &LoopBindings,
-        item_value: ConstValueId,
-        source_index: usize,
-        bindings: &mut FrameBindings,
-    ) -> Result<(), ConstantFoldError> {
-        let count = self.constants.value_count();
-        if let Some(item) = &loop_bindings.item {
-            bindings.insert(item.id, item_value);
-        }
-        self.bind_iteration_index(loop_bindings, source_index, bindings)?;
         charge_new_value_text(self.constants, self.string_table, count, self.budget)
     }
 
@@ -885,7 +925,12 @@ impl ConstInterpreter<'_> {
         if let Some(index) = &loop_bindings.index {
             let value =
                 const_iteration_index(index, position, self.constants).map_err(template_error)?;
-            bindings.insert(index.id, value);
+            self.bind_slot(
+                bindings,
+                index.id,
+                LiveValue::leaf(value, Permission::ReadOnly),
+                Permission::ReadOnly,
+            )?;
         }
         Ok(())
     }
@@ -898,7 +943,7 @@ impl ConstInterpreter<'_> {
         let Some(value) = self.evaluate_expression(expression, bindings)? else {
             return Ok(None);
         };
-        match self.constants.payload(value) {
+        match self.constants.payload(value.shape) {
             Some(ConstValuePayload::Bool(boolean)) => Ok(Some(*boolean)),
             _ => Err(unsupported_error(
                 labels::CONDITION,
@@ -925,7 +970,7 @@ impl ConstInterpreter<'_> {
     fn take_recovery(
         &mut self,
         expression: ExprId,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
         if matches!(self.state.outcome, Some(FrameOutcome::Recovered(_)))
             && self.fallible_handler_instructions(expression)?.is_some()
             && let Some(FrameOutcome::Recovered(slots)) = self.state.outcome.take()
@@ -940,7 +985,7 @@ impl ConstInterpreter<'_> {
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+    ) -> Result<Option<Vec<LiveValue>>, ConstantFoldError> {
         self.check_expression_depth(expression)?;
         let value_count = self.constants.value_count();
         self.state.expression_depth += 1;
@@ -958,6 +1003,7 @@ impl ConstInterpreter<'_> {
         }
         let rewritten = match rewritten {
             RewriteOutput::CallResults(slots) => return Ok(Some(slots)),
+            RewriteOutput::Value(_) => return Err(receiver_slot_mismatch()),
             RewriteOutput::Expression(expression) => expression,
         };
         let produced = unwrap_fallible_expression(rewritten, self.builder)?;
@@ -971,6 +1017,10 @@ impl ConstInterpreter<'_> {
                 self.string_table,
             ));
         };
+        let slots = slots
+            .into_iter()
+            .map(|value| self.materialize_value(value, Permission::Writable))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(slots))
     }
 
@@ -979,7 +1029,7 @@ impl ConstInterpreter<'_> {
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
+    ) -> Result<Option<LiveValue>, ConstantFoldError> {
         self.check_expression_depth(expression)?;
         let value_count = self.constants.value_count();
         self.state.expression_depth += 1;
@@ -1007,8 +1057,8 @@ impl ConstInterpreter<'_> {
     fn complete_recovered_value(
         &mut self,
         expression: ExprId,
-        value: ConstValueId,
-    ) -> Result<ConstValueId, ConstantFoldError> {
+        value: LiveValue,
+    ) -> Result<LiveValue, ConstantFoldError> {
         let view = self.builder.view(expression)?;
         let ExpressionOperationView::ValueBlock(ValueBlock::Catch(block)) = view.operation() else {
             return Ok(value);
@@ -1019,7 +1069,7 @@ impl ConstInterpreter<'_> {
         };
         let recovered = self
             .constants
-            .metadata(value)
+            .metadata(value.shape)
             .filter(|value| value.type_id == target)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
@@ -1032,9 +1082,12 @@ impl ConstInterpreter<'_> {
         metadata
             .synthetic_interface_provenance
             .merge(&recovered.synthetic_interface_provenance);
-        Ok(self
+        let shape = self
             .constants
-            .insert_value(metadata, ConstValuePayload::OptionSome(value))?)
+            .insert_value(metadata, ConstValuePayload::OptionSome(value.shape))?;
+        self.state
+            .storage
+            .allocate(shape, std::iter::once(value), self.budget)
     }
 
     /// Keep an authored catch active across expression rewriting and evaluation, including
@@ -1058,68 +1111,25 @@ impl ConstInterpreter<'_> {
         &mut self,
         expression: ExprId,
         bindings: &mut FrameBindings,
-    ) -> Result<Option<ConstValueId>, ConstantFoldError> {
-        if let Some(value) = self.evaluate_collection_read(expression, bindings)? {
-            return Ok(Some(value));
-        }
+    ) -> Result<Option<LiveValue>, ConstantFoldError> {
+        let rewritten = self.rewrite_for_value(expression, bindings)?;
         if self.state.outcome.is_some() {
             return Ok(None);
         }
-        let rewritten = match self.rewrite_for_value(expression, bindings)? {
+        match rewritten {
+            RewriteOutput::Value(value) => Ok(Some(value)),
             RewriteOutput::CallResults(slots) => {
                 let [value] = slots[..] else {
                     return Err(receiver_slot_mismatch());
                 };
-                return Ok(Some(value));
+                Ok(Some(value))
             }
-            RewriteOutput::Expression(expression) => expression,
-        };
-        if self.state.outcome.is_some() {
-            return Ok(None);
+            RewriteOutput::Expression(_) => Err(unsupported_error(
+                labels::VALUE_EXPRESSION,
+                self.builder.view(expression)?.span(),
+                self.string_table,
+            )),
         }
-        if let Some(value) = self.fold_to_constant(rewritten, bindings)? {
-            return Ok(Some(value));
-        }
-        if let ExpressionOperationView::Copy(place) = self.builder.view(rewritten)?.operation() {
-            let Some((root, projections)) =
-                self.evaluate_place_projections(place.id(), bindings)?
-            else {
-                return Ok(None);
-            };
-            if let Some(root_value) = bindings.get(&root).copied() {
-                return project_constant_value(
-                    self.constants,
-                    root_value,
-                    &projections,
-                    self.path_fork,
-                )
-                .map(Some)
-                .ok_or_else(|| {
-                    unsupported_error(
-                        labels::PROJECTED_READ,
-                        self.builder
-                            .view(rewritten)
-                            .ok()
-                            .and_then(|view| view.span()),
-                        self.string_table,
-                    )
-                });
-            }
-        }
-        if let Some(projected) = self.fold_template_with_bindings(rewritten, bindings)? {
-            return Ok(Some(projected.value));
-        }
-        if self.state.outcome.is_some() {
-            return Ok(None);
-        }
-        Err(unsupported_error(
-            labels::VALUE_EXPRESSION,
-            self.builder
-                .view(expression)
-                .ok()
-                .and_then(|view| view.span()),
-            self.string_table,
-        ))
     }
 
     /// Find how a collection failure on this expression must be handled.
@@ -1227,14 +1237,14 @@ impl ConstInterpreter<'_> {
     pub(super) fn fold_template_with_bindings(
         &mut self,
         expression: ExprId,
-        bindings: &FrameBindings,
-    ) -> Result<Option<ProjectedConstant>, ConstantFoldError> {
-        let (reference, template_span, value_mode) = {
+        bindings: &mut FrameBindings,
+    ) -> Result<Option<LiveValue>, ConstantFoldError> {
+        let (reference, template_span) = {
             let view = self.builder.view(expression)?;
             let ExpressionOperationView::Template(template) = view.operation() else {
                 return Ok(None);
             };
-            (template.tir_reference, view.span(), view.value_mode())
+            (template.tir_reference, view.span())
         };
         let template_store = self.scope.template_ir_store.borrow();
         let tir_view = TirView::with_minimum_phase(
@@ -1263,29 +1273,6 @@ impl ConstInterpreter<'_> {
         {
             return Ok(None);
         }
-        // TIR still receives expression IDs for its bindings. These rows live in the source
-        // arena, so bound them before adapting a frame, even when the template emits no text.
-        self.budget.retain_values(bindings.len(), template_span)?;
-        let mut fold_bindings = Vec::with_capacity(bindings.len());
-        for (path, value) in bindings {
-            let metadata = self.constants.metadata(*value).ok_or_else(|| {
-                unsupported_error(labels::TEMPLATE_VALUE, template_span, self.string_table)
-            })?;
-            let constant_expression = self.builder.constant(
-                *value,
-                metadata.type_id,
-                metadata.span,
-                metadata.value_mode,
-            )?;
-            let annotated_expression = self.builder.with_synthetic_interface_provenance(
-                constant_expression,
-                metadata.synthetic_interface_provenance.clone(),
-            )?;
-            fold_bindings.push(TemplateFoldBinding {
-                path: *path,
-                value: annotated_expression.id(),
-            });
-        }
         let builder = &mut *self.builder;
         let constants = &mut *self.constants;
         let string_table = &mut *self.string_table;
@@ -1300,6 +1287,7 @@ impl ConstInterpreter<'_> {
             path_fork: self.path_fork,
             budget,
             state,
+            live_bindings: bindings,
         };
         let result = {
             let mut fold_context =
@@ -1307,7 +1295,6 @@ impl ConstInterpreter<'_> {
                     .new_tir_fold_context(string_table, builder, constants);
             fold_context.template_output_limits = Some(template_output_limits);
             fold_context.template_work = Some(template_work);
-            fold_context.bindings = fold_bindings;
             fold_context.required_call_rewriter = Some(&mut site_rewriter);
             fold_prepared_template(&preparation, tir_view, &mut fold_context)?
         };
@@ -1326,15 +1313,9 @@ impl ConstInterpreter<'_> {
         metadata.synthetic_interface_provenance = metadata
             .synthetic_interface_provenance
             .union(&result.provenance);
-        let type_id = metadata.type_id;
         let value = constants.insert_value(metadata, ConstValuePayload::String(string_value))?;
         charge_new_value_text(constants, string_table, value_count, budget)?;
-        Ok(Some(ProjectedConstant {
-            value,
-            type_id,
-            span: template_span,
-            value_mode,
-        }))
+        Ok(Some(LiveValue::leaf(value, Permission::Writable)))
     }
 }
 
@@ -1345,6 +1326,7 @@ struct ExecutorSiteRewriter<'a> {
     path_fork: &'a PathInternerFork,
     budget: &'a mut ExecutionBudget,
     state: &'a mut ExecutionState,
+    live_bindings: &'a mut FrameBindings,
 }
 
 impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
@@ -1360,13 +1342,13 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
         let Some(scope) = source_scope else {
             return Ok(expression);
         };
-        let mut value_bindings = FrameBindings::default();
-        for binding in bindings {
-            if let ExpressionOperationView::Constant(value) =
-                expression_builder.view(binding.value)?.operation()
-            {
-                value_bindings.insert(binding.path, value);
-            }
+        // TIR owns nested traversal and charges its output to this emission.
+        // Folding here would retain an extra string per template iteration.
+        if matches!(
+            expression_builder.view(expression)?.operation(),
+            ExpressionOperationView::Template(_) | ExpressionOperationView::Constant(_)
+        ) {
+            return Ok(expression);
         }
         let mut services = ConstExecutionServices {
             builder: expression_builder,
@@ -1378,11 +1360,56 @@ impl RequiredCallSiteRewriter for ExecutorSiteRewriter<'_> {
             path_fork: self.path_fork,
         };
         let mut interpreter = services.interpreter(&mut *self.budget, &mut *self.state);
-        interpreter.rewrite_with_bindings(
-            expression,
-            RewriteMode::InterpretedBody,
-            &mut value_bindings,
-        )
+        let saved_span = interpreter.budget.span;
+        let mut saved = Vec::new();
+        let result = (|| {
+            for binding in bindings {
+                let ExpressionOperationView::Constant(shape) =
+                    interpreter.builder.view(binding.value)?.operation()
+                else {
+                    continue;
+                };
+                let value = interpreter.materialize_value(shape, Permission::ReadOnly)?;
+                let slot = interpreter.state.storage.bind_slot(
+                    value,
+                    Permission::ReadOnly,
+                    interpreter.budget,
+                )?;
+                saved.push((binding.path, self.live_bindings.insert(binding.path, slot)));
+            }
+            let Some(value) = interpreter.evaluate_expression(expression, self.live_bindings)?
+            else {
+                return Ok(expression);
+            };
+            let view = interpreter.builder.view(expression)?;
+            let (type_id, span, value_mode) =
+                (view.value_type_id()?, view.span(), view.value_mode());
+            let frozen = interpreter.freeze_live_value(value)?;
+            interpreter.budget.retain_values(1, span)?;
+            let provenance = interpreter
+                .constants
+                .metadata(frozen)
+                .map(|metadata| metadata.synthetic_interface_provenance.clone())
+                .unwrap_or_default();
+            let replacement =
+                expression_with_value(interpreter.builder, frozen, type_id, span, value_mode)?;
+            Ok(interpreter
+                .builder
+                .with_synthetic_interface_provenance(
+                    interpreter.builder.own(replacement),
+                    provenance,
+                )?
+                .id())
+        })();
+        interpreter.budget.span = saved_span;
+        for (path, previous) in saved.into_iter().rev() {
+            if let Some(previous) = previous {
+                self.live_bindings.insert(path, previous);
+            } else {
+                self.live_bindings.remove(&path);
+            }
+        }
+        result
     }
 }
 

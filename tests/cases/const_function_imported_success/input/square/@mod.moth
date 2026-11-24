@@ -33,3 +33,9 @@ packed #|value I32| -> I32:
     low, high = bounds(value * 10)
     return low * 100 + high
 ;
+
+$export
+shared_values #|| -> {I32}, {I32}:
+    values ~= {1}
+    return values, values
+;

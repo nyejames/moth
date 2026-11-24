@@ -173,7 +173,8 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
         V::Constant(_) => Ok(true),
         V::Reference(path) => Ok(loop_binding_paths.contains(&path)),
         V::Template(template) => nested_template(template.tir_reference, loop_binding_paths),
-        V::Coerce { .. }
+        V::FieldAccess { .. }
+        | V::Coerce { .. }
         | V::NumericUnary { .. }
         | V::NumericBinary { .. }
         | V::LogicalNot { .. }

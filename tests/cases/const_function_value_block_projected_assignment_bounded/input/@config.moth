@@ -1,5 +1,5 @@
 project #= (
-    name = "value_block_receiver_memory",
+    name = "value_block_projected_assignment_bounded",
     const_work_limit = 1000000,
     const_memory_limit_mb = 1,
 )

@@ -452,6 +452,28 @@ impl ConstValueCandidate<'_> {
         };
         self.insert_value(metadata, payload)
     }
+
+    /// Attach provenance to a completed root, which is the only consumer of its staged row.
+    pub(crate) fn with_completed_root_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        if let Some(index) = id.index().checked_sub(self.prefix.values.len()) {
+            let value = self.values.get_mut(index).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Completed constant root lacks a staged value.",
+                )
+            })?;
+            value
+                .metadata
+                .synthetic_interface_provenance
+                .merge(provenance);
+            return Ok(id);
+        }
+        self.with_value_provenance(id, Some(provenance))
+    }
 }
 
 /// Stage the copy one use of a shared constant needs, or `None` when the use adds no provenance.

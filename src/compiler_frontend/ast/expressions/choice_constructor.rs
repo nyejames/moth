@@ -1099,6 +1099,7 @@ fn finish_choice_payload_construct(
 
         choice_fields.push(CompletedConstructorField {
             name: field.name,
+            authored_ordinal: arg.authored_ordinal,
             slot: u32::try_from(slot).map_err(|_| {
                 InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,

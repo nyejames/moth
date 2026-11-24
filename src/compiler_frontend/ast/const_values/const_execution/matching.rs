@@ -13,6 +13,7 @@ use super::{
     instructions::{ConstInstruction, ConstMatchArm},
     labels,
     state::{ConstInterpreter, FrameBindings},
+    storage::{LiveValue, Permission},
     values::unsupported_error,
 };
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldError, fold_pattern_comparison};
@@ -73,40 +74,34 @@ impl ConstInterpreter<'_> {
     fn pattern_matches(
         &mut self,
         pattern: &MatchPattern,
-        scrutinee: ConstValueId,
+        scrutinee: LiveValue,
         bindings: &mut FrameBindings,
     ) -> Result<bool, ConstantFoldError> {
-        let scrutinee = transparent_value(self.constants, scrutinee)?;
-        let payload = stored_payload(self.constants, scrutinee)?;
+        let scrutinee = self.transparent_live_value(scrutinee)?;
+        let payload = stored_payload(self.constants, scrutinee.shape)?;
         match pattern {
             MatchPattern::OptionNone { .. } => Ok(matches!(payload, ConstValuePayload::OptionNone)),
             MatchPattern::OptionPresentCapture { binding_path, .. } => {
-                let ConstValuePayload::OptionSome(inner) = payload else {
+                if !matches!(payload, ConstValuePayload::OptionSome(_)) {
                     return Ok(false);
-                };
-                bindings.insert(*binding_path, *inner);
+                }
+                self.bind_capture(bindings, scrutinee, 0, *binding_path)?;
                 Ok(true)
             }
             MatchPattern::ChoiceVariant { tag, captures, .. } => {
-                let ConstValuePayload::Choice {
-                    tag: value_tag,
-                    fields,
-                    ..
-                } = payload
-                else {
+                let ConstValuePayload::Choice { tag: value_tag, .. } = payload else {
                     return Ok(false);
                 };
                 if value_tag != tag {
                     return Ok(false);
                 }
                 for capture in captures {
-                    let field = fields.get(capture.field_index).ok_or_else(|| {
-                        InfrastructureFailure::internal(
-                            CompilerStage::ConstantEvaluation,
-                            "a choice payload capture names a field the value lacks",
-                        )
-                    })?;
-                    bindings.insert(capture.binding_path, field.value);
+                    self.bind_capture(
+                        bindings,
+                        scrutinee,
+                        capture.field_index,
+                        capture.binding_path,
+                    )?;
                 }
                 Ok(true)
             }
@@ -119,17 +114,60 @@ impl ConstInterpreter<'_> {
         }
     }
 
+    fn transparent_live_value(
+        &mut self,
+        mut value: LiveValue,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.validate_live_value(value, self.budget.span)?;
+        while matches!(
+            stored_payload(self.constants, value.shape)?,
+            ConstValuePayload::Coerced(_)
+        ) {
+            let place = self
+                .state
+                .storage
+                .project(value, 0)?
+                .ok_or_else(missing_capture)?;
+            value = self.read_place(place, self.budget.span)?;
+        }
+        Ok(value)
+    }
+
+    fn bind_capture(
+        &mut self,
+        bindings: &mut FrameBindings,
+        scrutinee: LiveValue,
+        index: usize,
+        path: crate::compiler_frontend::symbols::path_interner::PathId,
+    ) -> Result<(), ConstantFoldError> {
+        let place = self
+            .state
+            .storage
+            .project(scrutinee, index)?
+            .ok_or_else(missing_capture)?;
+        let value = self.read_place(place, self.budget.span)?;
+        self.bind_slot(bindings, path, value, Permission::ReadOnly)
+    }
+
     /// Compare the scrutinee, or the present value of an option scrutinee, with a pattern value.
     fn present_value_matches(
         &mut self,
-        scrutinee: ConstValueId,
+        scrutinee: LiveValue,
         pattern: &PatternValue,
         op: &Operator,
     ) -> Result<bool, ConstantFoldError> {
-        let subject = match stored_payload(self.constants, scrutinee)? {
+        let subject = match stored_payload(self.constants, scrutinee.shape)? {
             ConstValuePayload::OptionNone => return Ok(false),
-            ConstValuePayload::OptionSome(inner) => transparent_value(self.constants, *inner)?,
-            _ => scrutinee,
+            ConstValuePayload::OptionSome(_) => {
+                let place = self
+                    .state
+                    .storage
+                    .project(scrutinee, 0)?
+                    .ok_or_else(missing_capture)?;
+                let inner = self.read_place(place, self.budget.span)?;
+                self.transparent_live_value(inner)?.shape
+            }
+            _ => scrutinee.shape,
         };
         let pattern_value = match pattern.kind {
             PatternValueKind::Constant(value) => value,
@@ -155,6 +193,13 @@ impl ConstInterpreter<'_> {
             unsupported_error(labels::MATCH_PATTERN, pattern.span, self.string_table)
         })
     }
+}
+
+fn missing_capture() -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "a const pattern capture names a field the value lacks",
+    )
 }
 
 fn relational_operator(op: RelationalPatternOp) -> Operator {

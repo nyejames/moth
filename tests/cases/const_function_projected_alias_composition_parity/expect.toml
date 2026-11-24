@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " a=2 b=2 c=12"
+rendered_output_exact = " a=22 b=2 c=12 d=22 e=22"

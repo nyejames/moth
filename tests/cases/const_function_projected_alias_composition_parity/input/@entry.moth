@@ -12,8 +12,9 @@ const_composed #|| -> I32:
     root ~= Outer(Inner(values = {1}))
     inner_alias ~= root.inner
     nested ~= inner_alias.values
+    ~root.inner = root.inner
     ~nested.push(5)
-    return nested.length()
+    return nested.length() * 10 + root.inner.values.length()
 ;
 
 runtime_composed || -> I32:
@@ -32,7 +33,25 @@ const_copied #|| -> I32:
     return root.inner.values.length() * 10 + nested.length()
 ;
 
+const_retained #|| -> I32:
+    root ~= Outer(Inner({1}))
+    retained ~= Outer(root.inner)
+    ~root.inner = Inner({3, 4})
+    ~retained.inner.values.push(2)
+    return retained.inner.values.length() * 10 + root.inner.values.length()
+;
+
+runtime_retained || -> I32:
+    root ~= Outer(Inner({1}))
+    retained ~= Outer(root.inner)
+    ~root.inner = Inner({3, 4})
+    ~retained.inner.values.push(2)
+    return retained.inner.values.length() * 10 + root.inner.values.length()
+;
+
 a = const_composed()
 b = runtime_composed()
 c = const_copied()
-~[: a=[a] b=[b] c=[c]]
+d = const_retained()
+e = runtime_retained()
+~[: a=[a] b=[b] c=[c] d=[d] e=[e]]

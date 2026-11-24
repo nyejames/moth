@@ -407,6 +407,7 @@ impl AstExpressionBuilder {
             value,
             target_param: argument.target_param,
             parameter_slot,
+            authored_ordinal: argument.authored_ordinal,
             access_mode: argument.access_mode,
             passing_mode: argument.passing_mode,
             span: argument.span,

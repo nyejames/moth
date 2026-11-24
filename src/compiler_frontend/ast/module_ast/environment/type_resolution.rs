@@ -1439,6 +1439,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     const_body_rejection_diagnostic(&rejection, header.name_span, string_table),
                 ));
             }
+            Err(ConstBodyPreparationError::Diagnostic(diagnostic)) => {
+                return Err(ExpressionParseError::Diagnostic(diagnostic));
+            }
             Err(ConstBodyPreparationError::Infrastructure(error)) => {
                 return Err(ExpressionParseError::Infrastructure(error));
             }

@@ -845,34 +845,11 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
     ) -> Result<Option<BuiltinCastPolicyId>, ConstantFoldError> {
         #[cfg(feature = "benchmark_counters")]
         increment_frontend_counter(FrontendCounter::CensusCastFoldAttempts);
-        match facts.evidence {
-            ResolvedCastEvidence::Builtin { policy } if policy.is_const_foldable() => {
-                Ok(Some(policy))
-            }
-            ref evidence => {
-                if self.boundary.requirement() == FoldRequirement::Opportunistic {
-                    return Ok(None);
-                }
-                let reason = match evidence {
-                    ResolvedCastEvidence::Builtin { .. } => {
-                        InvalidCastReason::BuiltinEvidenceNotConstFoldable
-                    }
-                    ResolvedCastEvidence::UserDefined { .. } => {
-                        InvalidCastReason::UserDefinedEvidenceNotConstFoldable
-                    }
-                    ResolvedCastEvidence::GenericBound => {
-                        InvalidCastReason::GenericBoundEvidenceNotConstFoldable
-                    }
-                };
-                Err(calls_data::invalid_cast(
-                    reason,
-                    Some(facts.source_type_id),
-                    Some(facts.target_type_id),
-                    original.span(),
-                )
-                .into())
-            }
-        }
+        Ok(const_cast_policy(
+            facts,
+            original.span(),
+            self.boundary.requirement(),
+        )?)
     }
 
     /// Combines the settled children of an expression that [`Self::enter`] parked. `children`
@@ -1229,6 +1206,33 @@ fn cast_operands(
         }
         _ => Ok(None),
     }
+}
+
+/// Check resolved cast eligibility without evaluating an operand.
+pub(crate) fn const_cast_policy(
+    facts: &CastFacts,
+    span: Option<SourceSpan>,
+    requirement: FoldRequirement,
+) -> Result<Option<BuiltinCastPolicyId>, DiagnosticDraft> {
+    let reason = match facts.evidence {
+        ResolvedCastEvidence::Builtin { policy } if policy.is_const_foldable() => {
+            return Ok(Some(policy));
+        }
+        _ if requirement == FoldRequirement::Opportunistic => return Ok(None),
+        ResolvedCastEvidence::Builtin { .. } => InvalidCastReason::BuiltinEvidenceNotConstFoldable,
+        ResolvedCastEvidence::UserDefined { .. } => {
+            InvalidCastReason::UserDefinedEvidenceNotConstFoldable
+        }
+        ResolvedCastEvidence::GenericBound => {
+            InvalidCastReason::GenericBoundEvidenceNotConstFoldable
+        }
+    };
+    Err(calls_data::invalid_cast(
+        reason,
+        Some(facts.source_type_id),
+        Some(facts.target_type_id),
+        span,
+    ))
 }
 
 enum PayloadFoldOutcome {
@@ -2142,6 +2146,70 @@ pub(crate) fn fold_value_with_constants(
     )
 }
 
+/// Complete one original expression from already settled child values, without rewriting its row.
+///
+/// A cast takes the source as its single slot and inherits only source provenance.
+/// Other operands have already executed in authored order and arrive here in resolved slot order.
+pub(crate) fn fold_completed_content(
+    root: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    types: &TypeEnvironment,
+    children: &[Option<ConstValueId>],
+    dec_power_exponent_depth: u32,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    stage_fold_value(
+        builder,
+        constants,
+        services,
+        FoldBoundary::Content {
+            types,
+            requirement: FoldRequirement::Required,
+        },
+        |_| None,
+        dec_power_exponent_depth,
+        |context| {
+            let expression = builder.view(root)?;
+            if !matches!(expression.success_shape(), SuccessShape::One(_)) {
+                return Ok(None);
+            }
+            match expression.operation() {
+                ExpressionOperationView::Constant(_) => {
+                    child_slots::<0>(children)?;
+                    let mut walk = FoldWalk::default();
+                    match context.enter(&mut walk, expression)? {
+                        FoldEntry::Settled(value) => Ok(value),
+                        FoldEntry::Deferred => unreachable!("constant entry must settle"),
+                    }
+                }
+                ExpressionOperationView::Cast { facts, .. } => {
+                    let Some(policy) = context.cast_policy(expression, facts)? else {
+                        return Ok(None);
+                    };
+                    context.complete_cast(expression, policy, children)
+                }
+                _ => {
+                    let mut provenance = SyntheticInterfaceProvenance::default();
+                    for &child in children.iter().flatten() {
+                        if let Some(metadata) = context.values.metadata(child) {
+                            provenance.merge(&metadata.synthetic_interface_provenance);
+                        }
+                    }
+                    let Some(result) = context.complete(expression, children)? else {
+                        return Ok(None);
+                    };
+                    Ok(Some(
+                        context
+                            .values
+                            .with_completed_root_provenance(result, &provenance)?,
+                    ))
+                }
+            }
+        },
+    )
+}
+
 /// Fold one constant-boundary expression (a declaration or signature default).
 ///
 /// Unlike [`constant_fold`], this materialises every foldable constructor (collections, records, choices,
@@ -2331,6 +2399,29 @@ fn fold_value(
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
     initial_dec_power_exponent_depth: u32,
 ) -> Result<ConstantValueFold, ConstantFoldError> {
+    stage_fold_value(
+        builder,
+        constants,
+        services,
+        boundary,
+        lookup,
+        initial_dec_power_exponent_depth,
+        |context| context.fold_walk(root),
+    )
+}
+
+/// Stage either a walk or a completed node under the same publication and refusal rules.
+fn stage_fold_value<F: FnMut(PathId) -> Option<ConstValueId>>(
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    boundary: FoldBoundary<'_>,
+    lookup: F,
+    initial_dec_power_exponent_depth: u32,
+    evaluate: impl FnOnce(
+        &mut FoldContext<'_, '_, F>,
+    ) -> Result<Option<ConstValueId>, ConstantFoldError>,
+) -> Result<ConstantValueFold, ConstantFoldError> {
     let FoldServices {
         string_table: strings,
         scope,
@@ -2352,7 +2443,7 @@ fn fold_value(
             external_calls: ExternalCallScratch::default(),
             dec_power_exponent_depth: initial_dec_power_exponent_depth,
         };
-        let value = context.fold_walk(root)?;
+        let value = evaluate(&mut context)?;
         refusal = context.refusal;
         Ok::<_, ConstantFoldError>(if refusal.is_some() { None } else { value })
     })?;

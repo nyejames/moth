@@ -5,7 +5,7 @@ use super::budget::{
     charge_new_value_text, value_own_allocation,
 };
 use super::instructions::{ConstInstruction, ConstInstructionKind};
-use super::rewrite::{RewriteMode, inherit_replaced_provenance};
+use super::rewrite::inherit_replaced_provenance;
 use super::state::{ActiveHandler, ConstExecutionServices, ExecutionState, FrameBindings};
 use super::*;
 use crate::compiler_frontend::ast::const_eval::{
@@ -199,7 +199,7 @@ fn shared_text_is_charged_once_through_its_owning_row() {
 }
 
 #[test]
-fn precharged_mutation_rows_are_not_charged_again_at_the_boundary() {
+fn charged_tail_does_not_hide_an_earlier_unseen_value() {
     let mut strings = StringTable::new();
     let text = strings.intern("abcdef");
     let mut constants = ConstValueStore::default();
@@ -209,19 +209,29 @@ fn precharged_mutation_rows_are_not_charged_again_at_the_boundary() {
             ConstValuePayload::String(ConstStringValue::Text(text)),
             None,
         )
+        .expect("earlier unseen string");
+    let precharged = constants
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(text)),
+            None,
+        )
         .expect("string");
     let meter = Rc::new(RefCell::new(ConstExecutionMeter::default()));
     let mut budget = ExecutionBudget::new(meter);
-    budget.precharged_value_indices.insert(0);
-    budget.retained_values = 1;
-    budget.retained_memory_bytes = 6;
-    charge_new_value_text(&constants, &strings, 0, &mut budget).expect("precharged row fits");
-    assert_eq!(budget.retained_values, 1);
-    assert_eq!(budget.retained_memory_bytes, 6);
-    assert!(matches!(
-        constants.payload(string),
-        Some(ConstValuePayload::String(ConstStringValue::Text(_)))
-    ));
+    let (bytes, count) = value_own_allocation(&constants, &strings, precharged);
+    budget
+        .retain_memory_bytes(bytes, None)
+        .expect("precharge row bytes");
+    budget
+        .retain_values(count, None)
+        .expect("precharge row slots");
+    super::budget::register_precharged_value(&constants, &strings, 1, &mut budget)
+        .expect("register the already charged row");
+    charge_new_value_text(&constants, &strings, 0, &mut budget).expect("charge the unseen row");
+    let (earlier_bytes, earlier_count) = value_own_allocation(&constants, &strings, string);
+    assert_eq!(budget.retained_memory_bytes, bytes + earlier_bytes);
+    assert_eq!(budget.retained_values, count + earlier_count);
 }
 
 #[test]
@@ -793,11 +803,7 @@ fn failed_rewrite_restores_the_handler_it_replaced() {
     let mut interpreter = services.interpreter(&mut budget, &mut state);
 
     let error = interpreter
-        .rewrite_with_bindings(
-            root,
-            RewriteMode::InterpretedBody,
-            &mut FrameBindings::default(),
-        )
+        .evaluate_expression(root, &mut FrameBindings::default())
         .expect_err("the zero attempt allowance refuses the nested call");
     assert!(matches!(error, ConstantFoldError::Budget(_)));
     assert!(
@@ -873,9 +879,12 @@ fn replaced_child_provenance_reaches_the_surviving_parent() {
 }
 
 #[test]
-fn nested_scalar_calls_execute_once_per_loop_iteration() {
+fn nested_scalar_calls_preserve_values_and_provenance_across_iterations() {
     use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeEndKind, RangeLoopSpec};
     use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+    use crate::compiler_frontend::synthetic_interface_provenance::{
+        SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+    };
 
     const ITERATIONS: i64 = 16;
     const CALLEE_RESULT: i64 = 7;
@@ -893,6 +902,18 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
         )
         .expect("returned literal")
         .id();
+    let config_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "source-config",
+        "offset",
+    );
+    let returned = builder
+        .with_synthetic_interface_provenance(
+            builder.own(returned),
+            SyntheticInterfaceProvenance::single(config_member.clone()),
+        )
+        .expect("attach the callee's config dependency")
+        .id();
     let ExpressionOperationView::Constant(returned_value) = builder
         .view(returned)
         .expect("returned expression")
@@ -909,6 +930,7 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
                 kind: ConstInstructionKind::BindValue {
                     path: PathId::try_from_index(5).expect("callee binding"),
                     value: returned_value,
+                    value_mode: ValueMode::ImmutableOwned,
                 },
                 span: None,
             },
@@ -1042,8 +1064,7 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
         donor_identity: None,
     };
 
-    let meter = constants.execution_meter();
-    let mut budget = ExecutionBudget::new(Rc::clone(&meter));
+    let mut budget = ExecutionBudget::new(constants.execution_meter());
     let scope = empty_module_scope();
     let paths = PathInternerFork::empty();
     let mut state = ExecutionState::default();
@@ -1064,16 +1085,17 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
     assert_eq!(returns.len(), 1);
     assert!(
         matches!(
-            constants.payload(returns[0]),
+            constants.payload(returns[0].shape),
             Some(ConstValuePayload::FixedScalar(value))
                 if value.as_i64() == Some(ITERATIONS * CALLEE_RESULT)
         ),
         "each iteration must add the callee's returned scalar to the running total"
     );
-    assert!(
-        meter.borrow().steps > ITERATIONS as usize,
-        "the nested call body must execute once per iteration"
-    );
+    let provenance = &constants
+        .metadata(returns[0].shape)
+        .expect("returned scalar metadata")
+        .synthetic_interface_provenance;
+    assert_eq!(provenance.members(), &[config_member]);
 }
 
 #[test]

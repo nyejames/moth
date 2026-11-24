@@ -89,6 +89,8 @@ pub(crate) struct CallArgument<E = ExprId> {
     /// WHAT: retains the parser's named/positional routing decision through AST validation.
     /// WHY: final validation must not reconstruct call syntax or produce a second routing policy.
     pub(crate) parameter_slot: Option<ParameterSlot>,
+    /// One-based authored argument order, independent of the routed parameter slot.
+    pub(crate) authored_ordinal: Option<std::num::NonZeroU32>,
 
     /// Future input carried by a forwarded Route argument for immediate generic inference.
     ///
@@ -124,6 +126,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            authored_ordinal: None,
             route_future_input_type: None,
         }
     }
@@ -145,6 +148,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            authored_ordinal: None,
             route_future_input_type: None,
         }
     }
@@ -200,6 +204,7 @@ impl<E> CallArgument<E> {
             marker_span: self.marker_span,
             following_separator_span: self.following_separator_span,
             parameter_slot: self.parameter_slot,
+            authored_ordinal: self.authored_ordinal,
             route_future_input_type: self.route_future_input_type,
         }
     }
@@ -217,7 +222,18 @@ pub(crate) fn order_owned_call_arguments_by_retained_slot<E>(
     let mut ordered = Vec::with_capacity(expected_slot_count);
     ordered.resize_with(expected_slot_count, || None);
 
-    for argument in arguments {
+    for (index, mut argument) in arguments.into_iter().enumerate() {
+        let ordinal = u32::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .and_then(std::num::NonZeroU32::new)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "authored call argument ordinal exceeds u32",
+                )
+            })?;
+        argument.authored_ordinal = Some(ordinal);
         let slot_index = retained_call_argument_slot_index(&argument, 0, expected_slot_count)?;
         let slot = &mut ordered[slot_index];
         if slot.is_some() {

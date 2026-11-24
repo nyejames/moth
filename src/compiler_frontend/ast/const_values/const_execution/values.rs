@@ -1,28 +1,30 @@
-//! Constant value helpers shared by const-body preparation and execution.
+//! Typed value settlement, copying and publication for required const evaluation.
 //!
-//! WHAT: folds typed expressions to constant values, projects and updates field/index paths, and
-//!       builds the constant replacements and budget/diagnostic errors used by the executor.
-//! WHY: required calls, interpreted bodies and interpreted writes all need the same value-domain
-//!      operations; one module keeps projection and error semantics consistent.
-//! MUST NOT: execute statements, resolve aliases or decide eligibility.
+//! The existing folder owns scalar and constructor semantics. Live aggregate members remain
+//! in `storage`; copying and publication traverse them instead of reading stale shape payloads.
+//! This module also owns the immutable projection and replacement helpers used at AST boundaries.
 
 use super::{
     ProjectedConstant, ResolvedPlaceProjection,
-    budget::{ExecutionBudget, MAX_PROJECTION_DEPTH, charge_new_value_text},
+    budget::{
+        ExecutionBudget, MAX_PROJECTION_DEPTH, charge_new_value_text, register_precharged_value,
+        value_own_allocation,
+    },
     labels,
     state::{ConstInterpreter, FrameBindings},
+    storage::{AllocationId, LiveBinding, LivePlace, LiveValue, Permission},
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
     ConstantFoldRefusalReason, ConstantValueFold, FoldRequirement, FoldServices,
-    fold_value_with_constants,
+    fold_completed_content, fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValue, ConstValueField, ConstValueId, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, ExpressionOperationView, SuccessShape,
+    AstExpressionBuilder, CoercionOperation, ExprId, ExpressionOperationView, SuccessShape,
 };
 use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -30,13 +32,17 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, types_borrows_targets,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use rustc_hash::FxHashMap;
 
 pub(super) fn constant_index(constants: &ConstValueStore, value: ConstValueId) -> Option<usize> {
     match constants.payload(value)? {
@@ -89,147 +95,466 @@ pub(super) fn project_constant_value(
     Some(current)
 }
 
-/// The owners one projected write reads, charges and records through.
-///
-/// WHY: the write helper needs the constant graph, the path component reader, the attempt budget
-///      and the string table at every nesting level. One borrowed context keeps the recursive
-///      signature readable and states that these four are the operation's whole environment.
-pub(super) struct ProjectionWrite<'a> {
-    pub(super) constants: &'a mut ConstValueStore,
-    pub(super) path_fork: &'a PathInternerFork,
-    pub(super) budget: &'a mut ExecutionBudget,
-    pub(super) string_table: &'a mut StringTable,
+fn value_invariant() -> ConstantFoldError {
+    InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "const execution encountered an invalid live value",
+    )
+    .into()
 }
 
-/// Writes through resolved field/index projections by producing an updated immutable constant.
-pub(super) fn assign_constant_projections(
-    value: ConstValueId,
-    projections: &[ResolvedPlaceProjection],
-    replacement: ConstValueId,
-    write: &mut ProjectionWrite<'_>,
-) -> Result<ConstValueId, ConstantFoldError> {
-    assign_constant_projections_at(value, projections, replacement, write, 0)
+fn retain_scratch<T>(
+    budget: &mut super::budget::ExecutionBudget,
+    count: usize,
+) -> Result<(), ConstantFoldError> {
+    budget.retain_values(count, budget.span)?;
+    budget.retain_memory_bytes(count.saturating_mul(std::mem::size_of::<T>()), budget.span)
 }
 
-fn assign_constant_projections_at(
-    value: ConstValueId,
-    projections: &[ResolvedPlaceProjection],
-    replacement: ConstValueId,
-    write: &mut ProjectionWrite<'_>,
-    depth: usize,
-) -> Result<ConstValueId, ConstantFoldError> {
+fn check_depth(depth: usize, span: Option<SourceSpan>) -> Result<(), ConstantFoldError> {
     if depth > MAX_PROJECTION_DEPTH {
         return Err(hard_limit_error(
-            write.constants.metadata(value).and_then(|m| m.span),
+            span,
             ConstBudgetCategory::Work,
             ConstBudgetUnit::ProjectionLevels,
             MAX_PROJECTION_DEPTH,
         ));
     }
-    let Some((projection, rest)) = projections.split_first() else {
-        return Ok(replacement);
-    };
-    let metadata = write
-        .constants
-        .metadata(value)
-        .cloned()
-        .ok_or_else(|| unsupported_error(labels::PROJECTED_WRITE, None, write.string_table))?;
-    let borrowed_payload = write.constants.payload(value).ok_or_else(|| {
-        unsupported_error(labels::PROJECTED_WRITE, metadata.span, write.string_table)
-    })?;
-    let slots = match borrowed_payload {
+    Ok(())
+}
+
+fn child_count(payload: &ConstValuePayload) -> usize {
+    match payload {
+        ConstValuePayload::Collection(items) => items.len(),
         ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
-            fields.len().saturating_add(1)
+            fields.len()
         }
-        ConstValuePayload::Collection(items) => items.len().saturating_add(1),
-        _ => 1,
-    };
-    let owned_slots = match borrowed_payload {
-        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => fields
-            .len()
-            .saturating_mul(std::mem::size_of::<ConstValueField>()),
-        ConstValuePayload::Collection(items) => items
-            .len()
-            .saturating_mul(std::mem::size_of::<ConstValueId>()),
+        ConstValuePayload::Coerced(_) | ConstValuePayload::OptionSome(_) => 1,
         _ => 0,
-    };
-    if !matches!(borrowed_payload, ConstValuePayload::Coerced(_)) {
-        write.budget.retain_memory_bytes(
-            std::mem::size_of::<ConstValue>().saturating_add(owned_slots),
-            metadata.span,
-        )?;
-        write.budget.retain_values(slots, metadata.span)?;
     }
-    let payload = borrowed_payload.clone();
-    let payload = match (projection, payload) {
-        (ResolvedPlaceProjection::Field(field), ConstValuePayload::Record(mut fields)) => {
-            let entry = fields
-                .iter_mut()
-                .find(|entry| write.path_fork.component(entry.name) == Some(*field))
-                .ok_or_else(|| {
-                    unsupported_error(labels::PROJECTED_WRITE, metadata.span, write.string_table)
-                })?;
-            entry.value =
-                assign_constant_projections_at(entry.value, rest, replacement, write, depth + 1)?;
-            ConstValuePayload::Record(fields)
+}
+
+fn child_at(payload: &ConstValuePayload, index: usize) -> Option<ConstValueId> {
+    match payload {
+        ConstValuePayload::Collection(items) => items.get(index).copied(),
+        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
+            fields.get(index).map(|field| field.value)
         }
-        (
-            ResolvedPlaceProjection::Field(field),
-            ConstValuePayload::Choice {
-                nominal_path,
-                tag,
-                mut fields,
-            },
-        ) => {
-            let entry = fields
-                .iter_mut()
-                .find(|entry| write.path_fork.component(entry.name) == Some(*field))
-                .ok_or_else(|| {
-                    unsupported_error(labels::PROJECTED_WRITE, metadata.span, write.string_table)
-                })?;
-            entry.value =
-                assign_constant_projections_at(entry.value, rest, replacement, write, depth + 1)?;
-            ConstValuePayload::Choice {
-                nominal_path,
-                tag,
-                fields,
+        ConstValuePayload::Coerced(inner) | ConstValuePayload::OptionSome(inner) if index == 0 => {
+            Some(*inner)
+        }
+        _ => None,
+    }
+}
+
+fn replace_children(
+    payload: &mut ConstValuePayload,
+    children: &[ConstValueId],
+) -> Result<(), ConstantFoldError> {
+    match payload {
+        ConstValuePayload::Collection(items) => {
+            if items.len() != children.len() {
+                return Err(value_invariant());
+            }
+            items.copy_from_slice(children);
+        }
+        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
+            if fields.len() != children.len() {
+                return Err(value_invariant());
+            }
+            for (field, &child) in fields.iter_mut().zip(children) {
+                field.value = child;
             }
         }
-        (ResolvedPlaceProjection::Index(index), ConstValuePayload::Collection(mut items)) => {
-            let item = items.get_mut(*index).ok_or_else(|| {
-                unsupported_error(labels::PROJECTED_WRITE, metadata.span, write.string_table)
-            })?;
-            *item = assign_constant_projections_at(*item, rest, replacement, write, depth + 1)?;
-            ConstValuePayload::Collection(items)
+        ConstValuePayload::Coerced(inner) | ConstValuePayload::OptionSome(inner) => {
+            if children.len() != 1 {
+                return Err(value_invariant());
+            }
+            *inner = children[0];
         }
-        (ResolvedPlaceProjection::Field(_), ConstValuePayload::Coerced(inner)) => {
-            let updated =
-                assign_constant_projections_at(inner, projections, replacement, write, depth + 1)?;
-            return Ok(updated);
+        _ if !children.is_empty() => return Err(value_invariant()),
+        _ => {}
+    }
+    Ok(())
+}
+
+impl ConstInterpreter<'_> {
+    pub(super) fn bind_slot(
+        &mut self,
+        bindings: &mut FrameBindings,
+        path: PathId,
+        value: LiveValue,
+        permission: Permission,
+    ) -> Result<(), ConstantFoldError> {
+        self.validate_live_value(value, self.budget.span)?;
+        if !bindings.contains_key(&path) {
+            retain_scratch::<(PathId, LiveBinding)>(self.budget, 1)?;
         }
-        (ResolvedPlaceProjection::Index(_), ConstValuePayload::Coerced(inner)) => {
-            let updated =
-                assign_constant_projections_at(inner, projections, replacement, write, depth + 1)?;
-            return Ok(updated);
-        }
-        _ => {
+        let binding = self
+            .state
+            .storage
+            .bind_slot(value, permission, self.budget)?;
+        bindings.insert(path, binding);
+        Ok(())
+    }
+
+    pub(super) fn read_place(
+        &mut self,
+        place: LivePlace,
+        span: Option<SourceSpan>,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.state
+            .storage
+            .read(place, self.budget)?
+            .ok_or_else(|| unsupported_error(labels::PROJECTED_READ, span, self.string_table))
+    }
+
+    pub(super) fn validate_live_value(
+        &mut self,
+        value: LiveValue,
+        span: Option<SourceSpan>,
+    ) -> Result<(), ConstantFoldError> {
+        if !self.state.storage.validate_value(value, self.budget)? {
             return Err(unsupported_error(
-                labels::PROJECTED_WRITE,
-                metadata.span,
-                write.string_table,
+                labels::PROJECTED_READ,
+                span,
+                self.string_table,
             ));
         }
-    };
-    let precharged_index = write.constants.value_count();
-    let inserted = write
-        .constants
-        .insert_value(metadata, payload)
-        .map_err(ConstantFoldError::from)?;
-    write
-        .budget
-        .precharged_value_indices
-        .insert(precharged_index);
-    Ok(inserted)
+        Ok(())
+    }
+
+    pub(super) fn mutable_access_error(
+        &self,
+        root: PathId,
+        span: Option<SourceSpan>,
+    ) -> ConstantFoldError {
+        ConstantFoldError::Diagnostic(types_borrows_targets::invalid_mutable_access(
+            DiagnosticPlace::Path(root),
+            InvalidMutableAccessReason::ImmutablePlace,
+            None,
+            None,
+            span,
+        ))
+    }
+
+    pub(super) fn materialize_value(
+        &mut self,
+        shape: ConstValueId,
+        permission: Permission,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.materialize_at(shape, permission, 0)
+    }
+
+    fn materialize_at(
+        &mut self,
+        shape: ConstValueId,
+        permission: Permission,
+        depth: usize,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        let payload = self.constants.payload(shape).ok_or_else(value_invariant)?;
+        let count = child_count(payload);
+        let compound = matches!(
+            payload,
+            ConstValuePayload::Collection(_)
+                | ConstValuePayload::Record(_)
+                | ConstValuePayload::Choice { .. }
+                | ConstValuePayload::Coerced(_)
+                | ConstValuePayload::OptionSome(_)
+        );
+        if !compound {
+            return Ok(LiveValue::leaf(shape, permission));
+        }
+        self.budget.step()?;
+        check_depth(depth, self.budget.span)?;
+        retain_scratch::<LiveValue>(self.budget, count)?;
+        let mut children = Vec::with_capacity(count);
+        for index in 0..count {
+            let child = child_at(
+                self.constants.payload(shape).ok_or_else(value_invariant)?,
+                index,
+            )
+            .ok_or_else(value_invariant)?;
+            children.push(self.materialize_at(child, permission, depth + 1)?);
+        }
+        let mut result = self
+            .state
+            .storage
+            .allocate(shape, children.into_iter(), self.budget)?;
+        result.permission = permission;
+        Ok(result)
+    }
+
+    pub(super) fn copy_live_value(
+        &mut self,
+        value: LiveValue,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.copy_at(value, 0, &mut FxHashMap::default())
+    }
+
+    fn copy_at(
+        &mut self,
+        value: LiveValue,
+        depth: usize,
+        copies: &mut FxHashMap<AllocationId, LiveValue>,
+    ) -> Result<LiveValue, ConstantFoldError> {
+        self.budget.step()?;
+        check_depth(depth, self.budget.span)?;
+        self.validate_live_value(value, self.budget.span)?;
+        let Some(allocation) = value.allocation else {
+            return Ok(LiveValue::leaf(value.shape, Permission::Writable));
+        };
+        if let Some(&copy) = copies.get(&allocation) {
+            let mut copy = copy;
+            copy.shape = value.shape;
+            return Ok(copy);
+        }
+        let count = self.state.storage.children(allocation).len();
+        retain_scratch::<LiveValue>(self.budget, count)?;
+        let mut children = Vec::with_capacity(count);
+        for index in 0..count {
+            let child = self
+                .state
+                .storage
+                .children(allocation)
+                .nth(index)
+                .ok_or_else(value_invariant)?;
+            children.push(self.copy_at(child, depth + 1, copies)?);
+        }
+        let copy = self
+            .state
+            .storage
+            .allocate(value.shape, children.into_iter(), self.budget)?;
+        retain_scratch::<(AllocationId, LiveValue)>(self.budget, 1)?;
+        copies.insert(allocation, copy);
+        Ok(copy)
+    }
+
+    pub(super) fn freeze_live_value(
+        &mut self,
+        value: LiveValue,
+    ) -> Result<ConstValueId, ConstantFoldError> {
+        self.freeze_at(value, 0, &mut FxHashMap::default())
+    }
+
+    fn freeze_at(
+        &mut self,
+        value: LiveValue,
+        depth: usize,
+        frozen: &mut FxHashMap<(AllocationId, ConstValueId), ConstValueId>,
+    ) -> Result<ConstValueId, ConstantFoldError> {
+        self.budget.step()?;
+        check_depth(depth, self.budget.span)?;
+        self.validate_live_value(value, self.budget.span)?;
+        let Some(allocation) = value.allocation else {
+            return Ok(value.shape);
+        };
+        if let Some(&id) = frozen.get(&(allocation, value.shape)) {
+            return Ok(id);
+        }
+        let payload = self
+            .constants
+            .payload(value.shape)
+            .ok_or_else(value_invariant)?;
+        let count = self.state.storage.children(allocation).len();
+        if !matches!(payload, ConstValuePayload::Collection(_)) && count != child_count(payload) {
+            return Err(value_invariant());
+        }
+        retain_scratch::<ConstValueId>(self.budget, count)?;
+        let mut children = Vec::with_capacity(count);
+        for index in 0..count {
+            let child = self
+                .state
+                .storage
+                .children(allocation)
+                .nth(index)
+                .ok_or_else(value_invariant)?;
+            children.push(self.freeze_at(child, depth + 1, frozen)?);
+        }
+        let payload = self
+            .constants
+            .payload(value.shape)
+            .ok_or_else(value_invariant)?;
+        let bytes = match payload {
+            ConstValuePayload::Collection(_) => 0,
+            ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => fields
+                .len()
+                .saturating_mul(std::mem::size_of::<ConstValueField>()),
+            _ => 0,
+        };
+        retain_scratch::<ConstValue>(self.budget, 1)?;
+        if !matches!(payload, ConstValuePayload::Collection(_)) {
+            self.budget.retain_values(count, self.budget.span)?;
+        }
+        self.budget.retain_memory_bytes(bytes, self.budget.span)?;
+        let payload = if matches!(payload, ConstValuePayload::Collection(_)) {
+            ConstValuePayload::Collection(children)
+        } else {
+            let mut payload = payload.clone();
+            replace_children(&mut payload, &children)?;
+            payload
+        };
+        let metadata = self
+            .constants
+            .metadata(value.shape)
+            .ok_or_else(value_invariant)?
+            .clone();
+        let index = self.constants.value_count();
+        let result = self.constants.insert_value(metadata, payload)?;
+        register_precharged_value(self.constants, self.string_table, index, self.budget)?;
+        retain_scratch::<((AllocationId, ConstValueId), ConstValueId)>(self.budget, 1)?;
+        frozen.insert((allocation, value.shape), result);
+        Ok(result)
+    }
+
+    pub(super) fn fold_live_expression(
+        &mut self,
+        expression: ExprId,
+        children: &[LiveValue],
+        dec_depth: u32,
+        bindings: &mut FrameBindings,
+    ) -> Result<Option<LiveValue>, ConstantFoldError> {
+        let mut inline = [None; 2];
+        if children.len() <= inline.len() {
+            return self.fold_live_operands(
+                expression,
+                children,
+                &mut inline[..children.len()],
+                dec_depth,
+                bindings,
+            );
+        }
+        let mut bytes = 0;
+        let result = (|| {
+            self.budget.charge_scratch(
+                &mut bytes,
+                std::mem::size_of::<Option<ConstValueId>>() * children.len(),
+            )?;
+            let mut operands = vec![None; children.len()];
+            self.fold_live_operands(expression, children, &mut operands, dec_depth, bindings)
+        })();
+        self.budget.release_memory_bytes(bytes);
+        result
+    }
+
+    fn fold_live_operands(
+        &mut self,
+        expression: ExprId,
+        children: &[LiveValue],
+        operands: &mut [Option<ConstValueId>],
+        dec_depth: u32,
+        bindings: &mut FrameBindings,
+    ) -> Result<Option<LiveValue>, ConstantFoldError> {
+        self.budget.step()?;
+        let span = self.builder.view(expression)?.span();
+        for (operand, &child) in operands.iter_mut().zip(children) {
+            self.validate_live_value(child, span)?;
+            *operand = Some(child.shape);
+        }
+        // These completed constructors allocate one staged row and a known-size payload.
+        // Charge before the folder builds them, then exclude the promoted row from the scan.
+        let view = self.builder.view(expression)?;
+        let constructor_slots = match view.operation() {
+            ExpressionOperationView::Collection(_) => {
+                Some((children.len(), std::mem::size_of::<ConstValueId>()))
+            }
+            ExpressionOperationView::Struct { .. } | ExpressionOperationView::Choice { .. } => {
+                Some((children.len(), std::mem::size_of::<ConstValueField>()))
+            }
+            ExpressionOperationView::Range { .. } => Some((2, std::mem::size_of::<ConstValueId>())),
+            ExpressionOperationView::Coerce {
+                operation: CoercionOperation::ToType(_),
+                ..
+            } => Some((1, std::mem::size_of::<ConstValueId>())),
+            _ => None,
+        };
+        let constructor_slots = if matches!(view.success_shape(), SuccessShape::One(_)) {
+            constructor_slots
+        } else {
+            None
+        };
+        if let Some((count, slot_bytes)) = constructor_slots {
+            self.budget.retain_values(count.saturating_add(1), span)?;
+            self.budget.retain_memory_bytes(
+                std::mem::size_of::<ConstValue>().saturating_add(count.saturating_mul(slot_bytes)),
+                span,
+            )?;
+        }
+        let value_count = self.constants.value_count();
+        let result = fold_completed_content(
+            expression,
+            self.builder,
+            self.constants,
+            FoldServices::new(
+                self.string_table,
+                Some(self.scope),
+                Some(self.scope.external_package_registry.as_ref()),
+            )
+            .recover_cast_failure(self.state.active_handler.body.is_some()),
+            self.types,
+            operands,
+            dec_depth,
+        )?;
+        if constructor_slots.is_some()
+            && matches!(&result, ConstantValueFold::Value(value) if value.index() == value_count)
+        {
+            register_precharged_value(self.constants, self.string_table, value_count, self.budget)?;
+        }
+        charge_new_value_text(self.constants, self.string_table, value_count, self.budget)?;
+        let shape = match result {
+            ConstantValueFold::Value(value) => value,
+            ConstantValueFold::NotConstant => return Ok(None),
+            ConstantValueFold::Refused(ConstantFoldRefusalReason::CastConversion {
+                error,
+                span,
+                ..
+            }) => {
+                self.execute_builtin_handler(error.code, Some(error.message), span, bindings)?;
+                return Ok(None);
+            }
+            ConstantValueFold::Refused(reason) => {
+                return Err(ConstantFoldError::Diagnostic(reason.into_draft()));
+            }
+        };
+        // Constructors retain their ordered live children. The folded row owns
+        // type and provenance, not a snapshot of the current allocation graph.
+        let value = match self.builder.view(expression)?.operation() {
+            ExpressionOperationView::Struct { .. }
+            | ExpressionOperationView::Choice { .. }
+            | ExpressionOperationView::Collection(_)
+            | ExpressionOperationView::Coerce { .. } => {
+                self.state
+                    .storage
+                    .allocate(shape, children.iter().copied(), self.budget)?
+            }
+            _ => self.materialize_value(shape, Permission::Writable)?,
+        };
+        Ok(Some(value))
+    }
+}
+
+/// Preflight an occurrence-specific row before the shared store clones its payload.
+pub(super) fn attach_live_provenance(
+    constants: &mut ConstValueStore,
+    string_table: &StringTable,
+    budget: &mut ExecutionBudget,
+    value: ConstValueId,
+    provenance: &SyntheticInterfaceProvenance,
+) -> Result<ConstValueId, ConstantFoldError> {
+    if provenance.is_empty() {
+        return Ok(value);
+    }
+    let metadata = constants.metadata(value).ok_or_else(value_invariant)?;
+    if provenance.is_subset_of(&metadata.synthetic_interface_provenance) {
+        return Ok(value);
+    }
+    let (bytes, slots) = value_own_allocation(constants, string_table, value);
+    budget.retain_memory_bytes(bytes, budget.span)?;
+    budget.retain_values(slots, budget.span)?;
+    let index = constants.value_count();
+    let value = constants.with_synthetic_interface_provenance(value, provenance)?;
+    register_precharged_value(constants, string_table, index, budget)?;
+    Ok(value)
 }
 
 impl ConstInterpreter<'_> {
@@ -242,21 +567,13 @@ impl ConstInterpreter<'_> {
     pub(super) fn constant_field_projection(
         &self,
         expression: ExprId,
-        bindings: &FrameBindings,
     ) -> Result<Option<ProjectedConstant>, ConstantFoldError> {
         let view = self.builder.view(expression)?;
         let ExpressionOperationView::FieldAccess { base, field } = view.operation() else {
             return Ok(None);
         };
-        let base_value = match base.operation() {
-            ExpressionOperationView::Constant(value) => value,
-            ExpressionOperationView::Reference(path) => {
-                let Some(value) = bindings.get(&path) else {
-                    return Ok(None);
-                };
-                *value
-            }
-            _ => return Ok(None),
+        let ExpressionOperationView::Constant(base_value) = base.operation() else {
+            return Ok(None);
         };
         let Some(value) = self
             .constants
@@ -295,7 +612,7 @@ impl ConstInterpreter<'_> {
             .recover_cast_failure(self.state.active_handler.body.is_some()),
             self.types,
             FoldRequirement::Required,
-            |path| bindings.get(&path).copied(),
+            |_| None,
         )? {
             ConstantValueFold::Value(value) => value,
             ConstantValueFold::NotConstant => return Ok(None),
@@ -382,7 +699,7 @@ pub(super) fn validate_call_results(
     constants: &ConstValueStore,
     call_types: &[TypeId],
     return_types: &[TypeId],
-    slots: &[ConstValueId],
+    slots: &[LiveValue],
 ) -> Result<(), ConstantFoldError> {
     if call_types != return_types || call_types.len() != slots.len() {
         return Err(InfrastructureFailure::internal(
@@ -392,7 +709,11 @@ pub(super) fn validate_call_results(
         .into());
     }
     for (&value, &expected) in slots.iter().zip(call_types) {
-        if constants.metadata(value).map(|metadata| metadata.type_id) != Some(expected) {
+        if constants
+            .metadata(value.shape)
+            .map(|metadata| metadata.type_id)
+            != Some(expected)
+        {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
                 "const function returned a value whose stored type disagreed with its result slot",

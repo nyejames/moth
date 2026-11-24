@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " const_length=1 const_removed=1 runtime_length=1 runtime_removed=1"
+rendered_output_exact = " const_length=1 const_removed=1 runtime_length=1 runtime_removed=1 const_detached=220 runtime_detached=220 const_visits=30 runtime_visits=30"

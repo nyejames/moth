@@ -3420,6 +3420,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
             vec![ConstructorField {
                 name: field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: expressions.own(value),
             }],
             struct_type_id,
@@ -3474,6 +3475,7 @@ fn rejects_const_record_struct_instance_runtime_lowering() {
             vec![ConstructorField {
                 name: field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value,
             }],
             const_record_type_id,

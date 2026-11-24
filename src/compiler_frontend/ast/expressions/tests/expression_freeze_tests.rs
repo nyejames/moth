@@ -502,6 +502,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
         value,
         target_param: None,
         parameter_slot: None,
+        authored_ordinal: None,
         access_mode: CallAccessMode::Shared,
         passing_mode: CallPassingMode::Shared,
         span: None,
@@ -553,6 +554,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
             vec![ConstructorField {
                 name: PathId::ROOT,
                 slot: 0,
+                authored_ordinal: None,
                 value: leaf,
             }],
             None,
@@ -563,6 +565,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
             vec![ConstructorField {
                 name: PathId::ROOT,
                 slot: 2,
+                authored_ordinal: None,
                 value: call_root,
             }],
             None,

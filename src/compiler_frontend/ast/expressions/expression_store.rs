@@ -226,6 +226,7 @@ pub(crate) struct ResolvedArgument<E = ExprId> {
     pub value: E,
     pub target_param: Option<StringId>,
     pub parameter_slot: Option<u32>,
+    pub authored_ordinal: Option<std::num::NonZeroU32>,
     pub access_mode: CallAccessMode,
     pub passing_mode: CallPassingMode,
     pub span: Option<SourceSpan>,
@@ -237,6 +238,7 @@ pub(crate) struct ResolvedArgument<E = ExprId> {
 pub(crate) struct ConstructorField<E = ExprId> {
     pub name: PathId,
     pub slot: u32,
+    pub authored_ordinal: Option<std::num::NonZeroU32>,
     pub value: E,
 }
 #[derive(Clone, Debug)]
@@ -1032,6 +1034,7 @@ append_range!(
         value: value.value.id(),
         target_param: value.target_param,
         parameter_slot: value.parameter_slot,
+        authored_ordinal: value.authored_ordinal,
         access_mode: value.access_mode,
         passing_mode: value.passing_mode,
         span: value.span,
@@ -1051,6 +1054,7 @@ append_range!(
     |value: ConstructorField<OwnedExpr>| ConstructorField {
         name: value.name,
         slot: value.slot,
+        authored_ordinal: value.authored_ordinal,
         value: value.value.id(),
     }
 );

@@ -16,7 +16,6 @@ pub(super) const CONTENT_REFERENCE: &str = "content reference";
 pub(super) const ZERO_SUCCESS_RESULTS: &str = "with zero success results";
 
 /// Executed operations the interpreter reaches beyond its representable value vocabulary.
-pub(super) const PROJECTED_WRITE: &str = "projected write";
 pub(super) const PROJECTED_READ: &str = "projected read";
 pub(super) const PLACE_PROJECTION: &str = "place projection";
 pub(super) const ASSIGNMENT_TARGET: &str = "assignment target";
@@ -25,7 +24,6 @@ pub(super) const CONDITION: &str = "condition";
 pub(super) const MATCH_PATTERN: &str = "match pattern";
 pub(super) const WITHOUT_FINAL_RETURN: &str = "without a final return";
 pub(super) const VALUE_EXPRESSION: &str = "value expression";
-pub(super) const TEMPLATE_VALUE: &str = "template value";
 pub(super) const REQUIRED_CALL: &str = "required call";
 
 /// Fallible collection operations and the handler contract they need.

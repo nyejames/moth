@@ -2,7 +2,7 @@
 //!
 //! WHAT: owns the executable row, the preparation entry points and this module map. Sibling
 //!       modules compile bodies, rewrite required source calls and run the bounded typed-AST
-//!       frame machine over `ConstValueStore` values.
+//!       frame machine over live storage and immutable `ConstValueStore` payloads.
 //! WHY: constant initializers and required calls fold during environment construction, before
 //!      HIR exists. The typed AST body and the canonical expression store are the only available
 //!      representation at that boundary, so execution stays over that typed vocabulary and never
@@ -26,20 +26,19 @@
 //! - `labels`: the operation names shared by classification and execution refusals.
 //! - `state`: the interpreter's borrowed service context, live execution state and handler
 //!   snapshots.
+//! - `storage`: bounded dynamic binding cells, aggregate edges and access permissions.
 //! - `execute`: the one executed-frame machine, including expression evaluation,
 //!   range/collection bindings and the TIR template adapter.
 //! - `matching`: match arm selection over the AST's resolved patterns, guards and captures.
-//! - `places`: interpreted aliases, projected reads and writes, collection mutation and fallible
-//!   handler execution.
+//! - `places`: typed place resolution, collection operations and fallible handler execution.
 //! - `values`: constant folding and projection/index helpers, error constructors and
 //!   expression-with-value construction.
 //! - `budget`: limits, meters and allocation charging. It answers how much work an attempt may
 //!   still spend; live interpreter state belongs to `state`.
 //!
-//! Data flow: `executable_for_const_declaration` compiles and validates one declaration; the
-//! rewrite layer replaces a call with a constant by evaluating the callee through `execute`;
-//! `execute` reads and writes interpreted state through `places`; rewrite, execute and places all
-//! use the shared value helpers, instruction vocabulary and budget owned by this module tree.
+//! Data flow: `executable_for_const_declaration` compiles and validates one declaration;
+//! the frame machine returns ordered live values. The rewrite layer freezes a result only
+//! when an AST consumer needs a replacement. Place operations share the attempt-local arena.
 //! There is exactly one `ConstFunctionExecutable`, one eligibility policy and one executed-frame
 //! machine.
 
@@ -54,12 +53,13 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateOutputLimits, TemplateOutputMeter, TemplateWorkBudget,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 mod budget;
@@ -71,6 +71,7 @@ mod matching;
 mod places;
 mod rewrite;
 mod state;
+mod storage;
 mod values;
 
 pub(crate) use eligibility::const_body_rejection_diagnostic;
@@ -94,6 +95,7 @@ pub(crate) struct ConstBodyRejection {
 #[derive(Debug)]
 pub(crate) enum ConstBodyPreparationError {
     Unsupported(ConstBodyRejection),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
@@ -129,13 +131,6 @@ impl ConstFunctionExecutable {
 enum ResolvedPlaceProjection {
     Field(StringId),
     Index(usize),
-}
-
-/// One mutable alias target: a canonical binding root and the projections copied from its place.
-#[derive(Clone, Debug)]
-struct AliasTarget {
-    root: PathId,
-    projections: Vec<ResolvedPlaceProjection>,
 }
 
 /// One constant value with its completed type, span and authored value mode.
