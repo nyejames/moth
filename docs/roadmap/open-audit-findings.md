@@ -8,7 +8,7 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-None.
+- [AUD-0027: Host contract redundancy](./audits/open_audits/AUD-0027-host-contract-redundancy.md)
 
 ## Candidate findings
 
