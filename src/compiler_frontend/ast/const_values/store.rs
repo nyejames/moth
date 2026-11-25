@@ -267,7 +267,8 @@ pub(crate) enum ConstValuePayload {
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValue {
     pub(crate) metadata: ConstValueMetadata,
-    pub(crate) payload: ConstValuePayload,
+    payload: Option<ConstValuePayload>,
+    shared_allocation: Option<ConstValueId>,
 }
 
 /// Borrowed postorder shape passed to public and HIR consumers.
@@ -406,7 +407,10 @@ impl ConstValueCandidate<'_> {
     }
 
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
-        self.value(id).map(|value| &value.payload)
+        let value = self.value(id)?;
+        value.payload.as_ref().or_else(|| {
+            self.value(value.shared_allocation?)?.payload.as_ref()
+        })
     }
 
     pub(crate) fn insert_value(
@@ -418,7 +422,42 @@ impl ConstValueCandidate<'_> {
         let index =
             checked_const_value_index(self.prefix.values.len(), self.values.len(), metadata.span)?;
         let id = ConstValueId(index);
-        self.values.push(ConstValue { metadata, payload });
+        self.values.push(ConstValue {
+            metadata,
+            payload: Some(payload),
+            shared_allocation: None,
+        });
+        Ok(id)
+    }
+
+    /// Mark a staged row as the unique definition of a live allocation.
+    pub(crate) fn mark_shared_allocation(
+        &mut self,
+        id: ConstValueId,
+    ) -> Result<(), ConstValueStoreError> {
+        let index = id.index().checked_sub(self.prefix.values.len())
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is not staged."))?;
+        let value = self.values.get_mut(index)
+            .filter(|value| value.payload.is_some())
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is missing."))?;
+        value.shared_allocation = Some(id);
+        Ok(())
+    }
+
+    /// Preserve occurrence metadata without copying the shared definition's payload.
+    pub(crate) fn insert_shared_occurrence(
+        &mut self,
+        metadata: ConstValueMetadata,
+        definition: ConstValueId,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let value = self.value(definition)
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is missing."))?;
+        if value.shared_allocation != Some(definition) || value.payload.is_none() {
+            return Err(ingest_invariant("Shared allocation has no owned definition."));
+        }
+        let index = checked_const_value_index(self.prefix.values.len(), self.values.len(), metadata.span)?;
+        let id = ConstValueId(index);
+        self.values.push(ConstValue { metadata, payload: None, shared_allocation: Some(definition) });
         Ok(id)
     }
 
@@ -447,10 +486,15 @@ impl ConstValueCandidate<'_> {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, provenance) else {
+        let Some(metadata) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
-        self.insert_value(metadata, payload)
+        if let Some(definition) = stored.shared_allocation {
+            self.insert_shared_occurrence(metadata, definition)
+        } else {
+            let payload = stored.payload.as_ref().expect("ordinary value owns its payload").clone();
+            self.insert_value(metadata, payload)
+        }
     }
 
     /// Attach provenance to a completed root, which is the only consumer of its staged row.
@@ -459,6 +503,9 @@ impl ConstValueCandidate<'_> {
         id: ConstValueId,
         provenance: &SyntheticInterfaceProvenance,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        if self.value(id).is_some_and(|value| value.shared_allocation.is_some()) {
+            return self.with_value_provenance(id, Some(provenance));
+        }
         if let Some(index) = id.index().checked_sub(self.prefix.values.len()) {
             let value = self.values.get_mut(index).ok_or_else(|| {
                 InfrastructureFailure::internal(
@@ -485,9 +532,8 @@ impl ConstValueCandidate<'_> {
 fn occurrence_copy(
     stored: &ConstValue,
     provenance: Option<&SyntheticInterfaceProvenance>,
-) -> Option<(ConstValueMetadata, ConstValuePayload)> {
-    let metadata = stored.metadata.with_occurrence_provenance(provenance?)?;
-    Some((metadata, stored.payload.clone()))
+) -> Option<ConstValueMetadata> {
+    stored.metadata.with_occurrence_provenance(provenance?)
 }
 
 fn visit_payload_children(payload: &ConstValuePayload, mut visitor: impl FnMut(ConstValueId)) {
@@ -570,6 +616,7 @@ enum FoldFrame<'a> {
     Field(ConstValueId),
     Finish {
         value: &'a ConstValue,
+        payload: &'a ConstValuePayload,
         result_start: usize,
     },
 }
@@ -774,11 +821,19 @@ impl ConstValueStore {
                 continue;
             }
             live[index] = true;
-            visit_payload_children(&values[index].payload, |child| {
-                if child.index() >= prefix_len {
-                    pending.push(child);
-                }
-            });
+            if let Some(definition) = values[index].shared_allocation
+                && definition.index() >= prefix_len
+                && definition != id
+            {
+                pending.push(definition);
+            }
+            if let Some(payload) = &values[index].payload {
+                visit_payload_children(payload, |child| {
+                    if child.index() >= prefix_len {
+                        pending.push(child);
+                    }
+                });
+            }
         }
         let live_count = live.iter().filter(|&&live| live).count();
         checked_const_value_index(
@@ -793,13 +848,25 @@ impl ConstValueStore {
             if !live[index] {
                 continue;
             }
-            remap_payload_children(&mut value.payload, |child| {
-                if child.index() >= prefix_len {
-                    *child = remapped[child.index() - prefix_len]
-                        .expect("validated backwards edge has a live promoted child");
-                }
-            });
+            if let Some(payload) = &mut value.payload {
+                remap_payload_children(payload, |child| {
+                    if child.index() >= prefix_len {
+                        *child = remapped[child.index() - prefix_len]
+                            .expect("validated backwards edge has a live promoted child");
+                    }
+                });
+            }
             let id = ConstValueId(self.values.len() as u32);
+            if let Some(definition) = &mut value.shared_allocation
+                && definition.index() >= prefix_len
+            {
+                *definition = if definition.index() - prefix_len == index {
+                    id
+                } else {
+                    remapped[definition.index() - prefix_len]
+                        .expect("shared definition precedes its occurrence")
+                };
+            }
             self.values.push(value);
             remapped[index] = Some(id);
         }
@@ -899,7 +966,7 @@ impl ConstValueStore {
         validate_payload_children(&payload, |id| self.value(id).is_some())?;
         let index = checked_const_value_index(self.values.len(), 0, metadata.span)?;
         let id = ConstValueId(index);
-        self.values.push(ConstValue { metadata, payload });
+        self.values.push(ConstValue { metadata, payload: Some(payload), shared_allocation: None });
         Ok(id)
     }
 
@@ -978,10 +1045,18 @@ impl ConstValueStore {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, provenance) else {
+        let Some(metadata) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
-        self.insert_value(metadata, payload)
+        if let Some(definition) = stored.shared_allocation {
+            let index = checked_const_value_index(self.values.len(), 0, metadata.span)?;
+            let id = ConstValueId(index);
+            self.values.push(ConstValue { metadata, payload: None, shared_allocation: Some(definition) });
+            Ok(id)
+        } else {
+            let payload = stored.payload.as_ref().expect("ordinary value owns its payload").clone();
+            self.insert_value(metadata, payload)
+        }
     }
 
     /// Finalisation reads bound edges directly. Ordinary constant occurrences reuse content.
@@ -1255,7 +1330,18 @@ impl ConstValueStore {
     }
 
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
-        self.value(id).map(|value| &value.payload)
+        let value = self.value(id)?;
+        value.payload.as_ref().or_else(|| self.value(value.shared_allocation?)?.payload.as_ref())
+    }
+
+    /// Payload owned by this row, excluding any shared definition it references.
+    pub(crate) fn owned_payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
+        self.value(id)?.payload.as_ref()
+    }
+
+    /// Identity of the allocation definition shared by this row, if any.
+    pub(crate) fn shared_allocation(&self, id: ConstValueId) -> Option<ConstValueId> {
+        self.value(id)?.shared_allocation
     }
 
     /// Whether a stored value is a `$in` helper, after walking transparent `Coerced` wrappers.
@@ -1377,9 +1463,10 @@ impl ConstValueStore {
             let (value, visit) = match frame {
                 FoldFrame::Finish {
                     value,
+                    payload,
                     result_start,
                 } => {
-                    let visit = match &value.payload {
+                    let visit = match payload {
                         ConstValuePayload::Collection(items) => {
                             if results.len().checked_sub(result_start) != Some(items.len()) {
                                 return Err(fold_stack_error::<E>());
@@ -1447,7 +1534,8 @@ impl ConstValueStore {
                         _ => fold_value_missing_error::<E>(id),
                     })?;
                     let result_start = results.len();
-                    let visit = match &value.payload {
+                    let payload = self.payload(id).ok_or_else(|| fold_value_missing_error::<E>(id))?;
+                    let visit = match payload {
                         ConstValuePayload::Number(number) => ConstValueVisit::Number(number),
                         ConstValuePayload::FixedScalar(scalar) => {
                             ConstValueVisit::FixedScalar(*scalar)
@@ -1465,6 +1553,7 @@ impl ConstValueStore {
                         ConstValuePayload::Collection(items) => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.extend(items.iter().rev().copied().map(FoldFrame::Visit));
@@ -1475,6 +1564,7 @@ impl ConstValueStore {
                         | ConstValuePayload::Choice { fields, .. } => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.extend(
@@ -1489,6 +1579,7 @@ impl ConstValueStore {
                         ConstValuePayload::Range { start, end } => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.push(FoldFrame::Visit(*end));
@@ -1500,6 +1591,7 @@ impl ConstValueStore {
                         | ConstValuePayload::OptionSome(child) => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.push(FoldFrame::Visit(*child));

@@ -423,7 +423,7 @@ impl StructuralConstness<'_> {
                 let expression = self.expressions.view(*scrutinee)?;
                 let decidable = match expression.operation() {
                     ExpressionOperationView::Constant(id) => matches!(
-                        self.const_values.value(id).map(|value| &value.payload),
+                        self.const_values.payload(id),
                         Some(
                             ConstValuePayload::OptionNone
                                 | ConstValuePayload::OptionSome(_)
@@ -491,7 +491,7 @@ pub(crate) fn const_conditional_loop_condition_value(
         condition = value;
     }
     match condition.operation() {
-        ExpressionOperationView::Constant(id) => match &const_values.value(id)?.payload {
+        ExpressionOperationView::Constant(id) => match const_values.payload(id)? {
             ConstValuePayload::Bool(value) => Some(*value),
             _ => None,
         },

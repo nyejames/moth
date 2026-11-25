@@ -7,6 +7,7 @@ use super::budget::{
 use super::instructions::{ConstInstruction, ConstInstructionKind};
 use super::rewrite::inherit_replaced_provenance;
 use super::state::{ActiveHandler, ConstExecutionServices, ExecutionState, FrameBindings};
+use super::storage::LiveValue;
 use super::*;
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetUnit, ConstantFoldError,
@@ -51,6 +52,116 @@ fn inline_span(offset: u32, length: u32) -> SourceSpan {
         SourceId::COMPILATION_ROOT,
         LocalSpan::exact_inline(offset, length).expect("a short authored span is inline-encodable"),
     )
+}
+
+#[test]
+fn const_freeze_groups_slots_and_keeps_distinct_allocations_distinct() {
+    use super::storage::Permission;
+
+    let mut constants = ConstValueStore::default();
+    let leaf = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None,
+    ).expect("leaf");
+    let shape = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Collection(vec![leaf]), None,
+    ).expect("collection shape");
+    let alternate_shape = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Collection(vec![leaf]), None,
+    ).expect("alternate occurrence shape");
+    let mut budget = ExecutionBudget::new(constants.execution_meter());
+    let mut state = ExecutionState::default();
+    let item = LiveValue::leaf(leaf, Permission::Writable);
+    let first = state.storage.allocate(shape, [item].into_iter(), &mut budget).expect("first allocation");
+    let second = state.storage.allocate(shape, [item].into_iter(), &mut budget).expect("second allocation");
+    let mut occurrence = first;
+    occurrence.shape = alternate_shape;
+    let mut builder = AstExpressionBuilder::new().expect("builder");
+    let mut strings = StringTable::new();
+    let scope = empty_module_scope();
+    let paths = PathInternerFork::empty();
+    let types = TypeEnvironment::default();
+    let executables = FxHashMap::default();
+    let mut services = ConstExecutionServices {
+        builder: &mut builder, constants: &mut constants, executables: &executables,
+        scope: &scope, string_table: &mut strings, types: &types, path_fork: &paths,
+    };
+    let roots = services.interpreter(&mut budget, &mut state)
+        .freeze_live_values(&[first, first, second, occurrence]).expect("freeze ordered slots");
+    assert_eq!(roots[0], roots[1], "one live allocation has one definition across slots");
+    assert_ne!(roots[0], roots[2], "equal distinct allocations must not merge");
+    assert_ne!(roots[0], roots[3], "a different occurrence shape has its own row");
+    assert_eq!(constants.shared_allocation(roots[3]), Some(roots[0]));
+    assert!(constants.owned_payload(roots[3]).is_none());
+}
+
+#[test]
+fn const_freeze_failure_in_later_slot_preserves_the_existing_store() {
+    use super::storage::Permission;
+
+    let mut constants = ConstValueStore::default();
+    let leaf = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None,
+    ).expect("existing leaf");
+    let shape = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Collection(vec![leaf]), None,
+    ).expect("existing shape");
+    let mut budget = ExecutionBudget::new(constants.execution_meter());
+    let mut state = ExecutionState::default();
+    let item = LiveValue::leaf(leaf, Permission::Writable);
+    let first = state.storage.allocate(shape, [item].into_iter(), &mut budget).expect("first allocation");
+    let second = state.storage.allocate(shape, [item].into_iter(), &mut budget).expect("second allocation");
+    let original_count = constants.value_count();
+    budget.retained_values = MAX_RETAINED_VALUES - 5;
+    let mut builder = AstExpressionBuilder::new().expect("builder");
+    let mut strings = StringTable::new();
+    let scope = empty_module_scope();
+    let paths = PathInternerFork::empty();
+    let types = TypeEnvironment::default();
+    let executables = FxHashMap::default();
+    let mut services = ConstExecutionServices {
+        builder: &mut builder, constants: &mut constants, executables: &executables,
+        scope: &scope, string_table: &mut strings, types: &types, path_fork: &paths,
+    };
+    assert!(services.interpreter(&mut budget, &mut state)
+        .freeze_live_values(&[first, second]).is_err());
+    assert_eq!(constants.value_count(), original_count);
+    assert!(matches!(constants.payload(leaf), Some(ConstValuePayload::Bool(true))));
+    assert!(matches!(constants.payload(shape), Some(ConstValuePayload::Collection(_))));
+}
+
+#[test]
+fn const_freeze_rejects_exponential_occurrences_before_publication() {
+    use super::storage::Permission;
+
+    let mut constants = ConstValueStore::default();
+    let leaf = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None,
+    ).expect("leaf");
+    let shape = constants.insert_resolved(
+        builtin_type_ids::BOOL, ConstValuePayload::Collection(vec![leaf, leaf]), None,
+    ).expect("collection shape");
+    let mut budget = ExecutionBudget::new(constants.execution_meter());
+    let mut state = ExecutionState::default();
+    let mut value = LiveValue::leaf(leaf, Permission::Writable);
+    for _ in 0..20 {
+        value = state.storage.allocate(shape, [value, value].into_iter(), &mut budget)
+            .expect("compact repeated-child graph");
+    }
+    let original_count = constants.value_count();
+    let mut builder = AstExpressionBuilder::new().expect("builder");
+    let mut strings = StringTable::new();
+    let scope = empty_module_scope();
+    let paths = PathInternerFork::empty();
+    let types = TypeEnvironment::default();
+    let executables = FxHashMap::default();
+    let mut services = ConstExecutionServices {
+        builder: &mut builder, constants: &mut constants, executables: &executables,
+        scope: &scope, string_table: &mut strings, types: &types, path_fork: &paths,
+    };
+    let error = services.interpreter(&mut budget, &mut state)
+        .freeze_live_values(&[value]).expect_err("expanded graph exceeds retained-value limit");
+    assert!(matches!(error, ConstantFoldError::Budget(_)));
+    assert_eq!(constants.value_count(), original_count);
 }
 
 #[test]

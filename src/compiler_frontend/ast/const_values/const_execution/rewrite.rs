@@ -945,10 +945,7 @@ impl RewriteWalk<'_, '_> {
             self.push_live_result(value)?;
             return Ok(None);
         }
-        let mut frozen = Vec::with_capacity(returns.len());
-        for value in returns {
-            frozen.push(self.interpreter.freeze_live_value(value)?);
-        }
+        let frozen = self.interpreter.freeze_live_values(&returns)?;
         let replacement = commit_call_result(
             self.interpreter.builder,
             expression,
