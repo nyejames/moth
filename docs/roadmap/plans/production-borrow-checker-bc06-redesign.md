@@ -14,10 +14,10 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
 | Candidate | Uncommitted holder-edge diff on that base: 9 files, +697/-63, preserved locally as `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). No untracked files outside the ignored `tmp/`. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
-| Sessions complete | 1 (Sections 1-2: evidence and witnesses) |
-| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They also keep a removed element's edge. See [Session 1 conclusions](#session-1-conclusions). |
-| Next task | Section 3: trace local transfer, liveness and publication against the same witnesses and write the fact-lifetime ledger. |
-| Next unanswered question | Which cell identity must an edge carry so that exact field replacement and successful `remove` can retire it, and which fact consumers still read the retired state? |
+| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger) |
+| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Published facts are recorded at the event, so retiring a binding is safe only after nothing reachable still names its identity. See [Session 1 conclusions](#session-1-conclusions) and [Section 3 conclusions](#section-3-conclusions). |
+| Next task | Section 4: trace one result through a real call, the public summary and the publication boundaries, using W7 and the `retain` twin. |
+| Next unanswered question | What is the smallest summary that keeps per-exit, per-field correlation for `select`, and how does it substitute the same actual twice? |
 
 ## 1. Evidence inventory
 
@@ -224,11 +224,108 @@ W1 rejects for the right reason. W1c exposes the second faulty event at line 7: 
 4. The candidate's `Fresh`-to-`AliasParams` change for constructed returns fixes a real ordinary unsound accept that's independent of C4. Any design keeps that rule or replaces it with something stronger.
 5. The `html_wasm` hashmap verdict needs an owner decision on the manifest once the design lands. A borrow rejection now precedes the capability error.
 
+## 3. Local transfer, liveness and publication
+
+Four read-only traces of the baseline (`git show 7cc05c61b:<path>`) and the candidate fed this section. Paths are relative to `src/compiler_frontend/analysis/borrow_checker/` unless stated. Line numbers refer to the candidate working tree.
+
+### Places and writes
+
+- A HIR place is `HirPlace { root: LocalId, projections }` (`hir/places.rs`). Projections are `Field(FieldId)` or `Index(HirValueId)` only. Options are values (`VariantConstruct`, `VariantPayloadGet`), never place steps. Authored source can't write an index place: collection writes go through `.set`.
+- Projections never reach checker state. `roots_for_place` (`transfer/access.rs`) returns `effective_roots(root)` and ignores the projection. `place_cell_root` only accepts an unprojected `SLOT`. Every `RootSet` is a bitmask over function-local binding indices. The candidate's `stored_field_roots` records only that a value came through *some* projection of a root.
+- The baseline's projected write (`~root.inner = X`) checks and records the root's cells and value roots and changes no state. The candidate checks with `AliasExclusivity::FieldCell`, then unions `X`'s children into the root's stored sets. Edges only grow.
+- Whole-binding replacement is the one strong update. `apply_slot_rebinding` clears all four baseline sets. The candidate calls `retarget_stored_root` first, so other holders move their edge to a remaining holder or drop it. A joined `SLOT|ALIAS` state and a write through a mutable alias union into the referent's cells and don't retarget. Self-assignment (`~x = x`) changes nothing in either tree.
+
+### Stored values and calls
+
+- Collection builtins are ordinary `CallTarget::External` calls whose access and return alias come from `ExternalFunctionDef` (`builder_surface/core_packages/collections.rs`). `get` returns `AliasArgs([0])`, so the result aliases the receiver. `push`, `set` and `remove` take a mutable receiver and return `Fresh`. Maps use `HirMapOp` directly with the same shape. The candidate's `CallStorage` is the only checker code that reads `CollectionBuiltinOp`.
+- Fallible map calls lower to `HirFallibleOperation::MapOp`. Fallible collection calls take the external result-call route. Both become `Invoke`. `engine.rs::apply_invoke_edge_transfer` resets every result local, then installs the captured results on the success edge and a fresh slot for the error value on the failure edge. Argument effects, and the candidate's stored-into-receiver edges, happen before the split, so they reach both edges.
+- No code in either tree cuts a receiver's edge on `remove`, `clear` or a failed store. The candidate copies the receiver's children onto a removed result and leaves the receiver unchanged.
+- `tests/borrow_checker_fact_tests.rs::map_remove_result_is_fresh_owned` removes a string. It asserts that the result is a `SLOT`, not an `ALIAS`, that its `value_roots` exclude `scores` and that the result keeps its own provenance. Snapshots don't expose stored sets, so it says nothing about nested topology or children.
+
+### Liveness
+
+- `metadata.rs` builds whole-local, per-block bitsets: may and must future use, may-assign (no must form) and the visible-local mask per lexical region, plus per-local order keys for the last use in a block and in the function. Writes count as uses.
+- `is_local_active_for_alias_conflict` (`transfer/access/conflicts.rs`) decides whether a candidate local blocks an access. A `SLOT` is active while it has any future use. An `ALIAS` stays active past linear expiry if a CFG use or a future assignment follows, and an unused mutable alias stays active to the end of its scope. The candidate only widens *which* locals are candidates, through `holders_of`. Activity is still the holder name's future use.
+- `engine.rs` builds a successor state in this order: clone the predecessor output, apply `Invoke` edge results, transport jump arguments simultaneously as `slot_with_value_roots(effective_roots(source))` plus the derivation ledger, then `kill_invisible` for the successor's region, then `join_in_place` (may-union, must-intersect for `derived_from_roots`). Jump transport drops modes, cells, write targets and the candidate's stored sets.
+- `kill_invisible` on the baseline resets a departing local and prunes every reference to it. The candidate first runs `relink_departing_roots`, which renames a departing root to one representative and copies its stored children there. `direct_alias_roots`, `write_target_roots` and `derived_from_roots` are pruned, never relinked.
+- The Boracle `last_use` module answers event-level, subject-aware future-use queries with witnesses. Only `boracle/report.rs` consumes it. It never feeds acceptance.
+
+The code implements four separate ideas with two mechanisms:
+
+| Idea | Mechanism | Conflation |
+| --- | --- | --- |
+| A name leaves scope | Region mask, `kill_invisible` | Also deletes the allocation identity, because identity is the binding index |
+| A loan's last keeping use | Order keys and may/must future use of the *name* | A holder that's never read again can't block a mutation of the child it holds, even while another live name reaches that holder |
+| An allocation reachable through another holder | Candidate stored sets only | Monotone: "was ever stored", with no field or element multiplicity |
+| A fact a consumer still needs | Facts recorded at each event | Roots in a fact are binding indices, so an identity retired before the event disappears from the fact |
+
+### Liveness and store witnesses
+
+The four `l*` witnesses live beside the Section 2 witnesses. The store witnesses are earlier BC-06 probes under `tmp/bc06/`.
+
+| Witness | Required | Baseline | Candidate | Class on candidate |
+| --- | --- | --- | --- | --- |
+| L1 `box = Box(child)` inside a loop body, push after the loop | Accept, `4` | Accepts, `4` | Accepts, `4` | Correct |
+| L2 `~child.push(i)` then `~keeper = Box(child)` in a loop, read `keeper` after | `0007` at the push | Accepts, `3` | `0007` 7:10 naming `keeper` | Correct, back edge carries the holder |
+| L3 `box = Box(child)`, return `box` on one branch, push on the other | Accept, `1 / 2` | Accepts | Accepts | Correct |
+| L4 `holder ~= Box(child)`, `writer ~= holder`, `~writer = Box({5})`, push `child`, read `holder` | Accept, `12` | Accepts, `12` | `0007` 8:6 naming `holder` | False rejection: write through an alias doesn't retire the edge |
+| `failed_set`: `~outer.set(5, incoming) catch:` then `~incoming.push(10)` in the handler | Accept, `old=1 incoming=2 size=1` | Accepts | `0007` 17:10 naming `outer` | False rejection: a failed store adds an edge |
+| `success_store`: callee `store(~rows, child)` pushes `child`, caller pushes `child` and reads `rows` | `0007` at the push | Accepts, `22` | Accepts, `22` | Unsafe accept: no interprocedural store summary |
+| `failure_store`: the same store then `return!`, mutation in the handler | `0007` at the push | Accepts, `22` | Accepts, `22` | Unsafe accept, as above |
+| `lexical_dynamic`: `writer ~= outer`, `~writer.push(child)` in a branch, push `child`, read `outer` | `0007` at the push | Accepts, `22 / 21` | `0007` 8:6 | Correct |
+| `permission_write`: immutable `input` stored in `Box`, push through the box | Reject for permission | Accepts, `2` | "Cannot mutably access immutable local `input`." | Correct |
+
+```moth
+Box = |items {I32}|
+
+probe || -> I32:
+    child ~= {1}
+    holder ~= Box(child)
+    writer ~= holder
+    ~writer = Box({5})
+    ~child.push(2)
+    return holder.items.length() * 10 + child.length()
+;
+```
+
+### Fact-lifetime ledger
+
+"Identity" is the key a fact uses. "Requeue" is a revisit of the block by the worklist.
+
+| Fact | Meaning | Producer and event | Identity scope | Consumers | Requeue or failure | Earliest safe retirement |
+| --- | --- | --- | --- | --- | --- | --- |
+| `LocalState.mode` | Binding is a slot, an alias, both or uninitialised | Define, assign, jump transport, `Invoke` edge | Binding index, per block state | Access checks, `record_advisory_drop_sites` (reads only the `SLOT` bit), snapshots | Recomputed per visit, may-union at joins. Failure edges reset result locals. | Region exit, after drop sites read it |
+| `value_roots` | Which bindings' values this value may alias | Loads, call result alias, jump transport | Binding index | Conflict candidates, statement and value fact roots, optional transfer | As above | When no live name or edge can still reach the identity, not when its own name dies |
+| `direct_alias_roots`, `write_target_roots` | Cells a write through this binding reaches | Alias formation, projected mutable alias | Binding index | `write_storage_cells`, `written_roots`, then the mutation summary | As above. Pruned, never relinked, at region exit. | Same as `value_roots`. A parameter's identity must outlive every alias that can write to it. |
+| `derived_from_roots` | Must-set of aliases this value came from | Alias derivation, jump transport | Binding index | Access exemption, joins | Must-intersect at joins | Not published, so any time it's no longer consulted |
+| Candidate `stored_roots`, `stored_field_roots` | Holder reaches a child root, whole or through a projection | Construction, projected store, builtin insert, `remove` result | Binding index | `holders_of`, `children_of`, so conflicts and mutable argument roots | Union only. Not transported by jumps. Relinked at region exit. Kept on failure edges. | Never in the candidate. A correct design retires on exact replacement, successful removal and failed stores. |
+| Metadata liveness | Future use, future assignment, visibility, order keys | Computed once per function | Binding index, block, order key | Activity, `classify_move_decision` | Static | Function end |
+| `StatementBorrowFact` | Shared, mutable and written roots at a statement | `StatementAccessTracker` during transfer | `HirNodeId` | `metadata.rs::finalize_public_call_summary_effects`, tests | Last visit wins. The last visit uses the fixed-point input, so it's final. | After the mutation summary converges |
+| `TerminatorBorrowFact` | Same for terminators | Same | `BlockId` | Tests | Same | Same |
+| `ValueBorrowFact` | Classification, roots and optional transfer for one HIR value | `ValueFactBuffer` per block visit | `HirValueId`, module-wide | Mutation summary (call argument and map receiver roots), tests | Replaced per block on revisit. Merged across final contexts by sorted union and `merge_completed_use`. | After the mutation summary converges |
+| `PublicCallSummary` | Parameter access, mutation, transfer, return alias and hazard bits | `metadata.rs` and `return_alias.rs` | `FunctionId`, then stable interface identities | Interface finalisation, private failure lanes, constraint checks, generated convergence, artefact equality | Recomputed to a fixed point | Owned by the module artefact |
+| `advisory_drop_sites` | Owned slots to drop on exits | `record_advisory_drop_sites` from out states | `BlockId` and binding index | `backends/wasm/hir_to_lir/ownership.rs` (`DropIfOwned`) | Read from final out states | Owned by the report |
+| Developer snapshots | Modes and roots per state | Test and `show_borrow_checker` builds | Binding index | Tests | Final states | Owned by the report |
+
+No production consumer outside the checker reads statement, terminator or value facts, or `optional_transfer`. Mutation and return information leave the checker only through `PublicCallSummary`, and ownership only through drop sites.
+
+**A source binding dies while a child survives.** `inline_ctor_branch` declares `shared ~= {1}` inside one arm of a value `if` and ends the arm with `then Box(shared), shared`. The jump transports both results, then `kill_invisible` removes `shared`. The baseline prunes `shared` from both destinations, so `box` and `items` share nothing and `~items.push(2)` is accepted. It renders `2`. The candidate's relink renames `shared` to the representative `items` and moves the departing temporary's children to `box`, so the push conflicts with `box`. The name died, the allocation didn't, and only a fact keyed by something other than the name survives the exit.
+
+**Why the factored cutover broke publication.** Its archive retired dead alias holders eagerly and kept owned slots "for source root and mutation fact attribution until edge retirement" (`tmp/bc06/cutover/final-archive/tracked.patch`, lines 606-607). The cutover logs still show `projected_alias_write_at_join_publishes_parameter_mutation` publishing `NoWrite` for a written parameter, a missing map receiver fact during summary publication and `shared_expression_row_merges_branch_roots_in_either_successor_order` publishing extra roots. Facts are already recorded at the event. They lose information when the identity a later event needs was retired with an earlier name.
+
+**One HIR value in two blocks, visited in either order.** Value facts merge by sorted, deduplicated union, a classification join and `merge_completed_use`, which keeps `Borrow` if any context borrows. These are commutative and associative, and each block contributes only its final visit, so the published row doesn't depend on visit order. `tests/borrow_checker_fact_tests.rs` pins this with `shared_expression_row_merges_branch_roots_in_either_successor_order`, `retained_result_and_transfer_observations_merge_across_final_cfg_contexts`, `actual_cfg_rows_preserve_all_transfer_and_ignore_absent_contexts`, `actual_cfg_transfer_and_ordinary_definition_merge_conservatively` and `catch_failed_argument_keeps_optional_transfer_consistent_with_handler_use`. Value facts are keyed module-wide while their roots are function-local. No test covers a row shared across functions.
+
+### Section 3 conclusions
+
+1. Identity has to outlive names. Any design that retires state at a name's last use needs an identity for each allocation or cell that stays valid while some live name or edge reaches it, and facts must record those identities at the event. Retiring dead slots is safe only under that split.
+2. Every false rejection the candidate adds comes from a missing strong update: exact field replacement (W3), successful removal (W1c), a write through a mutable alias (L4) and a failed store (`failed_set`). Each needs the edge keyed by the cell that holds it, and the failure lanes need effects applied per edge, not before the split.
+3. Activity follows the name, not the loan. A holder counts only while its own name has a future use. That's sound for the current witnesses because every observation goes through a named holder. Section 4 must check whether a summary-returned edge can make an unnamed holder matter.
+4. Interprocedural stores (`success_store`, `failure_store`) stay unsafe accepts in both trees. They need a summary effect that names the parameter receiving the store.
+
 ## Investigation queue
 
-Sections 3-7 of the assignment still run against the same witnesses:
+Sections 4-7 of the assignment still run against the same witnesses:
 
-- Section 3: fact-lifetime ledger for local transfer, liveness and publication.
 - Section 4: caller and callee traces through summaries, interface export, generated convergence and the Boracle adapter.
 - Section 5: what C4 publication must consume.
 - Section 6: design comparison and recovery of the 18-input benchmark manifest. `tmp/bc06/baseline_measure.json` keeps the input fingerprints and raw samples.
