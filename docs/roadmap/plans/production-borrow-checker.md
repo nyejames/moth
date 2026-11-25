@@ -6,8 +6,8 @@ The accepted source language and memory semantics remain authoritative in `docs/
 
 ## Current handoff
 
-**Status:** BC-06 narrowed. The factored production cutover failed its performance and refusal guards and was abandoned (see [Factored cutover attempt](#factored-cutover-attempt)). Stage 5 shared-operand capture landed on the existing root-granular checker. Projection-precise provenance awaits a new owner design.
-**Next action:** Resume const C4 on the existing checker. Its three committed call-result fixtures still fail there.
+**Status:** BC-06 production implementation is paused for a redesign investigation. The factored production cutover failed its performance and refusal guards and was abandoned (see [Factored cutover attempt](#factored-cutover-attempt)). Stage 5 shared-operand capture landed on the existing root-granular checker. A root-granular holder-edge candidate stays uncommitted: it fixes ordinary unsafe accepts but can't accept field replacement without also accepting its negative twin.
+**Next action:** Continue the [BC-06 redesign investigation](./production-borrow-checker-bc06-redesign.md) at Section 3. Const C4 stays paused until its design is approved.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -61,7 +61,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 ### BC-06: Relational production provenance
 
-**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. The slice 3 cutover was attempted and abandoned. The owner then chose the narrow route: keep the root-granular checker, land the Stage 5 capture and defer projection tracking to a later, more comprehensive design.
+**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. The slice 3 cutover was attempted and abandoned. The owner then chose the narrow route: keep the root-granular checker, land the Stage 5 capture and defer projection tracking to a later, more comprehensive design. That design is now under investigation in the [BC-06 redesign companion](./production-borrow-checker-bc06-redesign.md), which owns the witnesses, evidence and resume point.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
 

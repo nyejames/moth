@@ -11,9 +11,9 @@
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
-**Current slice:** C4 and Phase 5 remain paused for ordinary Stage 6 provenance correction. The owner approved the BC-06 baseline and test-only proof, not a production rewrite.
+**Current slice:** C4 and Phase 5 remain paused for ordinary Stage 6 provenance correction. The owner paused BC-06 production work for a [redesign investigation](./production-borrow-checker-bc06-redesign.md) that ends at design review.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Review the separate [HIR capture prerequisite and BC-06 proof limits](./production-borrow-checker.md#test-only-proof-and-cutover-decision). Reopen C4 only when ordinary access checking preserves correlated sharing and mutation permission through joins and calls.
+**Next action:** None in this plan until the BC-06 redesign is approved. Reopen C4 only when ordinary access checking preserves correlated sharing and mutation permission through joins and calls. The investigation's Section 5 records what C4 publication must consume.
 
 ## Global constraints
 
