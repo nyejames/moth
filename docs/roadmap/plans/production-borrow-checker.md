@@ -7,7 +7,7 @@ The accepted source language and memory semantics remain authoritative in `docs/
 ## Current handoff
 
 **Status:** BC-06 production implementation is paused for a redesign investigation. The factored production cutover failed its performance and refusal guards and was abandoned (see [Factored cutover attempt](#factored-cutover-attempt)). Stage 5 shared-operand capture landed on the existing root-granular checker. A root-granular holder-edge candidate stays uncommitted: it fixes ordinary unsafe accepts but can't accept field replacement without also accepting its negative twin.
-**Next action:** Continue the [BC-06 redesign investigation](./production-borrow-checker-bc06-redesign.md) at Section 3. Const C4 stays paused until its design is approved.
+**Next action:** Owner review of the design and implementation sequence in Sections 6 and 7 of the [BC-06 redesign investigation](./production-borrow-checker-bc06-redesign.md#6-design-choice). It chooses a sparse allocation layer beside the existing checker. Production work resumes at its slice 1 only after approval, and const C4 stays paused until then.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of

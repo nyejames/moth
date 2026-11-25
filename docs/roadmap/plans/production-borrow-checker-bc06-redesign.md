@@ -14,10 +14,10 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
 | Candidate | Uncommitted holder-edge diff on that base: 9 files, +697/-63, preserved locally as `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). No untracked files outside the ignored `tmp/`. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
-| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Section 5: C4 consumption) |
-| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. Its prototype lowering produces ordinary HIR that only an edge-aware Stage 6 checks soundly. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions) and [5](#section-5-conclusions). |
-| Next task | Section 6: compare designs against the witnesses and recover the 18-input benchmark manifest. |
-| Next unanswered question | Can the existing worklist carry cell-keyed edges and per-exit summary alternatives within the cutover guards, or does it need liveness-scoped state? |
+| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
+| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. The candidate fails the performance guard on 5 of the 18 workloads with identical work counters, so dense per-local edge sets are ruled out. The chosen design adds a sparse allocation layer to the existing checker. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions), [5](#section-5-conclusions) and [6](#section-6-conclusions). |
+| Next task | Owner design review of [Section 6](#6-design-choice) and [Section 7](#7-implementation-sequence). Production work starts at slice 1 only after approval. |
+| Next unanswered question | Does the owner accept the conservative limits in [Accepted imprecision](#accepted-imprecision), and the decisions listed under [Slice 0](#slice-0-owner-review)? |
 
 ## 1. Evidence inventory
 
@@ -357,8 +357,8 @@ Substituting `items` for both `a` and `b` gives, for the disjoint `select`, `{le
 
 So the summary needs, per outcome lane:
 
-- guarded alternatives, one per distinguishable exit, after deduplication;
-- for each alternative, a map from (result slot, field path) to a parameter, a parameter's field path or fresh storage, with the edge's permission;
+- guarded alternatives, one per distinguishable exit, after deduplication
+- for each alternative, a map from (result slot, field path) to a parameter, a parameter's field path or fresh storage, with the edge's permission
 - per-parameter effects for each lane: mutation as today, plus "parameter `i`'s value is stored into parameter `j`", so a store that happens before `return!` stays visible on the failure lane.
 
 Exactness and bounds:
@@ -491,9 +491,179 @@ These ordinary cases must pass before shared folded results are exposed: H1 and 
 3. The temporary must be writable fresh storage. This settles the open question about fresh materialisation permissions: permission comes from the receiving binding, never from the temporary.
 4. The store transaction, shared rows and rollback can proceed in parallel with BC-06, since they don't change emitted HIR until the lowering switches.
 
-## Investigation queue
+## 6. Design choice
 
-Sections 6-7 of the assignment still run against the same witnesses:
+### Performance evidence
 
-- Section 6: design comparison and recovery of the 18-input benchmark manifest. `tmp/bc06/baseline_measure.json` keeps the input fingerprints and raw samples.
-- Section 7: the ordered implementation sequence for owner approval.
+The 18-input manifest is recovered from `tmp/bc06/baseline_measure.py` and its output `tmp/bc06/baseline_measure.json`. Every input's SHA-256 still matches the recording. Twelve inputs are `benchmarks/numeric-scaling/<shape>-<size>.moth` for `alias-receiver-chain` 256 and 1024, `origin-fanout` 128 and 512, `copy-chain` 128 and 512, `aggregate-forwarding` 32 and 128, `narrow-chains` 128 and 512 and `generic-failure-chain` 32 and 128. Two are `benchmarks/borrow-stress.moth` and `benchmarks/speed-test.moth`, which contains `build_runtime_grid`. The script generates the last four into `tmp/bc06/scaling/`:
+
+- `branches-N`: `probe` takes `N` `Bool` flags and declares `total ~= 0`, then runs `N` statements of the form `if flag_i: ~total = 1 ;`, then returns `total`.
+- `sibling-loops-N`: `probe` declares `total ~= 0`, runs `N` statements of the form `loop 0 to 2: ~total = 1 ;`, then returns `total`.
+
+Both are generated for `N` of 16 and 64. The fixture `tests/cases/numeric_profile_int64_runtime_surfaces`, the cutover's worst unit, was measured as a nineteenth input outside the guard.
+
+`tmp/bc06/measure_s6.py` imports that manifest and measures all three compilers back-to-back, interleaved per input. Each compiler gets one warm-up and five samples, with `MOTH_TIMERS=bench`, then one counter replay with `MOTH_COUNTERS=summary`. The binaries are release builds with `detailed_timers` and `benchmark_counters`: the archive `0f384a5539`, the baseline `7cc05c61b` and the candidate on that base. Raw results are in `tmp/bc06/measure_s6.json`.
+
+Medians in milliseconds and peak RSS in MiB. Borrow time is `frontend.borrow.initial` + `frontend.borrow.converge` + `frontend.generated.borrow_recheck`.
+
+| Input | Archive check / borrow / RSS | Baseline | Candidate | Candidate guard |
+| --- | --- | --- | --- | --- |
+| alias-receiver-chain-256 | 5.09 / 1.00 / 16.3 | 5.16 / 1.02 / 16.6 | 5.42 / 1.36 / 16.6 | Pass |
+| alias-receiver-chain-1024 | 15.54 / 7.17 / 23.3 | 15.48 / 7.04 / 20.6 | 22.22 / 13.30 / 22.7 | Fails check and borrow |
+| origin-fanout-128 | 4.03 / 0.65 / 15.4 | 4.12 / 0.67 / 15.3 | 4.59 / 0.86 / 15.5 | Pass |
+| origin-fanout-512 | 10.82 / 5.22 / 18.6 | 11.13 / 5.39 / 18.5 | 12.73 / 7.16 / 18.5 | Pass |
+| copy-chain-128 | 3.33 / 0.26 / 14.7 | 3.22 / 0.25 / 14.5 | 3.39 / 0.34 / 14.5 | Pass |
+| copy-chain-512 | 5.19 / 1.21 / 16.0 | 4.96 / 1.19 / 15.8 | 6.07 / 2.04 / 15.9 | Pass |
+| aggregate-forwarding-32 | 5.50 / 1.19 / 16.5 | 5.70 / 1.19 / 16.3 | 5.92 / 1.60 / 16.4 | Pass |
+| aggregate-forwarding-128 | 16.54 / 8.28 / 21.4 | 16.59 / 8.26 / 21.4 | 24.55 / 15.65 / 20.7 | Fails check and borrow |
+| narrow-chains-128 | 19.17 / 13.86 / 77.8 | 19.64 / 14.51 / 77.7 | 24.20 / 18.76 / 93.6 | Fails check |
+| narrow-chains-512 | 197.30 / 184.37 / 731.1 | 184.67 / 172.25 / 850.6 | 261.70 / 249.40 / 826.9 | Fails check |
+| generic-failure-chain-32 | 5.10 / 1.29 / 17.8 | 5.19 / 1.26 / 17.7 | 5.22 / 1.45 / 18.5 | Pass |
+| generic-failure-chain-128 | 15.06 / 8.81 / 47.4 | 15.22 / 8.91 / 47.2 | 17.11 / 11.01 / 55.9 | Pass |
+| borrow-stress | 4.02 / 0.70 / 15.7 | 4.08 / 0.69 / 15.7 | 4.11 / 0.80 / 16.0 | Pass |
+| speed-test | 12.96 / 3.91 / 21.3 | 13.09 / 3.92 / 22.8 | 13.60 / 4.67 / 24.8 | Pass |
+| branches-16 | 2.96 / 0.28 / 14.7 | 3.08 / 0.28 / 14.4 | 2.98 / 0.30 / 14.6 | Pass |
+| branches-64 | 4.66 / 1.39 / 18.4 | 4.73 / 1.40 / 18.2 | 4.82 / 1.69 / 19.7 | Pass |
+| sibling-loops-16 | 5.44 / 2.39 / 18.0 | 5.50 / 2.46 / 17.7 | 5.85 / 2.85 / 19.1 | Pass |
+| sibling-loops-64 | 34.33 / 29.57 / 95.9 | 36.57 / 31.60 / 86.3 | 46.26 / 42.39 / 123.9 | Fails check |
+| int64 runtime surfaces (outside the guard) | 10.17 / 6.03 / 21.1 | 10.20 / 6.14 / 20.9 | 12.90 / 8.83 / 22.4 | Would fail check |
+
+The baseline passes every guard. The candidate fails five of the 18. Its counter replay matches the baseline exactly on every input: worklist iterations, joins, statement visits and conflict checks. The whole slowdown is per operation. `LocalState` gains two dense `RootSet` buffers of `ceil(L / 64)` words per local, so every clone, join and comparison does more work. `sibling-loops-64` has no aliasing at all and still pays 34 % more borrow time. A design that adds per-local dense sets for edges can't pass the guard, and allocation identities would make those sets larger.
+
+### Approaches ruled out
+
+| Approach | Evidence |
+| --- | --- |
+| Root-granular holder edges, the candidate as it stands | W3 and W4 get the same diagnostic. Five guard failures with identical counters. |
+| One parameter-index union per function summary | W7a and W7b get identical summaries ([Section 4](#the-minimum-summary-w7-needs)) |
+| Allocation identity sets alone, with no sharing relation | W7a's call result holds `items` in `left` on one exit and in `right` on the other. A copy that reads only identity sets must assume `left` and `right` may share, so W7a still rejects at the push. |
+| Factored per-exit alternatives in the caller's state | The cutover's representation. It changed about 274 verdicts and reached about 3× check time on two inputs. Alternatives grow exponentially and need a refusal diagnostic for a budget. |
+| Retiring state at the last use of a name | Breaks fact publication ([Section 3](#fact-lifetime-ledger)) |
+| Boracle as the acceptance arbiter | Disagrees with the approved W3 contract ([Section 4](#boracle)) |
+
+### The two designs compared
+
+**Extension.** Keep the existing worklist, `LocalState` root sets, fact publication and drop sites. Add one sparse allocation layer beside them. It records which allocation each projected cell holds and which allocations each allocation stores, with a permission per edge. Call summaries gain per-field sources and a conditional sharing relation. Binding-level aliasing keeps today's rules, so the only verdicts that move are the ones the new layer decides.
+
+**Replacement.** Replace the root sets with liveness-scoped cells, allocations and edges, and take every fact from the state at its event. It needs the same allocation identity, sharing relation and summaries. It also rebuilds binding-level aliasing, transfer and publication. No witness distinguishes it from the extension. Its gain is removing dead state, the cost that E1 in [the BC-06 plan](./production-borrow-checker.md#e1-dominant-state-size-copying-and-repeated-checking) describes. That cost exists on the archive and isn't required by any witness or guard.
+
+| Criterion | Extension | Replacement |
+| --- | --- | --- |
+| Separates W3 from W4, B1 from B1p | Yes, through cell strong update | Yes |
+| Separates W7a from W7b, W7c from W7d | Yes, through the sharing relation | Yes |
+| Verdicts reopened | Only constructs with stored children, projections and calls returning aggregates | All 3,323 corpus cases. The cutover moved about 274. |
+| Cost on code without stored children | Zero entries in the layer, so baseline cost | Unknown until built. The cutover was up to 3×. |
+| Fact publication and drop sites | Unchanged | Rebuilt and re-proved |
+| Needs a refusal diagnostic | No. Every fallback is a sound weak update or merge. | Yes, for its alternative budget |
+
+The extension is chosen. The replacement stays a possible later performance project under the same guard, independent of BC-06 correctness.
+
+### Chosen design
+
+**Identities.** An allocation identity is an allocation site: a construction, collection literal, `copy`, call result field or map result, plus one entry identity per parameter field path and per cell whose contents were never written in the function. Entry identities are minted lazily on first projection. A site inside a loop names every instance it creates, so a conflict check treats two instances as possibly the same allocation. That's conservative and sound.
+
+**Cells.** A cell is a local plus a field path. Collection elements share one path. The layer keeps `cell → allocation set` only for cells that a construction, projection or field write has touched.
+
+**Edges.** An edge is `(holder allocation, field path, held allocation, permission)`. Construction adds one edge per child, with the child's access permission. A `~` binding of an immutable local's allocation never gains write permission through an edge.
+
+**Sharing pairs.** Each holder allocation also keeps the pairs of its field paths that may hold one allocation in the same execution. A construction adds a pair when two children's identity sets intersect. Joins take unions. `copy` mints fresh identities for the copied graph and shares one identity between two paths only when the source holds that pair. It never derives sharing by intersecting identity sets, because a call result's sets mix exits.
+
+**Strong update.** A write to exactly one cell replaces that cell's allocation set. That covers a field write, `~alias = value` when the alias names exactly one cell, and a map `remove` that moves the element's identity into its result. A write whose target is several cells, or a cell inside a loop-site allocation, adds without removing. `set` applies its store edges on the success edge of the `Invoke` only.
+
+**Conflict rule.** A mutation through a path reaches the allocations that path names. It conflicts when another live binding, or an edge held by an allocation reachable from another live binding, reaches one of those allocations. It's also rejected when the path crossed an edge without write permission. Reachability is computed at the access, not stored. Edge sets live in the block state as sorted vectors. Joins are sorted unions and comparisons are slice comparisons.
+
+**Retirement.** At block exits the layer drops allocations no live local can reach. A dead local's name disappears, but its allocations stay while anything live reaches them. Facts are still published from the state at the event, so retirement can't change a published fact.
+
+**Call summaries.** For each success slot and each lane, the summary maps each result field path to a set of sources: a parameter field path or fresh storage. It also records conditional sharing pairs. A pair `(path p, path q, if parameters i and j alias)` means the two result fields may hold one allocation when the caller passes aliasing arguments for `i` and `j`, and an unconditional pair means they always may. The callee derives pairs from its own sharing pairs and from children that come from two parameters. Joins and multiple exits take unions. Per-lane store effects say "parameter `i`'s value is stored in parameter `j` at path `p`". A call site instantiates sources from argument identities, mints fresh identities per call, applies store effects on the matching lane edge and records the result's sharing pairs whose conditions hold for the actual arguments. The summary has no alternative cap: its size is bounded by result paths and parameter paths, and recursion converges because every component only grows.
+
+For W7a, the disjoint `select` has no pair, so `copy selected` gives `owned.left` and `owned.right` distinct identities and the push through `owned.left` can't reach `observed`. For W7b, the shared arm adds `(left, right, if a and b alias)`. `forward` passes `items` for both, so the copy shares one identity and the push rejects. W7c and W7d get the same results through the value `if` join.
+
+**Failure policy.** As [Section 4](#failure-policy) says. The extension needs no new diagnostic code, since no step can fail to produce a sound result.
+
+### Accepted imprecision
+
+These stay conservative rejections. No witness requires them to accept:
+
+- reading one field of a call result while mutating another field of the same uncopied result, when an argument appears in both fields on different exits
+- two instances created by one site inside a loop
+- a write through an alias that may name more than one cell
+- distinct collection elements.
+
+### What happens to the candidate
+
+| Candidate piece | Fate |
+| --- | --- |
+| `HirExpressionKind::is_aggregate_construction` in `hir/expressions.rs` | Kept |
+| `constructed_children` and the construction-children rule in `transfer/access.rs` | Kept as the source of construction edges, rewritten to target the layer |
+| Constructed returns classified as `AliasParams` in `return_alias.rs` | Kept until slice 2 replaces the summary. It fixes the ordinary `fresh_box` unsound accept. |
+| The `Remove` rule in `transfer/access/statement.rs` | Replaced by strong update of the result cell |
+| `stored_roots`, `stored_field_roots`, `store_children_into`, `relink_departing_roots`, `departing_representative`, `rename_stored_root` and `candidate_names_root` | Deleted. Dense per-local sets fail the guard. |
+| Store edges applied before the `Invoke` split | Deleted. Stores apply per lane edge. |
+| The six test literals that don't compile | Moot after the deletions |
+
+### Section 6 conclusions
+
+1. Dense per-local edge state can't meet the guard: the candidate's counters match the baseline, yet five workloads fail.
+2. Identity sets need a sharing relation, or `copy` can't tell W7a from W7b. The relation fits in the call summary as conditional pairs, which replaces the per-exit alternatives Section 4 proposed and needs no cap.
+3. The extension keeps every binding-level rule, fact and consumer. The replacement offers only performance gains that the guard doesn't require, at the cost of reopening the whole corpus.
+
+## 7. Implementation sequence
+
+Every slice lands as one reviewed change on top of the previous one. Durable regressions assert the diagnostic site as well as the verdict, at the layer that owns the behaviour. Fixture manifests change only in the slice whose rule changes them.
+
+### Slice 0: Owner review
+
+Decisions this design needs from the owner:
+
+- approve the extension and the [accepted imprecision](#accepted-imprecision)
+- confirm no new borrow diagnostic code, since the extension has no budget
+- confirm that imported const values keep tree projection, so a provider's internal sharing doesn't cross an import ([Section 5](#contract-at-each-boundary))
+- confirm that C4's store transaction and rollback may start in parallel with slice 1, while C4's shared lowering waits for slice 2.
+
+The approved contract decisions at the top of this document already cover `runtime_detached`, `runtime_retained` and the hashmap fixture.
+
+### Slice 1: Sparse allocation layer
+
+| Item | Content |
+| --- | --- |
+| Files | `analysis/borrow_checker/state.rs` (new layer type beside `LocalState`, sorted-vector joins and equality), `engine.rs` (join, block-exit retirement), `transfer/access.rs` (`transfer_assign_target` strong update, construction edges, `copy`), `transfer/access/statement.rs` (map `remove` and `set`, `transfer_invoke` per-lane stores, `transfer_never_call`), `transfer/access/conflicts.rs` (`check_mutable_access` reachability and edge permission), `hir/expressions.rs` (`is_aggregate_construction`), `return_alias.rs` (the candidate's constructed-return rule) |
+| Prerequisite | Slice 0 approval. Start from `7cc05c61b`, not from the candidate. Port the kept pieces by hand. |
+| Deletions | The candidate pieces listed as deleted above. Discard the uncommitted candidate once its kept pieces land. |
+| Must accept | W3 `22`, W1c `20`, L1 `4`, L3 `1 / 2`, L4 `12`, `failed_set`, B1p `21`, H3 `2`, P1-P4 with their outputs, the W8 const fixtures |
+| Must reject at the recorded site | W1, W4, L2, B1, H1, `inline_ctor_branch`, `lexical_dynamic`, `permission_write`, the ordinary `fresh_box` and `identity_fields` twins, `hashmap_alias_struct_field_param_return` and ordinary `runtime_detached` |
+| Corpus | `corpus_verdicts.py record` and `compare` against `tmp/bc06/corpus_7cc.json`. Explain every changed verdict against the canonical rules and update the manifests that the approved decisions change. |
+| Performance | `measure_s6.py` with the slice build in place of the candidate. All 18 inputs must pass the guard against the archive, and the counters must be reported. |
+| Stop | Any guard failure, any unexplained newly accepted program or any change to a published fact outside the layer's constructs. Report and stop, don't tune past the guard. |
+
+### Slice 2: Field-precise call summaries
+
+| Item | Content |
+| --- | --- |
+| Files | `return_alias.rs` (`FunctionReturnAliasSummary` becomes per-slot field sources with sharing pairs, plus `classify_function_return_alias`, `merge_return_alias` and `project_alias_summary_through_arguments`), `public_call_summary.rs` (per-lane store effects, `validate_public_call_summary`), `metadata.rs` (`build_public_call_summaries`, `stabilize_return_alias_summaries` as a validated monotone fixed point), `call_semantics.rs`, `transfer/access/statement.rs` (`transfer_call_result_alias` instantiation), `public_interface/interface_validation.rs`, `public_interface/local_finalization.rs`, `module_compilation/generated/convergence.rs` (transition validation, plus revalidation and rescheduling after `refresh_private_failure_lanes`), the external ABI `ExternalHirReturnAlias` and Boracle's `CallResultProvenance` |
+| Prerequisite | Slice 1 |
+| Deletions | The constructed-return `AliasParams` special case, now covered by field sources. The inequality-only stabilisation cap. |
+| Must accept | W7a and W7c with `left=2 right=1 original=1` for both flags, `retain` and `forward` callers without conflicting uses |
+| Must reject at the recorded site | W7b, W7d, `success_store`, `failure_store`, both committed `runtime_call_*_rejected` fixtures and their ordinary twins |
+| Corpus and performance | As slice 1. Also report `convergence_summary_changes` and `convergence_summary_comparisons` against the baseline. |
+| Stop | A summary transition the validator rejects, a convergence count growing without a matching new summary component, or a guard failure |
+
+### Slice 3 onwards: C4
+
+C4 owns these. They're listed for ordering only:
+
+- the freeze transaction, shared rows and rollback through `stage_values`, after slice 0 and in parallel with slices 1 and 2
+- shared lowering through writable prelude temporaries, after slice 2, with H1 rejected and H3 accepted on the ordinary path
+- C5 measurements, then Phase 5.
+
+### Validation sequence
+
+For each slice, in order:
+
+1. `cargo test -q -p moth --lib borrow_checker` and the owning layer's new regressions.
+2. The witness runner, `bash tmp/bc06/witness/run.sh <compiler> <witness directories>`, with every witness in the slice's tables.
+3. The corpus comparison and the performance guard, as the slice table says.
+4. `just boracle` as the independent lane. Its known disagreements on W3 and L4 are recorded here and don't block.
+5. `just validate` as the integrated checkpoint.
+6. `just validate-full` before merge, then Slice review.
+
+Record the revision, the witness results, the corpus differences and the guard table in this document's resume point after each slice.

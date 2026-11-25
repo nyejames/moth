@@ -13,7 +13,7 @@
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
 **Current slice:** C4 and Phase 5 remain paused for ordinary Stage 6 provenance correction. The owner paused BC-06 production work for a [redesign investigation](./production-borrow-checker-bc06-redesign.md) that ends at design review.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** None in this plan until the BC-06 redesign is approved. Reopen C4 only when ordinary access checking preserves correlated sharing and mutation permission through joins and calls. The investigation's Section 5 records what C4 publication must consume.
+**Next action:** None in this plan until the BC-06 redesign is approved. Reopen C4 only when ordinary access checking preserves correlated sharing and mutation permission through joins and calls. The investigation's Section 5 records what C4 publication must consume, and Section 7 places the C4 slices after the BC-06 slices they depend on.
 
 ## Global constraints
 
