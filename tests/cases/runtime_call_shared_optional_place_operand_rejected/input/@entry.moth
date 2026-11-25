@@ -1,0 +1,22 @@
+-- The implicit `some` for an option parameter does not delay the read.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace |holder ~Holder| -> I32:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+inspect_optional |items {I32}?, count I32| -> I32:
+    if items is |found|:
+        return found.length() * 10 + count
+    ;
+    return count
+;
+
+holder ~= Holder({1})
+result = inspect_optional(holder.items, replace(~holder))
+~[:[result]]

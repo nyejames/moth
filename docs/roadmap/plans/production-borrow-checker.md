@@ -6,8 +6,8 @@ The accepted source language and memory semantics remain authoritative in `docs/
 
 ## Current handoff
 
-**Status:** BC-06 archived baseline, finite witnesses and the representative HIR-shaped proof are recorded on `docs/const-foundation-profile-independent-semantics`. The production rewrite and const publication remain paused.
-**Next action:** Decide the source-facing exhaustion policy and approve or reject the production cutover on the HIR-shaped proof evidence. The Stage 5 projected-operand capture waits for the cutover.
+**Status:** BC-06 narrowed. The factored production cutover failed its performance and refusal guards and was abandoned (see [Factored cutover attempt](#factored-cutover-attempt)). Stage 5 shared-operand capture landed on the existing root-granular checker. Projection-precise provenance awaits a new owner design.
+**Next action:** Resume const C4 on the existing checker. Its three committed call-result fixtures still fail there.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -61,7 +61,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 ### BC-06: Relational production provenance
 
-**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. None of these authorises a production rewrite. The pairwise prototype does not meet the cutover gate. Const C4 publication and Phase 5 remain paused.
+**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. The slice 3 cutover was attempted and abandoned. The owner then chose the narrow route: keep the root-granular checker, land the Stage 5 capture and defer projection tracking to a later, more comprehensive design.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
 
@@ -99,10 +99,13 @@ probe |flag Bool| -> String:
 
 Both executions must render `left=2 right=1 original=1`. Both compilers checked for this investigation reject at the mutation with `MOTH-BORROW-0007`. Replacing the first return with `Pair(a, b)` must instead reject: the copy preserves sharing *within* the graph, and `observed` stays live across the mutation. Replacing the `select` exits with one ordinary CFG join and one return must make the same distinction. This tests projection precision as well as summary correlation: both compilers also reject the independent `Pair({1}, {2})` with the same observer.
 
-Replace the no-copy `probe_alternative` in `runtime_call_disjoint_result_fields`
-at cutover. Keep mutation through the immutable input only as a permission
-negative. Audit other positive fixtures that obtain access through shared
-parameters before keeping their expected results.
+`runtime_call_disjoint_result_fields`, `runtime_call_fresh_box_forward_rejected`
+and `runtime_call_identity_fields_rejected` encode these call-result
+requirements and fail on the existing checker: it rejects the disjoint
+fields and accepts both forwarded observers. Keep mutation through the
+immutable input only as a permission negative. Audit other positive
+fixtures that obtain access through shared parameters before keeping
+their expected results.
 
 | Ordinary source witness | Required result | Observed: retained pre-C4 CLI / linked prototype |
 | --- | --- | --- |
@@ -409,18 +412,37 @@ half the combined rows.
 
 #### Stage 5 projected operands
 
-Commit `f1c88afa7` captures explicit copies in written order. A shared
-projected operand is still read at the call, after later operands run.
-On HEAD, `inspect(holder.items, replace(~holder))` accepts and reads the
-replaced value. Its explicitly sequenced form rejects with
-`MOTH-BORROW-0007`. Capturing the operand as an alias temporary makes
-Stage 6 reject the overlap, but the current local root sets would also
-reject `inspect(pair.left, replace_right(~pair.right))`. HEAD already
-rejects the same-call `f(pair.left, ~pair.right)` (`MOTH-BORROW-0003`)
-and the explicit form (`MOTH-BORROW-0007`). That is conformant base-root
-conservatism (`borrow-validation.mtf`, "Access roots and aliases"). The
-owner chose field-precise acceptance of disjoint siblings, which needs
-the cutover, before the capture lands.
+Commit `f1c88afa7` captures explicit copies in written order. Before
+Stage 5, a shared place operand was still read at the call, after later
+operands ran: `inspect(holder.items, replace(~holder))` was accepted and
+read the replaced value, while its explicitly sequenced form rejects with
+`MOTH-BORROW-0007`.
+
+`lower_operand_sequence` in `hir_expression/calls.rs` now binds an earlier
+shared argument that loads an authored place (a user binding or a
+parameter, under any implicit option `some`) before a later operand's
+prelude, current-block lowering or fresh mutable argument. The binding is
+exactly the explicit `name = place`: a user-origin, immutable local, so
+Stage 6 needs no new rule. Diagnostics name it after the authored place,
+such as `holder.items`, through a side-table display path kept apart from
+backend identifiers. Receivers stay unbound because their access mode
+belongs to the resolved method.
+
+Every overlapping form now rejects at the mutable argument with
+`MOTH-BORROW-0007`. That covers whole, nested, optional, fallible,
+parameter and scalar operands. When a later argument mutates the root
+through a live mutable alias (`replace(~writer)`), the earlier read itself
+rejects with `MOTH-BORROW-0003`. Under root granularity
+`inspect(pair.left, replace_right(~pair.right))` also rejects, as do the
+same-call and explicit forms. That is conformant base-root conservatism
+(`borrow-validation.mtf`, "Access roots and aliases"). The owner deferred
+field-precise acceptance to the later provenance design. The fixture
+corpus showed no changed borrow verdict (3,315 cases). The eight
+`runtime_call_shared_*` fixtures pin each path and its diagnostic site.
+Measured back to back with the 18 guard workloads, check and borrow
+medians stayed within run-to-run noise of the pre-capture binary. Peak RSS
+on `sibling-loops-64` varied from 72 to 115 MiB across repeats of the same
+binary.
 
 #### HIR-shaped proof
 
@@ -515,7 +537,34 @@ these:
 - peak RSS ≤ 1.25 × archive + 4 MiB;
 - no exhaustion or unproven diagnostic on any workload, or on any `tests/cases` fixture other than those written to exercise one.
 
-Resume C4 only after the integrated correctness gates and this guard pass.
+These decisions governed the attempt below. They don't apply to the
+narrowed Stage 5 capture, which changes no Stage 6 rule.
+
+#### Factored cutover attempt
+
+The cutover replaced the local root sets with factored alternatives of
+binding and field cells, allocations, edges and loans, a new transfer and
+the exhaustion diagnostic. It was abandoned before review. Against the
+archived checker:
+
+- about 274 fixtures changed verdict, about 170 of them new exhaustion
+  refusals, and none was newly accepted;
+- 23 of 310 borrow checker unit tests and 2 of 140 provenance tests failed;
+- three of the 18 guard workloads were refused, including `narrow-chains`
+  `signed` and the speed test's `build_runtime_grid`, and `borrow-stress`
+  gained a false `MOTH-BORROW-0003`;
+- check time reached about 3× the archive on `alias-receiver-chain-1024`
+  and `aggregate-forwarding-128`.
+
+The dominant cost was dead state. Alternatives carried every authored
+binding slot, about 73 dead to 16 live in a typical row. Work per HIR unit
+had a median of 89, a 99th percentile of 6,579 and a maximum of 207,000
+(`numeric_profile_int64_runtime_surfaces`). Retiring dead slots eagerly
+broke publication of source-root, mutation and call-return facts, which
+still read them. A redesign needs liveness-scoped slots, with fact
+publication taken from the state at each event rather than from retained
+rows. The tracked patch and untracked files are archived under local
+`tmp/bc06/cutover/final-archive/`.
 
 
 ## Permanent performance evidence - 2026-10-12

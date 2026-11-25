@@ -25,17 +25,21 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirProjection};
 use crate::compiler_frontend::hir::expressions::{
-    HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX,
+    HirExpressionKind, HirMapOp, HirVariantCarrier, HirVariantField, OPTION_SOME_VARIANT_INDEX,
+    ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use super::{LoweredExpression, LoweredResults};
 
@@ -364,23 +368,35 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::with_capacity(args.len() + offset);
+        // Receivers stay uncaptured: their access mode belongs to the resolved method, which
+        // this sequence doesn't know.
+        let mut shared = Vec::with_capacity(args.len() + offset);
         let mut prelude = Vec::new();
         if let Some(receiver) = receiver {
             values.push(self.lower_child_expression_for_parent(&mut prelude, receiver)?);
+            shared.push(false);
         }
 
         let mut pending = 0;
         for (slot, argument) in args {
             let (expression, mode, source_span) = argument.parts()?;
             let mut value = if self.expression_needs_current_block_lowering(expression) {
-                self.commit_earlier_copies(&mut values[pending..], &mut prelude)?;
+                self.capture_earlier_operands(
+                    &mut values[pending..],
+                    &shared[pending..],
+                    &mut prelude,
+                )?;
                 pending = values.len();
                 self.flush_pending_call_prelude(&mut prelude)?;
                 self.lower_expression_value_to_current_block(expression)?
             } else {
                 let lowered = self.lower_expression(expression)?;
                 if !lowered.prelude.is_empty() || mode == CallPassingMode::FreshMutableValue {
-                    self.commit_earlier_copies(&mut values[pending..], &mut prelude)?;
+                    self.capture_earlier_operands(
+                        &mut values[pending..],
+                        &shared[pending..],
+                        &mut prelude,
+                    )?;
                     pending = values.len();
                 }
                 prelude.extend(lowered.prelude);
@@ -394,43 +410,153 @@ impl<'a> HirBuilder<'a> {
                 value = self.define_call_operand(&mut prelude, value, local, None, source_span)?;
             }
             values.push(value);
+            shared.push(mode == CallPassingMode::Shared);
         }
         Ok(LoweredResults { prelude, values })
     }
 
-    fn commit_earlier_copies(
+    /// Pins earlier operands before a later operand's prelude runs, so each operand observes
+    /// storage as it was when the operand was written.
+    fn capture_earlier_operands(
         &mut self,
         operands: &mut [HirValueId],
+        shared: &[bool],
         prelude: &mut Vec<HirStatement>,
     ) -> Result<(), HirConstructionFailure> {
-        for operand in operands {
-            // A copy reads source storage now and produces independent data.
-            // Don't introduce a live borrow by materialising a plain place.
+        for (operand, &shared) in operands.iter_mut().zip(shared) {
+            // A copy reads source storage now and produces independent data. Don't introduce a
+            // live borrow by materialising a plain place.
             if self.is_copy_operand(*operand) {
                 let value = self.module.expressions.expression(*operand);
                 let (ty, span) = (value.ty, value.span);
                 let local = self.allocate_temp_local(ty, span)?;
                 *operand = self.define_call_operand(prelude, *operand, local, span, span)?;
+            } else if let Some((load, place)) = self.authored_shared_place(*operand, shared) {
+                // Otherwise the call would read the place only after the later prelude ran.
+                // Binding it here leaves a later write to the same root visible to the borrow
+                // checker as a conflict with this still-needed alias. Only the load is bound,
+                // as in the explicit form, because the checker doesn't trace aliases through a
+                // bound `some` wrapper.
+                let value = self.module.expressions.expression(load);
+                let (ty, span) = (value.ty, value.span);
+                let display = self.place_display_path(place)?;
+                let local = self.allocate_operand_capture_local(ty, span, display)?;
+                let captured = self.define_call_operand(prelude, load, local, span, span)?;
+                *operand = self.rewrap_option_some(*operand, load, captured)?;
             }
         }
         Ok(())
     }
 
-    /// An explicit copy, possibly wrapped by the implicit `some` that argument
-    /// validation inserts for an option parameter.
-    fn is_copy_operand(&self, operand: HirValueId) -> bool {
-        let expressions = &self.module.expressions;
-        match expressions.expression(operand).kind {
-            HirExpressionKind::Copy(_) => true,
+    /// The load and place of a shared operand that reads authored storage, under any implicit
+    /// `some`. Compiler temporaries already hold evaluated operands; parameters carry no origin
+    /// entry.
+    fn authored_shared_place(
+        &self,
+        operand: HirValueId,
+        shared: bool,
+    ) -> Option<(HirValueId, HirPlace)> {
+        let load = self.unwrap_option_some(operand);
+        let HirExpressionKind::Load(place) = self.module.expressions.expression(load).kind else {
+            return None;
+        };
+        let authored = self
+            .side_table
+            .local_origin_kind(place.root)
+            .is_none_or(|kind| kind == HirLocalOriginKind::User);
+        (shared && authored).then_some((load, place))
+    }
+
+    /// Rebuilds `operand` around `captured` when `payload` sat under an implicit `some`.
+    fn rewrap_option_some(
+        &mut self,
+        operand: HirValueId,
+        payload: HirValueId,
+        captured: HirValueId,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        if operand == payload {
+            return Ok(captured);
+        }
+        let wrapper = self.module.expressions.expression(operand);
+        let (ty, span, region) = (wrapper.ty, wrapper.span, wrapper.region);
+        let HirExpressionKind::VariantConstruct { fields, .. } = wrapper.kind else {
+            return Err(InfrastructureFailure::hir_transformation(
+                "captured call operand payload lost its option wrapper",
+            )
+            .into());
+        };
+        let name = self.module.expressions.variant_fields(fields)[0].name;
+        let fields = self.module.expressions.append_variant_fields(
+            &[HirVariantField {
+                name,
+                value: captured,
+            }],
+            span,
+        )?;
+        self.make_expression(
+            &span,
             HirExpressionKind::VariantConstruct {
                 carrier: HirVariantCarrier::Option,
                 variant_index: OPTION_SOME_VARIANT_INDEX,
                 fields,
-            } => matches!(
-                expressions.variant_fields(fields),
-                [field] if matches!(expressions.expression(field.value).kind, HirExpressionKind::Copy(_))
-            ),
-            _ => false,
+            },
+            ty,
+            ValueKind::RValue,
+            region,
+        )
+    }
+
+    /// Interns `root.field.field` for diagnostics. The text stops at the first index, whose
+    /// operand has no authored spelling here, so the source root is still named.
+    fn place_display_path(&mut self, place: HirPlace) -> Result<PathId, HirConstructionFailure> {
+        let side_table = &self.side_table;
+        let component = |path: Option<PathId>| path.and_then(|path| self.path_fork.component(path));
+        let mut text = component(side_table.local_name_path(place.root))
+            .map(|name| self.string_table.resolve(name).to_owned())
+            .unwrap_or_default();
+        for projection in self.module.expressions.projections(place.projections) {
+            let HirProjection::Field(field) = projection else {
+                break;
+            };
+            if let Some(name) = component(side_table.field_name_path(*field)) {
+                text.push('.');
+                text.push_str(self.string_table.resolve(name));
+            }
+        }
+        let text = self.string_table.intern(&text);
+        self.path_fork
+            .try_intern_child(PathId::ROOT, text)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    "path table exhausted while naming a call-operand capture",
+                )
+                .into()
+            })
+    }
+
+    fn is_copy_operand(&self, operand: HirValueId) -> bool {
+        let operand = self.unwrap_option_some(operand);
+        matches!(
+            self.module.expressions.expression(operand).kind,
+            HirExpressionKind::Copy(_)
+        )
+    }
+
+    /// The value under the `some` that argument validation inserts for an option parameter.
+    /// The wrapper is a value tree, so its payload is still read only where the call runs.
+    fn unwrap_option_some(&self, operand: HirValueId) -> HirValueId {
+        let expressions = &self.module.expressions;
+        match expressions.expression(operand).kind {
+            HirExpressionKind::VariantConstruct {
+                carrier: HirVariantCarrier::Option,
+                variant_index: OPTION_SOME_VARIANT_INDEX,
+                fields,
+            } => match expressions.variant_fields(fields) {
+                [field] => field.value,
+                _ => operand,
+            },
+            _ => operand,
         }
     }
 

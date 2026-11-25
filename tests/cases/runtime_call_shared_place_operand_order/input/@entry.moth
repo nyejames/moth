@@ -1,0 +1,51 @@
+-- Shared place operands are read where they are written. Later operands that
+-- leave those roots alone keep the call accepted, and the earlier operand
+-- observes its value from before the later operand ran.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+inspect_optional |items {I32}?, count I32| -> I32:
+    if items is |found|:
+        return found.length() * 10 + count
+    ;
+    return count
+;
+
+grow |items ~{I32}| -> I32:
+    ~items.push(7)
+    return items.length()
+;
+
+measure |holder Holder| -> I32:
+    return holder.items.length()
+;
+
+pair_text |before I32, after I32| -> String:
+    return [:[before]-[after]]
+;
+
+bump |value ~I32| -> I32:
+    ~value += 1
+    return value
+;
+
+probe || -> String:
+    priya ~= Holder({1})
+    rob ~= {2}
+    disjoint = inspect(priya.items, grow(~rob))
+    read_only = inspect(priya.items, measure(priya))
+    optional = inspect_optional(priya.items, grow(~rob))
+    total ~= 0
+    loop 0 to 2 |step|:
+        ~total += inspect(priya.items, grow(~rob))
+        ~priya.items.push(step)
+    ;
+    count ~= 1
+    copied = pair_text(copy count, bump(~count))
+    return [:disjoint=[disjoint] read_only=[read_only] optional=[optional] total=[total] items=[priya.items.length()] rob=[rob.length()] copied=[copied] count=[count]]
+;
+
+~[:[probe()]]

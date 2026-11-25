@@ -33,6 +33,19 @@ changes that source does not change the copied value:
     inspect(old = copy holder, next_length = replace(~holder))
 ]
 
+A shared place argument, such as `holder.items`, is also read where it is
+written. The call still needs that read when a later argument runs, so a later
+argument that mutates the same root is rejected, just as if the place had been
+bound to a name first. Conflicts are checked per root: mutating `pair.right`
+conflicts with an earlier `pair.left` argument. Use `copy` when the call should
+see the old value:
+
+[codeblock, $code "moth":
+    -- Rejected: `replace` mutates `holder` while `holder.items` is still needed.
+    inspect(holder.items, replace(~holder))
+    inspect(copy holder.items, replace(~holder))
+]
+
 Host functions and compiler-owned builtin member calls are positional-only.
 
 ### Implicit failure at calls

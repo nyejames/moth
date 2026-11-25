@@ -1,0 +1,27 @@
+-- A later operand that propagates failure lowers into its own blocks. The
+-- earlier shared read is still taken before it runs.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace |holder ~Holder| -> I32:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+replace_failing |holder ~Holder| -> I32, Error!:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+probe || -> I32, Error!:
+    holder ~= Holder({1})
+    return inspect(holder.items, replace_failing(~holder)!)
+;
+
+result = probe() catch:
+    then 0
+;
+~[:[result]]

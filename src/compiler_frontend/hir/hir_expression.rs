@@ -1522,6 +1522,23 @@ impl<'a> HirBuilder<'a> {
         )
     }
 
+    // WHAT: allocates the immutable binding that pins a shared call operand's place.
+    // WHY: the capture desugars the authored read `name = place` that the operand already
+    //      performs, so it carries a user origin and gets exactly the borrow rules of that
+    //      explicit binding. Diagnostics name it after the place through `display`.
+    pub(crate) fn allocate_operand_capture_local(
+        &mut self,
+        ty: TypeId,
+        source_info: Option<SourceSpan>,
+        display: PathId,
+    ) -> Result<LocalId, HirConstructionFailure> {
+        let local_id =
+            self.allocate_compiler_local(ty, source_info, HirLocalOriginKind::User, None, None)?;
+        self.side_table
+            .bind_operand_capture_display(local_id, display);
+        Ok(local_id)
+    }
+
     pub(crate) fn allocate_fresh_mutable_call_arg_local(
         &mut self,
         ty: TypeId,
@@ -1553,7 +1570,8 @@ impl<'a> HirBuilder<'a> {
         let local = HirLocal {
             id: local_id,
             ty,
-            mutable: true,
+            // Only operand captures are immutable: they stand in for an authored shared read.
+            mutable: origin != HirLocalOriginKind::User,
             region,
             span: source_info,
         };

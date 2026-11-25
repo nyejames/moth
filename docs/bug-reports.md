@@ -83,28 +83,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
   `docs/docs/branching/statement-if.mtf` requires both bodies to be frontend-validated before a known `Bool` selects one, and `tests/cases/catch_and_inactive_branch_source_validation_rejected` already pins syntax and type validation in discarded branches. Add matching debug/release rejection cases.
 
-### JS projected call arguments still retarget when a later argument rebinds the base
+### Binding a place into an option drops its alias provenance
 
-- Found: projected-alias backend audit, 2026-11. Confirmed again on the clean `0f384a5539` compiler. Whole `copy` operands are fixed (see below); projected shared operands still await the HIR prerequisite in [BC-06](./roadmap/plans/production-borrow-checker.md#bc-06-relational-production-provenance).
-- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` can leave an earlier projected argument unevaluated while a later nested call runs in the prelude. The JS computed-place helpers capture their base storage when constructed (`src/backends/js/runtime/places.rs`), after the nested call has already rebound it.
-- Observed: With an old length of 2 and a replacement length of 3, `inspect(holder.items, replace(~holder))` and `inspect(outer.inner.items, replace(~outer.inner))` observe 3. `inspect(copy holder, replace(~holder))` also observed 3 before the fix. Both direct and nested `copy` of the projected collection preserved its original length. Authored index projections cannot reach this path because places only carry field projections.
-- Partial fix (2026-11): an earlier `copy` operand, including one wrapped for an option parameter, is now committed to a compiler local before a later operand's prelude or fresh mutable argument runs, and effectful operands run in written order. `tests/cases/runtime_call_copy_operand_order` and `runtime_call_copy_operand_live_writer_rejected` cover whole, named, optional, fallible and same-call copies. Shared place operands are not captured, so their borrow verdicts are unchanged.
-- Attempted fix (reverted, 2026-11): capturing earlier operands into compiler locals in HIR before borrow checking fixed the runtime order but kept changing borrow verdicts relative to the existing behaviour. Four review rounds each found new divergences:
-  - mutable-capture actor (`old = pair.first; set_first(~pair.first, stamp())` accepted);
-  - alias liveness through a capture (`observe(writer.first, rewrite(~pair))` accepted);
-  - copy independence (`keep(copy pair, stamp())` falsely tied to `pair`);
-  - early shared borrow (`set_first(~pair.first, read_slot(writer))` rejected);
-  - same-call copy read (`f(copy pair, ~pair, stamp())` accepted);
-  - designated cells after scope exit;
-  - a copy checked at the capture instead of at the call;
-  - copy-source liveness across a branch merge;
-  - `__hir_tmp_*` named in a diagnostic.
-
-  Current borrow verdicts see late-evaluation HIR for shared place operands.
-  Review the HIR producer correction before changing Stage 6. Do not preserve
-  those verdicts by moving evaluation after borrow checking. Check the
-  ordinary access rules at the captured operand and keep exclusive reservation
-  out of this change. Add executed projected and nested-field cases.
+- Found: shared call-operand capture work, 2026-11. Confirmed on `32c9c4208`; pre-existing.
+- Where: Stage 6 local binding transfer for a `some` construction around a place load. Capturing the whole implicit `some` wrapper of a call operand in HIR exposed it, so `src/compiler_frontend/hir/hir_expression/calls.rs` binds only the load under the wrapper.
+- Observed: with `holder ~= Holder({1})`, `maybe {I32}? = holder.items`, then `first = replace(~holder)` and `inspect(maybe, first)`, the program is accepted. Declaring `maybe = holder.items` instead rejects at `~holder` with `MOTH-BORROW-0007`.
+- Investigate: whether option construction should carry the payload's alias roots into the bound local, and which option fixtures change verdict.
 
 ### Rooted in-memory template sources may not reach disk resources on Windows
 

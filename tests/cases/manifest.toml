@@ -23210,3 +23210,59 @@ path = "const_function_named_operand_order_rejected"
 tags = ["integration", "functions", "const", "diagnostics"]
 contract = "language.functions.const_named_operands_evaluate_in_source_order"
 role = "primary"
+
+[[case]]
+id = "runtime_call_shared_place_operand_order"
+path = "runtime_call_shared_place_operand_order"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "primary"
+
+[[case]]
+id = "runtime_call_shared_place_operand_overlap_rejected"
+path = "runtime_call_shared_place_operand_overlap_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_nested_place_operand_rejected"
+path = "runtime_call_shared_nested_place_operand_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_optional_place_operand_rejected"
+path = "runtime_call_shared_optional_place_operand_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_place_operand_fallible_rejected"
+path = "runtime_call_shared_place_operand_fallible_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_parameter_place_operand_rejected"
+path = "runtime_call_shared_parameter_place_operand_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_scalar_operand_rejected"
+path = "runtime_call_shared_scalar_operand_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_shared_sibling_place_operand_rejected"
+path = "runtime_call_shared_sibling_place_operand_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.borrows.root_granular_projection_conflicts"
+role = "boundary"

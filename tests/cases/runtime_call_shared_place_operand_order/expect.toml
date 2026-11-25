@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "disjoint=12 read_only=11 optional=13 total=39 items=3 rob=5 copied=1-2 count=2"

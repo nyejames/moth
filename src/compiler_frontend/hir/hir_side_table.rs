@@ -21,8 +21,12 @@ use crate::compiler_frontend::hir::ids::{
 };
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -171,6 +175,9 @@ pub(crate) struct HirSideTable {
     // -------------------------------------------------------------------------
     local_names: FxHashMap<LocalId, PathId>,
     local_origins: FxHashMap<LocalId, HirLocalOrigin>,
+    /// Authored place text for call-operand captures, such as `holder.items`. Kept apart from
+    /// `local_names`, which also feeds backend identifiers.
+    operand_capture_displays: FxHashMap<LocalId, PathId>,
     function_names: FxHashMap<FunctionId, PathId>,
     struct_names: FxHashMap<StructId, PathId>,
     generic_struct_instances: FxHashMap<StructId, GenericInstantiationKey>,
@@ -192,6 +199,7 @@ impl HirSideTable {
         self.local_names.clear();
         self.terminator_spans.clear();
         self.local_origins.clear();
+        self.operand_capture_displays.clear();
         self.function_names.clear();
         self.struct_names.clear();
         self.generic_struct_instances.clear();
@@ -249,6 +257,8 @@ impl HirSideTable {
         };
         self.local_names.retain(|id, _| live_locals.contains(id));
         self.local_origins.retain(|id, _| live_locals.contains(id));
+        self.operand_capture_displays
+            .retain(|id, _| live_locals.contains(id));
         self.ast_to_hir = std::mem::take(&mut self.ast_to_hir)
             .into_iter()
             .filter_map(|(span, mut locations)| {
@@ -267,6 +277,9 @@ impl HirSideTable {
         }
 
         for path in self.local_names.values_mut() {
+            *path = remap.get(*path);
+        }
+        for path in self.operand_capture_displays.values_mut() {
             *path = remap.get(*path);
         }
         for path in self.function_names.values_mut() {
@@ -443,6 +456,11 @@ impl HirSideTable {
         );
     }
 
+    /// Records the authored place text that diagnostics show for a call-operand capture.
+    pub(crate) fn bind_operand_capture_display(&mut self, local_id: LocalId, display: PathId) {
+        self.operand_capture_displays.insert(local_id, display);
+    }
+
     /// Binds a human-readable name to a function.
     #[inline]
     pub(crate) fn bind_function_name(&mut self, function_id: FunctionId, name: PathId) {
@@ -542,6 +560,16 @@ impl HirSideTable {
         self.local_names.get(&local_id).copied()
     }
 
+    /// Returns the diagnostic name path of a local: the authored place text for a call-operand
+    /// capture, its declared name otherwise.
+    #[inline]
+    pub(crate) fn local_display_path(&self, local_id: LocalId) -> Option<PathId> {
+        self.operand_capture_displays
+            .get(&local_id)
+            .or_else(|| self.local_names.get(&local_id))
+            .copied()
+    }
+
     /// Returns origin metadata for a local variable.
     #[inline]
     pub(crate) fn local_origin(&self, local_id: LocalId) -> Option<HirLocalOrigin> {
@@ -612,6 +640,7 @@ impl HirSideTable {
 
     /// Resolves a local variable name to its leaf component.
     #[inline]
+    #[cfg(any(test, feature = "show_hir"))]
     pub(crate) fn resolve_local_name<'a>(
         &self,
         local_id: LocalId,
