@@ -14,10 +14,10 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
 | Candidate | Uncommitted holder-edge diff on that base: 9 files, +697/-63, preserved locally as `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). No untracked files outside the ignored `tmp/`. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
-| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication) |
-| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. See the conclusions of [Session 1](#session-1-conclusions), [Section 3](#section-3-conclusions) and [Section 4](#section-4-conclusions). |
-| Next task | Section 5: trace what C4 publication must consume, for one allocation repeated in a field and one repeated across two result slots. |
-| Next unanswered question | Does the C4 materialisation path build one runtime allocation per shared frozen allocation per evaluation, and what must cross into HIR for Stage 6 to see it? |
+| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Section 5: C4 consumption) |
+| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. Its prototype lowering produces ordinary HIR that only an edge-aware Stage 6 checks soundly. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions) and [5](#section-5-conclusions). |
+| Next task | Section 6: compare designs against the witnesses and recover the 18-input benchmark manifest. |
+| Next unanswered question | Can the existing worklist carry cell-keyed edges and per-exit summary alternatives within the cutover guards, or does it need liveness-scoped state? |
 
 ## 1. Evidence inventory
 
@@ -433,10 +433,67 @@ Summary merging past the alternative cap is sound, so it isn't an incomplete pro
 3. Boracle can't arbitrate W3, L4, permission or any local call in source mode. Its place-loan model disagrees with the approved stored-by-value contract. Acceptance evidence for the redesign must come from Node execution of witnesses and the canonical rules, with Boracle used only where its model agrees.
 4. The permission positive B1p fails on the candidate for the same reason as W3, which makes cell-keyed edges with strong update on exact replacement the common prerequisite for W3, B1p, L4, `failed_set` and the option and projected-alias bug reports.
 
+## 5. What C4 publication must consume
+
+A read-only trace covered `ast/const_values/const_execution/{rewrite,values}.rs`, `ast/const_values/store.rs`, `hir/hir_expression.rs`, `hir/hir_statement/declarations.rs`, the JavaScript expression emitter and the local C4 prototype (`tmp/bc06-prototype/tracked.patch`). Paths are relative to `src/compiler_frontend/`.
+
+### Where sharing is lost today
+
+| Step | Code | Effect |
+| --- | --- | --- |
+| Outer boundary | `rewrite.rs::finish_call` validates results with `validate_call_results`, then calls `freeze_live_value` once per slot | Each slot gets a fresh allocation memo, so `return items, items` freezes two independent rows |
+| Freeze | `values.rs::freeze_live_value` memoises `(AllocationId, shape)` within one call | `return Pair(a, a)` freezes one row for `a` inside the slot |
+| Commit | `values.rs::commit_call_result` emits one `Constant` row, or a result block of `Constant` rows | Slot order and types are already validated |
+| Lowering | `store.rs::fold_value` visits every edge with no memo. `declarations.rs::lower_const_store_expression` builds a fresh `Collection` or `StructConstruct` per occurrence. | Even a shared row becomes separate runtime allocations |
+| Emission | The JavaScript backend prints aggregates as inline literals in the enclosing function | Every evaluation builds fresh allocations. Nothing is hoisted. |
+
+`ConstValueStore::insert_value` always appends, so two equal collections from distinct allocations never merge. Imported folded values are projected as trees (`import_projection/values.rs::import_folded_value`), so a provider's internal sharing doesn't cross an import. `finish_call` inserts frozen rows directly. The rollback path, `ConstValueStore::stage_values`, isn't used there, so a failure after the first insert can leave rows behind.
+
+### Witnesses
+
+| Witness | Required | Baseline | Candidate | What it shows |
+| --- | --- | --- | --- | --- |
+| P1 `make #\|\| -> {I32}: return {1}`, `probe` pushes into `make()` and is called twice | Renders `22` | `22` | `22` | Each evaluation materialises fresh storage |
+| P2 `make #\|\|` returns `Pair(a, b)` with two equal `{1}` collections, push through `left` | Renders `21` | `21` | `21` | Equal contents stay distinct |
+| P3 `make #\|\|` returns `Pair(a, a)`, push through `left`, read `right`. An ordinary twin does the same. | Both render `2` once C4 publishes sharing | Const `1`, ordinary `2` | Same | The const result loses intra-slot sharing today |
+| P4 ordinary `Pair(a, a)`, `owned ~= copy source`, push through `owned.left` | Renders `21` | `21` | `21` | `copy` keeps internal sharing and detaches from the source |
+| H1 hand-lowered publication: `shared ~= {1}`, then `box Box, items ~{I32} = Box(shared), shared` in a value `if`, `forwarded = identity(box)`, push `items`, read `forwarded` | `0007` at the push | Accepts, renders `2` | `0007` 15:6 | The prototype's lowering needs the construction-edge rule |
+| H2 as H1 with an immutable `shared {I32} = {1}` | `0007` | "Cannot mutably access immutable local `shared`." | Same | An immutable temporary turns into a permission failure |
+| H3 as H1 without `forwarded` | Accept, renders `2` | Accepts | Accepts | The legal shape stays legal with a writable temporary |
+| H4 as H3 with an immutable temporary | Accept | Permission rejection at 14:6 | Same | An immutable temporary rejects a legal program |
+
+### Contract at each boundary
+
+1. **Interpreter to store.** One freeze per call result group, across every ordered slot, inside `stage_values`. The memo maps each live allocation to one shared definition row. Later occurrences become rows that point at that definition. Storage IDs, generations and live handles stay inside the interpreter. Equal contents in different allocations stay different rows. A failed freeze publishes nothing. The prototype's `freeze_live_values`, `FreezeScratch` and `ValueBlock::ConstantResults` implement this.
+2. **Store to HIR.** One lowering context per slot group. The first occurrence of a shared definition becomes a `DefineLocal` of a temporary in the prelude, and every occurrence becomes `Load(temporary)`. Lowering happens at the use site, so each runtime evaluation defines its own temporaries and gets fresh allocations. The prototype's `lower_const_store_expression_in_graph` does this. Match guards need the prototype's definitions-only prelude so a guard stays side-effect free.
+3. **Permission.** A published graph is fresh owned data. The temporary must be writable, which `allocate_temp_local` already gives a `CompilerTemp`. Each receiving binding's own declaration decides mutation, as the C1 decisions require. H2 and H4 show that an immutable temporary would turn sharing into a permission error.
+4. **Stage 6.** It sees ordinary HIR: a writable temporary, constructions that load it and result slots that load it. No const-specific rule is allowed. The same ordinary path then has to reject H1 and accept H3. That needs construction edges (the candidate rule or its replacement), identity that survives the scope exit of a value-`if` arm (Section 3 conclusion 1) and the call summaries from Section 4 when the folded graph flows through `identity` or `retain`.
+5. **Other data.** Slot order and types keep `validate_call_results`. Structural strings and resources keep their existing visits and charges, and a shared definition is charged once. Imported provider values keep tree projection unless the owner extends the C1 sharing contract across packages. Scalar-returning functions such as `const_detached` and `const_retained` publish no graph, so they stay independent of this work.
+
+### Dependency list
+
+| Work | Depends on | Can start independently |
+| --- | --- | --- |
+| BC-06 cell-keyed edges with strong update (W3, W4, B1p, L4, W1c, `failed_set`) | Section 6 design choice | Yes |
+| BC-06 per-exit summary alternatives and store effects (W7, `success_store`) | Cell-keyed edges, so a field path has something to name | After the edge slice |
+| C4 freeze transaction and shared rows in the store | Nothing in Stage 6 | Yes, behind the existing non-sharing lowering |
+| C4 shared lowering through prelude temporaries | Construction edges and scope-exit identity in Stage 6, or H1 and the committed C4 fixtures become unsafe accepts | No |
+| C4 failed-publication rollback through `stage_values` | Nothing | Yes |
+| C5 checkpoint and measurements | C4 shared lowering | No |
+| Phase 5 immutable receiver methods | C5 | No |
+
+These ordinary cases must pass before shared folded results are exposed: H1 and H3, both committed `runtime_call_*_rejected` fixtures and their ordinary twins, `inline_ctor_branch`, W3 and W4, B1 and B1p and the existing `runtime_call_shared_*` operand fixtures.
+
+### Section 5 conclusions
+
+1. C4 loses sharing at the per-slot freeze and again at per-occurrence lowering. The prototype fixes both with one freeze transaction per slot group and prelude temporaries. That changes HIR shape, not Stage 6 rules.
+2. The prototype's lowering is exactly the H1 shape. The baseline accepts it unsoundly and the candidate rejects it correctly, so shared lowering can't land before BC-06 ships construction edges and scope-exit identity.
+3. The temporary must be writable fresh storage. This settles the open question about fresh materialisation permissions: permission comes from the receiving binding, never from the temporary.
+4. The store transaction, shared rows and rollback can proceed in parallel with BC-06, since they don't change emitted HIR until the lowering switches.
+
 ## Investigation queue
 
-Sections 5-7 of the assignment still run against the same witnesses:
+Sections 6-7 of the assignment still run against the same witnesses:
 
-- Section 5: what C4 publication must consume.
 - Section 6: design comparison and recovery of the 18-input benchmark manifest. `tmp/bc06/baseline_measure.json` keeps the input fingerprints and raw samples.
 - Section 7: the ordered implementation sequence for owner approval.
