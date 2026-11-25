@@ -22,6 +22,17 @@ Named arguments can skip earlier defaults.
 User functions, struct constructors, choice payload constructors and
 source-authored receiver methods share this routing policy.
 
+### Evaluation order
+
+Arguments are evaluated once, in the order they are written, then routed to
+their parameters. Named arguments follow the same written order. A `copy`
+argument reads its source when it is evaluated, so a later argument that
+changes that source does not change the copied value:
+
+[codeblock, $code "moth":
+    inspect(old = copy holder, next_length = replace(~holder))
+]
+
 Host functions and compiler-owned builtin member calls are positional-only.
 
 ### Implicit failure at calls

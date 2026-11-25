@@ -20,22 +20,11 @@ impl<'a> HirBuilder<'a> {
         receiver: Option<ExpressionView<'_>>,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueRange, HirConstructionFailure> {
-        let mut values = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
-        if let Some(receiver) = receiver {
-            values.push(self.lower_expression_value_to_current_block(receiver)?);
-        }
-        for (index, argument) in args.iter().enumerate() {
-            let lowered = self.lower_call_argument_value(
-                argument,
-                span,
-                index + usize::from(receiver.is_some()),
-            )?;
-            for statement in lowered.prelude {
-                self.emit_statement_to_current_block(statement)?;
-            }
-            values.push(lowered.value);
-        }
-        self.module.expressions.append_values(&values, *span)
+        let mut lowered = self.lower_call_operands(args, receiver, span)?;
+        self.flush_pending_call_prelude(&mut lowered.prelude)?;
+        self.module
+            .expressions
+            .append_values(&lowered.values, *span)
     }
 
     pub(in crate::compiler_frontend::hir) fn emit_result_call_to_current_block(
@@ -89,9 +78,12 @@ impl<'a> HirBuilder<'a> {
                 let Some(error_type) = value.error_type() else {
                     return Err(InfrastructureFailure::hir_transformation("Fallible map producer lacks an error channel").into());
                 };
-                // Commit receiver work before arguments can enter a failure continuation.
-                let receiver = self.lower_expression_value_to_current_block(receiver)?;
-                let args = self.lower_invoke_arguments(arguments, None, &span)?;
+                let mut lowered = self.lower_call_operands(arguments, Some(receiver), &span)?;
+                self.flush_pending_call_prelude(&mut lowered.prelude)?;
+                let (&receiver, arguments) = lowered.values.split_first().ok_or_else(|| {
+                    InfrastructureFailure::hir_transformation("Fallible map producer lacks a receiver")
+                })?;
+                let args = self.module.expressions.append_values(arguments, span)?;
                 let types = self.lower_call_result_types(value.success_types())?;
                 let error = self.lower_type_id(error_type)?;
                 self.emit_fallible_operation(

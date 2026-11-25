@@ -1,0 +1,66 @@
+Holder = |items {I32}|
+
+replace |holder ~Holder| -> I32:
+    ~holder = Holder({4, 5, 6})
+    return holder.items.length()
+;
+
+inspect |old Holder, next_length I32| -> String:
+    return [:old=[old.items.length()] new=[next_length]]
+;
+
+inspect_reversed |next_length I32, old Holder| -> String:
+    return inspect(old, next_length)
+;
+
+inspect_optional |old Holder?, next_length I32| -> String:
+    length = if old is |value|:
+        then value.items.length()
+    else
+        then -1
+    ;
+    return [:old=[length] new=[next_length]]
+;
+
+inspect_fallible |old Holder, next_length I32| -> String, Error!:
+    if next_length is 0:
+        return! Error("empty")
+    ;
+    return inspect(old, next_length)
+;
+
+inspect_and_push |snapshot {I32}, items ~{I32}| -> I32:
+    ~items.push(3)
+    return snapshot.length() * 10 + items.length()
+;
+
+stamp |trace ~I32, digit I32| -> I32:
+    ~trace = trace * 10 + digit
+    return digit
+;
+
+combine |first I32, second I32| -> String:
+    return [:first=[first] second=[second]]
+;
+
+probe || -> String:
+    whole ~= Holder({1, 2})
+    before = inspect(copy whole, replace(~whole))
+    named_holder ~= Holder({1, 2})
+    named_copy = inspect_reversed(old = copy named_holder, next_length = replace(~named_holder))
+    optional_holder ~= Holder({1, 2})
+    optional = inspect_optional(copy optional_holder, replace(~optional_holder))
+    reversed ~= Holder({1, 2})
+    after = inspect(next_length = replace(~reversed), old = copy reversed)
+    fallible_holder ~= Holder({1, 2})
+    fallible = inspect_fallible(copy fallible_holder, replace(~fallible_holder)) catch:
+        then "error"
+    ;
+    same_call_holder ~= Holder({1, 2})
+    same_call = inspect_and_push(copy same_call_holder.items, ~same_call_holder.items)
+    trace ~= 0
+    named = combine(second = stamp(~trace, 1), first = stamp(~trace, 2))
+    return [:before=[before] named_copy=[named_copy] optional=[optional] after=[after] fallible=[fallible] same_call=[same_call] named=[named] trace=[trace]]
+;
+
+~[:[probe()]]

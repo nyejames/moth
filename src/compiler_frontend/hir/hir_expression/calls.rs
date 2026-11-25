@@ -10,10 +10,13 @@
 //! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only.
 
-use crate::compiler_frontend::ast::expressions::call_argument::CallPassingMode;
+use std::num::NonZeroU32;
+
+use crate::compiler_frontend::ast::expressions::call_argument::{CallArgument, CallPassingMode};
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ArgumentListView, ArgumentView, ExpressionView,
+    ArgumentListView, ArgumentView, ExpressionStore, ExpressionView,
 };
+use crate::compiler_frontend::ast::statements::never_call::NeverCall;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -23,17 +26,50 @@ use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX,
+};
 use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::HirValueId;
-use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
 
 use super::{LoweredExpression, LoweredResults};
+
+#[derive(Clone, Copy)]
+enum CallOperand<'a> {
+    Stored(ArgumentView<'a>),
+    Never(&'a ExpressionStore, &'a CallArgument),
+}
+
+impl<'a> CallOperand<'a> {
+    fn authored_ordinal(self) -> Option<NonZeroU32> {
+        match self {
+            Self::Stored(argument) => argument.metadata().authored_ordinal,
+            Self::Never(_, argument) => argument.authored_ordinal,
+        }
+    }
+
+    fn parts(
+        self,
+    ) -> Result<(ExpressionView<'a>, CallPassingMode, Option<SourceSpan>), HirConstructionFailure>
+    {
+        Ok(match self {
+            Self::Stored(argument) => {
+                let metadata = argument.metadata();
+                (argument.value(), metadata.passing_mode, metadata.span)
+            }
+            Self::Never(store, argument) => (
+                store.view(argument.value)?,
+                argument.passing_mode,
+                argument.span,
+            ),
+        })
+    }
+}
 
 impl<'a> HirBuilder<'a> {
     pub(crate) fn call_target_requires_result_projection(&self, target: &CallTarget) -> bool {
@@ -71,29 +107,15 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let mut lowered_args = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
-        if let Some(receiver) = receiver {
-            lowered_args.push(self.lower_expression_value_to_current_block(receiver)?);
-        }
-
-        for (arg_index, argument) in args.iter().enumerate() {
-            let lowered = self.lower_call_argument_value(
-                argument,
-                span,
-                arg_index + usize::from(receiver.is_some()),
-            )?;
-            for prelude_statement in lowered.prelude {
-                self.emit_statement_to_current_block(prelude_statement)?;
-            }
-            lowered_args.push(lowered.value);
-        }
+        let LoweredResults {
+            mut prelude,
+            values,
+        } = self.lower_call_operands(args, receiver, span)?;
+        self.flush_pending_call_prelude(&mut prelude)?;
 
         let result_type = self.lower_call_result_type(result_type_ids)?;
         let result_local = self.allocate_temp_local(result_type, None)?;
-        let args = self
-            .module
-            .expressions
-            .append_values(&lowered_args, *span)?;
+        let args = self.module.expressions.append_values(&values, *span)?;
 
         let call_statement = HirStatement {
             id: self.allocate_node_id(),
@@ -134,7 +156,6 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        let mut prelude = Vec::new();
         let hir_op = hir_map_op_from_builtin(op);
         if receiver_requires_mutable != hir_op.requires_mutable_receiver() {
             crate::compiler_bug!(
@@ -144,17 +165,13 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        let lowered_receiver = self.lower_child_expression_for_parent(&mut prelude, receiver)?;
-
-        let mut lowered_args = Vec::with_capacity(args.len());
-        for (arg_index, argument) in args.iter().enumerate() {
-            if self.expression_needs_current_block_lowering(argument.value()) {
-                self.flush_pending_call_prelude(&mut prelude)?;
-            }
-            let lowered = self.lower_call_argument_value(argument, span, arg_index)?;
-            prelude.extend(lowered.prelude);
-            lowered_args.push(lowered.value);
-        }
+        let LoweredResults {
+            mut prelude,
+            values,
+        } = self.lower_call_operands(args, Some(receiver), span)?;
+        let (&lowered_receiver, lowered_args) = values.split_first().ok_or_else(|| {
+            InfrastructureFailure::hir_transformation("Map call lost its receiver")
+        })?;
 
         let statement_id = self.allocate_node_id();
         let region = self.current_region_or_error()?;
@@ -166,10 +183,7 @@ impl<'a> HirBuilder<'a> {
             Some(self.allocate_temp_local(result_type, None)?)
         };
 
-        let args = self
-            .module
-            .expressions
-            .append_values(&lowered_args, *span)?;
+        let args = self.module.expressions.append_values(lowered_args, *span)?;
         let statement = HirStatement {
             id: statement_id,
             kind: HirStatementKind::MapOp {
@@ -204,25 +218,8 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        let mut prelude = Vec::new();
-        let mut lowered_args = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
-        if let Some(receiver) = receiver {
-            let value = self.lower_child_expression_for_parent(&mut prelude, receiver)?;
-            lowered_args.push(value);
-        }
-        for (arg_index, argument) in args.iter().enumerate() {
-            if self.expression_needs_current_block_lowering(argument.value()) {
-                self.flush_pending_call_prelude(&mut prelude)?;
-            }
-            let lowered = self.lower_call_argument_value(
-                argument,
-                span,
-                arg_index + usize::from(receiver.is_some()),
-            )?;
-            prelude.extend(lowered.prelude);
-            lowered_args.push(lowered.value);
-        }
-        self.lower_call_results_from_values(target, &lowered_args, prelude, result_type_ids, span)
+        let LoweredResults { prelude, values } = self.lower_call_operands(args, receiver, span)?;
+        self.lower_call_results_from_values(target, &values, prelude, result_type_ids, span)
     }
 
     pub(super) fn lower_call_results_from_values(
@@ -295,82 +292,169 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    pub(super) fn lower_call_argument_value(
+    pub(super) fn lower_call_operands(
         &mut self,
-        argument: ArgumentView<'_>,
-        call_span: &Option<SourceSpan>,
-        argument_index: usize,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let metadata = argument.metadata();
-        self.lower_call_argument_value_parts(
-            argument.value(),
-            metadata.passing_mode,
-            metadata.span,
-            call_span,
-            argument_index,
-        )
+        args: ArgumentListView<'_>,
+        receiver: Option<ExpressionView<'_>>,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredResults, HirConstructionFailure> {
+        self.lower_operands_in_authored_order(args.iter().map(CallOperand::Stored), receiver, span)
     }
 
-    /// Lower one call argument from already-resolved metadata and value.
-    ///
-    /// WHAT: the shared argument lowering used by stored call views and the AST `NeverCall`
-    ///       payload, which keeps its arguments outside the expression store.
-    /// WHY: terminating calls must evaluate arguments exactly like ordinary calls, including
-    ///      fresh-rvalue materialisation for mutable arguments, without constructing a second
-    ///      call representation.
-    pub(crate) fn lower_call_argument_value_parts(
+    pub(in crate::compiler_frontend::hir) fn lower_never_call_operands(
         &mut self,
-        value: ExpressionView<'_>,
-        passing_mode: CallPassingMode,
-        source_span: Option<SourceSpan>,
-        call_span: &Option<SourceSpan>,
-        argument_index: usize,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let lowered_value = if self.expression_needs_current_block_lowering(value) {
-            LoweredExpression {
-                prelude: vec![],
-                value: self.lower_expression_value_to_current_block(value)?,
-            }
-        } else {
-            self.lower_expression(value)?
-        };
+        expressions: &ExpressionStore,
+        call: &NeverCall,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredResults, HirConstructionFailure> {
+        let receiver = call.receiver.map(|id| expressions.view(id)).transpose()?;
+        let args = call
+            .arguments
+            .iter()
+            .map(|arg| CallOperand::Never(expressions, arg));
+        self.lower_operands_in_authored_order(args, receiver, span)
+    }
 
-        if passing_mode != CallPassingMode::FreshMutableValue {
-            return Ok(lowered_value);
+    fn lower_operands_in_authored_order<'source>(
+        &mut self,
+        args: impl ExactSizeIterator<Item = CallOperand<'source>> + Clone,
+        receiver: Option<ExpressionView<'source>>,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredResults, HirConstructionFailure> {
+        if args
+            .clone()
+            .filter_map(CallOperand::authored_ordinal)
+            .is_sorted()
+        {
+            return self.lower_operand_sequence(args.enumerate(), receiver, span);
         }
 
-        let mut prelude = lowered_value.prelude;
-        let value = lowered_value.value;
-        let value_type = self.module.expressions.expression(value).ty;
-        let temp_local = self.allocate_fresh_mutable_call_arg_local(
-            value_type,
-            None,
-            *call_span,
-            argument_index,
-        )?;
+        // Typed method calls can already carry their receiver as an unmarked
+        // leading argument. Leave that prefix first. Remaining unmarked
+        // operands are compile-time defaults, not authored evaluations.
+        let prefix = args
+            .clone()
+            .take_while(|arg| arg.authored_ordinal().is_none())
+            .count();
+        let mut ordered: Vec<_> = args.enumerate().collect();
+        ordered.sort_unstable_by_key(|(slot, arg)| match arg.authored_ordinal() {
+            Some(ordinal) => (1, ordinal.get() as usize),
+            None if *slot < prefix => (0, *slot),
+            None => (2, *slot),
+        });
 
-        let write_statement = HirStatement {
+        let mut lowered = self.lower_operand_sequence(ordered.iter().copied(), receiver, span)?;
+        let offset = usize::from(receiver.is_some());
+        // Return to ABI slot order without evaluating any operand again.
+        for position in 0..ordered.len() {
+            while ordered[position].0 != position {
+                let slot = ordered[position].0;
+                ordered.swap(position, slot);
+                lowered.values.swap(position + offset, slot + offset);
+            }
+        }
+        Ok(lowered)
+    }
+
+    fn lower_operand_sequence<'source>(
+        &mut self,
+        args: impl ExactSizeIterator<Item = (usize, CallOperand<'source>)>,
+        receiver: Option<ExpressionView<'source>>,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredResults, HirConstructionFailure> {
+        let offset = usize::from(receiver.is_some());
+        let mut values = Vec::with_capacity(args.len() + offset);
+        let mut prelude = Vec::new();
+        if let Some(receiver) = receiver {
+            values.push(self.lower_child_expression_for_parent(&mut prelude, receiver)?);
+        }
+
+        let mut pending = 0;
+        for (slot, argument) in args {
+            let (expression, mode, source_span) = argument.parts()?;
+            let mut value = if self.expression_needs_current_block_lowering(expression) {
+                self.commit_earlier_copies(&mut values[pending..], &mut prelude)?;
+                pending = values.len();
+                self.flush_pending_call_prelude(&mut prelude)?;
+                self.lower_expression_value_to_current_block(expression)?
+            } else {
+                let lowered = self.lower_expression(expression)?;
+                if !lowered.prelude.is_empty() || mode == CallPassingMode::FreshMutableValue {
+                    self.commit_earlier_copies(&mut values[pending..], &mut prelude)?;
+                    pending = values.len();
+                }
+                prelude.extend(lowered.prelude);
+                lowered.value
+            };
+
+            if mode == CallPassingMode::FreshMutableValue {
+                let ty = self.module.expressions.expression(value).ty;
+                let local =
+                    self.allocate_fresh_mutable_call_arg_local(ty, None, *span, slot + offset)?;
+                value = self.define_call_operand(&mut prelude, value, local, None, source_span)?;
+            }
+            values.push(value);
+        }
+        Ok(LoweredResults { prelude, values })
+    }
+
+    fn commit_earlier_copies(
+        &mut self,
+        operands: &mut [HirValueId],
+        prelude: &mut Vec<HirStatement>,
+    ) -> Result<(), HirConstructionFailure> {
+        for operand in operands {
+            // A copy reads source storage now and produces independent data.
+            // Don't introduce a live borrow by materialising a plain place.
+            if self.is_copy_operand(*operand) {
+                let value = self.module.expressions.expression(*operand);
+                let (ty, span) = (value.ty, value.span);
+                let local = self.allocate_temp_local(ty, span)?;
+                *operand = self.define_call_operand(prelude, *operand, local, span, span)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// An explicit copy, possibly wrapped by the implicit `some` that argument
+    /// validation inserts for an option parameter.
+    fn is_copy_operand(&self, operand: HirValueId) -> bool {
+        let expressions = &self.module.expressions;
+        match expressions.expression(operand).kind {
+            HirExpressionKind::Copy(_) => true,
+            HirExpressionKind::VariantConstruct {
+                carrier: HirVariantCarrier::Option,
+                variant_index: OPTION_SOME_VARIANT_INDEX,
+                fields,
+            } => matches!(
+                expressions.variant_fields(fields),
+                [field] if matches!(expressions.expression(field.value).kind, HirExpressionKind::Copy(_))
+            ),
+            _ => false,
+        }
+    }
+
+    fn define_call_operand(
+        &mut self,
+        prelude: &mut Vec<HirStatement>,
+        value: HirValueId,
+        local: LocalId,
+        span: Option<SourceSpan>,
+        ast_span: Option<SourceSpan>,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let definition = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Write {
-                target: HirWriteTarget::DefineLocal(temp_local),
+                target: HirWriteTarget::DefineLocal(local),
                 value,
             },
-            span: None,
+            span,
         };
-        self.side_table.map_statement(source_span, &write_statement);
-        prelude.push(write_statement);
+        self.side_table.map_statement(ast_span, &definition);
+        prelude.push(definition);
 
-        let region = self.current_region_or_error()?;
-        let no_span = None;
-        let value = self.make_expression(
-            &no_span,
-            HirExpressionKind::Load(HirPlace::local(temp_local)),
-            value_type,
-            ValueKind::RValue,
-            region,
-        )?;
-
-        Ok(LoweredExpression { prelude, value })
+        let ty = self.module.expressions.expression(value).ty;
+        self.make_local_load_expression(local, ty, &span, self.current_region_or_error()?)
     }
 
     pub(crate) fn flush_pending_call_prelude(

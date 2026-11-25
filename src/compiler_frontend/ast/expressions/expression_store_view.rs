@@ -80,7 +80,7 @@ impl<'a> ArgumentListView<'a> {
     pub(crate) fn len(self) -> usize {
         self.values.len()
     }
-    pub(crate) fn iter(self) -> impl ExactSizeIterator<Item = ArgumentView<'a>> + 'a {
+    pub(crate) fn iter(self) -> impl ExactSizeIterator<Item = ArgumentView<'a>> + Clone + 'a {
         let owner = self.owner;
         self.values
             .iter()

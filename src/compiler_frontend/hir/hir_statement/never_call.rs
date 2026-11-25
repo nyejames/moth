@@ -51,33 +51,13 @@ impl<'a> HirBuilder<'a> {
                 .insert(target.clone(), HirFunctionReturnContract::Never);
         }
 
-        let mut lowered_args =
-            Vec::with_capacity(call.arguments.len() + usize::from(call.receiver.is_some()));
-        if let Some(receiver) = call.receiver {
-            let mut prelude = Vec::new();
-            let value =
-                self.lower_child_expression_for_parent(&mut prelude, expressions.view(receiver)?)?;
-            self.flush_pending_call_prelude(&mut prelude)?;
-            lowered_args.push(value);
-        }
-
-        for (arg_index, argument) in call.arguments.iter().enumerate() {
-            let value = self.lower_call_argument_value_parts(
-                expressions.view(argument.value)?,
-                argument.passing_mode,
-                argument.span,
-                &call_span,
-                arg_index + usize::from(call.receiver.is_some()),
-            )?;
-            let mut prelude = value.prelude;
-            self.flush_pending_call_prelude(&mut prelude)?;
-            lowered_args.push(value.value);
-        }
+        let mut lowered = self.lower_never_call_operands(expressions, call, &call_span)?;
+        self.flush_pending_call_prelude(&mut lowered.prelude)?;
 
         let args = self
             .module
             .expressions
-            .append_values(&lowered_args, call_span)?;
+            .append_values(&lowered.values, call_span)?;
         let block = self.current_block_id_or_error()?;
         self.emit_terminator_with_span(
             block,

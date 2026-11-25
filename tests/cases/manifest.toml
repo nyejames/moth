@@ -18065,6 +18065,20 @@ contract = "language.memory.retained_field_replacement_and_disjoint_access"
 role = "boundary"
 
 [[case]]
+id = "runtime_call_copy_operand_order"
+path = "runtime_call_copy_operand_order"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.call_copy_operands_follow_authored_order"
+role = "primary"
+
+[[case]]
+id = "runtime_call_copy_operand_live_writer_rejected"
+path = "runtime_call_copy_operand_live_writer_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_copy_operands_follow_authored_order"
+role = "boundary"
+
+[[case]]
 id = "aggregate_multi_bind_known_leaf_receivers_runtime"
 path = "aggregate_multi_bind_known_leaf_receivers_runtime"
 tags = ["integration", "numeric", "inference", "collections", "maps", "multi_bind", "runtime"]
