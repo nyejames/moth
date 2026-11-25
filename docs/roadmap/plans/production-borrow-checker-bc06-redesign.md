@@ -4,7 +4,7 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 
 **Owner direction (2026-11-25):** production implementation is paused. Investigate the design and return one reviewable design and implementation sequence. The holder-edge candidate stays uncommitted and preserved. Before this direction the two plans disagreed: the BC-06 handoff said "resume const C4 on the existing checker", while [C4](./const-functions-evaluation-foundation-and-semantics-plan.md#c4-integrate-required-evaluation-and-close-publication) stayed paused until ordinary access checking preserves correlated sharing and permission. This investigation now gates both.
 
-**Approved contract decisions:** `hashmap_alias_struct_field_param_return` and the ordinary `runtime_detached` function must reject at their mutation with `MOTH-BORROW-0007`. The ordinary `runtime_retained` function must accept and render `22`. Fixture manifests stay unchanged until the design is approved.
+**Approved contract decisions:** `hashmap_alias_struct_field_param_return` and the ordinary `runtime_detached` function must reject at their mutation with `MOTH-BORROW-0007`. The ordinary `runtime_retained` function must accept and render `22`. Fixture manifests change only in the slice whose rule changes them. The owner approved the design with the [Slice 0 decisions](#slice-0-owner-decisions).
 
 ## Resume point
 
@@ -12,12 +12,12 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | --- | --- |
 | Branch | `docs/const-foundation-profile-independent-semantics` |
 | Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
-| Candidate | Uncommitted holder-edge diff on that base: 9 files, +697/-63, preserved locally as `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). No untracked files outside the ignored `tmp/`. |
+| Candidate | Set aside. The holder-edge diff on that base (9 files, +697/-63) is preserved as the reference `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
 | Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. The candidate fails the performance guard on 5 of the 18 workloads with identical work counters, so dense per-local edge sets are ruled out. The chosen design adds a sparse allocation layer to the existing checker. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions), [5](#section-5-conclusions) and [6](#section-6-conclusions). |
-| Next task | Owner design review of [Section 6](#6-design-choice) and [Section 7](#7-implementation-sequence). Production work starts at slice 1 only after approval. |
-| Next unanswered question | Does the owner accept the conservative limits in [Accepted imprecision](#accepted-imprecision), and the decisions listed under [Slice 0](#slice-0-owner-review)? |
+| Next task | Slice 1, the sparse allocation layer, from `7cc05c61b`. C4's freeze transaction, rollback and import witnesses run in parallel. |
+| Next unanswered question | Can slice 1 meet its witness row within the unchanged performance guard? |
 
 ## 1. Evidence inventory
 
@@ -420,11 +420,11 @@ Both Boracle lanes treat a stored reference as a loan of the source *place*, so 
 | Outcome | Policy |
 | --- | --- |
 | A real conflict | The existing access diagnostic at the access, such as `MOTH-BORROW-0007` or `MOTH-BORROW-0003`. An established conflict takes precedence over every other outcome. |
-| An incomplete mandatory proof | A new deterministic borrow diagnostic naming the function and the limit or construct. Budget exhaustion stops analysis at once. No partial acceptance or summary is published. `MOTH-BORROW-0008` is historical and must not be reused, so this needs the next free code. |
+| An incomplete mandatory proof | Fail closed: no acceptance and no partial summary. An established conflict still takes precedence. The chosen design has no hard cutoff, so every transfer finishes with a sound result and this outcome can't arise. Adding a hard analysis limit reopens the diagnostic decision with the owner. Any new code must skip `MOTH-BORROW-0008`, which is historical. |
 | An unproven optional transfer | Falls back to borrowing. Never a source error. |
 | Missing compiler metadata | The infrastructure-failure contract, as today when a reachable statement lacks a published fact in `metadata.rs::finalize_public_call_summary_effects`. |
 
-Summary merging past the alternative cap is sound, so it isn't an incomplete proof. Only a construct that the design can't represent soundly needs the new diagnostic.
+A sound merge, such as a weak update or a union at a join, isn't an incomplete proof. When the finished analysis shows that two paths may alias, the existing access diagnostic is accurate.
 
 ### Section 4 conclusions
 
@@ -578,16 +578,18 @@ The extension is chosen. The replacement stays a possible later performance proj
 
 For W7a, the disjoint `select` has no pair, so `copy selected` gives `owned.left` and `owned.right` distinct identities and the push through `owned.left` can't reach `observed`. For W7b, the shared arm adds `(left, right, if a and b alias)`. `forward` passes `items` for both, so the copy shares one identity and the push rejects. W7c and W7d get the same results through the value `if` join.
 
-**Failure policy.** As [Section 4](#failure-policy) says. The extension needs no new diagnostic code, since no step can fail to produce a sound result.
+**Failure policy.** As [Section 4](#failure-policy) says. Every transfer finishes with a sound result, so the extension needs no new diagnostic code. If the analysis ever stops before establishing a mandatory result, it fails closed. A hard cutoff would reopen the diagnostic decision.
 
 ### Accepted imprecision
 
-These stay conservative rejections. No witness requires them to accept:
+The owner accepted these four limits for this implementation. Each stays a conservative rejection and covers only the shape described. If a required positive falls inside one, the slice stops and returns to the owner rather than widening the limit or dropping the positive.
 
-- reading one field of a call result while mutating another field of the same uncopied result, when an argument appears in both fields on different exits
-- two instances created by one site inside a loop
-- a write through an alias that may name more than one cell
-- distinct collection elements.
+| Limit | Scope | Required positives it must not reach |
+| --- | --- | --- |
+| Mixed exits in an uncopied call result | Reading one field of a call result while mutating another field of the same result, with no `copy` in between, when one argument reaches both fields on different exits | W7a and W7c copy first. `runtime_call_disjoint_result_fields` uses distinct arguments. |
+| Loop allocation sites | Two allocations created by one site on different iterations of a loop are treated as possibly the same | L1 and L3 keep one allocation per iteration live at a time |
+| Ambiguous alias writes | `~alias = value` when the alias may name more than one cell is a weak update | L4 writes through an alias that names exactly one cell |
+| Collection elements | All elements of one collection share one field path | W1c moves one element out with `remove`, which is a strong update of the result |
 
 ### What happens to the candidate
 
@@ -611,26 +613,42 @@ These stay conservative rejections. No witness requires them to accept:
 
 Every slice lands as one reviewed change on top of the previous one. Durable regressions assert the diagnostic site as well as the verdict, at the layer that owns the behaviour. Fixture manifests change only in the slice whose rule changes them.
 
-### Slice 0: Owner review
+### Slice 0: Owner decisions
 
-Decisions this design needs from the owner:
+Recorded from the owner's review of revision `0c5e64c9f`:
 
-- approve the extension and the [accepted imprecision](#accepted-imprecision)
-- confirm no new borrow diagnostic code, since the extension has no budget
-- confirm that imported const values keep tree projection, so a provider's internal sharing doesn't cross an import ([Section 5](#contract-at-each-boundary))
-- confirm that C4's store transaction and rollback may start in parallel with slice 1, while C4's shared lowering waits for slice 2.
+| Question | Decision |
+| --- | --- |
+| The extension and its conservative rejections | Approved, with sparse allocation and field facts in the existing checker. The four limits above are accepted with their scope stated, so they can't absorb a required positive. The dense candidate is set aside because it failed 5 of the 18 guards, including one without aliasing. |
+| No new borrow diagnostic code | Confirmed while every transfer completes with a sound result. A finished analysis that finds a possible alias uses the existing diagnostic. Stopping before a mandatory result fails closed, with no acceptance and no partial summary. A future hard cutoff reopens this decision. |
+| Imported constants as trees | Approved only where sharing is unobservable. An import-specific change in observable behaviour is declined. C1 requires a runtime materialisation to preserve sharing within its graph, while each materialisation may still be fresh. C4 must test an exported folded value separately from an imported const function evaluated by the consumer, each with one graph holding the same child twice and one holding two equal, distinct children. If a supported consumer can tell the local and imported forms apart, C4 preserves that distinction across the interface. The public representation needn't change before slice 1. |
+| C4 store work in parallel | Approved. One freeze transaction covers the ordered result slots, with shared definitions and rollback if a later slot fails. Tests must show that pre-existing store rows survive and no partial result becomes visible. C4 also checks what the existing tree walkers do with a compact graph that references one child repeatedly, since charging each definition once doesn't bound a consumer that expands every occurrence. Shared runtime lowering waits until the ordinary checker passes its controls. |
+
+Implementation returns to the owner if a required positive can't be preserved soundly, a hard analysis limit becomes necessary or an imported value shows a sharing difference the proposed interface can't represent. The performance guard is unchanged.
 
 The approved contract decisions at the top of this document already cover `runtime_detached`, `runtime_retained` and the hashmap fixture.
+
+### Witness ownership
+
+Each witness belongs to the first slice whose rule decides it. Later slices must keep it.
+
+| Owner | Must accept | Must reject at the recorded site |
+| --- | --- | --- |
+| Slice 1 | W3 `22`, W1c `20`, L1 `4`, L3 `1 / 2`, L4 `12`, `failed_set`, B1p `21`, B2 projected alias with a fresh holder, H3 `2`, P1 `22`, P2 `21`, P4 `21` and the ordinary form of P3 `2` | W1, W1b, W4, L2, B1, H1, `inline_ctor_branch`, `lexical_dynamic`, `permission_write`, the option-binding report (`tmp/stage5/optbind`), the ordinary twins of both `runtime_call_*_rejected` fixtures, `hashmap_alias_struct_field_param_return` and ordinary `runtime_detached` |
+| Slice 2 | W7a and W7c with `left=2 right=1 original=1` for both flags, `runtime_call_disjoint_result_fields` with `left=1 right=2 second=1`, and `retain` and `forward` callers without conflicting uses | W7b, W7d, `success_store` and `failure_store` |
+| C4 shared lowering | P3's const form rendering `2`, H3 through the real lowering, and the import witnesses wherever sharing is observable | The const forms of `runtime_call_fresh_box_forward_rejected` and `runtime_call_identity_fields_rejected`, and H1 through the real lowering |
+| Outside BC-06 | The multi-bind report (`tmp/bc06/rebind_ordinary_multibind`) belongs to HIR multi-bind lowering | |
+
+The const forms of the two committed `runtime_call_*_rejected` fixtures and `runtime_call_disjoint_result_fields` fail on `7cc05c61b`, as the BC-06 plan records. They stay failing until their owner lands.
 
 ### Slice 1: Sparse allocation layer
 
 | Item | Content |
 | --- | --- |
 | Files | `analysis/borrow_checker/state.rs` (new layer type beside `LocalState`, sorted-vector joins and equality), `engine.rs` (join, block-exit retirement), `transfer/access.rs` (`transfer_assign_target` strong update, construction edges, `copy`), `transfer/access/statement.rs` (map `remove` and `set`, `transfer_invoke` per-lane stores, `transfer_never_call`), `transfer/access/conflicts.rs` (`check_mutable_access` reachability and edge permission), `hir/expressions.rs` (`is_aggregate_construction`), `return_alias.rs` (the candidate's constructed-return rule) |
-| Prerequisite | Slice 0 approval. Start from `7cc05c61b`, not from the candidate. Port the kept pieces by hand. |
+| Prerequisite | Slice 0 decisions, recorded above. Start from `7cc05c61b`, not from the candidate. Port the kept pieces by hand, with `tmp/bc06/holder_edges_candidate.patch` as the reference. |
 | Deletions | The candidate pieces listed as deleted above. Discard the uncommitted candidate once its kept pieces land. |
-| Must accept | W3 `22`, W1c `20`, L1 `4`, L3 `1 / 2`, L4 `12`, `failed_set`, B1p `21`, H3 `2`, P1-P4 with their outputs, the W8 const fixtures |
-| Must reject at the recorded site | W1, W4, L2, B1, H1, `inline_ctor_branch`, `lexical_dynamic`, `permission_write`, the ordinary `fresh_box` and `identity_fields` twins, `hashmap_alias_struct_field_param_return` and ordinary `runtime_detached` |
+| Witnesses | The slice 1 row of [Witness ownership](#witness-ownership) |
 | Corpus | `corpus_verdicts.py record` and `compare` against `tmp/bc06/corpus_7cc.json`. Explain every changed verdict against the canonical rules and update the manifests that the approved decisions change. |
 | Performance | `measure_s6.py` with the slice build in place of the candidate. All 18 inputs must pass the guard against the archive, and the counters must be reported. |
 | Stop | Any guard failure, any unexplained newly accepted program or any change to a published fact outside the layer's constructs. Report and stop, don't tune past the guard. |
@@ -642,8 +660,7 @@ The approved contract decisions at the top of this document already cover `runti
 | Files | `return_alias.rs` (`FunctionReturnAliasSummary` becomes per-slot field sources with sharing pairs, plus `classify_function_return_alias`, `merge_return_alias` and `project_alias_summary_through_arguments`), `public_call_summary.rs` (per-lane store effects, `validate_public_call_summary`), `metadata.rs` (`build_public_call_summaries`, `stabilize_return_alias_summaries` as a validated monotone fixed point), `call_semantics.rs`, `transfer/access/statement.rs` (`transfer_call_result_alias` instantiation), `public_interface/interface_validation.rs`, `public_interface/local_finalization.rs`, `module_compilation/generated/convergence.rs` (transition validation, plus revalidation and rescheduling after `refresh_private_failure_lanes`), the external ABI `ExternalHirReturnAlias` and Boracle's `CallResultProvenance` |
 | Prerequisite | Slice 1 |
 | Deletions | The constructed-return `AliasParams` special case, now covered by field sources. The inequality-only stabilisation cap. |
-| Must accept | W7a and W7c with `left=2 right=1 original=1` for both flags, `retain` and `forward` callers without conflicting uses |
-| Must reject at the recorded site | W7b, W7d, `success_store`, `failure_store`, both committed `runtime_call_*_rejected` fixtures and their ordinary twins |
+| Witnesses | The slice 2 row of [Witness ownership](#witness-ownership), and every slice 1 witness still holds |
 | Corpus and performance | As slice 1. Also report `convergence_summary_changes` and `convergence_summary_comparisons` against the baseline. |
 | Stop | A summary transition the validator rejects, a convergence count growing without a matching new summary component, or a guard failure |
 
@@ -651,8 +668,9 @@ The approved contract decisions at the top of this document already cover `runti
 
 C4 owns these. They're listed for ordering only:
 
-- the freeze transaction, shared rows and rollback through `stage_values`, after slice 0 and in parallel with slices 1 and 2
-- shared lowering through writable prelude temporaries, after slice 2, with H1 rejected and H3 accepted on the ordinary path
+- the freeze transaction, shared rows and rollback through `stage_values`, after slice 0 and in parallel with slices 1 and 2, with the tests and the tree-walker check that [Slice 0](#slice-0-owner-decisions) requires
+- the import witnesses from Slice 0, before any change to the public representation
+- shared lowering through writable prelude temporaries, after slice 2, owning the C4 row of [Witness ownership](#witness-ownership)
 - C5 measurements, then Phase 5.
 
 ### Validation sequence
