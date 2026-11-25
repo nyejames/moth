@@ -478,7 +478,44 @@ Precision is lost in these places:
 
 The model refuses, rather than guess, when copying a graph with non-exact identities, on an ambiguous multi-edge summary projection, and when a conservative completion writes over a captured argument cell. An `Unproven` refusal drops only its alternative. A reachable conflict still wins, and budget exhaustion stops at once.
 
-Before cutover, choose how exhaustion and `Unproven` refusal reach source. Production must not publish acceptance in either case. Do not add a fallback checker.
+#### Cutover decisions
+
+The owner approved the slice 3 cutover on this evidence. It lands as one
+production change. Durable regressions must assert the diagnostic site as
+well as the verdict, at the layer that owns each behaviour: direct and
+forwarded `select`, the shared-child conflict, `retain`, the failure lanes,
+and refusal and exhaustion.
+
+**Exhaustion and unproven paths.** If any reachable alternative is
+`Unproven`, a successful alternative can't justify accepting the function.
+A conflict established on another reachable alternative takes precedence.
+If the work budget expires first, analysis stops there and reports the
+limit. Either outcome gets a new deterministic borrow diagnostic that names
+the function and the limit or construct. No partial success or summary is
+published, and the old checker is never retried.
+
+**Corpus comparison.** Run the whole corpus through the replacement and
+compare it with the archived `0f384a5539` release checker. Explain every
+changed borrow verdict against the canonical rules, especially newly
+accepted programs and previously accepted programs that now exhaust a
+limit. The archive has documented errors in both directions, so matching
+it isn't the goal.
+
+**Performance guard.** This is fixed before the candidate is measured. The
+archived release binary was re-measured on the recording host with the 18
+workloads of `tmp/bc06/baseline_measure.py`. Check-time medians moved by
+up to 15 % between sessions with the same binary (narrow chains 512:
+184.55 ms, then 211.65 ms). Measure the archive and the candidate
+back-to-back in one session, using the same script, five samples after one
+warm-up. The candidate passes only if every workload satisfies all of
+these:
+
+- median `command.check.total` ≤ max(1.25 × archive, archive + 2 ms);
+- median borrow time (`frontend.borrow.initial` + `frontend.borrow.converge` + `frontend.generated.borrow_recheck`) ≤ 1.5 × archive + 1 ms;
+- peak RSS ≤ 1.25 × archive + 4 MiB;
+- no exhaustion or unproven diagnostic on any workload, or on any `tests/cases` fixture other than those written to exercise one.
+
+Resume C4 only after the integrated correctness gates and this guard pass.
 
 
 ## Permanent performance evidence - 2026-10-12
