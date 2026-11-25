@@ -14,10 +14,10 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
 | Candidate | Uncommitted holder-edge diff on that base: 9 files, +697/-63, preserved locally as `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). No untracked files outside the ignored `tmp/`. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
-| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger) |
-| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Published facts are recorded at the event, so retiring a binding is safe only after nothing reachable still names its identity. See [Session 1 conclusions](#session-1-conclusions) and [Section 3 conclusions](#section-3-conclusions). |
-| Next task | Section 4: trace one result through a real call, the public summary and the publication boundaries, using W7 and the `retain` twin. |
-| Next unanswered question | What is the smallest summary that keeps per-exit, per-field correlation for `select`, and how does it substitute the same actual twice? |
+| Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication) |
+| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. See the conclusions of [Session 1](#session-1-conclusions), [Section 3](#section-3-conclusions) and [Section 4](#section-4-conclusions). |
+| Next task | Section 5: trace what C4 publication must consume, for one allocation repeated in a field and one repeated across two result slots. |
+| Next unanswered question | Does the C4 materialisation path build one runtime allocation per shared frozen allocation per evaluation, and what must cross into HIR for Stage 6 to see it? |
 
 ## 1. Evidence inventory
 
@@ -322,11 +322,121 @@ No production consumer outside the checker reads statement, terminator or value 
 3. Activity follows the name, not the loan. A holder counts only while its own name has a future use. That's sound for the current witnesses because every observation goes through a named holder. Section 4 must check whether a summary-returned edge can make an unnamed holder matter.
 4. Interprocedural stores (`success_store`, `failure_store`) stay unsafe accepts in both trees. They need a summary effect that names the parameter receiving the store.
 
+## 4. Calls and publication boundaries
+
+Three read-only traces covered `return_alias.rs`, `public_call_summary.rs`, the interface and generated-convergence owners and the Boracle adapter. Neither the summary type nor any publication owner differs between the baseline and the candidate. The candidate changes only how `return_alias.rs` classifies a constructed return.
+
+### Today's summary
+
+`metadata.rs::build_public_call_summaries` builds one summary per function before any transfer and stabilises it over recursion. `return_alias.rs::classify_function_return_alias` visits every reachable `Return` and merges each returned expression into one value: `Fresh < AliasParams(sorted parameter indices) < Unknown`. A parameter load reports the whole parameter, whatever its projection. A returned local takes a flow-insensitive union of all its writers. Separate success slots share one union, and `ReturnError` exits contribute nothing. `project_alias_summary_through_arguments` maps a callee's indices through the caller's own argument classifications. Every merge sorts and deduplicates, so the result doesn't depend on traversal order, and the lattice height per function is at most the parameter count plus two. `stabilize_return_alias_summaries` checks only inequality and stops at a cap. The monotone transition validator runs only in generated convergence.
+
+| Function | Baseline | Candidate |
+| --- | --- | --- |
+| `select`, disjoint arms | `Fresh` | `AliasParams([1, 2])` |
+| `select`, one arm `Pair(a, b)` | `Fresh` | `AliasParams([1, 2])` |
+| `forward` | `Fresh` | `AliasParams([1, 2])` |
+| `retain` | `Fresh` | `AliasParams([0])` |
+
+At the call `forward(flag, items, items)`, `transfer_call_result_alias` unions the value roots of arguments 1 and 2. Both are `{items}`, so `selected` becomes a slot whose value aliases `items`. It holds no stored edge. On the baseline `selected` is root-free. Neither form records which field came from which argument, or that the two fields never share within one exit. The two `select` variants get identical summaries.
+
+`PublicCallSummary` has no store effect. A callee that pushes its shared argument into its mutable parameter publishes only `mutation = Writes` for the receiver. If it then takes `return!`, its alias summary is `Unknown` because no `Return` is reachable. That's why `success_store` and `failure_store` stay unsafe accepts.
+
+### The minimum summary W7 needs
+
+Write each exit as an alternative that maps every result slot and field path to its source:
+
+| Callee | Alternative | `left` | `right` |
+| --- | --- | --- | --- |
+| `select`, disjoint | exit 1 | parameter `a` (shared) | fresh |
+| | exit 2 | fresh | parameter `b` (shared) |
+| `select`, one arm | exit 1 | parameter `a` (shared) | parameter `b` (shared) |
+| | exit 2 | fresh | parameter `b` (shared) |
+| `forward` | each `select` alternative, substituted through `forward`'s arguments | | |
+
+Substituting `items` for both `a` and `b` gives, for the disjoint `select`, `{left: items, right: fresh}` or `{left: fresh, right: items}`. Neither alternative puts one allocation under both fields, so `copy selected` produces a graph with no internal sharing, and pushing through `owned.left` can't reach `observed`. For the one-arm variant, exit 1 becomes `{left: items, right: items}`. The copy preserves that sharing inside the new graph, so `observed` aliases the pushed collection and the push must reject. The value-`if` join in W7c and W7d produces the same two alternatives if the join keeps them apart, and today's union if it merges them.
+
+So the summary needs, per outcome lane:
+
+- guarded alternatives, one per distinguishable exit, after deduplication;
+- for each alternative, a map from (result slot, field path) to a parameter, a parameter's field path or fresh storage, with the edge's permission;
+- per-parameter effects for each lane: mutation as today, plus "parameter `i`'s value is stored into parameter `j`", so a store that happens before `return!` stays visible on the failure lane.
+
+Exactness and bounds:
+
+| Property | Rule |
+| --- | --- |
+| Exact | Direct parameter loads and constructions in each exit, per field path |
+| Conservative | Opaque branch conditions, so exits aren't correlated with arguments. Collection elements share one path. Recursive and over-deep types collapse to the whole value. |
+| Growth | Alternatives per summary are capped. Past the cap, all alternatives merge into one whose field map is the union, which is today's `AliasParams` per field. Merging is sound, deterministic and loses only precision, so it needs no refusal. |
+| Order | Alternatives are canonicalised: sorted field maps, sorted alternatives, duplicates and subsumed alternatives removed. Equal inputs give equal summaries in any traversal order. |
+| Recursion | A call group starts every member at "no alternatives" and iterates callee-first to a fixed point. Alternatives only grow until the cap merges them, so the iteration is monotone and terminates. |
+| Two invocations | Each call site instantiates fresh identities for its results, so two calls of the same function never share a fresh allocation. |
+
+### Publication boundaries
+
+- **Interface export.** `public_interface/local_finalization.rs` stores each exported concrete free function's or receiver method's whole `PublicCallSummary` under its stable `OriginFunctionId`. The summary contains only parameter positions, so no function-local ID crosses. `validate_public_call_summary` checks the parameter count, declared access, `Shared ⇒ NoWrite` and a canonical, in-range alias set. Interface closure requires every publisher of one origin to agree exactly. Generic templates, private functions and generated sidecars publish no record here.
+- **Generic materialisation.** `ast/generic_functions/materialisation/preparation_freeze.rs` keeps only the summaries that evidence requirements name, and requires imported and published copies to be equal. Generated functions start from a signature bootstrap. After the sidecar's own borrow analysis, `exact_generated_sidecar_summary` replaces it.
+- **Generated convergence.** `module_compilation/generated/convergence.rs` reschedules callers only on a validated `Widened` transition. `base_summary_changes` maps widened base functions to stable identities and enqueues only the generated nodes that name them. `install_convergence_summaries` skips a re-borrow when installed summaries are unchanged. After the queue drains, `refresh_private_failure_lanes` reruns `check_borrows` on rewritten HIR when installation changed it. It doesn't validate a transition or reschedule callers afterwards, and it doesn't write refreshed summaries back to the generated transaction. A summary that depends on failure lanes would need that path to revalidate.
+- **Call kinds.** `call_semantics.rs::resolve_call_semantics` reads `Local` summaries from the current report, `CrossModule` from imported summaries, `ModulePrivate` and `Generated` from the HIR maps, and `External` from the package registry. Receiver methods resolve to one of these targets. `Call` and `Invoke` apply the return alias, `Invoke` only on the success edge. `NeverCall` applies argument effects only.
+- **Cost of a richer summary.** 22 files name `FunctionReturnAliasSummary`. None serialises it, since publication uses structural equality. The changes fall on the classifier, transfer, transition validation, interface agreement, the external ABI conversion (`ExternalHirReturnAlias`) and Boracle's `CallResultProvenance` mirror.
+
+### Boracle
+
+`problem/call_effects.rs` translates a call into ordered arguments with shared or exclusive access and one result origin shared by every result slot. It drops mutation, transfer, store targets and field paths. Map `remove` becomes `Unknown(OpaqueExternal)`. In source mode the Boracle service passes no local summaries, so every local call becomes `Unknown(MissingSummary)` and the oracle stops as inconclusive. A direct construction does produce field edges (`AggregateField`), but nothing crosses a call.
+
+The differential dumps used a release build of `7cc05c61b` with `--features boracle`:
+
+```bash
+moth boracle tmp/bc06/boracle_runs/<witness>.moth --dump differential
+```
+
+| Witness | Function with the behaviour | Reference static result | Oracle | Meaning |
+| --- | --- | --- | --- | --- |
+| W3 | `runtime_retained` | Conflict at the replacement `~root.inner = Inner({3, 4})`, against the loan from `Outer(root.inner)`, kept by the push | `RuntimeConflict` | Disagrees with the approved contract |
+| W4 | `runtime_retained_twin` | Conflicts at the replacement and the push | `RuntimeConflict` | Right verdict |
+| L4 | `probe` | Three conflicts | `RuntimeConflict` | Disagrees with the expected acceptance |
+| W1, W1c | `runtime_detached` | None | Inconclusive: `remove` result is `SummaryUnknown` | No evidence |
+| W7a | `probe` | One conflict | Inconclusive: `MissingSummary` | No evidence |
+| B1 permission negative | `marshal` | None | `CompleteSafe` | Doesn't model permission through aggregates |
+
+Both Boracle lanes treat a stored reference as a loan of the source *place*, so replacing `root.inner` conflicts with `retained`. Moth stores allocations by value. C2 states that "storing a writable allocation by value does not retain the projection through a later-replaced source field", and `access-and-aliasing.mtf` says a fresh binding can hold a reference to an existing allocation without aliasing its source binding cell. Boracle can't serve as acceptance evidence for W3, L4 or permission. The existing pinned disagreement, `boracle_differential_shared_alias_definition_write_through_is_a_conflict_candidate` in `boracle/tests/differential.rs`, is a separate case: the reference accepts an exclusive defining write through a shared alias that the oracle executes as a conflict.
+
+### Permission and open bug reports
+
+| Witness | Required | Baseline | Candidate |
+| --- | --- | --- | --- |
+| B1 `marshal \|items {I32}\|` stores `items` in `box ~= Box(child = items)` and pushes through `box.child` | Reject for permission, even with no later use | Accepts, renders `22` | "Cannot mutably access immutable local `items`." at 5:10 |
+| B1p as B1, but `~box.child = {7}` before the push | Accept, renders `21` | Accepts, `21` | Same rejection at 6:10. False rejection: the replacement doesn't retire the edge. |
+
+| Report | Reproducer | Baseline / candidate | Classification |
+| --- | --- | --- | --- |
+| Binding a place into an option drops its alias provenance | `maybe {I32}? = holder.items`, then `replace(~holder)` | Accepts, `10` / rejects at 18:22 | Shared prerequisite. Option `some` is an aggregate construction, so the edge model owns it. Owner: BC-06. |
+| Multi-bind through a mutable alias is rejected at runtime | `view ~= base`, `~view, extra = pair(3)` | `MOTH-BORROW-0003` at 7:18 naming `__hir_tmp_1`, in both | Independent. The multi-bind result temporaries are read while the alias is live in both trees. Owner: HIR multi-bind lowering and Stage 6 temporary classification. |
+| Ordinary struct construction bypasses an immutable parameter's access | B1 | Accepts / rejects | Shared prerequisite. Permission must travel with the cell-keyed edge, or B1p stays rejected. Owner: BC-06. |
+| Projected alias write targets keep the holder cell as a conservative identity | `writer ~= holder.first`, `~holder = Pair({2}, {3})`, read `holder.first`, then `writer` | `MOTH-BORROW-0003` at 7:19 in both | Shared prerequisite. It needs the explicit allocation identity from [Section 3 conclusion 1](#section-3-conclusions). Owner: BC-06. |
+
+### Failure policy
+
+| Outcome | Policy |
+| --- | --- |
+| A real conflict | The existing access diagnostic at the access, such as `MOTH-BORROW-0007` or `MOTH-BORROW-0003`. An established conflict takes precedence over every other outcome. |
+| An incomplete mandatory proof | A new deterministic borrow diagnostic naming the function and the limit or construct. Budget exhaustion stops analysis at once. No partial acceptance or summary is published. `MOTH-BORROW-0008` is historical and must not be reused, so this needs the next free code. |
+| An unproven optional transfer | Falls back to borrowing. Never a source error. |
+| Missing compiler metadata | The infrastructure-failure contract, as today when a reachable statement lacks a published fact in `metadata.rs::finalize_public_call_summary_effects`. |
+
+Summary merging past the alternative cap is sound, so it isn't an incomplete proof. Only a construct that the design can't represent soundly needs the new diagnostic.
+
+### Section 4 conclusions
+
+1. W7a and W7b differ only in which fields share inside one exit. A summary keyed by parameter index alone can't express that. The smallest sufficient summary keeps per-lane, per-exit alternatives mapping result field paths to parameter paths, with permission, plus per-lane store effects.
+2. Publication carries summaries opaquely by stable origin and compares them structurally. A richer summary costs match and validation updates in about 22 files, with no wire format to migrate. The failure-lane refresh path needs transition validation before summaries can depend on lanes.
+3. Boracle can't arbitrate W3, L4, permission or any local call in source mode. Its place-loan model disagrees with the approved stored-by-value contract. Acceptance evidence for the redesign must come from Node execution of witnesses and the canonical rules, with Boracle used only where its model agrees.
+4. The permission positive B1p fails on the candidate for the same reason as W3, which makes cell-keyed edges with strong update on exact replacement the common prerequisite for W3, B1p, L4, `failed_set` and the option and projected-alias bug reports.
+
 ## Investigation queue
 
-Sections 4-7 of the assignment still run against the same witnesses:
+Sections 5-7 of the assignment still run against the same witnesses:
 
-- Section 4: caller and callee traces through summaries, interface export, generated convergence and the Boracle adapter.
 - Section 5: what C4 publication must consume.
 - Section 6: design comparison and recovery of the 18-input benchmark manifest. `tmp/bc06/baseline_measure.json` keeps the input fingerprints and raw samples.
 - Section 7: the ordered implementation sequence for owner approval.
