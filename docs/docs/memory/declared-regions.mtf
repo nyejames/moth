@@ -61,7 +61,7 @@ An ordinary statically known `if true:` can provide a rare local lexical scope:
 
 This is not a special block alias. It follows ordinary static Bool `if` rules, preserves the selected branch scope and disappears before HIR. It does not create a declared region or change ancestor-placement legality.
 
-Future compiler-owned scopes such as `$async:` remain distinct. Their marker describes language-defined execution behaviour rather than naming a user-declared lifetime region.
+Each function invocation owns the tasks it starts. A `name:` region changes where values live. It does not introduce a task scope. See @../async (Channels).
 
 ### `into` declaration position
 

@@ -10,7 +10,7 @@ A task is one resumable execution of ordinary Moth functions. Start a child task
     >> worker(writer)
 ]
 
-The caller evaluates the arguments once in normal source order and establishes the child's validated argument and endpoint obligations before publishing the child as runnable. A failed argument evaluation starts no child. Spawning is a statement, not an expression producing a task handle. The child begins independently when scheduled. Its direct target has zero ordinary success slots. Use channels for results. A child may return builtin `Error!`; map custom errors in an ordinary wrapper before spawning.
+The caller evaluates the receiver and written arguments once in source order, including named arguments. Argument names determine which formal slot receives each captured value. Only after preparation succeeds does the caller establish the child's obligations and make it runnable. A failed argument starts no child. Spawning is a statement, not an expression producing a task handle. The child begins independently when scheduled. Its direct target has zero ordinary success slots. Use channels for results. A child may return builtin `Error!`; map custom errors in an ordinary wrapper before spawning.
 
 Ordinary calls execute on the current task and can suspend transitively without annotations or call-site markers. Returning from an ordinary call means that invocation and its children have completed. The entry invocation also runs under a task-capable, builder-owned execution lifecycle. Purely synchronous code needs no task machinery when none is reachable.
 
@@ -40,7 +40,7 @@ Multiple producers and consumers may use one channel. Every message is delivered
 
 Each live sending or receiving capability contributes a logical endpoint obligation. Ordinary calls and child-task dispatch may establish scoped endpoint obligations for their receiving parameters. An invocation cannot release an obligation still needed by another invocation. An endpoint can be forwarded to a compatible parameter, including a child task. Creating, passing, explicitly releasing and automatically releasing these obligations are compiler-known operations, not general reference counting.
 
-`writer.close()` releases the writer's obligation. `reader.close()` releases the reader's obligation. Neither forcibly closes another task's endpoint. A released endpoint is no longer usable. Automatic release occurs at a defined source lifetime boundary, not when a garbage collector happens to reclaim the handle. Closing the last writer prevents further sends and wakes receivers. Already accepted messages remain available until drained. Closing the last reader prevents further delivery, wakes blocked senders with a recoverable error and releases undeliverable queued values.
+`writer.close()` releases the writer's obligation. `reader.close()` releases the reader's obligation. Neither forcibly closes another task's endpoint. A helper that accepts a scoped writer and calls `writer.close()` releases its own parameter obligation. Its caller can still use the original writer. Using a released endpoint is an error. Automatic release follows the source scope exit. An optimiser or garbage collector cannot close an endpoint early just because the local has had its last use. Closing the last writer prevents further sends and wakes receivers. Already accepted messages remain available until drained. Closing the last reader prevents further delivery, wakes blocked senders with a recoverable error and releases undeliverable queued values.
 
 The memory and compiler authorities must preserve this logical release behavior independently of physical representation. The endpoint obligation representation and exact parameter/local-position rules are a pre-implementation checkpoint: the conservative V1 baseline is scoped local and parameter capabilities, separate obligations on calls and dispatch, no endpoint escape through ordinary aggregates, return slots, Wire/Route captures or messages. Ordinary payload graphs are not granted these capabilities. The implementation plan must confirm the precise release sites and alias behavior before executable support.
 
@@ -63,7 +63,7 @@ Failure before commitment preserves the sender's responsibility. Sending when no
     ;
 ]
 
-A failure handler may still use a named message that was not transferred. The successful path cannot. After a join of these paths a use is legal only if it is valid on every incoming path. This is transactional transfer, not implicit copying and not rollback of earlier operand effects. Uncommitted temporary messages are cleaned up on failure or cancellation.
+A handler for a failed send can use its untransferred named message. A handler for a failed *call* needs a stronger guarantee. A helper can send the message successfully and then fail while joining a child. Its caller's handler cannot reuse that message. A helper can also catch a failed send and return normally. After either call outcome, reuse is legal only if every path reaching it kept the message. Earlier operand effects stand. Failure or cancellation cleans up uncommitted temporary messages.
 
 ## Receiving and closure
 
@@ -106,7 +106,9 @@ A receive arm binds the ordinary optional result in its own arm scope, or discar
     ;
 ]
 
-Without `else =>`, selection waits for an enabled operation to become ready. With `else =>`, it performs the fallback immediately if none are ready. The all-disabled no-default case cannot make progress; the implementation checkpoint must specify its deadlock diagnostic. If several operations can complete, arbitrate fairly rather than always preferring the first ready arm. A rotating start position is the initial implementation candidate. There is no second biased-select API. A closed reader is ready with `none`; a writer with no receivers is ready with a failed send, not a successful one. Handle or disable closed receive arms in repeated selections.
+Without `else =>`, selection waits for an enabled operation. With `else =>`, it takes the fallback immediately if none are ready. If every guard is false and there is no fallback, the task has no channel operation to wake it. Its owner can still cancel it. Deadlock is reported when the whole execution can no longer make progress.
+
+Selection arbitrates fairly among ready arms. A live reader becomes ready with `none` once the last writer releases its endpoint and the buffer drains. Handle or disable that arm in a repeated selection. Using a reader after `reader.close()` is an error. A live writer with no remaining receivers is ready with a failed send.
 
 Selection commits at most one operation. Readiness and commit form one scheduler transaction. Losing receive arms consume nothing and losing send arms transfer nothing. Registration, wake-up, cancellation and removal of losing operations must avoid lost wake-ups and double completion. Operand evaluation and error order remain explicit. The implementation checkpoint fixes exact guard/operand staging and arm-body grammar against ordinary expression and match rules. The baseline evaluates guards and enabled operands once in authored order, requires preparation not to suspend, commits only the winner and destroys unused fresh temporaries. Side effects performed in preparation are not undone. A selected failed send follows ordinary failure delivery and does not run its success arm.
 

@@ -3,9 +3,8 @@ Moth has three ways to describe a feature that isn't available today.
 ### Accepted but not built yet
 
 Some features belong to the accepted design but aren't built yet. Examples
-include declared regions, recursive choice types and the future compiler-owned
-`$async:` block spelling. These features may appear in the progress matrix as
-implementation work.
+include declared regions, recursive choice types and function-scoped Channels.
+These features may appear in the progress matrix as implementation work.
 
 ### Still being considered
 

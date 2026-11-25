@@ -1,530 +1,325 @@
 # Channels V1 implementation plan
 
-> For agentic workers: implement in reviewed slices using the repository's
-> AGENTS.md reading routes and validation policy. Use the superpowers
-> subagent-driven-development or executing-plans workflow where available.
+- **Status** Queued, accepted V1 design
+- **Current slice** None
+- **Blockers** Final memory compatibility brief and production memory safety foundations
+- **Next action** Verify the activation evidence below, then review the Phase 0 decisions
 
-STATUS: queued, accepted V1 direction
-CURRENT SLICE: none
-BLOCKERS: final memory design closure and delivered memory safety foundations,
-including the production borrow checker and complete supported-runtime topology
-proof. Repeated statement option capture must be available before stream-loop
-acceptance.
-NEXT ACTION: refresh the activation baseline and close the design/evidence gate.
+Deliver function-owned cooperative tasks and host-integrated Channels on HTML-JS.
+The [Channels reference](../../docs/async/channels.mtf) owns source semantics.
+The [compiler](../../compiler-design-overview.md), [build system](../../build-system-design.md)
+and [memory documentation](../../developer-docs/memory-management/overview.mtf)
+own the handoffs. V1 includes a tested portable Wasm handoff. Collector-free
+physical memory implementation and full Wasm execution follow on the roadmap.
 
-## Goal and authority
+## Before activation
 
-Deliver one host-integrated cooperative Channels model on HTML-JS, with
-backend-neutral analysis, a concrete tested Wasm/runtime handoff and no
-dependency on the full collector-free allocator implementation. The later
-full Wasm backend must implement the same observable contracts, not an
-alternative async language. The canonical source authority is
-`docs/docs/async/channels.mtf`. Compiler, build, memory and native host
-authorities own their respective handoffs. This plan is a work item, not
-another semantic reference. Promote any approved checkpoint decisions to the
-permanent owners before implementing them.
+- [ ] Record the actual checkout and focused baseline in the working notes.
+  Follow the repository reading routes. Verify profile-independent const
+  classification, dense HIR, ordered native result slots, concrete generic
+  targets and stable external binding classifications on the activation tree.
+  Exercise recursive messages only when their ordinary choice representation exists.
+- [ ] The memory brief identifies the bounded owners of child arguments, queue
+  entries, pending operations, returns and host registrations. Require delivered
+  production last-use, provenance, retained-edge, outlives and local/link
+  topology checks on ordinary programs, real builder roots and a validated
+  HostGC handoff. Rerun the live production provenance controls, including
+  writable retention through a helper, a store before failure and disjoint
+  copied siblings. An oracle result or an advisory drop site cannot discharge
+  this gate. General physical memory lowering stays with its roadmap owner.
+- [ ] Verify ordered Stage 5 operand capture before reusing call lowering.
+  In the production borrow tracker's reproducer, a later argument rebinds a
+  holder from two items to three. An earlier independent copy observes two.
+  Diagnose an overlapping live shared operand at its authored site and accept
+  a disjoint shared control. Cover ordinary and fallible calls.
+  Fix capture in its existing producer if still outstanding. Dispatch and
+  selection consume those captures. Stage 6 cannot recover their original order.
+- [ ] Deliver general repeated statement option capture by the stream-loop
+  integration gate in Phase 5. Test a side-effecting ordinary optional producer
+  first. Its loop owner supplies reevaluation, a fresh binding and nearest-loop
+  exits. Collection-producing loops stay in their existing work item.
 
-The roadmap orders final memory design closure, production memory safety
-foundations, Channels, remaining memory-management work and full mixed Wasm.
-Boracle research can begin from the accepted Channels semantics before any
-Channels code lands. Do not activate runtime concurrency until the foundation
-gate passes. Do not begin general collector-free lowering in this plan.
+## Phase 0. Close the remaining design decisions
 
-## Global constraints
+Record each decision at its permanent owner with its distinguishing example.
+These are review inputs for the first implementer. The conservative choices
+below remain proposals until the language, memory and runtime owners accept them.
 
-- One source spelling per operation: prefix direct-call `>>`, infix send
-  `>>`, prefix receive `<<`, statement `if:` selection and ordinary calls.
-  No async annotations, future objects, alternate channel methods, detached
-  tasks, scheduler objects, new prelude package or general consuming-call API.
-- Compiler-owned directional channel contract and scoped endpoint obligations.
-  Ordinary payload semantics remain reference-semantic, copy-explicit and
-  move-inferred except mandatory channel transfer on successful commitment.
-- Normal invocation completion joins; failure cancels and joins. No successful
-  result publication before completion; cancellation and trap are distinct
-  from recoverable failure and normal closure.
-- All runtime borrow and lifetime legality is mandatory across profiles and
-  targets. Required const evaluation stays separate and runtime operations
-  are ineligible. Ordinary functions remain runtime functions in every profile.
-- Reuse canonical exact types, result slots, stable call identities, generated
-  convergence, source constraints, effect and lifetime summaries, dense
-  stores and diagnostics. No donor-local IDs in public summaries.
-- The compiler owns semantic effects and cleanup facts; build supplies roots,
-  partition and capabilities; the runtime realises a validated execution
-  contract. The backend cannot infer legality or change logical close timing.
-- Keep the native host adapter and browser runtime isolated from compiler
-  internals. No Wasmtime dependency in the compiler, no general foreign
-  callback/re-entry ABI, no arbitrary host retention of guest references.
-- Keep synchronous code cheap and async runtime reachability-driven. Do not
-  add universal frame allocation, atomic REC, GC fallback on a capable
-  full-control target, universal promises or per-call task creation.
+| Owner | Decision and acceptance evidence |
+| --- | --- |
+| Language and memory | Confirm non-negative compile-time `I32` capacity, including zero, omitted, negative and unrepresentable cases. Set exact endpoint type positions, whether local aliasing is allowed and whether supplying the same endpoint to two formals acquires one or two obligations or is rejected. Start with constructor locals and scoped parameters only. Write expected results for forwarding, early close, partial argument evaluation and attempted escape through results, aggregates, messages or Wiring. |
+| Memory | Start dispatch arguments with scalars, independent graphs and proven transfers. Admit a scoped immutable loan only with a demonstrated use case and a production lifetime proof that covers joins, cancellation and retained children. Ordinary cross-task mutable loans and independent transfers from declared regions are excluded. Record allowed message types, including nominal wrappers for optional payloads and the rejection of top-level optional payloads. |
+| Language and compiler | Set operator binding and placement in call arguments and runtime templates, postfix and catch attachment, receive discard, direct receiver calls, mutable arguments and the eligibility of a `Never` target. Pin selection grammar, default position and preparation order using guard/operand side effects and a preparation error. Review the baseline of evaluating each guard then its enabled operands in authored order, with non-suspending preparation and ordinary statement arm bodies. |
+| Runtime and host | Write one turn-by-turn trace for immediate success, a waiting operation, child failure during join, cancellation racing commit and two simultaneously ready arms. Specify which operations yield, fairness between continuously ready arms/tasks and how a yielding guest gives the host a turn. For timer, browser event and asynchronous request completion, fix public names, exact types, host capability, registration lifetime, bounded ingress and overflow behaviour. |
+| Compiler, memory and backend | Compare explicit resumable frames with scheduler-driven JS generators on nested calls, deep recursion, synchronous cost, retained bytes and cancellation. Validate a portable suspend/return/resume mechanism with authored Wasm. Optional stack switching can be compared where available. Record the chosen continuation and versioned host handoff, supported target edges and measurements. |
 
-## Prerequisite and activation evidence
+Review these decisions before implementing their dependent slices. Promote the
+chosen behaviour to the canonical references. Keep the evidence and its limits
+distinct from a production or target-support claim.
 
-- [ ] Read AGENTS.md, index.md, current progress, style/testing/validation,
-  compiler and build architecture, the async, function, branching, loop,
-  option/error, Wiring, constraint, IO and external-binding authorities, all
-  routed memory authorities and Lappet runtime/host ABI contracts.
-- [ ] Establish the actual activation HEAD and inventory parser and lexical
-  reservations, generated summary convergence, HIR/CFG, borrow problem
-  extraction, production checker, reference and operational Boracle solvers,
-  JS lowerer, runtime helper demand and Wasm LIR/host boundaries. Update
-  locations to the delivered code. Do not pin a speculative baseline.
-- [ ] Verify completed profile-independent const/runtime semantics, dense
-  HIR, ordered success/error slots, static generic targets, required concrete
-  aggregate/message type support and explicit stable external binding
-  classification. Recursive choice support is required where recursive
-  message graphs are advertised; do not fake a carrier for unsupported types.
-- [ ] Verify the accepted memory compatibility brief and delivered production
-  last-use/alias, provenance, retention, outlives and mandatory local/link
-  topology substrate on ordinary runtime programs. Validate real builder
-  roots, transitive graph independence, success/error transfer facts, loan
-  liveness and logical cleanup requirements. This is production architecture
-  shared with the later memory work, not a temporary Channels checker.
-- [ ] Verify the conservative validated HostGC memory-plan handoff for the
-  initial JS target. Host GC implements physical storage only. Logical
-  endpoint/registration release must already be representable independent
-  of GC. No async execution if any needed proof is missing.
-- [ ] Deliver the general repeated statement option-capture slice using its
-  ordinary loop contract and CFG; coordinate its existing roadmap owner so
-  collection-producing loops remain later and nothing implements it twice.
-- [ ] Run the current focused production/Boracle differential and source
-  integration baselines and record commands, results and relevant measured
-  costs. Any unresolved safety gap blocks activation, rather than being
-  accepted because JS happens to keep storage alive.
+## Phase 1. Parse once and lower to ordinary compiler owners
 
-## Phase 0: Close semantic and architecture checkpoints
+Paths below `src/compiler_frontend/` are relative to that directory.
 
-Before code changes, produce short durable decisions at the canonical owners,
-with executable/reference traces where a choice affects semantics. Preserve
-the accepted public direction. The following implementation-level details
-need explicit review rather than guessing at lowering time.
+- [ ] Reuse `CHANNEL_SEND` and `CHANNEL_RECEIVE` in `tokenizer/schema.rs`
+  and their existing lexer productions. Dispatch prefix direct-call `>>`,
+  infix send and prefix receive by grammatical position. Grouping and postfix
+  operators use the expression parser. Preserve `value = << reader`. Reject
+  declaration shorthand, invalid directions, indirect spawn and value-producing
+  child targets at the authored span.
+- [ ] Retire the obsolete async-block path here. `yield` currently tokenises
+  as a keyword and `ast/expressions/namespace_access/` expects a symbol after
+  a dot. Free the retired reservations in `crates/moth-lexical/src/words.rs`
+  and the frontend mapping so `io.task.yield()` resolves normally. Remove
+  obsolete deferred dispatch, diagnostic/render entries, `async_blocks` Cargo
+  and CLI feature forwarding, feature-matrix entries and superseded fixtures.
+  Keep independent checked-block coverage and stable unrelated diagnostic
+  identities. Test ordinary identifiers and continued rejection of the retired
+  task syntax as concurrency syntax.
+- [ ] In `ast/statements/multi_bind.rs` the annotation belongs to the individual
+  target and the RHS normally starts with `ExpectedType::Infer`. For the exact
+  channel construction form, resolve `Channel of T` as contextual evidence
+  before typing the initializer. Produce ordered reader and writer slots with
+  exact carried types. Reuse the shared argument router in
+  `ast/expressions/call_arguments.rs` for the named capacity. Preserve ordinary
+  per-target annotations and builtin naming policies. Test wrong arity, omitted
+  initializer, ordinary multibind and inferred generic endpoint parameters.
+- [ ] Preserve the receiver and each written argument's evaluation position
+  independently of its formal slot. `ast/expressions/call_validation.rs`
+  normalises named arguments for the callee. Reuse captured operands in
+  `hir/hir_expression/calls.rs` and the fallible path. An out-of-order named
+  dispatch such as `>> worker(second = record(2), first = record(1))` records
+  2 then 1. A failure in the latter argument publishes no child or new lease.
+- [ ] Recognise statement `if:` in `ast/statements/if_headers.rs` before the
+  Bool-header path. Reuse top-level arm delimiters from `match_arm_boundaries.rs`,
+  ordinary arm scopes and loop targets. `loop_headers.rs` owns repeated option
+  capture. Preserve capture scope, break, continue, early return and stream
+  exhaustion. Reject mixed header forms, malformed guards and misplaced defaults.
+- [ ] Use dense HIR operations, stable call targets and existing native
+  success/error destinations in `hir/terminators.rs`. Make dispatch, wait,
+  commit, release and invocation exit explicit. Suspension preserves the live
+  operation. Only its winning edge defines results. Record preparation regions
+  with source spans. Update successor traversal in `hir/utils.rs`, validation,
+  remapping and generated sidecars together. Keep cancellation internal. Test
+  required-const exclusions, inactive-source typing and reachable target
+  rejection before executable support is enabled.
 
-- [ ] Finalize constructor capacity validation, canonical endpoint identities
-  and exact allowed positions, generic evidence, endpoint aliasing, scoped
-  parameter lease creation and release. Confirm the conservative baseline:
-  local/parameter-only capabilities, independent per-invocation obligations,
-  explicit close and lexical release, no arbitrary capability storage or
-  endpoint-containing message. Establish whether local rebinding aliases
-  one obligation or is rejected; never make alias count equal lease count.
-  Verify producer/consumer, multiple producers, multiple consumers and helper
-  forwarding. Test same endpoint supplied twice, parent closes its own
-  endpoint after spawn, child closes early, error during argument preparation,
-  last-reader teardown, no resurrection after final close.
-- [ ] Fix ordinary task argument contract: fresh/independent graphs or
-  proven transfers with no surviving conflicting aliases; reject unproved
-  cross-task sharing, Wire/Route identity retention, ordinary mutable
-  cross-task loans and declared-region escapes. Evaluate a bounded scoped
-  immutable-loan rule against real use cases and the canonical single-owner
-  topology. Only permit it if production and Boracle can prove it. Specify
-  how sends of ordinary parameters induce caller-side mandatory outcome-
-  sensitive transfer requirements without general move syntax. A wrapper
-  cannot launder an aliased graph; no optional transfer used as proof.
-- [ ] Fix message type domain. Support ordinary transferable scalars, strings
-  and concrete legal aggregate/choice graphs, no unproven opaque resources,
-  capabilities or independent declared-region members. Keep outer receive
-  absence distinct from optional payload absence; reject the unsupported
-  top-level optional payload rather than inventing nested options.
-- [ ] Define send/receive precedence and placement (including templates,
-  nested argument expressions and postfix handling), direct spawn call shape
-  including receiver/mutable argument restrictions, exact branch binding
-  syntax, guards and default placement. Fix selection preparation staging,
-  all-disabled behavior, selected-send failure routing and cancellation races.
-  The baseline is statement-only selection, one final else, one operation
-  per arm, non-suspending guard and operand preparation, closed-reader
-  readiness with none, recoverable selected-send failure. Report all-disabled
-  no-default selection as proven deadlock, not ordinary absence.
-- [ ] Fix task dispatch commit and scheduler turn order. Use explicit ready,
-  running, waiting, joining, cancelling and terminal states; no recursive
-  guest re-entry. Specify fair ready-task and ready-arm arbitration, FIFO
-  buffered messages, fairness assumptions and host polling opportunities.
-  A cooperative long-running function may starve the host; no implicit
-  preemption promise. Define scheduler quiescence and reliable host-wakeup
-  accounting. Decide when zero-wait operations do not yield.
-- [ ] Define normal/error/cancel exit ordering for each dynamic invocation:
-  stop admitting new children, stage result, retire unused endpoint
-  obligations, preserve child-live storage, join/cancel descendants, dispose
-  remaining registrations and locals, deliver one outcome. Cover returns
-  inside loops and branches, postfix optional early return and implicit
-  failure. Specify parent error vs child failure observation, cancellation
-  during join, multiple failures, and error delivered at the owner boundary
-  rather than an arbitrary interrupted call. Cancellation bypasses ordinary
-  catches as a control outcome, not a new source result type. Traps invalidate
-  the instance under existing fault policy.
-- [ ] Fix suspension and failure summary dependencies before HIR publication.
-  Include spawn edges distinctly from ordinary calls, join, cancellation,
-  select and host wait. Verify recursive SCCs, private inferred failure,
-  exported and custom error boundaries (including mapping a child failure
-  by an ordinary wrapper around its owning invocation), generic instantiation, selected
-  inactive code, const eligibility and existing constraint verification.
-  Optional `$no_suspend` is a proof of absence, not permission to suspend.
-  Unknown provider evidence cannot prove absence. Include implicitly waiting
-  function exit and error cleanup in this effect.
-- [ ] Fix host execution/ingress contract for timers and real browser event
-  delivery plus at least one asynchronous completion (for example fetch).
-  Identify lifecycle owner, bounded queue overflow/coalescing/error policy,
-  registration retention, host cancellation, stale generation rejection,
-  timer duration exact type, and API placement under existing io or focused
-  builder packages. A browser callback cannot synchronously wait for queue
-  space. Host-owned pending data must be bounded and independent. Do not
-  expose a raw promise, continuation, callback or arbitrary route invocation.
-- [ ] Compare compact explicit continuation frames/state machine, JS
-  generators driven by a common scheduler and any supported Wasm stack
-  switching path. Use small authored JS/Wasm and host fixtures to measure
-  resumable call chains, deep recursion, ordinary call overhead, suspended
-  local storage, task/queue memory and cancellation. Baseline must not
-  require optional Wasm stack-switching proposals or force a universal
-  dispatcher for synchronous Wasm. Fix the minimum portable continuation
-  handoff and target eligibility before selecting representation. Record
-  why alternatives were rejected. Prototype mechanics is not production
-  proof or a target support claim.
-- [ ] Obtain explicit architecture review of these decisions, including
-  memory/borrow and host/Wasm owners. Update permanent authorities and
-  remove superseded rules before proceeding.
+## Phase 2. Converge facts before verifying constraints
 
-## Phase 1: Compiler surface and neutral operations
+- [ ] Extend `public_call_summary.rs` and the existing generated-function
+  transaction in `module_compilation/generated/`. Preserve the ordering in
+  `convergence.rs` and `constraint_convergence.rs`: establish escaping builtin
+  failure, install private failure lanes, then compute effects on final HIR.
+  Keep ordinary calls and dispatch edges distinct. A child with a synchronous
+  body can still make its owner's implicit join suspend. Summarise cleanup and
+  host waits. A selection with an immediate default has no communication wait
+  of its own. Its winning body can still suspend.
+- [ ] Verify optional `$no_suspend` on functions and methods and the implicit
+  requirement on every selection guard and enabled operand. Reuse
+  `hir/constraint_facts/analysis.rs` (`analyze_statement_region`) and
+  `hir/constraint_verification.rs` for a bounded causal witness. Arm bodies
+  follow ordinary call rules. Provisional facts and unknown foreign effects
+  cannot prove absence. Test recursive, imported, re-exported and generated
+  targets, including a provider whose only interface change is suspension.
+  A suspending call in a proven dead handler adds no suspension or scheduler
+  demand. Change only the imported callee's failure summary to make the handler
+  reachable and verify that both results change.
+  Keep witnesses/local HIR IDs out of public identity. Preserve existing
+  `$infallible`, numeric constraints and profile-independent verdicts.
+- [ ] Extend the failed-send operation through `builtins/error_codes.rs` and
+  `hir/private_failure_lane.rs`. Deliver an escaping child's original builtin
+  Error at the owning invocation's completion, including an arbitrary declared
+  code. Classify the join as the implicit failure origin. Keep other host calls
+  on their declared failure paths. Test a caught owner call, exported boundary,
+  explicit custom-error mapping and a child failure during a staged return.
 
-Owners: moth-lexical and frontend lexical mapping; retained preparation;
-AST expression, statement, call and type owners; Stage 5 dense HIR and
-validation; canonical language and diagnostics owners.
+## Phase 3. Prove transfer and produce cleanup facts
 
-- [ ] Add tests for constructor contextual two-result typing, named capacity,
-  zero and positive bounds, wrong arity/type/direction, omitted initializer,
-  endpoint misuse and nested payload restrictions. Parse/type check via
-  existing native result and receiving-context owners. Do not add tuple
-  carriers or bidirectional channel values.
-- [ ] Add positive/negative tests for prefix direct-call dispatch, infix
-  send, unary receive with grouping, call/return arguments, explicit
-  declarations/updates, rejected legacy sugar and standalone receive.
-  Validate exact source locations, shadowing and ordinary argument routing.
-  Preserve receiver/callee/argument order and once-only evaluation.
-- [ ] Lower direct child dispatch and channel construction to validated
-  semantic operations with resolved targets and explicit native result
-  slots. A child target has no ordinary success values, only zero-success
-  or builtin Error! contract. Resolve Never targets at the Phase 0 checkpoint;
-  Never is not an ordinary zero-result signature. Reject custom unadapted errors and invalid
-  first-class targets. No source async function type.
-- [ ] Represent send, receive, selection, wait, join and logical endpoint
-  release with explicit CFG outcomes and stable operation identities;
-  no nested effectful expression left in a backend value. Distinguish
-  suspended operation from normal success/error continuation and internal
-  cancellation. Receive success has one optional slot; failed send does not
-  define successful destinations. Reuse Invoke-style failure edges and
-  ordinary option/loop/branch destinations rather than a semantic Result.
-- [ ] Define selection arms and guards in the shared branch/call owners.
-  Use explicit arm-scope identities and selected-edge destinations.
-  Reject mixed Bool/match/select forms, duplicate/default placement and
-  malformed guards. A guard false path contributes no registered operation.
-  Require arm CFG to preserve break/continue/return and nearest loop rules.
-- [ ] Add source validation for required const functions, constants,
-  const templates, config and other required-const contexts; no new
-  const effect interpreter. Check the actual delivered const classifier.
-- [ ] Retain inactive-source typing and evidence checks but remove executable
-  async demand only at the existing mandatory semantic-selection boundary.
-  Add remap, generated sidecar, HIR verifier and diagnostics tests.
-- [ ] Until the runtime and safety gates are met, reject reachable
-  unsupported execution with structured target diagnostics. Check-only
-  success must not imply a target can execute an incomplete feature.
-- [ ] Run targeted parser, AST/HIR and integration cases; run the slice
-  review and relevant docs gate.
+- [ ] Extend the production `analysis/borrow_checker/` and its memory-foundation
+  facts. A committed send transfers a whole independent allocation graph's
+  cleanup responsibility. The lifetime owner remains fixed. Shared children
+  inside the graph retain their identity. A surviving outside alias or a
+  declared-region escape prevents transfer. A projection cannot detach part
+  of a family. Transfer of the whole family needs a proven final use and
+  a legal lifetime owner.
+  `FunctionReturnAliasSummary::Fresh` only excludes parameter roots. Reuse
+  ordinary `copy`. Use `copy_preserves_shared_children_runtime` as the
+  synchronous control. Send a copy with a repeated child in the compiled
+  channel case and verify independence from the original. Preserve valid
+  task-local borrows across suspension when no conflicting observer exists.
+- [ ] Extend `PublicCallParameterSummary` and its transition validator with
+  mandatory send commitment per parameter **on each reachable callable exit**.
+  Existing `MayConsume` models optional transfer. A caller regains access
+  only when every path to its exit is uncommitted. Test a direct precommit
+  failure, a helper that sends then fails, a helper that catches a failed send
+  and returns success, a conditional send and a later child failure at join.
+  Carry these facts through forwarded aliases and imported/generic wrappers.
+  Widen mixed histories conservatively. Extend the existing summary and
+  publication/invalidation paths once.
+- [ ] Track scoped endpoint obligations separately from payload aliases.
+  `.close()` consumes the *current* receiver obligation. An ordinary helper
+  closes only its own parameter lease. Lower explicit close and automatic
+  scope exit to the same release effect exactly once. Distinguish use after
+  close from a live reader draining an exhausted channel. Protect earlier
+  staged arguments/selection candidates against conflicting later mutations
+  or closes. Prove bounded parent, child, queue and host lifetimes on every
+  exit, including optional early return, cancellation and a pending join.
+- [ ] Publish per-operation liveness and release facts for locals, pending
+  operands, queued messages, selected-arm temporaries, staged returns and
+  registrations. Use the memory planner's validated JS handoff. GC timing,
+  non-lexical last use and advisory drop sites cannot move observable close.
+  Production Stage 6 consumes validated HIR and writes side tables.
+- [ ] Extend `analysis/borrow_checker/problem/` and Boracle's reference,
+  operational, differential and reduction paths. Separate static sites from
+  dynamic task, channel and wait occurrences. Run the same source through
+  production and the normalized problem. Record the production verdict,
+  reference verdict and bounded execution or counterexample separately.
+  The differential runner compares Boracle implementations. Retain known
+  disagreements, unsupported cases and exhausted bounds as such. Require
+  evidence for both accepted and rejected cases before runtime activation.
 
-## Phase 2: Suspension, failure and constraint convergence
+## Phase 4. Run structured tasks through a single completion protocol
 
-Owners: existing callable summaries, external provider registry,
-module_compilation/generated convergence, hir/constraint_facts and
-constraint_verification, canonical call/interface/link fact owners.
+- [ ] Implement the Phase 0 continuation with a resume point, live locals,
+  existing result/error slots and planned cleanup. Dispatch creates a child
+  only at commit. Ordinary suspendable calls stay on the current task.
+  Proven synchronous bodies retain direct calls. Register `io.task.yield()`
+  and `io.task.cancel_children()` via `src/builder_surface/core_packages/io.rs`
+  and the existing binding/capability path.
+- [ ] On normal exit stop admitting children to that invocation, stage results,
+  release its retiring endpoint obligations and join. Keep storage observed
+  by children live. On escaping failure latch the first observed Error, cancel
+  siblings/descendants as appropriate and join before delivery. Wake a parent
+  blocked in a nested call and unwind to the owner. Explicit cancellation
+  withdraws waits and bypasses ordinary catches. Traps use existing fault
+  handling. Reclaim completed child records while the parent remains live.
+- [ ] Drive deterministic traces for recursion, multiple staged results,
+  child-first and parent-first failure, cancellation during join and repeated
+  child creation. A parent that falls through holding the sole writer releases
+  it before joining a child draining the stream. A parent draining an open
+  stream inside its body must explicitly release its own writer or arrange
+  another end condition.
 
-- [ ] Test direct, transitive, recursive, cross-module, re-exported and
-  generic calls, including a non-suspending child whose parent may join.
-  Add a stable inferred suspension fact with unknown/provisional state
-  distinct from proven absence. Use one monotone finite convergence,
-  independent of profile/target. Keep local suspension sites keyed to HIR.
-- [ ] Extend existing implicit-failure analysis for sends and escaping
-  child failures. Retain first-failure primary cause with bounded source
-  witness. Spawn argument failures remain in the caller's ordinary expression
-  lane; child error belongs to owning invocation completion. Preserve
-  explicit Error! handling, closed export and custom-error requirements,
-  ordinary catch eligibility and native success/error destination rules.
-- [ ] Install private failure lanes, converge summaries, prune only
-  unreachable handlers and refresh dependent borrow/lifetime/link facts
-  before immutable publication. No hidden third error slot.
-- [ ] Add `$no_suspend` through existing compiler-owned directive attachment
-  and constraint verifier. Verify function/method/generic contracts and
-  transitive calls, implicit join and unknown host evidence. Reject any
-  violation with bounded causal call/operation witness. Ordinary functions
-  need no positive annotation; no user-extensible effect row.
-- [ ] Ensure `$infallible` checks escaping channel/child errors and semantic
-  traps under its existing guarantee, separately from suspension and
-  external cancellation. No weakening of fast/safe numeric rules.
-- [ ] Publish complete canonical summary effects and fingerprint changes
-  through the existing public interface and generated-sidecar owners.
-  Reuse stable call identity and active link facts for child target reachability
-  and host requirements. An unchanged public summary must not cause
-  needless semantic recompilation.
-- [ ] Test source acceptance and validated HIR equivalence in debug and
-  release, including a pruned handler and a previously synchronous provider
-  gaining suspension. Run focused constraint/failure/generic cases and the
-  module publication/architecture checks.
+## Phase 5. Deliver one queue and commit operation
 
-## Phase 3: Borrow, transfer, lifetimes and Boracle
+- [ ] Implement one channel state with directional lease counts, FIFO buffered
+  messages and pending offers/receives. Reuse the same readiness and commit
+  operations for direct communication and Phase 6. Rendezvous needs no buffer
+  slot. Capacity bounds accepted entries. Waiting senders retain their
+  uncommitted payloads. Size waiter storage by live registrations and release
+  it on withdrawal. Guard count overflow and repeated completion.
+- [ ] Test zero/full capacity, one delivery with multiple producers/consumers,
+  explicit release plus scope exit, last-writer drain followed by repeated
+  absence and last-reader teardown. Teardown disposes queued values and
+  fails blocked sends with their payloads intact. After a successful handoff,
+  cancellation cannot reverse ownership. Run the compiled producer/consumer
+  through a forwarded endpoint and a general repeated-option loop. Verify
+  messages, absence and failure codes in debug and release.
 
-Owners: production Stage 6, normalized Boracle problem extraction,
-reference and operational oracle, lifetime/retention analysis and link
-topology. Consume the delivered common memory foundations.
+## Phase 6. Select atomically and diagnose global deadlock
 
-- [ ] Extend the normalized problem with task dispatch, suspend/resume,
-  channel commit, loser withdrawal, close, join and cancellation events.
-  Model dynamically distinct invocation/endpoint occurrences and wait
-  records rather than conflating static HIR IDs with runtime objects.
-  Reuse existing places, overlap, alias, future-use and outcome facts.
-- [ ] Extend reference and operational oracle traces for task/endpoint
-  events and bounded scheduler choices. Exercise exact success, error,
-  cancellation and alternative-arm effects. Keep inconclusive bounded
-  exploration distinct from proof and retain reduced counterexamples.
-  Production uses conservative static facts, not runtime search or
-  an interpreter check in the emitted program.
-- [ ] Prove mandatory graph transfer on committed sends: no surviving
-  source/retained alias, no unsupported family projection detachment,
-  no lateral region promotion, no direct cycle or declared-region escape.
-  Failure and losing branches retain responsibility and source access.
-  Preserve scalar value semantics, fresh/copy handling and interprocedural
-  send-of-parameter consumption facts.
-- [ ] Prove child argument legality, bounded task and queue owners, suspension
-  live storage, endpoint obligation aliases/retention and deterministic
-  release legality. Ensure a parent reaching return cannot free a child-live
-  allocation; an exclusive access cannot be used by another task while
-  suspended. Do not reject a task-local borrow solely because it is live
-  across suspension when no conflicting observer is possible.
-- [ ] Publish validated suspension liveness and cleanup requirements with
-  one owner: task-local values, argument staging, pending send values,
-  select candidates, staged returns, retained resources, exit outcomes.
-  Logical endpoint and registration releases are semantic events separate
-  from physical reclamation. Feed the ordinary compiler-owned memory
-  planning boundary; JS may select HostGC for payload storage only after
-  mandatory proof.
-- [ ] Test aliased fields, projection sends, later use after success,
-  failed-send reuse, path joins, loop re-entry, copied values, recursive
-  choice graphs where supported, task-local mutation, incompatible access,
-  invalid escapes, endpoint close/alias misuse, cancellation of suspended
-  nested calls, declared-region restrictions and inter-module summaries.
-- [ ] Compare production/reference/operational results for bounded adversarial
-  fixtures. Review topology and mandatory transfer separately from optional
-  drop precision. No GC, dynamic uniqueness scan, parallel checker or
-  advisory drop sites as legality fallback. Run targeted and `just validate`
-  at this hard pre-runtime integration gate.
+- [ ] Stage guards and enabled operands once under the approved order. A
+  preparation error disposes fresh temporaries and prevents registration.
+  Earlier user effects stand. Use one wait identity for all enabled arms.
+  Atomically commit one compatible arm (both parties for rendezvous), remove
+  losing offers and wake each participating continuation once. Never match
+  two arms of the same selection. The chosen failed send takes its error
+  edge. The success body is unreachable on that outcome.
+- [ ] Test duplicate endpoints, the same graph offered to two writers, a fresh
+  losing temporary, two selections meeting, default, EOF readiness and
+  competing cancel/commit. Only the winner transfers. A late wake cannot
+  recommit. Exercise fairness with several continuously ready arms and
+  document the approved rotation or equivalent deterministic test policy.
+  Compare a contested selection in the scheduler model and a compiled Moth
+  program using the same event sequence and allowed winners.
+- [ ] An all-false, no-default selection has no communication wakeup. Keep it
+  cancellable. Diagnose global deadlock only with no runnable task, deliverable
+  completion or live host source capable of waking the instance. Test a parent
+  cancelling the disabled child, the same wait in a truly quiescent instance,
+  a full queue, a circular join/receive and a stale host token. Report bounded
+  wait, channel, parent and source identities through the instance fault lane.
+  Elapsed time is solely a harness fail-safe.
 
-## Phase 4: Scheduler, task frames and completion
+## Phase 7. Integrate HTML entries, browser IO and the test harness
 
-Owners: backend-neutral execution handoff and selected backend runtime.
-Use the Phase 0 evidence; one scheduler protocol with compact task IDs,
-wait IDs and explicit state, no public task object API.
+- [ ] `src/projects/html_project/js_path.rs` lowers linked modules separately
+  into isolated JS scopes. Aggregate validated demand across the entry,
+  imported functions and reachable generated sidecars. Create **one scheduler
+  per execution instance** outside those module wrappers. Keep the per-module
+  helpers in `src/backends/js/emitter.rs` stateless with respect to that
+  instance. Test an imported child waking its parent, two independent page
+  instances and a synchronous-only bundle with no scheduler or async helpers.
+- [ ] Keep exactly-once entry activation and publish staged fragments only
+  when the invocation and descendants succeed. On failure retain static HTML,
+  report once and preserve explicit IO already performed. Drive timer, browser
+  event and real asynchronous completion through scoped registrations with
+  instance and wait generations. Copy/validate bounded host-owned data before
+  scheduling, observe the agreed count/byte and overflow policy and release
+  subscriptions on cancellation or teardown. A callback enqueues a wakeup.
+  It cannot synchronously wait for guest capacity or re-enter running guest code.
+  Forced page destruction invalidates the instance and host resources without
+  promising guest cleanup. Reject reachable unclassified async bindings at
+  target validation. Ordinary synchronous foreign bindings keep their contracts.
+- [ ] Extend classic and ES-module execution in
+  `src/compiler_tests/integration_test_runner/assertions/rendered_output.rs`.
+  Both currently finish after one `setImmediate`. Observe entry settlement or
+  a typed fault before serialising output. Reuse the bounded Node subprocess
+  and the existing Wasm completion-observation pattern. Self-test delayed
+  success, late failure, expected deadlock and an actual harness timeout.
+- [ ] Use deterministic fake-host traces for race permutations and a focused
+  real-browser test for a timer while another task repeatedly yields, a DOM
+  event waking a receiver, request success/failure against a local endpoint,
+  ingress bursts and teardown followed by late completion. Do not infer
+  browser scheduling from the existing fake input event target. Keep snapshot
+  input behaviour and unrelated page scripts intact.
 
-- [ ] Write deterministic scheduler/model tests for runnable ordering,
-  nested ordinary calls, recursion, child dispatch, yield, implicit join
-  and terminal outcomes, including a child that completes before parent
-  exit and a parent that stages a multiple-result return.
-- [ ] Implement the selected continuation representation using only locals
-  live across a suspend edge, explicit resume point, native result/error
-  destinations and planned cleanup facts. Synchronous calls use their
-  existing path. Do not turn every function invocation into a task or
-  allocate a heap frame for a proven non-suspending body.
-- [ ] Register child ownership at dispatch commit, not before evaluating
-  fallible arguments. Join all descendants transitively through their
-  owners. Release parent endpoint obligations at the validated exit
-  boundary before joining when legal; preserve child-live storage and
-  staged result obligations. Never publish success before join.
-- [ ] Deliver child/parent recoverable failure and explicit cancellation
-  through one cleanup protocol. Remove waits exactly once, resume or
-  unwind active continuation frames, cancel descendants and deliver primary
-  error only after cleanup. Fault/host termination uses existing quarantine,
-  not catch or a retry. A late completion token must be harmless.
-- [ ] Add `io.task.yield()` and `io.task.cancel_children()` through the
-  existing Core IO registration/capability path. No second prelude or
-  scheduler customization surface.
-- [ ] Add stress traces for nested scopes, thousands of completed children
-  with bounded retained bookkeeping, cancellation during join, task-local
-  state and failure while returning. Verify cleanup and scheduler identity
-  reuse, no stale wakeup and no synchronous-path overhead regressions.
+## Phase 8. Verify the portable Wasm handoff
 
-## Phase 5: Channel queue and endpoint runtime
+- [ ] Specify a versioned suspend/resume boundary with result/error destinations,
+  frame-layout inputs, validated live storage, commit order, instance generation,
+  wait identity and cancellation. Build supplies lifecycle roots, target
+  assignment and capabilities. Compiler validation checks reachable cross-target
+  edges before physical planning. Gate unsupported mixed JS/Wasm calls with a
+  target diagnostic. Physical frame data stays outside public semantic identity.
+- [ ] In `crates/lappet/src/runtime/instance.rs`, fallible exports reserve
+  statuses 0 and 1 for success and declared error. Host-produced staged text must
+  be consumed within its call. Exercise the new boundary with small authored
+  core Wasm fixtures and the pinned runtime. Return control to the host with
+  no live staging ticket, borrowed guest span, resource guard or call context.
+  Resume using independent data. Reject stale or cross-instance tokens and
+  cancel without guest re-entry. Repeat suspend/resume/cancel and verify bounded
+  frame storage that returns to baseline on teardown. Preserve fault quarantine and the
+  synchronous ABI.
+- [ ] Hand the validated frame, queue, pending payload, lease and registration
+  requirements to remaining physical memory work. Exercise close, cancel,
+  join and teardown in collector-free verification. Keep REC non-atomic.
+  Full Wasm execution needs parity on the same Moth scenarios after its
+  backend lands. An authored fixture establishes the mechanism only.
 
-- [ ] Test rendezvous, FIFO buffered messages, bounded capacity, empty/full
-  wait, one delivery per message, multiple senders/receivers, endpoint
-  forwarding, explicit close, last-sender drain and last-reader failure.
-- [ ] Implement one channel state owner with bounded queue and waiter
-  storage. Use compact IDs and efficient ready/wait queues. One commit
-  changes pending payload responsibility and channel state. A direct
-  handoff need not allocate a queue node. Avoid polling or wake-all storms.
-- [ ] Track only logical endpoint obligations, not every ordinary alias.
-  Release each lease exactly once through compiler-planned release sites.
-  Last writer wakes receivers after buffered data is drained; last reader
-  releases undeliverable payloads and fails pending sends without consuming
-  their values. No backend-GC finalizer defines closure.
-- [ ] Preserve order and ownership on failure, cancellation before/after
-  commit and receiver teardown. A host or scheduler wakeup cannot recommit
-  a completed operation. Track bounded reusable waiter records and channel
-  storage; counters must not wrap or underflow.
-- [ ] Integrate compiled producer/consumer, multiple producer worker-pool,
-  copy-and-send and repeated-option stream cases. Verify exact messages
-  and error codes, not emitted JavaScript snippets. Include output/error
-  propagation through ordinary imported and generic wrappers.
-- [ ] Run scheduler and channel state-model tests plus targeted source
-  integration tests in debug and release.
+## Phase 9. Verification and slice review
 
-## Phase 6: Atomic selection and liveness diagnostics
+Use one primary test owner per contract. Keep unit tests for grammar, typed
+IR edges, invalid states and bounded scheduler traces. Put observable programs
+under `tests/cases/` and register them in `tests/cases/manifest.toml`. Give
+Phase 5 one compiled `channels_worker_pool` case for forwarding, EOF and join.
+Keep compile-time rejection and host-entry faults in cases that can observe
+those outcomes. Extend existing fixtures first. Use the same source for backend
+and profile comparisons. Run the focused check with the owning slice.
 
-- [ ] Add tests for send/receive competition, simultaneous readiness,
-  duplicate endpoint arms, false guards, default, all-disabled selection,
-  closed readers, failed selected send, same value offered to two writers,
-  fresh losing values and cancellation before/after arbitration.
-- [ ] Register one selection identity with all eligible channel waits.
-  Atomic arbitration commits at most one arm, unregisters losers and
-  wakes exactly one continuation. Resolve rendezvous between selections
-  without self-matching or double commit. No temporary child per arm.
-- [ ] Use deterministic test scheduling and fair arbitration under
-  repeated readiness; record fairness policy and assumptions. Do not
-  claim probabilistic fairness or bounded progress outside those rules.
-- [ ] Track bounded waiting reasons (send/receive/select/join/host), source
-  identity and parent relationships. Diagnose proven global quiescent
-  deadlock only when no runnable or deliverable internal work and no
-  registered host completion can wake the instance. A live host wait is
-  not proof of deadlock. Never use a fixed elapsed-time heuristic.
-- [ ] Test mutual receive, blocked send on full queue, parent join awaiting
-  its own unsent shutdown, endpoint release resolving a wait, host wait
-  preventing false deadlock, and stale cancelled host wait not preventing
-  a true deadlock. Keep partial-deadlock and protocol analysis deferred.
-- [ ] Define fault classification and dev/host reporting via existing
-  instance-owned runtime diagnostic path. Bound reports and preserve
-  spawn/wait sites without retaining completed task graphs. Validate
-  scheduler/selection model against compiled traces.
+| Checkpoint | Command and required evidence |
+| --- | --- |
+| Surface and summaries | `cargo test -p moth-lexical`, `cargo test -p moth --lib constraint_summary` and `moth tests --case core_io_namespace_binding_success --terse` as an existing namespace control. Check source spans, selected edges, bounded witnesses and changed versus unchanged interface reuse. |
+| Memory safety | Run production source cases alongside `just boracle`. Run `just boracle-campaign` for changed generated differential coverage. Record verdicts, bounds and reduced failures. Run `just validate` before enabling runtime execution. |
+| Runtime and host | Once registered, run `moth tests --case channels_worker_pool --terse`, harness self-tests, the real-browser lane and `cargo test -p lappet --features runtime` for the native fixtures. State browser, target, profile and exact commands. Verify synchronous runtime erasure in the artefact. |
+| Performance | Compare like-for-like workloads for ordinary call/compile cost, output size, summary convergence, live frame bytes, allocations, queue/waiter peaks, transfer throughput, selection withdrawal, host wake latency and cancellation. Include worker pools and event bursts. Use non-recording measurements and keep raw data local. |
+| Documentation and integration | Run `moth check docs --terse` and `moth build docs --release`, inspect changed pages and run `just validate` at the integration boundary. Run `just validate-full` on the final integrated tree before landing on main. |
 
-## Phase 7: Real host integration and HTML-JS
-
-Owners: Core IO, focused builder bindings, JS runtime/import demand,
-entry assembly and dev reporting, host ABI/adapter authorities.
-
-- [ ] Implement the approved timer and event/completion APIs and scoped
-  registrations from Phase 0. Host callbacks enqueue independently
-  validated data or completion tokens and arrange a scheduler wakeup;
-  never re-enter an active Moth stack or expose a raw callback. Validate
-  exact result/error types before publishing values. A host event burst
-  observes its documented bounded ingress policy, including full queue.
-- [ ] Drive resumable entry execution through the builder-owned page
-  lifecycle. Preserve exactly-once activation, existing staged runtime
-  fragment publication only at successful entry completion, static HTML
-  on error and explicit IO already performed. A long-lived entry waiting
-  on events does not publish staged fragments early. Explicit live DOM
-  operations need their own approved builder API, not implicit template
-  reactivity. Unrelated host scripts stay outside the fault wrapper.
-- [ ] Define host teardown, registration ownership, cancellation/unsubscribe,
-  late completion invalidation and stale generation behavior. Browser
-  destruction may terminate execution without running arbitrary guest
-  cleanup; host-owned resources and instance disposal still end their
-  obligations. No claimed graceful cleanup for a forcibly killed process.
-- [ ] Use existing target capabilities and stable external call metadata
-  to reject unclassified async boundaries before lowering. Ordinary foreign
-  synchronous value-only bindings remain closed. Keep host async adapters
-  separate from arbitrary external JS/WAT/native functions.
-- [ ] Execute real event-loop tests: timer suspends while another task
-  runs; actual browser event wakes a waiting receive; asynchronous
-  completion succeeds and fails; cancellation while pending; page teardown
-  and late wakeups; bounded ingress under burst; runtime error reported
-  once. Use fake deterministic host scenarios for races plus real host
-  tests for scheduling and ingress. Test synchronous-only artefacts do
-  not include the scheduler or unused host helpers.
-- [ ] Run doc and integration gates, selected builder tests and
-  `just validate`. Record browser/host coverage and unsupported surfaces.
-
-## Phase 8: Wasm and memory-planner handoff
-
-This phase establishes a tested portable execution contract, not full Wasm
-Channels lowering ahead of its prerequisites.
-
-- [ ] Publish the accepted continuation handoff, resume/dispatch operation,
-  native result/error slot transport, suspension-live storage and ownership
-  transition requirements in compiler and memory authorities. Specify
-  target-validated frame alignment/layout inputs, semantic commit order,
-  instance/wait identity, host import completion/cancellation and cleanup
-  responsibilities. Physical encoding belongs to the later validated
-  memory/target plan. No source semantic type or new public fingerprint
-  domain for physical frame state.
-- [ ] Validate small core Wasm and Lappet mechanism fixtures for suspend
-  back to host, resume, typed result delivery, cancellation, no re-entry,
-  bounded frame storage and stale host token rejection. Use pinned runtime
-  APIs and portable Wasm features, compare any optional feature with the
-  portable route. Do not treat authored Wasm fixture success as Moth backend
-  delivery.
-- [ ] Define mixed JS/Wasm affinity/edge restrictions for suspendable calls,
-  ownership of task/channel runtime and cross-target lifecycle. A JS-owned
-  scheduler may drive guest continuation only through a validated ABI.
-  Unsupported reachable cases receive target diagnostics until implemented;
-  synchronous reachable code retains existing behavior.
-- [ ] Review actual JS runtime with memory authorities. Identify frame,
-  pending-send, queue, lease, wakeup and staged-result allocation families,
-  retained edges, semantic cleanup events, logical close frontiers and
-  exact count obligations. Keep non-atomic REC and one validated memory
-  plan per variant. Never make endpoint lease accounting ordinary REC.
-- [ ] Require subsequent physical memory implementation to consume these
-  facts, including all cancel/join/close/teardown edges, and exercise
-  Channels in collector-free verification. Require full Wasm plan to
-  implement tested parity, not only synchronous numeric or queue smoke tests.
-
-## Phase 9: Performance, review and closeout
-
-- [ ] Measure synchronous frontend and output baselines, compile-time
-  summary convergence, code size, allocations per task and per suspend,
-  suspended-frame bytes, queue/waiter peak storage, rendezvous and buffered
-  throughput, select arbitration/withdrawal, host wakeup latency and
-  cancellation/cleanup cost. Include long-running worker pools and bounded
-  event bursts. Compare identical configurations with recorded workload
-  parameters; no invented thresholds or benchmark history edits.
-- [ ] Review each semantic/runtime owner for duplicate parser rules, parallel
-  summaries, carrier/continuation bloat, stale paths, lost-wakeup and
-  double-release risks, profiling-conditioned legality, unsafe host
-  retention, missing tests and unnecessary helper demand. Use the
-  repository Slice review; independent correctness and redundancy reviews
-  are required before final activation/closeout.
-- [ ] Verify every accepted surface and every negative contract against
-  canonical source tests, production/Boracle proof, scheduler model and
-  real HTML-JS execution. Check typed runtime errors vs traps vs cancelled
-  scopes, source diagnostic distinctions and cross-profile parity. No
-  tests that silently hang: harness owns bounded execution and identifies
-  expected deadlock vs test timeout.
-- [ ] Update progress rows for actually delivered capabilities, diagnostics
-  and targets. Update canonical async, compiler, memory, IO, external and
-  builder references where checkpoints settled details. Remove obsolete
-  async syntax/reservations and old plan references. Keep unsupported
-  Wasm paths honestly gated. Do not edit generated docs directly.
-- [ ] Run `moth check docs --terse` and `moth build docs --release` (or
-  documented Cargo equivalents), inspect changed pages, run `just validate`
-  at broad integration and `just validate-full` for final integrated
-  merge readiness per current validation policy. Record exact commands,
-  failures and measured evidence. Revalidate after integration changes.
-- [ ] Review the remaining memory plan against actual Channels results
-  before it activates, then update the full Wasm plan to consume the
-  accepted handoffs. Transfer durable requirements to canonical authorities
-  and retire this plan and its roadmap entry in the completion commit.
-
-## Required review focus
-
-- Parent retains an endpoint needed to unblock its child: close ordering
-  and resource liveness, not only happy-path join.
-- A sent graph is consumed only at commit: pending, failed, cancelled and
-  losing paths conserve every responsibility and alias fact.
-- A sibling fails during a nested suspend or staged return: correct owner
-  receives the original error after all descendants clean up.
-- Host event arrives concurrently with registration teardown or page reload:
-  no stale wakeup, unbounded queue or guest re-entry.
-- Transitive suspend/failure changes through a generic/imported function:
-  correct stable summary invalidation, constraint verification and no
-  profile-dependent acceptance.
-
-## Completion boundary
-
-V1 is complete for HTML-JS only when the full accepted Channels surface,
-mandatory static safety, real host integration, failure/cancellation and
-global deadlock diagnostics have executable evidence. The common compiler
-and memory handoff plus validated Wasm/native mechanism evidence must be
-ready for full backend implementation. Actual Wasm Channels support remains
-deferred until full backend parity and collector-free memory-plan verification
-pass. Fine-grained task groups, richer partial deadlock and protocol analysis,
-parallel tasks and new async abstractions are outside this work.
+- [ ] Perform the repository Slice review at each coherent handoff. Before
+  closeout, obtain independent correctness and redundancy reviews. Verify
+  all accepted HTML-JS behaviour, mandatory production proof and the Wasm
+  mechanism evidence. Remove displaced parsers, summary passes, unused
+  runtime demand and redundant tests where the new owner covers the contract.
+- [ ] Update the progress matrix only for delivered language/target support.
+  Move durable decisions to the permanent owners, reconcile the remaining
+  memory and Wasm work with the measured implementation and remove this plan
+  and its roadmap entry in the completion commit.
