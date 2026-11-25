@@ -6,8 +6,8 @@ The accepted source language and memory semantics remain authoritative in `docs/
 
 ## Current handoff
 
-**Status:** BC-06 archived baseline and finite test-only witnesses are recorded on `docs/const-foundation-profile-independent-semantics`. The production rewrite and const publication remain paused.
-**Next action:** Review the separate Stage 5 call capture prerequisite. Keep the existing Stage 6 checker until a representative bounded proof supports a complete replacement.
+**Status:** BC-06 archived baseline, finite witnesses and the representative HIR-shaped proof are recorded on `docs/const-foundation-profile-independent-semantics`. The production rewrite and const publication remain paused.
+**Next action:** Decide the source-facing exhaustion policy and approve or reject the production cutover on the HIR-shaped proof evidence. The Stage 5 projected-operand capture waits for the cutover.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -61,7 +61,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 ### BC-06: Relational production provenance
 
-**Status:** The owner approved a committed baseline and a test-only proof on `docs/const-foundation-profile-independent-semantics`. Neither authorises a production rewrite. The pairwise prototype does not meet the cutover gate. Const C4 publication and Phase 5 remain paused.
+**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. None of these authorises a production rewrite. The pairwise prototype does not meet the cutover gate. Const C4 publication and Phase 5 remain paused.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
 
@@ -407,24 +407,79 @@ one component to retain exponentially many rows: an even-parity
 relation projects to every combination on each proper subset but omits
 half the combined rows.
 
-**Next review:** Review the HIR capture prerequisite on its own. Capture
-each operand once before later effects and preserve delivery into its
-parameter slot. Test old-value output for copies, authored-site
-diagnostics for overlapping live shared operands and a disjoint
-control. Include a reversed-name control if widening the change to
-named arguments. Do not add exclusive reservation or reorder operands
-after Stage 6.
+#### Stage 5 projected operands
 
-Do not approve the production provenance rewrite on this evidence. It
-needs a representative HIR-shaped proof of bounded selector and
-recency abstraction, compatible future uses and factor inference through
-joins, calls and failure-lane changes. Measure lost precision and work
-on that model before choosing a guard. Project away dead observations
-and factor only proven independence. If a remaining component exhausts
-its budget, keep the result unpublished and distinguish unproven
-from an observed conflict. Review the source-facing handling of that
-case separately. No new diagnostic policy, fallback checker or
-production cap follows from the scratch refusals.
+Commit `f1c88afa7` captures explicit copies in written order. A shared
+projected operand is still read at the call, after later operands run.
+On HEAD, `inspect(holder.items, replace(~holder))` accepts and reads the
+replaced value. Its explicitly sequenced form rejects with
+`MOTH-BORROW-0007`. Capturing the operand as an alias temporary makes
+Stage 6 reject the overlap, but the current local root sets would also
+reject `inspect(pair.left, replace_right(~pair.right))`. HEAD already
+rejects the same-call `f(pair.left, ~pair.right)` (`MOTH-BORROW-0003`)
+and the explicit form (`MOTH-BORROW-0007`). That is conformant base-root
+conservatism (`borrow-validation.mtf`, "Access roots and aliases"). The
+owner chose field-precise acceptance of disjoint siblings, which needs
+the cutover, before the capture lands.
+
+#### HIR-shaped proof
+
+The standalone crate under local `tmp/bc06/hir_proof/` models validated
+HIR shapes: `Define`/`Update`, place projections, written-order call
+operands after Stage 5 capture, jump arguments, `Invoke` channels,
+error returns and lexical scope exits. It is never compiled into Moth.
+An alternative stores binding and field cells, site × recency
+allocation identities, permissioned edges and loans with holder sets.
+An access conflicts when its cells or reachable nodes overlap a live
+loan. Overlap includes a shared child reached through distinct paths.
+A slot replacement needs only the replaced cell. Block states are exact
+products of factors with disjoint footprints, re-split only when
+`|S| = ∏|πᵢ(S)|`. Summaries are guarded outcome alternatives with
+per-channel slots and permissions, weak or strong input-edge effects,
+root replacement and retained loans. They converge callee-first over
+SCCs, and a lane rewrite restarts from bottom. A converged empty summary
+becomes a conservative completion, so only a declared Never removes a
+continuation.
+
+There are 206 deterministic witnesses. They cover the projected-operand
+shapes, disjoint and shared-child siblings in same-call, explicit and
+nested forms, the evidence matrix above, the C4 `select`/`forward` and
+`retain` controls, mutual recursion, three-way coexistence through
+transfer and composition, failure lanes, recency across loop
+iterations, and exact budget boundaries. Three adversarial audit cycles
+found 25 defects. Most were unsound accepts: missing result and
+stored-edge loans, strong export of a callee push, dropped root
+replacement, factor splits across materialised residuals and refusals
+hiding reachable conflicts. Each one now has a regression test, and the
+final verification audit was clean.
+
+Work units under the default limits (work 100,000; 1,024
+alternatives, nodes and loans; 32 selectors; 4,096 edges):
+
+| Workload | Sizes | Work |
+| --- | --- | ---: |
+| Independent aliasing branches, factored | 4 / 8 / 12 / 16 | 2,512 / 7,730 / 15,684 / 26,374 |
+| Same, eager alternatives | 4 / 8 and above | 68,818 / refused |
+| Native call depth | 4 / 8 / 16 / 32 | 318 / 562 / 1,050 / 2,026 |
+| Duplicate caller and callee product | 2² / 3³ / 4³ / 4⁴ | 1,314 / 3,159 / 6,128 / 18,488 |
+
+Branch row work grows linearly (about 53 per branch), and factor visits
+grow quadratically (about 55N²). That matches the O(locals) join walk
+in today's `join_in_place`. Products grow with the product size. The
+append loop accepts at 839 work and refuses with a limit of 838.
+
+Precision is lost in these places:
+
+- Branch conditions are opaque, so a repeated `if c` reports a false conflict.
+- All collection elements share one selector.
+- Recursive or untracked interiors saturate to typed residuals.
+- Summary and recent nodes of one type may alias.
+- Formal relevance is flow-insensitive, and exceeding the root-partition cap falls back to one may-alias seed.
+
+The model refuses, rather than guess, when copying a graph with non-exact identities, on an ambiguous multi-edge summary projection, and when a conservative completion writes over a captured argument cell. An `Unproven` refusal drops only its alternative. A reachable conflict still wins, and budget exhaustion stops at once.
+
+Before cutover, choose how exhaustion and `Unproven` refusal reach source. Production must not publish acceptance in either case. Do not add a fallback checker.
+
 
 ## Permanent performance evidence - 2026-10-12
 
