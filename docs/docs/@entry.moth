@@ -69,8 +69,8 @@ listed = sync_navigation(sidebar_id)!
     - @../developer-docs/memory-management (Memory management)
     - @../developer-docs/style-guide (Development standards)
 
-    ## Future design drafts
+    ## Tasks and native runtime design
 
-    - @./async (Async)
+    - @./async (Channels and tasks)
     - @./lappet (Lappet native runtime and package infrastructure)
 ]

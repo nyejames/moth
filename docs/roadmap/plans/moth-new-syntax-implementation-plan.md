@@ -27,6 +27,8 @@ Follow [AGENTS.md](../../../AGENTS.md) from the implementing worktree. Read the 
 | 4. Switch the language | Both parsers and all current authored surfaces move together. | Design acceptance cases, migrated suites and docs release build on the same commit. |
 | 5. Qualify and retire | Clean and supported rebuild paths agree, quality gates pass and every touched area has closed audits. | Coverage, performance and deletion comparison, permanent authorities and merge evidence. |
 
+The public language reference, cheatsheet and documentation site on this branch already teach the target syntax. Use their examples as source fixtures when implementing the compiler and codec. The documentation build checks the site and renders its code samples. It does not compile those samples as Moth programs. Keep the docs and executable cases together as each changed rule gains compiler support.
+
 Every row is subject to the following opening and closing procedure, including planning-only, corpus and final integration work.
 
 ## How to run each phase

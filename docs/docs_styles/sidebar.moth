@@ -315,7 +315,7 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/design-scope/">Design scope</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Future design</p>
-            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/async/">Async</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/async/">Channels and tasks</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/lappet/">Lappet</a>
 
         </nav>

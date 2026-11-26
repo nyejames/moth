@@ -180,10 +180,7 @@ its explicit parameter-context rules.
 
 ### Channels
 
-`docs/docs/async/@entry.moth` describes the accepted Channels V1 design:
-invocation-owned child tasks, typed endpoints, send and receive operations
-and guarded readiness cases. Runtime delivery is separate from the grammar
-for ordinary blocks and match arms.
+`docs/docs/async/channels.mtf` owns the accepted Channels V1 contract for invocation-owned tasks, typed endpoints, guarded readiness selection, failure, cancellation, host IO and lifetimes. The short guide at `docs/docs/async/@entry.moth` introduces the syntax. Compiler and runtime delivery are pending.
 
 ### Project structure
 

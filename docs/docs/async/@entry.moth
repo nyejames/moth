@@ -1,3 +1,4 @@
+@channels content as channels_reference
 @docs_styles navbar, section, codeblock, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Channels and readiness"]]
@@ -8,9 +9,9 @@
 [sidebar]
 listed = sync_navigation(sidebar_id)!
 [section, $md:
-    # Channels and readiness
+    # Channels and readiness @#channel-guide
 
-    A typed channel lets one task send a value to another. A function invocation owns the child tasks it starts and joins them before it returns. These examples describe the accepted Channels V1 design. The compiler and runtime still need to implement it.
+    A typed channel lets one task send a value to another. A function invocation owns the child tasks it starts and joins them before it returns. These examples describe the accepted Channels V1 design. The compiler and runtime still need to implement it. Read the @#channel-reference (full Channels V1 reference) for the complete contract.
 
     ## Send and receive
 
@@ -86,3 +87,5 @@ listed = sync_navigation(sidebar_id)!
 
     The accepted memory contract uses cooperative, single-threaded scheduling and non-atomic retained-edge counts. @../../developer-docs/memory-management (Memory management) describes the underlying lifetime rules. See @../progress (Progress) for implementation status.
 ]
+
+[section:[channels_reference]]
