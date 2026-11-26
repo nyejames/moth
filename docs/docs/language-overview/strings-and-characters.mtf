@@ -25,7 +25,7 @@ across a physical newline.
 
 ### MON string boundary
 
-Source quoted slices keep exactly the five escapes listed above; source widening is deferred. MON literal data uses its own bounded decoder, which additionally accepts `\u{H...}` with 1–6 ASCII hex digits; no source escape implementation is shared. This does not change source availability. MON accepts only quoted strings and characters; raw template syntax is not a MON string literal, while a folded or runtime-evaluated template result is an ordinary serialisable `String`. See @../mon/#mon-format (MON format).
+MON accepts the five escapes above and Unicode escapes of the form `\u{H...}` with one to six ASCII hexadecimal digits. A MON string literal uses quotes. A Moth String template can supply a serialisable value after it evaluates. See @../mon/#mon-format (MON format).
 
 A quoted string slice is read-only content. It has no character or substring
 mutation surface and isn't concatenated with `+`. A slice may be read,
@@ -44,7 +44,7 @@ Single quotes create `Char` values.
 
 ### Template strings
 
-Square brackets create string templates. Templates produce owned string values
+In a String context, square brackets construct string values
 and may fold at compile time or lower to runtime string construction.
 
 Templates are the idiomatic and canonical way to:
@@ -115,7 +115,7 @@ operators (`<`, `<=`, `>`, `>=`).
 ### Binding reassignment versus content mutation
 
 A mutable binding that holds a string can be reassigned. Quoted slices are
-immutable. Templates produce owned `String` values. The current source
+immutable. String templates produce owned `String` values. The current source
 surface does not yet expose in-place string mutation operations.
 
 [codeblock, $code "moth":
@@ -132,7 +132,7 @@ surface does not yet expose in-place string mutation operations.
 Templates own interpolation, formatting, slots, wrappers and structured
 content. See @../templates (Templates) for the complete system.
 
-Quoted slices and templates both participate in the language's `String` surface.
+Quoted slices and String templates both participate in the language's `String` surface.
 Expression-position raw backtick slices aren't implemented. Inside a template
 body, backticks, backslashes and physical newlines are ordinary body text
 available to the active formatter.

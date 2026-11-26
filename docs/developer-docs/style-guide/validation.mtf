@@ -801,7 +801,7 @@ changed. Package and test filters avoid rebuilding or running unrelated targets.
 
 `testing.mtf > MON and shared lexical coverage` owns standalone codec test
 locations and the real-source parity harness. Its `gaps.rs` keeps intentional
-data/source differences separate from accepted but undelivered source `{=}`,
+data/source differences separate from accepted but undelivered source `["[=]"]`,
 Unicode escapes and contextual `::Variant`. A filtered parity run must execute
 the intended cases. A pass with zero selected tests proves nothing.
 

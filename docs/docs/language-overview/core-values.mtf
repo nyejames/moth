@@ -30,15 +30,15 @@ literal inference, operators and conversions. The standard defaults do not set
 a minimum arithmetic width. Current implementation and backend support are
 recorded by @../progress (Progress).
 
-The Strings and characters section owns the implemented string source forms.
+The Strings and characters section describes quoted literals and String templates.
 Options are documented with Errors and options.
 
 ### Composite values
 
-Collections use braces. String templates use square brackets.
+Square brackets construct collections, maps and strings. A String collection receiver keeps the names below as separate elements. A body containing text constructs a String.
 
 [codeblock, $code "moth":
-    names = {"Priya", "Rob"}
+    names [String] = ["Priya", "Rob"]
 
     message = [:
         Hello from a template.

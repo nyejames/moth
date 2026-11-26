@@ -1,16 +1,16 @@
 Read an item with `get`:
 
 [codeblock, $code "moth":
-    first = items.get(0) catch:
+    first = items.get(0) catch {
         then 0
-    ;
+    }
 ]
 
 Change a stored item with `set`:
 
 [codeblock, $code "moth":
-    ~items.set(0, 99) catch:
-    ;
+    ~items.set(0, 99) catch {
+    }
 ]
 
 Add and remove items with `push` and `remove`.
@@ -19,7 +19,7 @@ Whether `push` can fail depends on the collection. A growable collection gains
 room as needed, so its `push` cannot fail:
 
 [codeblock, $code "moth":
-    growable ~{I32} = {10, 20}
+    growable ~[I32] = [10, 20]
 
     ~growable.push(30)
 ]
@@ -27,18 +27,18 @@ room as needed, so its `push` cannot fail:
 A fixed-size collection can be full, so its `push` can fail and must be handled:
 
 [codeblock, $code "moth":
-    fixed ~{3 I32} = {10, 20}
+    fixed ~[3 I32] = [10, 20]
 
-    ~fixed.push(30) catch:
-    ;
+    ~fixed.push(30) catch {
+    }
 ]
 
 `remove` can fail on either one, because the index may not exist:
 
 [codeblock, $code "moth":
-    removed = ~growable.remove(1) catch:
+    removed = ~growable.remove(1) catch {
         then 0
-    ;
+    }
 ]
 
 Get the current number of items with `length()`:

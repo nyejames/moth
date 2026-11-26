@@ -134,7 +134,7 @@ baseline keeps that capability conservative until canonical semantics adopt the 
 - Loops use fixed-point future-use reasoning.
 
 [codeblock, $code "moth":
-    items ~= {"a", "b"}
+    items ~[String] = ["a", "b"]
     shared = items
     inspect(shared)
 
@@ -142,7 +142,7 @@ baseline keeps that capability conservative until canonical semantics adopt the 
 ]
 
 [codeblock, $code "moth":
-    items ~= {"a", "b"}
+    items ~[String] = ["a", "b"]
     shared = items
 
     change(~items)   -- invalid: shared is used again below
@@ -232,7 +232,7 @@ The compiler checks signatures, types, eligibility and statically evident mutati
 - Copying through a Wire reads and copies the binding's current value. It does not copy or forward the binding capability.
 - External opaque handles and resources are non-copyable unless their semantic profile defines a genuine independent-copy operation.
 - A non-copyable graph member produces a source diagnostic. The compiler must not silently retain an alias.
-Expressions can construct new values from shared inputs: constructing a result doesn't implicitly copy the inputs. Template interpolation reads inputs and produces a new output string.
+String interpolation reads its inputs and produces text. A sequence construction creates fresh membership. A splice reads its source membership and elements once at its authored position. Stored reference-valued elements retain their normal sharing, permissions and lifetime obligations. A direct nested head creates a fresh row. An ordinary insertion of an existing row retains that row itself. Only an explicit eligible `copy` duplicates the reachable graph. A later operand cannot change which elements an earlier splice or copy captured.
 
 [codeblock, $code "moth":
     -- conceptual: non-copyable external handle inside a graph
@@ -242,7 +242,7 @@ Expressions can construct new values from shared inputs: constructing a result d
 ## Exclusive access with ~
 
 [codeblock, $code "moth":
-    items ~{String} = {"Priya"}
+    items ~[String] = ["Priya"]
 
     update(~items)
     ~items.push("Rob")
@@ -253,7 +253,7 @@ The source form `~place` requests access to an existing mutable place for a writ
 ## Fresh values and hidden locals
 
 [codeblock, $code "moth":
-    update({"fresh"})
+    update(["fresh"])
     update(Vector2(x = 1.0, y = 2.0))
     update([: generated])
 ]
@@ -261,7 +261,7 @@ The source form `~place` requests access to an existing mutable place for a writ
 These forms are valid for ordinary mutable parameters. Source `~` on a fresh value isn't:
 
 [codeblock, $code "moth":
-    update(~{"fresh"})   -- invalid
+    update(~["fresh"])   -- invalid
     update(~Vector2(x = 1.0, y = 2.0))   -- invalid
 ]
 
@@ -365,7 +365,7 @@ rule lives in `docs/docs/bindings/shadowing.mtf`.
 - @../ (Memory management): concise memory-model contract
 - @../borrow-validation (Borrow validation): how shared and exclusive access are checked
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges, escapes and region topology
-- @../declared-regions (Declared regions): accepted `name:` / `into name` placement and destination lifetimes
+- @../declared-regions (Declared regions): accepted `name { ... }` / `into name` placement and destination lifetimes
 - @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility after access validation
 - @../retained-edge-counting (Retained Edge Counting): why ordinary aliases are never counted
 - @../../language/ (Language reference): canonical source syntax and semantics

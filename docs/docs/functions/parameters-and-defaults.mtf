@@ -2,9 +2,9 @@ Every ordinary function parameter has a name and an explicit exact value type
 or parameter capability contract.
 
 [codeblock, $code "moth":
-    describe |prefix String, subject String| -> String:
+    describe |prefix String, subject String| -> String {
         return [prefix, ": ", subject]
-    ;
+    }
 ]
 
 ### Parameter forms
@@ -34,9 +34,9 @@ remains valid. Only directive syntax rejects an authored empty `()`.
 A default belongs to the declaration.
 
 [codeblock, $code "moth":
-    describe |prefix String = "item", subject String| -> String:
+    describe |prefix String = "item", subject String| -> String {
         return [prefix, ": ", subject]
-    ;
+    }
 ]
 
 A caller can omit a defaulted parameter.
@@ -59,9 +59,9 @@ Accepted:
 [codeblock, $code "moth":
     DEFAULT_PREFIX #= "item"
 
-    describe |prefix String = DEFAULT_PREFIX, subject String| -> String:
+    describe |prefix String = DEFAULT_PREFIX, subject String| -> String {
         return [prefix, ": ", subject]
-    ;
+    }
 ]
 
 Rejected:
@@ -70,11 +70,10 @@ Rejected:
 - runtime function calls
 - references to other parameters
 
-Struct fields share the same `= default` syntax, but struct defaults have their
-own compile-time rule. Choice payload fields do not support defaults.
+Struct fields and choice payload fields can also declare typed, compile-time defaults. An omitted field uses its declared default. Supplying `none` to an optional field keeps the absence.
 
 Pipes declare parameters or typed fields. Supplied values use
-@../language-overview/#mon-syntax (MON syntax). An anonymous const record requires
+@../language-overview/#mon-syntax (Constructor syntax). An anonymous const record requires
 an initializer for every field and declares no constructable type. Its entries
 are values, not parameters or defaults. See @../constants/#const-records (Const records).
 
@@ -84,4 +83,4 @@ with a named parameter type.
 
 ### MON data boundary
 
-Source parameter defaults above are unchanged. MON schema defaults are a separate serialised-data contract documented by reference: defaults are prevalidated data applied only at the exact missing field, a supplied `none` is validated as `none` and never replaced, and a supplied nested record is never deep-merged with a default. Only an explicit field default permits omission, and choice payload fields still have no defaults. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format) and @../errors/#options (Options).
+A MON schema applies a validated default only to an omitted struct or choice payload field. A supplied `none` stays absent. A supplied nested record uses its own field rules. See @../mon/#mon-format (MON format) and @../errors/#options (Options).

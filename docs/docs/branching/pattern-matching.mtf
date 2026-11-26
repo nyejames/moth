@@ -1,53 +1,49 @@
 A full match checks one value against a sequence of patterns.
 
 [codeblock, $code "moth":
-    if score is:
-        < 0 => io.line("invalid")
-        0 => io.line("zero")
-        >= 90 => io.line("excellent")
-        else => io.line("other")
-    ;
+    if score is {
+        case < 0: io.line("invalid")
+        case 0: io.line("zero")
+        case >= 90: io.line("excellent")
+        else: io.line("other")
+    }
 ]
 
 ### Match shape
 
-- The header is `if value is:`.
-- An arm is `<pattern> => <body>`.
-- A guarded arm is `<pattern> if condition => <body>`.
-- The guard must resolve to `Bool`.
-- Arm headers begin at the start of a logical line.
-- An intermediate arm ends at the next line-initial arm.
-- The terminal arm may close on the line that contains its `=>`.
-- One final semicolon closes the complete match, either on the terminal arm's line or alone after it.
-- Intermediate arms do not use semicolons. A `;` at the end of an intermediate arm reports the match-arm delimiter diagnostic.
+- The match evaluates its subject once and checks arms in source order.
+- Each pattern arm begins a logical line with `case`. An optional `if` guard follows the pattern and must evaluate to Bool.
+- A colon ends the header. The arm body starts on that line or continues on later lines.
+- The next arm at the same match depth or the closing brace ends the body. Captures belong to that arm's guard and body.
+- The first matching arm with a true or omitted guard runs. A selected arm never falls through to its neighbour.
 
-Match placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
+A new `case` starts an arm even if its colon is missing. The diagnostic belongs at that arm header. A line beginning with `is` can instead continue a comparison in the preceding statement. A colon inside a nested template belongs to the template. See @../language-overview/#blocks-and-statements (Blocks and statements).
 
 ### Default arm
 
-`else =>` is the only catch-all arm.
+`else:` is the only catch-all arm.
 
 [codeblock, $code "moth":
-    if value is:
-        0 => io.line("zero")
-        else =>
-    ;
+    if value is {
+        case 0: io.line("zero")
+        else:
+    }
 ]
 
-In a statement match, bodyless `else =>` explicitly ignores every remaining
+In a statement match, bodyless `else:` explicitly ignores every remaining
 case.
 
-`_ =>` is not wildcard syntax. `else => _` is also invalid.
+`case _:` is not wildcard syntax. `else: _` is also invalid.
 
 ### Value-producing match
 
 A match can produce values with `then` at a closed receiving site.
 
 [codeblock, $code "moth":
-    label = if status is:
-        Ready => then "ready"
-        Waiting => then "waiting"
-    ;
+    label = if status is {
+        case Ready: then "ready"
+        case Waiting: then "waiting"
+    }
 ]
 
 Every selected value-producing arm must produce the receiver's required values
@@ -61,24 +57,22 @@ At least one selected path must produce values.
 ### Single-predicate value match
 
 A closed receiver can also use one option-present capture or one choice-variant
-predicate. The inline and block forms are equivalent one-arm matches with a
-required `else`. They are not full `if value is:` matches and do not use `=>`
-arms.
+predicate. Both forms require a bare `else`. The inline form keeps both results on one line. The block form encloses both branches in one brace pair.
 
 [codeblock, $code "moth":
     label = if maybe_name is |name| then name else "guest"
 
-    block_label = if maybe_name is |name|:
+    block_label = if maybe_name is |name| {
         then name
     else
         then "guest"
-    ;
+    }
 
     score = if status is Ready then 1 else 0
 
-    block_score = if status is Ready:
+    block_score = if status is Ready {
         then 1
     else
         then 0
-    ;
+    }
 ]

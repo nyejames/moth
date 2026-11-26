@@ -61,19 +61,19 @@ Wire and Route are parameter contracts. A pipe-delimited list does not imply a
 shared meaning across declarations:
 
 [codeblock, $code "moth":
-    show |value String| -> String:
+    show |value String| -> String {
         return value
-    ;
+    }
 
     Point = |
         x I32,
         y I32,
     |
 
-    Status ::
+    Status = {
         Ready,
         Failed | message String |,
-    ;
+    }
 ]
 
 Function parameters receive call arguments. Struct fields describe named
@@ -87,13 +87,13 @@ struct and choice references for those ordinary position contracts.
 A source function parameter may require `Wire of T`:
 
 [codeblock, $code "moth":
-    read_name |value Wire of String| -> String:
+    read_name |value Wire of String| -> String {
         return value
-    ;
+    }
 
-    forward_name |value Wire of String| -> String:
+    forward_name |value Wire of String| -> String {
         return read_name(value)
-    ;
+    }
 
     name ~= "Priya"
     label = forward_name(name)
@@ -167,15 +167,15 @@ Only an immediate route-receiving parameter permits a direct choice constructor
 to leave payload fields for future input:
 
 [codeblock, $code "moth":
-    FormMessage ::
+    FormMessage = {
         NameChanged | value String |,
         Submit,
-    ;
+    }
 
-    TodoMessage ::
+    TodoMessage = {
         Rename | id I32, value String |,
         Delete | id I32 |,
-    ;
+    }
 
     todo_id = 42
 ]
@@ -204,24 +204,19 @@ to leave payload fields for future input:
     ]
 ]
 
-Captured arguments fill a contiguous leading payload prefix. Future input fills
-the remaining trailing fields in declaration order. Partial routes permit no
-holes, named omissions or arbitrary reordering. A fully supplied zero-input
-constructor can use ordinary complete-constructor argument rules, including
-legal named arguments.
+A one-input route captures a contiguous leading prefix in field order. It reserves exactly the final field for future input, even when that field has a default. Capture expressions run once at formation in written order. A zero-input route uses ordinary positional and named constructor arguments and fills omitted fields from their declared defaults.
 
 The immediate receiving parameter is what permits a direct constructor to be
-partial. Outside that boundary, ordinary construction still requires every
-field:
+partial. Outside that boundary, ordinary construction requires every field without a default:
 
 [codeblock, $code "moth":
-    on_rename |route Route of String -> TodoMessage| -> String:
+    on_rename |route Route of String -> TodoMessage| -> String {
         return "route received"
-    ;
+    }
 
-    on_delete |route Route of TodoMessage| -> String:
+    on_delete |route Route of TodoMessage| -> String {
         return "route received"
-    ;
+    }
 
     todo_id = 42
     on_rename(TodoMessage::Rename(todo_id))
@@ -238,11 +233,7 @@ ownership rules. The route retains their resulting values, not executable
 expressions to rerun at a later event. Runtime captures remain runtime data even
 when the route signature and constructor are statically known.
 
-Outside that receiving boundary, ordinary constructors still require all payload
-fields. `message = TodoMessage::Rename(todo_id)` lacks the String field and is
-invalid. A zero-input route using that same incomplete constructor is also
-invalid, since it has no future input to supply the missing field. No `|>`,
-angle-bracket or `route` expression form changes these rules.
+Here the trailing `text` field has no default, so both an ordinary construction and a zero-input route require it. If the declaration gave `text` a default, either receiver could omit it. A one-input route would still reserve it for the future String.
 
 ### Type identity and forwarding
 
@@ -267,17 +258,17 @@ This self-contained message-handling example receives an ordinary choice value
 and does not use Wire or Route:
 
 [codeblock, $code "moth":
-    TodoMessage ::
+    TodoMessage = {
         Rename | id I32, text String |,
         Delete | id I32 |,
-    ;
+    }
 
-    update |state String, message TodoMessage| -> String:
-        return if message is:
-            Rename(id, text) => then text
-            Delete(id) => then state
-        ;
-    ;
+    update |state String, message TodoMessage| -> String {
+        return if message is {
+            case Rename(id, text): then text
+            case Delete(id): then state
+        }
+    }
 ]
 
 One child-to-parent Route can be forwarded through another compatible Route
@@ -285,21 +276,21 @@ parameter. The partial parent constructor captures its leading `editor_id`;
 the future `EditorMessage` fills the remaining field:
 
 [codeblock, $code "moth":
-    EditorMessage ::
+    EditorMessage = {
         Changed | value String |,
-    ;
+    }
 
-    AppMessage ::
+    AppMessage = {
         Editor | editor_id I32, message EditorMessage |,
-    ;
+    }
 
-    receive_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+    receive_editor |on_message Route of EditorMessage -> AppMessage| -> String {
         return "route received"
-    ;
+    }
 
-    forward_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+    forward_editor |on_message Route of EditorMessage -> AppMessage| -> String {
         return receive_editor(on_message)
-    ;
+    }
 
     forward_editor(AppMessage::Editor(7))
 ]
@@ -329,7 +320,7 @@ to turn a wire into a snapshot or a route into an already constructed message.
 
 ## Templates and runtime consumers
 
-Templates produce ordinary String values. Returning, passing or assigning one
+A String template produces an ordinary String. Returning, passing or assigning one
 carries no hidden wire, route, subscription or rerender recipe. Composition,
 control flow, slots, wrappers, formatting, folding and fragment insertion keep
 their ordinary contracts. Structural resource and site-root pieces retain their
@@ -361,9 +352,4 @@ represent two independent channels or two bidirectional endpoints.
 
 Explicit send transfers an independent graph under the async memory contract.
 Wire identity is not channel data, and route formation performs no hidden send.
-The channel construction form settles no endpoint-parameter grammar, buffering,
-cancellation, close, selection, suspension or host-event ingress rules.
-
-Async operations, `>>`, `<<`, `spawn`, `yield` and structured `$async:` scopes
-belong to separate language contracts. Channel construction requires the
-initializer shown above.
+Channels V1 specifies its own endpoint lifetimes, buffering and selection. Prefix `>>` dispatches a task, infix `>>` sends a value and prefix `<<` receives an optional result. See @../async (Channels and readiness) for the accepted design and implementation status.

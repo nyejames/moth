@@ -27,3 +27,14 @@ with an ordinary loop header, including its signed `by` step and bindings.
 Template control flow has no `break` or `continue` markers. Ordinary Moth
 statements still have their own `if`, `else`, `break` and `continue` forms.
 Template bodies build lazily at runtime unless they are const-required.
+
+A sequence receiver collects the selected child results. The following loop
+returns one greeting per name. The inner colon opens the String child.
+
+[codeblock, $code "moth":
+    greetings |names [String]| -> [String] {
+        return [loop names |name|:
+            [: Hello, [name]!]
+        ]
+    }
+]

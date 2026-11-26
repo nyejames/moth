@@ -24,10 +24,10 @@ Source directives attach to one following construct:
     greeting #= "Hello"
 
     $doc [: Parses input text.]
-    parse_text |source String| -> String:
+    parse_text |source String| -> String {
         $todo [: Add Unicode escapes.]
         return source
-    ;
+    }
 ]
 
 `$export` publishes a declaration or strict direct-selection dependency clause
@@ -41,14 +41,14 @@ instead:
     root_value #= "root"
 
     $export @forms
-    button #|label String| -> String:
+    button #|label String| -> String {
         return label
-    ;
+    }
 
     $export @forms/validation
-    validate |value String| -> String:
+    validate |value String| -> String {
         return value
-    ;
+    }
 ]
 
 Consumers reach those names as `@child root_value`, `@child/forms button` and
@@ -115,9 +115,9 @@ separated by whitespace. Commas are not used:
 
 [codeblock, $code "moth":
     $doc [: Returns a greeting.] $todo [: Consider localisation.]
-    greeting || -> String:
+    greeting || -> String {
         return "Hello"
-    ;
+    }
 ]
 
 The target construct begins on a later line, never after the final directive

@@ -1,8 +1,8 @@
 Choices can use `is` and `is not` when their payloads are equality-safe.
 
 [codeblock, $code "moth":
-    first = Status::Ready
-    second = Status::Ready
+    first = WindowEvent::Opened
+    second = WindowEvent::Opened
 
     same = first is second
 ]

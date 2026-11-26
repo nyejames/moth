@@ -3,9 +3,9 @@ Trait requirements describe the methods a conforming type must have. The receive
 ### `This` means the implementing type
 
 [codeblock, $code "moth":
-    DISPLAY_TEXT must:
+    DISPLAY_TEXT must {
         display |This| -> String
-    ;
+    }
 ]
 
 `This` is a placeholder for whatever type later declares conformance.
@@ -13,9 +13,9 @@ Trait requirements describe the methods a conforming type must have. The receive
 ### Mutable receiver
 
 [codeblock, $code "moth":
-    RESETTABLE must:
+    RESETTABLE must {
         reset |~This|
-    ;
+    }
 ]
 
 `~This` means the method may mutate the receiver.
@@ -23,9 +23,9 @@ Trait requirements describe the methods a conforming type must have. The receive
 ### Named `This` parameters
 
 [codeblock, $code "moth":
-    SAME must:
+    SAME must {
         equals |This, other This| -> Bool
-    ;
+    }
 ]
 
 When `This` is not the receiver, it must have a parameter name like `other This`.

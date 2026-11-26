@@ -7,9 +7,9 @@ declaring explicit conformance:
         text String,
     |
 
-    to_string |this Label| -> String:
+    to_string |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must CASTABLE_TO_STRING
     value String = cast Label("docs")

@@ -285,7 +285,7 @@ The manifest is a compiler-owned value. A serialised form is deferred until pers
 | Several ordered success slots on host imports | Layout fixed. Registration rejects them in V1 |
 | Several ordered success slots on exports | Supported. Lappet's Rust call API is later runtime design |
 | Byte buffers | Deferred |
-| Records, choices, collections including `{Byte}`, maps, tuples | Deferred |
+| Records, choices, collections including `["[Byte]"]`, maps, tuples | Deferred |
 | Callbacks, async calls, re-entry | Excluded from V1 |
 
 A deferred family needs its own approved layout before any binding accepts it. A V1 binding never maps it implicitly.

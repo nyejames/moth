@@ -50,5 +50,5 @@ network route or a portable browser implementation.
 
 Entry-root startup preserves its success fragment slots and built-in Error!
 channel. Publication waits for success and never implies rollback of prior IO.
-Templates remain strings. Resource strings retain their structural origins
+HTML body fragments and registered HTML slots receive Strings. A package can build typed component data and explicitly render it before that boundary. Resource strings retain their structural origins
 until a valid output context supplies their characters.

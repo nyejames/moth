@@ -1,16 +1,12 @@
-A choice defines a value that can take one of several named forms.
+A choice defines a value that takes one of several named forms.
 
 [codeblock, $code "moth":
-    Status ::
-        Ready,
-        Waiting,
-        Failed | message String |,
-    ;
+    WindowEvent = {
+        Opened,
+        Resized | width I32, height I32 = 720 |,
+    }
 ]
 
-`Ready` and `Waiting` are unit variants.
-
-`Failed` carries one payload field named `message`.
-
-A choice is its own type. Another choice with similar variants is still a
-different type.
+`Opened` carries no data. `Resized` uses the same field list as a struct.
+Its constructor needs a width and uses a height of 720 when the caller omits it.
+Both variants produce a `WindowEvent`.

@@ -3,9 +3,9 @@ A range loop counts through numbers.
 `to` stops before the end value:
 
 [codeblock, $code "moth":
-    loop 0 to 5 |value|:
+    loop 0 to 5 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 This produces `0`, `1`, `2`, `3` and `4`.
@@ -13,9 +13,9 @@ This produces `0`, `1`, `2`, `3` and `4`.
 Use `to &` when the end value should be included:
 
 [codeblock, $code "moth":
-    loop 0 to & 5 |value|:
+    loop 0 to & 5 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 This also produces `5`.
@@ -25,9 +25,9 @@ This also produces `5`.
 You can leave out the first `0`.
 
 [codeblock, $code "moth":
-    loop to 5 |value|:
+    loop to 5 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 ### Change the step
@@ -35,9 +35,9 @@ You can leave out the first `0`.
 Use `by` to set a signed step:
 
 [codeblock, $code "moth":
-    loop 0 to 10 by 2 |value|:
+    loop 0 to 10 by 2 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 This produces `0`, `2`, `4`, `6` and `8`.
@@ -47,9 +47,9 @@ This produces `0`, `2`, `4`, `6` and `8`.
 Use a negative step:
 
 [codeblock, $code "moth":
-    loop 5 to 0 by -1 |value|:
+    loop 5 to 0 by -1 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 This produces `5`, `4`, `3`, `2` and `1`.
@@ -61,9 +61,9 @@ keyword.
 Any range using `F16`, `F32` or `F64` needs an explicit float step:
 
 [codeblock, $code "moth":
-    loop 0.0 to 1.0 by 0.1 |amount|:
+    loop 0.0 to 1.0 by 0.1 |amount| {
         io.line([: [amount]])
-    ;
+    }
 ]
 
 The value binding uses the selected range type. The optional second binding

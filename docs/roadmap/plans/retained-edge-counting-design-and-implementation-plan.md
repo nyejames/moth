@@ -241,14 +241,14 @@ Consider one heavy allocation stored under a runtime-dependent number of keys.
 ```moth
 blob = load_blob()!
 
-loop aliases |name|:
+loop aliases |name| {
     ~index.set(name, blob)!
-;
+}
 
-loop eviction_keys |key|:
-    ~index.remove(key) catch:
-    ;
-;
+loop eviction_keys |key| {
+    ~index.remove(key) catch {
+    }
+}
 ```
 
 Runtime execution may create this graph:
@@ -273,9 +273,9 @@ Loops and recursion are common producers of runtime-many retention, but they are
 This loop needs no REC:
 
 ```moth
-loop items |item|:
+loop items |item| {
     use(item)
-;
+}
 ```
 
 Its aliases are temporary and statically bounded.
@@ -283,9 +283,9 @@ Its aliases are temporary and statically bounded.
 Repeated events can create REC pressure without a visible loop:
 
 ```moth
-add_alias |index ~{String = Blob}, key String, blob Blob| -> Error!:
+add_alias |index ~[String = Blob], key String, blob Blob| -> Error! {
     ~index.set(key, blob)!
-;
+}
 ```
 
 Ordinary fields can also create runtime-dependent retained multiplicity:
@@ -510,7 +510,7 @@ Consider a map whose key and value point to the same allocation family:
 
 ```moth
 text = [: large value]
-values ~{String = String} = {}
+values ~[String = String] = [=]
 
 ~values.set(text, text)! -- final use of text
 removed = ~values.remove("large value")!
@@ -541,10 +541,10 @@ Removal drops the stored key obligation and reclassifies the stored value obliga
 A user method gets a strong summary by composing builtin effects.
 
 ```moth
-clear |this ~UserIndex|:
+clear |this ~UserIndex| {
     ~this.values.clear()
-    this.count = 0
-;
+    ~this.count = 0
+}
 ```
 
 If `values` is the only field retaining indexed elements, the compiler may infer that `UserIndex.clear` kills the whole element-retention domain.

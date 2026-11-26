@@ -163,7 +163,7 @@ returns its argument, and `flag() -> Bool` returns `true`.
   in both profiles with `x == 2`, without `MOTH-RULE-0088` /
   `side_effecting_prelude`.
 
-For F9, use the ordinary statement-match spelling (not a `match` keyword):
+The F9 reproducer uses the statement-match grammar of the measured Alpha revisions:
 
 ```moth
 flag || -> Bool:
@@ -706,7 +706,7 @@ Permanent semantic authority: `docs/developer-docs/memory-management/access-and-
 
 ### Access design gate (resolved)
 
-The Phase 4 binary accepted writes through immutable parameter aliases, overlapping shared aliases, returned aliases and multi-return aliases that ordinary HIR rejected. The following remains invalid:
+The Phase 4 binary accepted writes through immutable parameter aliases, overlapping shared aliases, returned aliases and multi-return aliases that ordinary HIR rejected. This Alpha source records the access witness. The corresponding write remains invalid under the accepted grammar:
 
 ```moth
 probe #|input I32| -> I32:

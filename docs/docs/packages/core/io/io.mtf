@@ -83,22 +83,22 @@ The host owns the listeners that observe keyboard and pointer events and records
 
     io.input.update(~input)
 
-    if io.input.key_pressed(input, "d"):
+    if io.input.key_pressed(input, "d") {
         io.line("pressed d")
-    ;
+    }
 
-    if io.input.pointer_down(input, "left"):
+    if io.input.pointer_down(input, "left") {
         x = io.input.pointer_x(input)
         y = io.input.pointer_y(input)
 
         io.line([: pointer [x], [y]])
-    ;
+    }
 
     last_key = io.input.last_key_pressed(input)
 
-    if last_key is |key|:
+    if last_key is |key| {
         io.line([: last key: [key]])
-    ;
+    }
 
     io.input.close(~input)
 ]

@@ -544,7 +544,7 @@ The result shares no mutable origin with the source. Existing source aliases rem
 Example:
 
 [codeblock, $code "moth":
-    items ~= {"Priya"}
+    items ~[String] = ["Priya"]
     shared = items
     snapshot ~= copy items
 
@@ -587,10 +587,10 @@ Loops make this harder because one definition site can execute many times:
 [codeblock, $code "moth":
     value ~= initial()
 
-    loop condition:
+    loop condition {
         previous = value
         ~value = next()
-    ;
+    }
 ]
 
 The first reference model may use one origin class per fresh definition site and carry that class around the loop fixed point. That is an abstraction, not a claim that every runtime iteration shares storage.
@@ -809,14 +809,14 @@ Boracle should exploit path separation whenever the source cannot observe confli
 Example:
 
 [codeblock, $code "moth":
-    items ~{String} = {"Priya"}
+    items ~[String] = ["Priya"]
     shared = items
 
-    if condition:
+    if condition {
         inspect(shared)
     else
         ~items.push("Rob")
-    ;
+    }
 ]
 
 The shared use and exclusive mutation occur on different paths. A reference solver should not reject them merely because both are textually after the alias issue.
@@ -833,7 +833,7 @@ conservatively keep such aliases active to scope exit.
 Boracle should investigate the stronger rule:
 
 [codeblock, $code "moth":
-    items ~= {"Priya"}
+    items ~[String] = ["Priya"]
     writer ~= items
 
     -- writer is never used

@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Loops"]]
 [$in description:["Conditional, collection and range loops with break and continue in Moth."]]
@@ -20,13 +21,11 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Loops
 
-    Moth uses one `loop` keyword for conditional repetition, collection
-    iteration and numeric ranges. The header selects the form, so you don't need
-    separate `while`, `for` and range-loop keywords.
+    Use a braced `loop` for repeated statements. Its header can test a Boolean, capture the next present option, visit collection elements or generate a numeric range. A loop inside square brackets contributes values to a String or sequence.
 
     `break` and `continue` target the nearest loop. A `by` step is signed, so its
     sign chooses direction rather than the bounds. Range bounds and steps follow

@@ -23,9 +23,9 @@ temporary could hold its intermediate.
 A function can return implicit failure through builtin `Error!`:
 
 [codeblock, $code "moth":
-    divide |left I32, right I32| -> F64, Error!:
+    divide |left I32, right I32| -> F64, Error! {
         return left / right
-    ;
+    }
 ]
 
 Private functions can carry implicit failure through internal calls. Custom

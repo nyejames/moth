@@ -1,21 +1,21 @@
 Patterns can match exact values, ranges, choice variants or option shapes.
 
 [codeblock, $code "moth":
-    if status is:
-        Ready => io.line("ready")
-        Waiting => io.line("waiting")
-    ;
+    if status is {
+        case Ready: io.line("ready")
+        case Waiting: io.line("waiting")
+    }
 ]
 
-A choice match does not need `else =>` when every variant is covered.
+A choice match can omit `else:` when it covers every variant with unguarded arms. A guarded choice match needs a fallback.
 
 Payload variants expose their fields through captures:
 
 [codeblock, $code "moth":
-    if response is:
-        Success => io.line("done")
-        Err(message) => io.line(message)
-    ;
+    if response is {
+        case Success: io.line("done")
+        case Err(message): io.line(message)
+    }
 ]
 
 The capture name must match the field name.
@@ -23,17 +23,17 @@ The capture name must match the field name.
 Use `as` when the local name should be different:
 
 [codeblock, $code "moth":
-    Err(message as error_text) => io.line(error_text)
+    case Err(message as error_text): io.line(error_text)
 ]
 
 Options have two complete shapes: absent and present.
 
 [codeblock, $code "moth":
-    if maybe_name is:
-        none => io.line("missing")
-        |name| => io.line(name)
-    ;
+    if maybe_name is {
+        case none: io.line("missing")
+        case |name|: io.line(name)
+    }
 ]
 
-Most other value matches need `else =>` because the compiler cannot list every
+Most other value matches need `else:` because the compiler cannot list every
 possible `I32`, `String` or other scalar value.

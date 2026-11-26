@@ -78,7 +78,7 @@ compiler's checked storage policy, not source count arithmetic.
 - `Byte` supports equality and unsigned-octet ordering with another `Byte`.
 - `Byte` has no arithmetic operators, unary minus or range-loop domain.
 - `Byte` and `U8` convert infallibly in both directions. Other numeric conversions compose through `U8`.
-- `{Byte}` remains an ordinary collection, not a buffer source type or text encoding.
+- `["[Byte]"]` remains an ordinary collection, not a buffer source type or text encoding.
 
 ### `Dec` and `DecN`
 

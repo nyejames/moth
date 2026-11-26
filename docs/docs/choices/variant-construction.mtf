@@ -1,59 +1,49 @@
-Construct choice values through the choice name and variant name.
-
-### Unit variants
-
-A unit variant is a value without a constructor call.
+Write the choice name, `::` and the variant name together, with no whitespace or comments around the separator. A unit variant
+takes no parentheses. A variant with fields requires parentheses, including
+when every field has a default.
 
 [codeblock, $code "moth":
-    current = Status::Ready
+    WindowEvent = {
+        Opened,
+        Resized | width I32, height I32 = 720 |,
+        Captioned | text String? = "Untitled" |,
+    }
+
+    opened = WindowEvent::Opened
+    wide = WindowEvent::Resized(1280)
+    tall = WindowEvent::Resized(1280, height = 1080)
+    caption = WindowEvent::Captioned()
+    blank = WindowEvent::Captioned(none)
 ]
 
-This form is invalid:
-
-[codeblock, $code "moth":
-    -- INVALID: unit variants are not constructor calls
-    current = Status::Ready()
-]
-
-### Payload variants
-
-A payload variant requires constructor parentheses.
-
-[codeblock, $code "moth":
-    failed = Status::Failed("network")
-    named = Status::Failed(message = "network")
-]
+`wide` carries width 1280 and height 720. `caption` carries the present
+String `"Untitled"`. `blank` carries `none` because the caller supplied it.
 
 ### Argument rules
 
-- Positional arguments fill payload fields in declaration order.
-- Positional arguments must come before named arguments.
-- A named argument must match a payload field.
-- Each payload field must be supplied exactly once.
-- Payload fields have no defaults.
-- Extra or missing arguments are invalid.
-- Argument values are checked against the exact payload field types. Eligible raw numeric origins may materialise in their field type; already typed values need exact compatibility.
+Positional arguments fill fields in declaration order. Named arguments can
+follow in any order and may skip a defaulted field. Each field can receive one
+argument. Unknown names, extra arguments and omitted required fields are
+errors. An eligible raw numeric literal takes its exact field type. An
+already typed argument must match that type.
 
-An immediate `Route of ...` parameter supplies one bounded exception to complete
-construction: a direct constructor may capture a leading payload prefix and
-leave the trailing field for its future input. The ordinary rules above still
-apply outside that boundary. The @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring reference)
-owns the exact zero/one-input contract, capture order and forwarding limits.
+`WindowEvent::Opened()` adds parentheses to a unit variant.
+`WindowEvent::Captioned` omits parentheses from a payload variant.
+Both forms are errors. Inspect a completed payload with a pattern.
 
-Constructed payload fields are immutable.
+### Constructor routes
 
-Direct payload field mutation is invalid.
+An ordinary `WindowEvent` receiver constructs the value immediately. At a
+`Route of WindowEvent` parameter, `WindowEvent::Resized(1280)` captures the
+completed payload, including the default height. At a
+`Route of I32 -> WindowEvent` parameter, the same spelling captures the width
+and reserves the final height for future input, even though it has a default.
+The captured arguments form a contiguous leading prefix and run once in
+written order. See @../wiring (Wiring).
 
-Use pattern matching to inspect payload fields.
+### MON choice data
 
-### Qualified variant headers
-
-Write qualified variants as `Status::Ready`. The separator touches both names:
-no whitespace, line break or comment may appear on either side of `::`.
-Whitespace before `::`, or any gap after it, reports `MOTH-SYNTAX-0031`; a line
-break before `::` ends the expression first. The spaced `Status :: Ready, Busy;`
-form is choice declaration syntax and does not apply to construction.
-
-### Variant construction MON data boundary
-
-Source construction keeps the explicit `Choice::Variant` form above; contextual `::Variant` source construction is deferred. MON literal data documents the same unit/payload distinction with either contextual `::Variant` or one exact `Choice::Variant` qualifier. The receiving schema selects the expected choice, and an explicit qualifier is a checked assertion that never selects another schema. Matching payload shapes do not make nominal choices interchangeable, and payload fields still have no defaults. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+Moth source uses a qualified name such as `WindowEvent::Opened`. In MON data,
+`::Opened` reads the expected choice from the receiving schema. An explicit
+qualifier must match that schema. MON applies validated field defaults to
+omissions without evaluating Moth expressions. See @../mon/#mon-format (MON format).

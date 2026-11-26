@@ -107,23 +107,23 @@ The declaration-like contract is:
 
 ```moth
 sort type T |
-    this ~{T},
+    this ~[T],
     stable Bool = true,
     memory SortMemory = SortMemory::Automatic,
 |
 ```
 
 This is a compiler-owned member rather than a source function copied into each module. The same
-member is available on fixed `{N T}` collections. A fixed collection sorts only its logical occupied
+member is available on fixed `[N T]` collections. A fixed collection sorts only its logical occupied
 range and keeps its capacity.
 
 `SortMemory` is a closed compiler-owned policy choice:
 
 ```moth
-SortMemory ::
+SortMemory = {
     Automatic,
     Minimal,
-;
+}
 ```
 
 It uses normal nominal choice identity and unit-variant semantics. The compiler reserves the type

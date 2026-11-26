@@ -60,7 +60,7 @@ on output placement. Use the context's structural-string rendering service to
 resolve those pieces. Plain-text extraction is valid only when every piece has
 concrete characters.
 
-A runtime template is executable Moth code that produces a string. It isn't a
+A runtime HTML entry fragment executes Moth code and supplies a String. It isn't a
 second build-time template evaluator. Explicit [$html:<code>~&#91;...&#93;</code>] runtime top-level templates contribute to
 the normal entry's fragment result collection. Compiler-owned `$doc` metadata
 attaches to declaration identities and `$todo` has no output. `$note` is a

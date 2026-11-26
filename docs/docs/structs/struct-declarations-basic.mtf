@@ -7,7 +7,7 @@ A struct groups named values into one new type.
     |
 ]
 
-Each field has a name and a type.
+Each field has a name and a type. Choice variants use the same field lists.
 
 Fields can have defaults:
 

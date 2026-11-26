@@ -21,6 +21,8 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 
 ## 1. Evidence inventory
 
+The source witnesses and diagnostic locations below use the Alpha grammar of the measured revisions. The syntax migration preserves their required access, provenance and output behaviour.
+
 Every comparison below names its binary. "Reproduced" means re-run this session.
 
 | Label | Compiler | Fixture tree | Status |

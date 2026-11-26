@@ -61,11 +61,11 @@ page, docs index, sidebar, pager and this map together.
   output placement, URL contexts and stylesheet deduplication by stable
   resource origin. Source Strings do not compare unresolved resources by
   rendered URL.
-- The current HTML `stylesheets` slot accepts exactly one tracked CSS
-  resource per insert. Passing a concatenated structural String containing
-  several CSS origins is an **intended extension to investigate** and is not
-  current source acceptance. Examples using it must say so. A collection-
-  valued builder handoff is an alternative still open, not a settled syntax.
+- Each HTML `stylesheets` insert takes one tracked CSS resource. Use separate
+  direct inserts for independent resources. Additional resource handoffs
+  remain separate design work.
+- A bracket applies one receiving wrapper. Apply several named style inserts
+  to that receiver in the same head. Nest another receiving element explicitly.
 - The current `head` slot deduplicates *complete direct contributions*
   after URL rendering. Concatenating several head snippets into one String
   loses the per-snippet boundary: do not claim independent head/script

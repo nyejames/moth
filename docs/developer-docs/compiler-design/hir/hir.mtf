@@ -54,13 +54,13 @@ canonical types nor failure delivery and cannot grant target capabilities.
 
 ## Runtime template work
 
-Neutral template handoff from AST becomes ordinary string and control-flow operations in HIR:
+The Alpha compiler lowers a runtime String template to ordinary HIR operations:
 
 - runtime string construction
 - template control flow as ordinary CFG
 - slot accumulators and appends where needed
 
-Compile-time entry fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
+In the accepted redesign, a sequence construction reaches HIR with its element type and contribution roles resolved. HIR preserves each read at its written position and the lazy control flow of selected children. Backends see ordinary typed construction. Compile-time entry fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
 
 The greeting's runtime pieces, if any remain dynamic, look like ordinary operations over strings and calls. Static compile-time fragment text stays metadata until the HTML builder inserts it.
 

@@ -64,7 +64,7 @@ A fresh result root has a new root allocation but may retain legal references to
 [codeblock, $code "moth":
     name = "Priya"                    -- fresh string slice
     greeting = [: Hello, [name]]      -- fresh owned template
-    items = {1, 2, 3}                 -- fresh collection
+    items = [1, 2, 3]                 -- fresh collection
 ]
 
 A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints.
@@ -76,9 +76,9 @@ An alias result reuses an existing root or projection. Shared bindings, field ac
 [codeblock, $code "moth":
     original = load_items()
     view = original                   -- alias result
-    first = original.get(0) catch:    -- alias result (shared access)
+    first = original.get(0) catch {    -- alias result (shared access)
         assert(false, "known valid index")
-    ;
+    }
 ]
 
 ### Projection roots

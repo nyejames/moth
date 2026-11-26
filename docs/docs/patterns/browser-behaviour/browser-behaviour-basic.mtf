@@ -7,16 +7,15 @@ Moth's documentation sidebar marks the active link and builds its breadcrumb
 through an explicit runtime call after the static fragments:
 
 [codeblock, $code "moth":
-    @docs_styles sidebar, init_docs_sidebar
+    @docs_styles sidebar, sidebar_id, sync_navigation
 
     [sidebar]
 
-    init_docs_sidebar()!
+    listed = sync_navigation(sidebar_id)!
 ]
 
 The sidebar template runs nothing when it is imported or rendered.
-`init_docs_sidebar()` calls the existing `@builder/web/page` browser package, which
-reads the current location and updates the navigation elements.
+The docs facade re-exports `sync_navigation` from `@builder/web/page`. The call reads the current location and updates the navigation elements for that sidebar. Its Boolean result tells the caller whether the current page has a sidebar link.
 
 ### Prefer native HTML and CSS
 

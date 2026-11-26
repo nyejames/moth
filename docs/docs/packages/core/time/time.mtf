@@ -120,9 +120,9 @@ All three use the handle ABI. They carry no source-visible fields.
 [codeblock, $code "moth":
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds
 
-    created = timestamp_from_iso_string("not-a-date") catch:
+    created = timestamp_from_iso_string("not-a-date") catch {
         then timestamp_from_unix_milliseconds(0.0)
-    ;
+    }
 ]
 
 ### Duration construction and helpers

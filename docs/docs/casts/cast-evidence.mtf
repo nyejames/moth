@@ -33,9 +33,9 @@ receiver method and declare explicit conformance:
         text String,
     |
 
-    to_string |this Label| -> String:
+    to_string |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must CASTABLE_TO_STRING
 
@@ -46,10 +46,10 @@ receiver method and declare explicit conformance:
 Fallible evidence declares its actual typed route:
 
 [codeblock, $code "moth":
-    try_to_i32 |this Label| -> I32, Error!:
+    try_to_i32 |this Label| -> I32, Error! {
         value I32 = cast this.text
         return value
-    ;
+    }
 
     Label must TRY_CASTABLE_TO_I32
 

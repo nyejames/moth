@@ -1,5 +1,5 @@
 @project-graphs-and-modules content as reference_content
-@docs_styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, sidebar, sync_navigation, sidebar_id
 @diagrams css as diagrams_css
 
 [$in title:["04. Project graphs and modules"]]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     Folders become a canonical source graph with providers, consumers and one compile per physical module.

@@ -135,7 +135,7 @@ assert typed values before comparison. Invalid cases assert each parser's own
 rejection reason and span. Never compare fabricated tokens or helper outputs.
 `gaps.rs` documents and independently checks framing, nominal identity,
 literal-data/expression differences, quoted text and resource limits. Keep
-undelivered `{=}`, Unicode escapes and contextual `::Variant` linked to the
+undelivered `["[=]"]`, Unicode escapes and contextual `::Variant` linked to the
 roadmap and progress matrix. Moth-native `$mon`, automatic schemas and the
 static builder remain separate future work.
 
@@ -207,19 +207,19 @@ mutating functions rather than merely checking that each function compiles:
 
 [codeblock, $code "moth":
     -- Excerpt from a larger scenario, not a standalone fixture.
-    validate_state |game Simulation|:
+    validate_state |game Simulation| {
         carried ~= 0
-        loop game.agents |agent|:
-            if agent.health > 0:
+        loop game.agents |agent| {
+            if agent.health > 0 {
                 assert(agent.tile >= 0 and agent.tile < board_cells)
-            ;
+            }
             ~carried += agent.cargo
-        ;
+        }
         mined = counter_value(game.counters, "mined")
         delivered = counter_value(game.counters, "delivered")
         lost = counter_value(game.counters, "lost")
         assert(mined is delivered + lost + carried)
-    ;
+    }
 ]
 
 A good scenario has multiple independently observable outcomes and a few
@@ -674,7 +674,7 @@ command:
     [td:
         [: `scoped-blocks`]
         [: `checked_blocks`, `async_blocks`]
-        [: the deferred-feature diagnostics for `$checked:` and `$async:` blocks]
+        [: the current Alpha diagnostics for the earlier `$checked:` and `$async:` block spellings]
     ]
 
     [td:

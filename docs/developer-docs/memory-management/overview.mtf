@@ -25,7 +25,7 @@ Moth is reference-semantic. Existing values use shared, read-only access by defa
 
 Garbage collection is a permitted physical representation of a topology that has already been proven legal. It is not the semantic correctness baseline. GC cannot legalise an invalid or unproven topology, and a release build on a backend that advertises full memory control must not fall back to a tracing collector.
 
-**Region** is Moth's general semantic lifetime-owner concept. An **inferred region** is chosen by the compiler. A **declared region** is a hard source-declared `name:` region whose membership is explicit through `into name`. A declared region is not necessarily a physical arena.
+**Region** is Moth's general semantic lifetime-owner concept. An **inferred region** is chosen by the compiler. A **declared region** is a hard source-declared `name { ... }` region whose membership is explicit through `into name`. A declared region is not necessarily a physical arena.
 
 ## Mandatory proof and physical strategy
 
@@ -300,7 +300,7 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: `name:` / `into name`, destination scope, hard declared-region exits, nested declared regions]
+        [: `name { ... }` / `into name`, destination scope, hard declared-region exits, nested declared regions]
         [:
             - `docs/developer-docs/memory-management/declared-regions/overview.mtf`
             - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`

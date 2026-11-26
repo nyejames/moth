@@ -2,10 +2,10 @@ Postfix `!` propagates a typed error through the enclosing function's compatible
 error slot.
 
 [codeblock, $code "moth":
-    wrapper |text String| -> I32, Error!:
+    wrapper |text String| -> I32, Error! {
         value = parse_number(text)!
         return value
-    ;
+    }
 ]
 
 ### Contract for error propagation
@@ -19,7 +19,7 @@ error slot.
 - Multi-success fallible calls may feed a matching multi-bind.
 
 [codeblock, $code "moth":
-    items ~{4 I32} = {}
+    items ~[4 I32] = []
 
     ~items.push(value)!
 ]
@@ -40,7 +40,7 @@ Old inline fallback and bang-handler spellings are invalid.
     value = parse_number(text) err!
 ]
 
-Use `catch then ...` or a block `catch:` handler for recovery.
+Use `catch then ...` or a block `catch { ... }` handler for recovery.
 
 ### Implicit private propagation
 
@@ -50,19 +50,19 @@ functions without an error slot infer and propagate it within the same semantic
 module. Their internal callers do not add postfix `!`.
 
 [codeblock, $code "moth":
-    product |left I32, right I32| -> I32:
+    product |left I32, right I32| -> I32 {
         return left * right
-    ;
+    }
 
     $export
-    checked_product |left I32, right I32| -> I32, Error!:
+    checked_product |left I32, right I32| -> I32, Error! {
         return product(left, right)
-    ;
+    }
 
     $export
-    product_or_zero |left I32, right I32| -> I32:
+    product_or_zero |left I32, right I32| -> I32 {
         return product(left, right) catch then 0
-    ;
+    }
 ]
 
 `checked_product` materialises escaping implicit failure as a built-in `Error`.

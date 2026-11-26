@@ -1,6 +1,6 @@
 @browser-behaviour-basic content as browser_basic
 @browser-behaviour content as browser_advanced
-@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, sync_navigation, sidebar_id
 
 [$in title:Browser behaviour]
 [$in description:Separate static HTML from runtime DOM operations and future typed event delivery.]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Browser behaviour

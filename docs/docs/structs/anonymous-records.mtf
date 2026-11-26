@@ -15,7 +15,7 @@ validation and lifetime validation.
         height I32,
     |
 
-    show_window ||:
+    show_window || {
         window ~= (
             title = "Strategy",
             bounds = (
@@ -27,7 +27,7 @@ validation and lifetime validation.
         ~window.bounds.size.width = 1440
         independent ~= copy window
         ~independent.title = "Overview"
-    ;
+    }
 ]
 
 A runtime receiving context selects a runtime record. Its field expressions
@@ -60,7 +60,7 @@ already bound local. They may also contain ordinary supported values, including
 explicitly constructed nominal structs and choices.
 
 [codeblock, $code "moth":
-    show_state ||:
+    show_state || {
         child = (count = 3)
         state = (
             saved = child,
@@ -69,7 +69,7 @@ explicitly constructed nominal structs and choices.
 
         selected = state.fresh
         count = state.saved.count
-    ;
+    }
 ]
 
 A compiler-generated parent field carries the child's resolved hidden type.

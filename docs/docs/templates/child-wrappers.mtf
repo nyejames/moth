@@ -22,14 +22,11 @@ The child insertion point is implicit because only one is allowed.
 
 Each directive is optional, and either may be used alone. Each may occur once
 per head, so a repeated `$before` or `$after` is rejected. Both may appear in the
-same head. The assignment marker is required, so `$before` or `$after` without
-`=` is invalid.
-
-A value is a compile-time String or a constant template wrapper. A plain String
-is literal text. A compile-time String may also retain structural resource
-pieces, which survive composition and resolve in the output context. A constant
-template wrapper may contain named slots, which the enclosing application fills.
-Its unresolved slot identity and structural resource pieces survive composition.
+same head. Each takes one operand, as in `$before row`. In a String
+construction, use compile-time text or a constant template wrapper. A typed
+sequence wrapper prepends or appends compatible contributions. Structural
+resource Strings keep their origins until the output resolves them. A
+constant wrapper may expose named slots for its enclosing application.
 
 [codeblock, $code "moth":
     row #= [$html:<tr style="[$slot row_style]">]
@@ -56,21 +53,21 @@ Only named slots may appear in a `$before` or `$after` value. An explicit
 default or positional slot anywhere in the value, including in a nested
 template, is rejected at the offending slot. The child insertion point is implicit.
 
-Runtime-dependent expressions and values that are neither compile-time Strings
-nor constant template wrappers are rejected at their authored span. For a
-template value, normal template body whitespace applies, including a space
-immediately after its body colon.
+The operand must be compile-time known and compatible with the constructed
+output. String template whitespace follows the usual body rules, including
+any space after the colon.
 
 ### No output and loops
 
 A false or absent condition and a zero-iteration loop emit no wrapper. A selected
-empty String still counts as output and is wrapped. A direct child loop is
+empty String or sequence still counts as output and is wrapped. A direct child loop is
 wrapped once around its aggregate output. Put a wrapper inside the loop body to
 wrap each iteration.
 
 ### Direct-child scope
 
-The wrapper applies only to direct children.
+The wrapper applies once per direct child construction. A child that splices
+several elements receives one prefix and suffix around the group.
 
 Literal body text is not individually wrapped.
 

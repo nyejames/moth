@@ -178,6 +178,13 @@ constructor routes, capability restrictions and the channel-construction
 boundary. Ordinary type, call, choice and memory contracts still apply outside
 its explicit parameter-context rules.
 
+### Channels
+
+`docs/docs/async/@entry.moth` describes the accepted Channels V1 design:
+invocation-owned child tasks, typed endpoints, send and receive operations
+and guarded readiness cases. Runtime delivery is separate from the grammar
+for ordinary blocks and match arms.
+
 ### Project structure
 
 - `docs/docs/project-structure/project-layout.mtf`
@@ -297,6 +304,9 @@ and numeric-text facts without compiler tokens, type lookup or arithmetic.
 Source call-argument and declaration parsers remain compiler-local. The real-source
 suite at `src/compiler_tests/mon_syntax_parity/` checks the common notation under
 equivalent exact receiving types.
-The codec does not imply Moth-native `$mon`, automatic schema extraction or a
-static project builder. Source `{=}`, Unicode escapes beyond the existing five
-and contextual `::Variant` construction remain named undelivered parity gaps.
+The accepted format uses square brackets for literal sequences and maps.
+The Alpha source parser and the standalone codec still require a coordinated
+cutover, including empty maps and choice field defaults. Unicode escapes
+beyond the existing five and contextual `::Variant` source construction have
+separate parity gaps. Moth-native `$mon`, schema extraction and the static
+asset builder remain planned work.

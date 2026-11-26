@@ -110,7 +110,7 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
 
     [td:
         [: Declared region]
-        [: A source-declared hard lifetime region introduced by `name:`. It cannot be silently widened, membership is explicit through `into name`, and its owned allocations remain until declared-region exit.]
+        [: A source-declared hard lifetime region introduced by `name { ... }`. It cannot be silently widened, membership is explicit through `into name`, and its owned allocations remain until declared-region exit.]
     ]
 
     [td:
@@ -550,7 +550,7 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 - @../ (Memory management): top-level memory authority
 - @../access-and-aliasing (Access and aliasing): shared aliases, copies and aggregate storage
 - @../borrow-validation (Borrow validation): exclusivity and optional transfer safety
-- @../declared-regions (Declared regions): accepted deferred `name:` / `into name` surface and hard destination lifetimes
+- @../declared-regions (Declared regions): accepted deferred `name { ... }` / `into name` surface and hard destination lifetimes
 - @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility
 - @../retained-edge-counting (Retained Edge Counting): the counted strategy for runtime-many persistent edges
 - @../runtime-and-backend-lowering (Runtime and backend lowering): physical strategies, collector-free release and external profiles

@@ -7,16 +7,15 @@ its body while that condition remains `true`.
 [codeblock, $code "moth":
     count ~= 0
 
-    loop count < 3:
+    loop count < 3 {
         io.line([: [count]])
         ~count += 1
-    ;
+    }
 ]
 
 ### Conditional loop contract
 
-- The form is `loop condition: ... ;`.
-- An inline loop closes on the line containing its opening `:`. A multiline loop closes with `;` alone after its body. See @../language-overview/#blocks-and-statements (Blocks and statements).
+- Write `loop condition { ... }`. A pair of braces encloses the statements in each iteration. See @../language-overview/#blocks-and-statements (Blocks and statements).
 - The condition must resolve to `Bool`.
 - The condition is checked before the first iteration, so the body may run zero times.
 - It is checked again after each completed iteration.
@@ -24,6 +23,16 @@ its body while that condition remains `true`.
 - There is no separate `while` keyword.
 - `break` exits the nearest active loop.
 - `continue` skips the rest of the current body and starts the next condition check.
+
+### Repeat while an option is present
+
+[codeblock, $code "moth":
+    loop ~scanner.next_token() is |token| {
+        inspect(token)
+    }
+]
+
+Moth evaluates the option-producing expression before each attempted iteration. A present value binds an immutable capture for that iteration. An absent value ends the loop. A `continue` tries the header again and a `break` exits immediately. A channel can use the same header to drain a reader. See @../async (Channels and readiness).
 
 ### Divergence proof
 

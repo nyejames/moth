@@ -1,387 +1,88 @@
-@core/css center
-@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, codeblock, theme_head, sidebar, sync_navigation, sidebar_id
 
-[$in title:["Coroutines and Async in Moth"]]
-[$in description:["Design draft for structured async, coroutines, channels and explicit suspension in Moth."]]
+[$in title:["Channels and readiness"]]
+[$in description:["Child tasks, typed channels, sends, receives and readiness selection in Moth's Channels V1 design."]]
 [$in head:[theme_head]]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
-[title, center: COROUTINES AND ASYNC IN MOTH]
-
+listed = sync_navigation(sidebar_id)!
 [section, $md:
-    **Design draft:** This page is a future-facing design document for language and compiler planning.
-    It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented.
-    `$async:` is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its block semantics remain deferred, and this page delivers no implementation.
+    # Channels and readiness
 
-    Moth approaches async and concurrency by making **control flow explicit** and **communication safe by default**.
+    A typed channel lets one task send a value to another. A function invocation owns the child tasks it starts and joins them before it returns. These examples describe the accepted Channels V1 design. The compiler and runtime still need to implement it.
 
-    Instead of hiding async behind keywords like `async` / `await` or complex runtime abstractions,
-    Moth uses a small set of primitives that make data flow, suspension and concurrency visible in the syntax.
-
-    At a high level:
-
-    - Coroutines are lightweight, cooperative tasks
-    - Coroutines communicate using typed channels
-    - Concurrency is structured and scoped
-    - Suspension points are visible in code
-    - The compiler can enforce safety rules around shared data, references and task lifetimes
-
-    The goal is async code that remains readable, predictable and analysable.
-]
-
-[section, $md:
-    ## Core idea
-
-    The draft uses these primitives:
-
-    [styled_table:
-        [header: [: Concept] [: Syntax] [: Meaning] ]
-
-        [data:
-            [: Channels ]
-            [: typed channel declaration (future) ]
-            [: Create typed communication endpoints ]
-        ]
-
-        [data:
-            [: Send ]
-            [: [$html:<code>&gt;&gt;</code>] ]
-            [: Transfer a value into a channel ]
-        ]
-
-        [data:
-            [: Receive ]
-            [: [$html:<code>&lt;&lt;</code>] ]
-            [: Wait for a value from a channel ]
-        ]
-
-        [data:
-            [: Coroutine ]
-            [: [$html:<code>spawn</code>] ]
-            [: Start cooperative work inside a compiler-owned async scope ]
-        ]
-
-        [data:
-            [: Suspension ]
-            [: [$html:<code>yield</code>] ]
-            [: Explicitly give control back to the scheduler ]
-        ]
-
-        [data:
-            [: Scope ]
-            [: compiler-owned directive block ]
-            [: Bound the lifetime of spawned coroutines ]
-        ]
-    ]
-
-    The future `$async:` block is compiler-owned language structure. It is not
-    builder metadata or a builder extension.
-
-    The intended model is:
-
-    > Async is structured control flow plus safe message passing.
-]
-
-[section, $md:
-    ## Channels
-
-    Coroutines should not share mutable state by default.
-
-    Instead, they communicate by sending values through typed channels.
-
-    The separately accepted future channel construction is:
+    ## Send and receive
 
     [codeblock, $code "moth":
-        reader, writer Channel of AppMessage = Channel()
+        produce |writer ChannelWriter of String| -> Error! {
+            "Priya" >> writer
+            "Rob" >> writer
+        }
+
+        run || -> Error! {
+            reader, writer Channel of String = Channel()
+            >> produce(writer)
+            writer.close()
+
+            loop << reader is |name| {
+                io.line(name)
+            }
+        }
+
+        run()!
     ]
 
-    In this declaration:
+    `Channel()` creates an unbuffered channel and returns the reader first and the writer second. Prefix `>>` dispatches a direct function or receiver-method call as a child task. Its target has zero ordinary success results. An ordinary call runs on the current task and may suspend.
 
-    - `writer` is the sending endpoint
-    - `reader` is the receiving endpoint
-    - the channel carries values of type `AppMessage`
-    - `Channel()` is the value-position constructor, with its type supplied by the receiving declaration
+    In `produce`, infix `>>` sends each String to the writer. Each send waits for a matching receive. Prefix `<<` receives an optional value. The loop binds each present name and prints it. After the last writer closes and the buffer drains, a receive yields `none` and the loop ends.
 
-    The endpoint-parameter grammar for larger coroutine examples remains
-    unresolved, so this page does not prescribe legacy constructor or endpoint
-    generic spellings.
+    A reader parameter uses `ChannelReader of T` and a writer uses `ChannelWriter of T`. Passing an endpoint establishes a scoped obligation for that invocation. Calling `close()` releases that obligation. Other invocations can still use their own endpoints.
 
-    You can think of this as a one-way pipe for values of a specific type.
+    The parent closes its own writer before draining the channel. The child holds its own writer until it exits. Keeping the parent's writer open would leave the parent waiting for another name. Before returning, `run` joins the child. A child failure reaches the caller through its owning invocation.
 ]
 
 [section, $md:
-    ## Sending values
-
-    Values are sent into a channel with `>>`.
+    ## Choose a ready operation
 
     [codeblock, $code "moth":
-        value >> writer
+        if {
+            case incoming = << reader if listening:
+                handle(incoming)
+            case pending >> writer:
+                io.line("sent")
+            else:
+                io.line("nothing ready")
+        }
     ]
 
-    The value flows to the right into the channel.
+    Each `case` offers one send or receive. The optional Boolean guard enables the operation. Here the receive guard can use `listening`. The prospective binding `incoming` first exists in the winning body, where `handle` receives the optional result. Write `case << reader:` to discard the received value.
 
-    Sending may suspend the current coroutine if the receiver is not ready.
+    The scheduler selects fairly among ready operations and commits at most one. A losing receive consumes nothing and a losing send retains its payload. The final `else:` runs immediately when no enabled operation is ready. Omit it to wait. For an unconditional operation, write the send or receive directly.
 
-    This is an intentional visible suspension point.
+    Once a reader reaches end of stream it stays ready and returns `none`. A repeated selection needs to handle closure or disable that arm. A send with no readers is also ready. If selected, it raises a recoverable error, skips its success body and leaves responsibility for the unaccepted payload with the sender.
 ]
 
 [section, $md:
-    ## Memory prerequisites - accepted, deferred with the rest of async
-
-    Channels are the point where Moth's memory model and its concurrency model meet, so the memory rules are locked even though async itself is deferred.
-
-    **Static owner and runtime responsibility stay separate.** Before runtime send, the compiler assigns an independently owned graph to a channel-compatible bounded channel or task lifetime. A successful send does not rewrite semantic lifetime topology. It transfers affine cleanup responsibility to the channel, which owns the queued value until receive or channel teardown. A receive transfers that responsibility out to the receiver lifecycle.
-
-    **Send is a mandatory transfer.** `>>` is not an optional last-use optimisation and not a borrow. The sender has no later use of the sent value on any path. This is the one place Moth requires transfer rather than inferring it opportunistically, because the receiving coroutine may outlive the sender. If a send fails before commit, the value was not queued, so cleanup responsibility remains with or returns to the sender. The channel cannot destroy a value that it never accepted.
-
-    **Channels transfer independent graphs.** A channel does not create a shared graph spanning two task lifetimes. Arbitrary shared Moth reference graphs do not cross task boundaries. The sent value must already satisfy the channel-compatible lifetime contract, and queued values belong to the bounded channel or task lifecycle.
-
-    **Declared-region-owned values cannot be sent.** A value owned by a declared `name:` region is released in bulk at declared-region exit and never individually, so it cannot become an independently transferable channel value. Send a fresh value, or an independent `copy`, instead.
-
-    **Retained Edge Counting stays non-atomic.** REC counters are non-atomic under the accepted coroutine model, which assumes cooperative single-threaded scheduling with visible suspension points. Any future model with genuinely parallel coroutines needs a separate accepted design for atomic counting before it can share counted allocations across them. This is a hard prerequisite, not an implementation detail.
-
-    Memory semantics are described in
-    @../../developer-docs/memory-management (Memory management).
-]
-
-[section, $md:
-    ## Receiving values
-
-    Values are received from a channel with `<<`.
+    ## Buffering and task completion
 
     [codeblock, $code "moth":
-        value << reader
+        reader, writer Channel of String = Channel(capacity = 32)
     ]
 
-    The value flows left out of the channel and is assigned to `value`.
+    This channel can queue up to 32 strings. A full queue makes a sender wait. An empty, open queue makes a reader wait. Several readers and writers can share the channel. Each accepted message reaches one reader and queued messages come out in order.
 
-    Receiving may suspend the current coroutine until a value is available.
+    Dispatch evaluates the written arguments once in source order. If preparation fails, the child never starts. A child can return a built-in error slot. When a child fails, its owning invocation cancels its other children, waits for cleanup and delivers the failure. Handle it at the owning call. If the parent fails first, it cancels and joins its children before delivering its own error.
 
-    Like sending, this is a visible suspension point.
+    A task can give others a turn with `io.task.yield()`. To request cancellation of its own outstanding children, an invocation calls `io.task.cancel_children()`. It still joins them before exiting. Cancelling a task can withdraw a pending channel operation. A send that already committed keeps its effect.
 ]
 
 [section, $md:
-    ## Coroutines
+    ## Value and task lifetimes
 
-    A coroutine is a function that can suspend and resume execution.
+    A successful send transfers cleanup responsibility for an independent value to the channel. Receiving transfers that responsibility to the receiver. An independently transferable graph must already satisfy the bounded channel or task lifetime. A failed or losing send leaves its value with the sender.
 
-    Coroutines are started with `spawn` and must run inside a `$async:` scope.
+    Storage placed with `into` belongs to its declared region until bulk cleanup. To send data from such a region, construct a fresh transferable value or an eligible independent `copy`. Closing a region reclaims its storage. The function invocation owns the child join.
 
-    The endpoint-parameter grammar for larger coroutine declarations is not
-    fixed. This page therefore does not invent typed `producer` or `consumer`
-    parameters. Their bodies use the accepted channel operations:
-
-    [codeblock, $code "moth":
-        message >> writer
-        value << reader
-    ]
-
-    A future implementation must preserve endpoint direction, mandatory
-    send-transfer and bounded task lifetime. Neither endpoint passing nor a
-    complete coroutine function signature is implemented here.
-]
-
-[section, $md:
-    ## Yield
-
-    `yield` explicitly suspends the current coroutine and allows other coroutines to run.
-
-    [codeblock, $code "moth":
-        yield
-    ]
-
-    This is a cooperative pause point.
-
-    It does not block the whole program. It tells the scheduler that the current coroutine is ready to let something else run.
-
-    Example:
-
-    [codeblock, $code "moth":
-        loop 0 to 1_000_000 |i|:
-            i >> writer
-
-            if i % 128 is 0:
-                yield
-            ;
-        ;
-    ]
-
-    Here, `yield` prevents one long-running coroutine from starving others.
-
-    Suspension is always visible in the code.
-
-    There are no hidden pause points.
-]
-
-[section, $md:
-    ## Structured async scopes
-
-    Coroutines run inside a `$async:` scope. `$async:` is compiler-owned
-    language structure, not builder metadata.
-
-    [codeblock, $code "moth":
-        $async:
-            reader, writer Channel of AppMessage = Channel()
-            yield
-        ;
-    ]
-
-    A `$async:` scope means:
-
-    - coroutines may be spawned inside the scope
-    - suspension is allowed inside the scope
-    - channel send and receive operations may suspend inside the scope
-    - spawned coroutines are bounded by the scope
-    - no detached background task can silently outlive its data
-
-    The declaration above is a future syntax illustration, not a runnable
-    program. Scheduling, endpoint passing and channel runtime behaviour remain
-    deferred.
-
-    This makes the intended concurrency boundary visible and bounded.
-]
-
-[section, $md:
-    ## Why not viral async types?
-
-    Moth should avoid making async infect every function type by default.
-
-    The draft model does not rely on a special `["Future[T]"]` return type everywhere, and it does not require every caller to become async just because one operation may suspend.
-
-    Instead:
-
-    - suspension is only valid in async-capable contexts
-    - suspension points are explicit
-    - channels make communication visible
-    - spawned work is scoped
-    - the compiler can reject unsafe use across scope boundaries
-
-    The goal is not to hide async.
-
-    The goal is to make async local and visible.
-]
-
-[section, $md:
-    ## Safety model
-
-    The async model should preserve Moth's normal safety rules.
-
-    Async code should not allow:
-
-    - data races
-    - dangling references into completed scopes
-    - detached tasks that keep using local state
-    - hidden mutable sharing between coroutines
-    - unbounded background work by default
-
-    Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing and transfer.
-
-    Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.
-]
-
-[section, $md:
-    ## Full example
-
-    A larger producer/consumer example is intentionally omitted. Its
-    endpoint-parameter grammar is unresolved, and this page does not prescribe
-    alternate constructor or endpoint-generic spellings.
-
-    The accepted future declaration and scope spelling are shown together:
-
-    [codeblock, $code "moth":
-        $async:
-            reader, writer Channel of AppMessage = Channel()
-            ...
-        ;
-    ]
-
-    The intended design has three visible forms of async behaviour:
-
-    - `spawn` starts concurrent work
-    - `>>` and `<<` communicate through the channel
-    - `yield` explicitly gives the scheduler a chance to run other work
-
-    No implementation is delivered by this design page.
-]
-
-[section, $md:
-    ## Compiler lowering
-
-    The exact lowering strategy is not final.
-
-    A future compiler implementation may lower coroutines into state machines.
-
-    Conceptually, each coroutine needs to preserve:
-
-    - its current execution point
-    - its live local values
-    - pending channel operations
-    - any values that cross suspension points
-    - enough ownership and borrow information to remain memory safe
-    - the affine cleanup responsibility of any value transferred through a channel
-
-    This fits Moth's broader compiler direction:
-
-    - AST validates syntax and types
-    - HIR makes control flow explicit
-    - borrow validation checks safe access
-    - backend lowering decides how coroutines are represented for the target runtime
-
-    Async should be represented semantically before backend-specific lowering.
-]
-
-[section, $md:
-    ## Backend considerations
-
-    This design depends on backend capabilities.
-
-    Important open questions include:
-
-    - how WebAssembly stack switching evolves
-    - how browsers expose scheduling and suspension
-    - how native Wasm runtimes expose async host calls
-    - how Moth should integrate with browser event loops
-    - how game engines or embedded hosts should drive scheduling
-    - whether early JS output should use generator-style lowering, explicit state machines, or host promises
-
-    The user-facing syntax should remain stable even if backend strategies differ.
-]
-
-[section, $md:
-    ## Deferred design questions
-
-    Several details should be deliberately deferred until the basic model is proven:
-
-    - cancellation semantics
-    - channel buffering
-    - channel close behaviour
-    - task failure propagation
-    - timeout syntax
-    - select-style waiting on multiple channels
-    - async host function imports
-    - endpoint passing and coroutine parameter grammar
-    - interaction with closures and captured mutable access
-    - any parallel coroutine model, which requires an accepted atomic counting design first
-
-    These should be designed as extensions, not packed into the first implementation.
-]
-
-[section, $md:
-    ## Current status
-
-    This design is not implemented yet.
-
-    `$async:` is the agreed future spelling for a compiler-owned directive
-    block, not builder metadata. Its semantics, lowering and runtime support
-    remain deferred; no implementation is delivered by this page.
-
-    It is intended as a future reference for language design and compiler implementation planning.
-
-    Any implementation must preserve the accepted channel memory rules:
-    mandatory send-transfer, bounded lifetime, independent graphs, failed-send
-    responsibility and non-atomic REC under cooperative scheduling.
-
-    The important part is to keep the source model explicit and structured.
+    The accepted memory contract uses cooperative, single-threaded scheduling and non-atomic retained-edge counts. @../../developer-docs/memory-management (Memory management) describes the underlying lifetime rules. See @../progress (Progress) for implementation status.
 ]

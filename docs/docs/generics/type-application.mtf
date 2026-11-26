@@ -44,7 +44,7 @@ Work around the limit with an intermediate alias:
     value Box of StringIntPair = Box(Pair("count", 3))
 ]
 
-The collection element exception allows one inline `of` application inside a collection element annotation, such as `{Box of String}`. Nested `of` applications inside a collection element are rejected for the same reason as nested `of` in any other type position: use a named concrete alias.
+The collection element exception allows one inline `of` application inside a collection element annotation, such as `["[Box of String]"]`. Nested `of` applications inside a collection element are rejected for the same reason as nested `of` in any other type position: use a named concrete alias.
 
 ### Concrete generic aliases
 

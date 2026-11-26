@@ -35,9 +35,9 @@ Input polling lives under `io.input.*`. Create an input handle, update it each t
 
     io.input.update(~input)
 
-    if io.input.key_pressed(input, "d"):
+    if io.input.key_pressed(input, "d") {
         io.line("pressed d")
-    ;
+    }
 
     io.input.close(~input)
 ]
@@ -53,12 +53,12 @@ The handle records input between updates, but recording input doesn't run your p
 Pointer helpers report button state and coordinates.
 
 [codeblock, $code "moth":
-    if io.input.pointer_down(input, "left"):
+    if io.input.pointer_down(input, "left") {
         x = io.input.pointer_x(input)
         y = io.input.pointer_y(input)
 
         io.line([: pointer [x], [y]])
-    ;
+    }
 ]
 
 Buttons use `"left"`, `"middle"` and `"right"`. Coordinates are `F64` values measured from the top-left of the page's visible area, with Y increasing downward.

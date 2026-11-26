@@ -17,7 +17,8 @@ A struct constructor uses the struct name and supplies its fields through
 - Positional arguments must come before named arguments.
 - A named argument must match a real field.
 - Each field may be supplied once.
-- Omitted fields use their declared defaults.
+- Named arguments may skip a defaulted field. Omitted fields use their declared defaults.
+- An explicitly supplied `none` stays absent. An optional field without a default is required.
 - Every field without a default is required.
 - Extra arguments are invalid.
 - Values are checked and contextually coerced against field types.
@@ -44,7 +45,9 @@ conversion. Named type declarations remain separate, flat declarations.
 
 ### MON data boundary
 
-Source construction above is unchanged: an anonymous record never becomes a nominal struct because the fields match. MON literal struct data documents both anonymous `(...)` and one exact `Name(...)` qualifier by reference. An explicit qualifier is a checked assertion against the receiving schema, never implicit conversion and never user-code invocation. That contract is Rust-only serialised-data documentation; source behaviour is unchanged. See @../mon/#mon-format (MON format).
+MON can also describe a struct with named literal entries in parentheses. Its
+prepared schema supplies the type and any omitted defaults. A qualifier such
+as `Size` must match that schema. See @../mon/#mon-format (MON format).
 
 ### Field reads
 

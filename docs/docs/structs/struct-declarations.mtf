@@ -7,6 +7,9 @@ A struct declares a nominal runtime type with named fields.
     |
 ]
 
+A named struct has one constructor with the same name as its type. A choice
+variant uses the same field list and default rules. See @../choices (Choices).
+
 ### Contract for struct declarations
 
 - The declaration form is `Name = | fields |`.

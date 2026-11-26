@@ -9,7 +9,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Wiring"]]
 [$in description:["Wire and Route parameter contracts, capability positions and channel boundaries."]]
@@ -17,7 +18,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Wiring
 

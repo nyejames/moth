@@ -1,17 +1,15 @@
 Pattern matching is useful when one value can take several meaningful shapes.
 
 [codeblock, $code "moth":
-    if score is:
-        < 0 => io.line("invalid")
-        0 => io.line("zero")
-        >= 90 => io.line("excellent")
-        else => io.line("other")
-    ;
+    if score is {
+        case < 0: io.line("invalid")
+        case 0: io.line("zero")
+        case >= 90: io.line("excellent")
+        else: io.line("other")
+    }
 ]
 
-Each arm begins with a pattern and `=>`.
+Each pattern arm starts a logical line with `case`. A colon ends its header. Moth evaluates the subject once and runs the first arm whose pattern matches and whose guard, if present, is true.
 
-There are no semicolons between arms. One semicolon closes the whole match.
-
-Use `else =>` for everything that was not matched earlier. It can have an empty
+Use `else:` for everything that was not matched earlier. It can have an empty
 body when the remaining cases should do nothing.

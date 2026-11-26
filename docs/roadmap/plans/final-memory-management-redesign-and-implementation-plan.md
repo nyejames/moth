@@ -933,8 +933,8 @@ Declared regions are the explicit source escape hatch for deliberate shared life
 
 ### Tasks
 
-- [ ] Replace the current deferred `identifier:` diagnostic with real declared-region body parsing.
-- [ ] Keep exact `_:` rejected and validate declared-region name collisions against visible names and active declared regions.
+- [ ] Implement braced declared-region headers in the executable-body parser and replace the deferred-feature diagnostic.
+- [ ] Reject an underscore as a region name and validate declared-region name collisions against visible names and active declared regions.
 - [ ] Implement declaration-site `into region_name` placement.
 - [ ] Enforce current and ancestor placement only.
 - [ ] Enforce destination-scope visibility and collision rules.

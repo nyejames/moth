@@ -4,7 +4,7 @@ For general directive ownership and syntax, see @../directives (Directives).
 The compiler owns template directives and formatters. Source modifiers such as
 `$export` and `$config` have separate targets. Builders cannot register directives.
 
-Template directives begin with `$`.
+A structural directive can route text or typed sequence contributions. A text formatter such as `$md` supplies a String context.
 
 [codeblock, $code "moth":
     content = [$md:

@@ -594,7 +594,10 @@ doc_pager_next #= [$html:
 $export
 @navbar navbar
 $export
-@sidebar sidebar, init_docs_sidebar
+@sidebar sidebar, sidebar_id
+
+$export
+@builder/web/page sync_navigation
 
 $export
 footer #= [$html:

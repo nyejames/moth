@@ -22,7 +22,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Project structure"]]
 [$in description:["How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."]]
@@ -30,7 +31,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Project structure
 

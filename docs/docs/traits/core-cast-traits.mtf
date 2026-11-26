@@ -46,9 +46,9 @@ ordinary lowercase `this` receiver and its concrete type.
         text String,
     |
 
-    to_string |this Label| -> String:
+    to_string |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must CASTABLE_TO_STRING
 
@@ -68,16 +68,16 @@ plain `cast` syntax:
         text String,
     |
 
-    try_to_i32 |this Label| -> I32, Error!:
+    try_to_i32 |this Label| -> I32, Error! {
         value I32 = cast this.text
         return value
-    ;
+    }
 
     Label must TRY_CASTABLE_TO_I32
 
-    parsed I32 = cast Label("42") catch |err|:
+    parsed I32 = cast Label("42") catch |err| {
         then 0
-    ;
+    }
 ]
 
 The method's typed error follows ordinary call and catch compatibility rules.

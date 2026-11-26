@@ -137,15 +137,12 @@ outside scope.
 ### General lexical blocks and control-flow labels
 
 Moth has no dedicated general lexical-block construct. `block` is an ordinary
-identifier, so `block:` has the same declared-region meaning as any valid
-`name:` header. Anonymous `_:` blocks and brace replacements remain outside
-scope. Structured control flow introduces ordinary lexical scopes, while bare
-`identifier:` headers belong exclusively to declared regions.
+identifier, so `block { ... }` has the same declared-region meaning as any valid
+`name { ... }` header. A region needs a name. Bare braces have no standalone meaning. A control-flow block can contain several lexical scopes, one for each branch.
 
 Arbitrary statement labels, labelled `break`, labelled `continue` and `goto`
 remain outside scope. Unlabelled loop exits stay structural and target the
-nearest enclosing loop. Future compiler-owned scopes such as `$async:` remain
-distinct because their marker carries language-defined behaviour.
+nearest enclosing loop.
 
 ### Source-visible RC and dynamic shared ownership
 

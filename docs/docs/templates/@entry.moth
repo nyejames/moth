@@ -16,7 +16,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Templates"]]
 [$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
@@ -24,19 +25,15 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Templates
 
-    Templates form Moth's only string-composition system. Square brackets can
-    join short values, format Markdown or HTML and compose larger layouts with
-    slots, wrappers and control flow. Template `$` directives remain owned
-    here; the accepted general directive family is documented at
-    @../directives (Directives).
-
-    Other languages often split this work across concatenation, interpolation
-    and a separate template language. Moth keeps one typed `String` result and
-    lets the compiler fold it when every input comes from compile time.
+    Templates compose Strings and typed sequences with square brackets.
+    A colon introduces the body. Wrappers route child contributions through
+    slots, and a condition or loop chooses which output to include.
+    Formatters such as `$md` and `$html` build Strings. For keyed bracket
+    construction see @../collections (Collections and maps).
 ]
 
 [section:

@@ -1,74 +1,80 @@
-Collections form ordered, zero-indexed, homogeneous groups.
-
-Collection types and literals use braces.
-
-[codeblock, $code "moth":
-    values ~= {1, 2, 3}
-    names {String} = {"Priya", "Rob"}
-]
-
-### Literal inference
-
-- A non-empty literal has one homogeneous element shape. Its retained numeric leaves can wait for eligible exact receivers in the same body before defaulting.
-- Whole-number origins stay in the integer family. A non-empty literal with raw whole and decimal/exponent values selects the binary-float family in either item order. Whole values materialise directly at the selected float precision.
-- A bound integer keeps its integer family. `{count, 2.5}` is rejected rather than reclassified.
-- Every already typed item must match one exact element type. Arithmetic promotion does not search for a collection storage type. Convert differently typed items explicitly.
-- Element type and fixed capacity remain stable through mutation.
+Square brackets construct text, a homogeneous sequence or a map. A binding,
+assignment, parameter, return, field, field default or collection entry can
+supply the immediate receiving type.
 
 [codeblock, $code "moth":
-    accept_u64_values |items {U64}|:
-    ;
-
-    values = {1, 2, 3}
-    accept_u64_values(values)
-
-    first {F32} = {1, 2.5}
-    second {F32} = {2.5, 1}
-
-    count = 1
-    -- Invalid: count keeps its integer family.
-    mixed = {count, 2.5}
+    counts = [1, 2]
+    title = ["Build", " log"]
+    labels [String] = ["Build", "log"]
+    text String = [42]
+    bytes [Byte] = [77, 79]
+    scores [String = I32] = ["Priya" = 10]
 ]
 
-The same numeric-origin rules can pass through a known collection, map,
-nominal/generic or optional shape when that shape already exists. They do not
-infer an empty container or anonymous-record structure.
+Without a receiver, an all-String head concatenates. Homogeneous non-String
+values form a sequence. A known sequence and compatible scalar contributions
+form a sequence of its element type. A direct key/value entry establishes a
+map. An incompatible mix such as `["[1, \"hello\"]"]` needs an explicit compatible
+receiver. String formatting applies only once the String context is known.
 
-@../numbers/#numeric-literals (Numeric literals) owns numeric leaf inference,
-family selection and defaults.
+A declaration fixes the construction kind and nesting shape. Passing the value
+later cannot change either. Raw numeric leaves inside a known shape may still
+receive an exact numeric type under @../numbers/#numeric-literals (Numeric
+literals). Whole and decimal literal origins select the binary-float family
+together in either order. Already typed items keep their types.
 
-An empty literal needs an explicit collection type at its declaration or field
-default site.
+### Splicing and nesting
 
 [codeblock, $code "moth":
-    values ~{I32} = {}
+    first = [1, 2]
+    second = [3, 4]
+    flat = [first, second, 5]
+    rows = [[first], [second]]
+    one_row = [[first, second]]
+    tags = [["Home", "Docs"], ["API"]]
 ]
 
-The compiler does not infer an empty collection from:
+`flat` contains five integers. A sequence contributes its elements in order
+and a scalar contributes one element. A direct nested head preserves a
+dimension. `rows` contains two fresh rows, `one_row` contains one row of four
+integers and `tags` contains rows of separate Strings.
 
-- a later `push`
-- later assignment
-- a loop
-- a function argument
-- HIR use
-- borrow analysis
+Splicing reads membership exactly once at the written position. New membership
+is independent, while reference-valued elements keep their usual sharing.
+To store an existing row itself, insert it with `~matrix.push(row)`. Splicing a
+matrix contributes its rows, keeping their identities. Later effects cannot
+change which items an earlier splice read. On failure, the receiving binding
+gets no partial result. Earlier explicit effects still stand.
 
-### Collection versus map literals
+### Empty values and bodies
 
-A top-level key/value entry with `=` makes a non-empty brace literal a map
-literal.
+[codeblock, $code "moth":
+    title String = []
+    labels [String] = []
+    rows [[I32]] = [[]]
+    other_rows = [[], [1, 2]]
+    scores [String = I32] = [=]
+]
 
-Every entry in that literal must then be a key/value pair.
+An empty head or empty colon body needs type evidence. A known String receiver
+produces the empty String. A collection receiver produces zero items.
+The first row of `other_rows` takes its element type from the second row.
+An empty map requires `["[=]"]` and evidence for both types. A map
+receiver rejects `["[]"]`. An optional receiver can wrap a completed
+empty value as present. Only `none` denotes absence.
 
-Collection items and map entries cannot be mixed.
+A sequence body accepts child constructions and structural control flow.
+Formatting whitespace contributes nothing. Raw text belongs in a String child.
 
-### Syntax boundaries
+[codeblock, $code "moth":
+    greet |names [String]| -> [String] {
+        return [loop names |name|:
+            [: Hello, [name]!]
+        ]
+    }
+]
 
-- Collections do not use square-bracket indexing.
-- Square brackets belong to templates.
-- Element reads and writes use compiler-owned collection members.
-- `~` is binding or access mode. It is not part of collection type identity.
-
-### Collection literal MON data boundary
-
-Source and MON data share the empty-container distinction: `{}` is always a collection and `{=}` is always a map; a receiving type or schema cannot change the container's kind. See @../mon/#mon-format (MON format) for the MON literal-data contract. Shared notation is owned by @../language-overview/#mon-syntax (MON syntax).
+Each iteration contributes one greeting. See @../templates (Templates) for
+typed slots and wrappers and @#hash-maps (Hash maps) for keyed construction.
+MON uses the same delimiters for literal containers and preserves every
+authored sequence element. See @../mon/#mon-format (MON format).

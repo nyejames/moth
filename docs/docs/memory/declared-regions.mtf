@@ -1,21 +1,21 @@
 ### Declared region syntax
 
-`name:` creates a declared hard lifetime region in runtime statement position. Values placed into a declared region belong to that declared region for their full lifetime. No declared-region-owned value, projection or alias may outlive the declared region.
+`name { ... }` creates a declared hard lifetime region in runtime statement position. Values placed into a declared region belong to that declared region for their full lifetime. No declared-region-owned value, projection or alias may outlive the declared region.
 
 A declaration targets the declared region with the `into` keyword:
 
 [codeblock, $code "moth":
-    request:
+    request {
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)
-    ;
+    }
 ]
 
 [codeblock, $code "text":
     name [access/type] into region_name = expression
 ]
 
-There is no `group` keyword. The declared region name is the ordinary value-like identifier before `:`.
+There is no `group` keyword. The declared region name is the ordinary value-like identifier before the opening brace.
 
 ### Bulk cleanup and cycles
 
@@ -27,9 +27,9 @@ The rule that direct source-created cycles require one declared region follows f
 
 ### Declared region header and placement rules
 
-- `name:` is valid only in runtime executable bodies
+- `name { ... }` is valid only in runtime executable bodies
 - The declared region name follows normal value-like identifier policy
-- Exact `_:` is invalid and does not create an anonymous declared region
+- Exact `_ { ... }` is invalid and does not create an anonymous declared region
 - `into region_name` appears only on declaration receiving boundaries in V1
 - Placement may target the current declared region or a lexically enclosing ancestor declared region
 - Placement may not target a sibling, child, unrelated declared region or builder lifecycle root by spelling its name
@@ -46,22 +46,22 @@ A declared region with no direct or nested placement targeting it produces an un
 
 ### No general lexical-block feature or labels
 
-Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Exact `_:` is invalid. Bare `identifier:` syntax is reserved for declared regions, not arbitrary control-flow labels.
+A name followed by a braced body declares a region in executable code. `block` is an ordinary identifier and can name a region. The single underscore cannot.
 
 Moth does not add labelled `break`, labelled `continue` or `goto`. Unlabelled `break` and `continue` keep targeting the nearest enclosing loop.
 
-An ordinary statically known `if true:` can provide a rare local lexical scope:
+An ordinary statically known `if true { ... }` can provide a rare local lexical scope:
 
 [codeblock, $code "moth":
-    if true:
+    if true {
         temporary = calculate()
         use(temporary)
-    ;
+    }
 ]
 
 This is not a special block alias. It follows ordinary static Bool `if` rules, preserves the selected branch scope and disappears before HIR. It does not create a declared region or change ancestor-placement legality.
 
-Future compiler-owned scopes such as `$async:` remain distinct. Their marker describes language-defined execution behaviour rather than naming a user-declared lifetime region.
+A function invocation joins the child tasks it starts. Closing a declared region performs bulk cleanup. See @../async (Channels and readiness) for task lifetimes.
 
 ### `into` declaration position
 
@@ -70,7 +70,7 @@ Future compiler-owned scopes such as `$async:` remain distinct. Their marker des
 [codeblock, $code "moth":
     parsed into scratch = parse_post(post)
     parsed ParsedPost into scratch = parse_post(post)
-    rows ~{Row} into scratch = {}
+    rows ~[Row] into scratch = []
     maybe_name String? into scratch = find_name(id)?
 ]
 
@@ -96,9 +96,9 @@ A declaration targeting an ancestor declared region is a narrow V1 escape mechan
 
 - A declaration targeting an ancestor declared region is legal only from a straight-line nested declared region that executes at most once
 - It is invalid directly inside `if` branches, match arms, `catch` branches, loops, repeated template or runtime control flow or any construct that may execute zero or multiple times
-- A statically known `if true:` is still conditional syntax for this rule and does not make ancestor placement legal
+- A statically known `if true { ... }` is still conditional syntax for this rule and does not make ancestor placement legal
 - Conditional production must use one declaration in the destination scope whose initializer is a value-producing `if`, match or `catch`
-- Loop production must mutate a collection or aggregate already owned by the destination declared region through ordinary exclusive access
+- A statement loop can fill a collection already owned by the destination region through ordinary exclusive access
 - Name collisions and definite initialization are checked in the destination scope
 - Visibility begins at the declaration point and continues through the remainder of the destination declared region
 
@@ -117,16 +117,16 @@ A fresh result root may retain parameters or other pre-existing values only when
 Nested declared regions are valid.
 
 [codeblock, $code "moth":
-    request:
+    request {
         config Config into request = load_config()
 
-        scratch:
+        scratch {
             parsed ParsedPost into scratch = parse_post(post)
             html String into request = render_post(parsed, config)
-        ;
+        }
 
         use(html)
-    ;
+    }
 ]
 
 For a child declared region nested in a parent declared region:

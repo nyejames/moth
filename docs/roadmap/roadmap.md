@@ -54,9 +54,9 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. The syntax migration owns coordinated source and codec support for the empty map `[=]`. Complete remaining source parity for Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
 
-- [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
+- [Repeated option-capture loops](./plans/repeated-option-capture-loops-plan.md) - Low priority. A statement loop reevaluates a `T?` expression once per attempt, binds the present payload in its body and exits on `none`.
 
 - [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `@package.moth` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
@@ -87,6 +87,10 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
 
+## Immutable collection results from statement loops
+
+Typed bracket loops collect ordered output. Full statement loops can build a collection with ordinary mutation and early exits. An immutable collection result from a full statement loop remains an unaccepted design question. Reopen it only with a concrete case that needs statement-level control flow and cannot be expressed clearly by either form.
+
 ## Never return proof follow-ups
 
 Accepted `-> !` body proof covers false assertions, explicit Never calls,
@@ -109,7 +113,7 @@ routes direct const root inserts only; it does not register runtime resources.
 `$required` is a much later candidate whose value and exact behaviour need
 reconsideration; `$unique` is also deferred. Neither is accepted or implemented.
 Loop-level uniqueness is excluded, and const-function implementation is outside
-the builder slots work.
+the builder slots work. A typed component tree reaches an HTML entry only through explicit rendering to String. A stylesheet insert still contributes one tracked CSS origin, and head deduplication compares each complete rendered contribution. Arbitrary typed builder output, multi-resource stylesheet inserts and finer head deduplication need separate design.
 
 ## Compiler data-layout follow-ups
 
@@ -247,7 +251,7 @@ After the first `@core/time` JavaScript slice:
 - Temporal-backed JS calendar behaviour once runtime and polyfill policy is clear
 - locale-aware formatting and parsing
 - local time-zone lookup
-- async timers, sleep and intervals after async and task design exists
+- timers, sleep and intervals after the Channels V1 task runtime is available
 - browser animation-frame integration in a web-specific package rather than `@core/time`
 - Wasm and native lowerings
 - higher-precision or nanosecond timestamp representation only after its own package contract is accepted. Fixed-width numeric support alone does not change Duration or Timestamp representation

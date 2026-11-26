@@ -50,11 +50,11 @@ A message domain can use an ordinary choice:
 [codeblock, $code "moth":
     -- Illustrative future event domain
 
-    SidebarEvent ::
+    SidebarEvent = {
         Scrolled,
         Resized,
         Expanded | open Bool |,
-    ;
+    }
 ]
 
 The accepted Channel direction provides separate reader and writer endpoints:

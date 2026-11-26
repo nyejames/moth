@@ -69,7 +69,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 The original C4 blockers are unsoundness cases. After receiving `Box(items), items` from a const result, a mutation through the writable `items` binding must conflict with a live observer of the same allocation through `box.items`. It must still conflict after ordinary `retain |items {I32}| -> Box: return Box(items);`, whole-value forwarding or a runtime join that retires the branch's local names but not the shared children. A fresh box is not a fresh collection.
 
-The prototype adds pairwise view links beside the local root sets and groups return links by exit. It accepts a direct `select` call but rejects the forwarded shape after it flattens those groups in `collect_call_results`. The original source probe put `selected.left` in a new writable box and mutated that retained referent. Baseline acceptance is not proof that this mutation is legal: it can exercise the independent read-only permission bypass. Use an explicit graph copy as the positive control instead:
+The prototype adds pairwise view links beside the local root sets and groups return links by exit. It accepts a direct `select` call but rejects the forwarded shape after it flattens those groups in `collect_call_results`. The original source probe put `selected.left` in a new writable box and mutated that retained referent. Baseline acceptance is not proof that this mutation is legal: it can exercise the independent read-only permission bypass. The following positive control uses an explicit graph copy. The spelling and diagnostic observations refer to the Alpha compilers used in this investigation.
 
 ```moth
 Pair = |left {I32}, right {I32}|
@@ -689,7 +689,7 @@ Keep reference-solver findings and downstream production relevance separate. Bor
 
 For the older replay failures, the historical reproducer was `cargo run --features boracle -- boracle <source> --dump problem`. Its result was tied to an earlier source corpus. Do not claim those exact failures persist on a later branch without rerunning it. Resolve the reference acceptance gap before using that case as supporting evidence for a production precision change. The `BR-01` counterexample is a **known reference-model issue** and must remain visible to the differential campaign until resolved. A bounded oracle is not a replacement for a proof of universal correctness.
 
-The proposed `$checked:` deeper proof-budget surface remains a separate design/research question. It is not implementation-ready and must not alter the ordinary source safety rules. Production compilation retains no developer-visible reference/experimental mode switch.
+The proposed `$checked` deeper proof-budget surface remains a separate design/research question. It is not implementation-ready and must not alter the ordinary source safety rules. Production compilation retains no developer-visible reference/experimental mode switch.
 
 ## Working and closeout rules
 

@@ -4,7 +4,15 @@ A template can be required to finish during compilation.
 
 ### Named const templates
 
-A normal constant binding can hold a folded template string.
+A constant binding can hold a completed String or sequence. An open template
+declaration can instead expose slots for an application. A const function
+returns completed values. It cannot return an unresolved insert or an open
+wrapper.
+
+[codeblock, $code "moth":
+    sections #[String] = ["Introduction", "Reference"]
+    navigation #[String] = [sections, "Examples"]
+]
 
 [codeblock, $code "moth":
     site_name #= "Moth"
@@ -30,6 +38,8 @@ remain valid. The removed direct [$html:<code>#&#91;...&#93;</code>] spelling ha
         # Compile-time heading
     ]
 ]
+
+The HTML entry supplies a String receiver. A numeric contribution can format as text here. Render a typed sequence explicitly to contribute it as HTML.
 
 The bare direct form in the entry file:
 

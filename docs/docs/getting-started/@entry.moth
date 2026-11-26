@@ -7,7 +7,8 @@
     language_theme_head,
     doc_pager_next,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Getting Started with moth"]]
 [$in description:["How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."]]
@@ -15,7 +16,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Getting Started with moth
 

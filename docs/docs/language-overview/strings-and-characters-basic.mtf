@@ -49,4 +49,8 @@ A quoted string like `"Hello"` is read-only content. You can reassign a
 mutable binding to point at a different string, but you can't change the
 string itself.
 
-Square brackets belong to templates. Collections use curly braces instead.
+The same brackets can construct a collection. Give the binding a String collection type to keep the items separate.
+
+[codeblock, $code "moth":
+    names [String] = ["Priya", "Rob"]
+]

@@ -19,19 +19,19 @@ Several Moth declarations use pipe-delimited lists, but their positions keep
 different contracts:
 
 [codeblock, $code "moth":
-    show |value String| -> String:
+    show |value String| -> String {
         return value
-    ;
+    }
 
     Point = |
         x I32,
         y I32,
     |
 
-    Status ::
+    Status = {
         Ready,
         Failed | message String |,
-    ;
+    }
 ]
 
 Function parameters receive call arguments. Struct fields describe named
@@ -48,11 +48,11 @@ The receiving type must be immediate. The same boundary rule applies to
 ordinary generic calls, optional values and casts:
 
 [codeblock, $code "moth":
-    empty type Item || -> {Item}:
-        return {}
-    ;
+    empty type Item || -> [Item] {
+        return []
+    }
 
-    items {I32} = empty()
+    items [I32] = empty()
     maybe_name String? = none
     wide I64 = cast 1
 ]

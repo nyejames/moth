@@ -1,6 +1,6 @@
 @core/html span
 @core/css center
-@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Progress Matrix"]]
 [$in description:["Current implementation status, coverage and feature progress for the Moth compiler."]]
@@ -13,12 +13,14 @@ green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [title, center: PROGRESS MATRIX]
 [section, $md:
     This page tracks current implementation and target status for Moth's accepted core language,
     compiler, build-system and backend design. Package APIs and project-builder-specific behaviour
     are tracked separately in @./packages-and-builders (Packages and Builders Progress).
+
+    The language reference uses the new syntax. The compiler and standalone MON reader on this branch still use the preceding grammar. Rows marked implemented describe capabilities on that compiler. The coordinated syntax change is pending.
 
     Accepted deferred surfaces may appear here. Open design questions and outside-scope
     mechanisms do not. Permanent language exclusions live in @../design-scope (Design scope).
@@ -269,7 +271,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Partial]
             [$md: Broad literal, choice, payload-capture, relational, guard, exhaustiveness, warning and value-if coverage. @https://github.com/nyejames/moth/tree/main/tests/cases/match_optional_u8_literal_pattern_success (match_optional_u8_literal_pattern_success) covers exact optional numeric payload patterns. Fixed-width and Byte typing fixtures cover range and category diagnostics.]
             [: Frontend / HIR / JS / HTML]
-            [: Literal patterns, choice variants, payload extraction, relational patterns, guards and [$html:<code>else =&gt;</code>] arms work on HTML-JS. Option captures and declared choice payload captures remain valid, while general bare-name captures and String relational subjects receive diagnostics. Closed receivers support inline and block single-predicate value matches. Full relational overlap analysis and nested choice payload patterns remain deferred. Fixed numeric scalar patterns do not grant HTML-Wasm aggregate support.]
+            [: Literal patterns, choice variants, payload extraction, relational patterns, guards and fallback arms work on HTML-JS. Option captures and declared choice payload captures remain valid, while general bare-name captures and String relational subjects receive diagnostics. Closed receivers support inline and block single-predicate value matches. Full relational overlap analysis and nested choice payload patterns remain deferred. Fixed numeric scalar patterns do not grant HTML-Wasm aggregate support.]
         ]
 
         [data:
@@ -277,7 +279,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Supported]
             [$md: Broad literal, mutation, indexing, loop, fixed-capacity, failure and diagnostics coverage, including multiline qualified choice constructors retained through header discovery. A deterministic fulfilment ledger checks stock conservation across repeated updates, partial requests, returns and caught helper errors. @https://github.com/nyejames/moth/tree/main/tests/cases/aggregate_late_u64_collection_runtime (aggregate_late_u64_collection_runtime) covers body-local numeric leaf inference. Concrete element mismatch fixtures reject storage widening.]
             [: JS / HTML]
-            [$md: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections retain distinct types. Positive literals and visible [$html:<code>#I32</code>] constants supply fixed capacities. Numeric element inference follows @../collections/#collection-literals (Collection literals), while positions and lengths use I32. Growable push remains infallible and returns no value. Fixed push, get, set and remove retain their documented failure contracts. HTML-Wasm rejects collection lowering, including every collection holding a fixed scalar.]
+            [$md: Growable [$html:<code>&#91;T&#93;</code>] and fixed [$html:<code>&#91;N T&#93;</code>] collections retain distinct types. Positive literals and visible [$html:<code>#I32</code>] constants supply fixed capacities. Numeric element inference follows @../collections/#collection-literals (Collection literals), while positions and lengths use I32. Growable push remains infallible and returns no value. Fixed push, get, set and remove retain their documented failure contracts. HTML-Wasm rejects collection lowering, including every collection holding a fixed scalar.]
         ]
 
         [data:
@@ -285,7 +287,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Partial]
             [$md: Broad frontend, HIR, borrow, JS and diagnostic coverage. @https://github.com/nyejames/moth/tree/main/tests/cases/aggregate_late_u64_map_keys_runtime (aggregate_late_u64_map_keys_runtime) and duplicate-key fixtures cover numeric key inference. Float-key fixtures cover target rejection.]
             [: JS / HTML / backend validation for other targets]
-            [$md: HTML-JS supports insertion-ordered maps with fixed integer, Byte and canonical String-like keys, exact typed lookup and duplicate rejection. F16/F32/F64 and Dec keys remain unsupported. Numeric leaves follow @../collections/#hash-maps (Hash maps). Current contextual [$html:<code>{}</code>] empty maps differ from the accepted [$html:<code>{=}</code>] spelling, which remains deferred. HTML-Wasm rejects map lowering.]
+            [$md: HTML-JS supports insertion-ordered maps with fixed integer, Byte and canonical String-like keys, exact typed lookup and duplicate rejection. F16/F32/F64 and Dec keys remain unsupported. Numeric leaves follow @../collections/#hash-maps (Hash maps). The current frontend uses receiver context for empty map literals. The new syntax requires [$html:<code>&#91;=&#93;</code>] even with a map receiver. HTML-Wasm rejects map lowering.]
         ]
 
         [data:
@@ -393,11 +395,11 @@ template comment, valid only as a template-body child. Presentation-only roles c
         ]
 
         [data:
-            [: Declared regions (`name:` / `into name`)]
+            [: Declared regions (`name { ... }` / `into name`)]
             [: Deferred]
             [: Targeted lexer, statement-classification, deferred-diagnostic, anonymous-declared-region rejection and reclaimed-identifier coverage.]
             [: Frontend / HIR / lifetime analysis / all backends]
-            [: Valid [$html:<code>name:</code>] headers are reserved in executable statement position and report a deferred-feature diagnostic. Exact [$html:<code>_:</code>] is rejected. Full declared-region parsing, [$html:<code>into name</code>] placement, HIR metadata, topology and backend support remain deferred. Declared regions are hard count-free bulk lifetimes whose owned storage is never released individually.]
+            [: Valid named region headers report a deferred-feature diagnostic. The new grammar writes a region as [$html:<code>name { ... }</code>]. A region needs a name. Full declared-region parsing, [$html:<code>into name</code>] placement, HIR metadata, topology and backend support remain deferred. Declared regions are hard count-free bulk lifetimes whose owned storage is never released individually.]
         ]
 
         [data:
@@ -642,11 +644,11 @@ See @../directives (Directives).]
         ]
 
         [data:
-            [: Directive block spellings]
+            [: Channel operations and the proposed proof-budget directive]
             [: Deferred]
             [: None]
             [: Frontend]
-            [: Future compiler-owned blocks use [$html:<code>$async:</code>] and [$html:<code>$checked:</code>]. Recognition of those names is not semantic implementation. Checked deep-proof algorithms remain an open proposal, not accepted Alpha work.]
+            [: Channels V1 specifies invocation-owned tasks and channel readiness. The runtime is deferred. The separate proof-budget directive remains a research proposal.]
         ]
 
         [data:
@@ -746,7 +748,7 @@ See @../directives (Directives).]
             [: MON standalone Rust codec]
             [: Partial]
             [$md: Broad public API, codec and bounded hardening coverage. @https://github.com/nyejames/moth/blob/main/crates/moth-mon/tests/public_api/numeric.rs (MON public numeric tests) covers all eleven exact scalar identities, Byte, F16 edge bits, signed zero, U32 Error fields and retained Integer/Decimal values. @https://github.com/nyejames/moth/tree/main/src/compiler_tests/mon_syntax_parity (MON/source syntax parity tests) distinguishes shared syntax from data-only capabilities.]
-            [$md: The standalone moth-mon crate and moth::mon re-export expose one Rust-only codec with explicit schemas, exact-width values, immutable prepared defaults, strict field/choice/map routing and bounded failure handling. Integer and Decimal remain lossless data families. Fixed float ingress rounds directly at its declared precision. @../mon (MON) owns the schema and data contracts. Shared lexical rules retain reserved-name and entry-spacing validation, with [$html:<code>{=}</code>] as the MON empty-map spelling. This codec supplies no Moth source/runtime operations or static asset builder.]
+            [$md: The standalone moth-mon crate and moth::mon re-export expose one Rust-only codec with explicit schemas, exact-width values, immutable prepared defaults, strict field/choice/map routing and bounded failure handling. Integer and Decimal remain lossless data families. Fixed float ingress rounds directly at its declared precision. @../mon (MON) owns the schema and data contracts. Shared lexical rules retain reserved-name and entry-spacing validation, under the current codec. The square-bracket format and shared choice field defaults await the codec migration. This codec supplies no Moth source/runtime operations or static asset builder.]
         ]
 
         [data:

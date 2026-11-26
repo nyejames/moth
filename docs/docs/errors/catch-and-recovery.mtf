@@ -12,9 +12,9 @@ See @../directives/#constraints (Constraints).
 protected expression are optional:
 
 [codeblock, $code "moth":
-    value = left * right + offset catch:
+    value = left * right + offset catch {
         then 0
-    ;
+    }
 ]
 
 The handler covers both arithmetic operations, receiver evaluation, arguments,
@@ -115,23 +115,21 @@ failure. A bound catch materialises the compatible error.
 
 ### Handler forms and result requirements
 
-Use `catch:` for a block handler without an error binding, or
-`catch |err|:` when the handler needs the error:
+Use `catch { ... }` for a block handler without an error binding, or
+`catch |err| { ... }` when the handler needs the error:
 
 [codeblock, $code "moth":
-    value = parse_number(text) catch:
+    value = parse_number(text) catch {
         then 0
-    ;
+    }
 
-    other = parse_number(text) catch |err|:
+    other = parse_number(text) catch |err| {
         io.line(err.message)
         then 0
-    ;
+    }
 ]
 
-An inline handler closes on the line containing its opening `:`. A multiline handler
-closes with `;` alone after its body. Handler placement follows
-@../language-overview/#blocks-and-statements (Blocks and statements).
+A braced handler encloses recovery statements. Its optional captured error is visible inside the handler. See @../language-overview/#blocks-and-statements (Blocks and statements).
 
 Inline recovery uses `then` on one logical line and has no statement body:
 
@@ -150,10 +148,10 @@ diverge after that loop, and it cannot fall through without producing or
 exiting. Multi-success handlers match the expression's arity:
 
 [codeblock, $code "moth":
-    name, score = load_user(id) catch |err|:
+    name, score = load_user(id) catch |err| {
         io.line(err.message)
         then "guest", 0.0
-    ;
+    }
 ]
 
 A fallible operation with no success values does not need `then`. The error

@@ -1,5 +1,5 @@
 @compile-time-semantics content as reference_content
-@docs_styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, sidebar, sync_navigation, sidebar_id
 @diagrams css as diagrams_css
 
 [$in title:["08. Compile-time semantics"]]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.

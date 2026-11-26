@@ -40,9 +40,9 @@ Dependency aliases must not collide with any visible name in the same file, incl
 Aliases do not shadow an existing visible name. A collision is a compile error.
 
 [codeblock, $code "moth":
-    render || -> String:
+    render || -> String {
         return "local"
-    ;
+    }
 
     -- Error: render is already visible in this file
     @other render

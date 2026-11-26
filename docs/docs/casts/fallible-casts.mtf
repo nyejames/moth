@@ -9,9 +9,9 @@ failure route. A compatible builtin `Error!` slot can return it. A custom
 `E!` slot does not automatically convert builtin failure.
 
 [codeblock, $code "moth":
-    parse_count |text String| -> I32, Error!:
+    parse_count |text String| -> I32, Error! {
         return cast text
-    ;
+    }
 ]
 
 A source-authored fallible evidence method exposes its declared `Error!`
@@ -27,14 +27,14 @@ trap before the cast runs. See @../directives/#constraints (Constraints).
 Use `catch` to recover a fallible conversion:
 
 [codeblock, $code "moth":
-    count I32 = cast text catch:
+    count I32 = cast text catch {
         then 0
-    ;
+    }
 
-    other_count I32 = cast text catch |err|:
+    other_count I32 = cast text catch |err| {
         io.line(err.message)
         then 0
-    ;
+    }
 ]
 
 The handler produces the success values required by the receiving site or
@@ -42,10 +42,10 @@ leaves through `return` or `return!`. It protects both operand evaluation and
 conversion:
 
 [codeblock, $code "moth":
-    narrow |left U32, right U32| -> U8:
+    narrow |left U32, right U32| -> U8 {
         value U8 = cast left + right catch then 0
         return value
-    ;
+    }
 ]
 
 This catches `U32` addition overflow and failure to convert its result to

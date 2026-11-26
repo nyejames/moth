@@ -36,9 +36,9 @@ This known `I8` overflow diagnoses at compile time. Runtime operations use the
 same selected-width check:
 
 [codeblock, $code "moth":
-    add_i8 |left I8, right I8| -> I8, Error!:
+    add_i8 |left I8, right I8| -> I8, Error! {
         return left + right
-    ;
+    }
 
     value I8 = add_i8(127, 1) catch then 0
 ]
@@ -55,9 +55,9 @@ Negating a signed minimum also fails in its original narrow type:
 check:
 
 [codeblock, $code "moth":
-    negate_i8 |value I8| -> I8, Error!:
+    negate_i8 |value I8| -> I8, Error! {
         return -value
-    ;
+    }
 
     result I8 = negate_i8(-128) catch then 0
 ]
@@ -70,15 +70,15 @@ Widen the operands before arithmetic when the operation needs a wider domain.
 Casting the result cannot widen an operation that has already completed:
 
 [codeblock, $code "moth":
-    add_wide |left I8, right I8| -> I16:
+    add_wide |left I8, right I8| -> I16 {
         wide_left I16 = cast left
         wide_right I16 = cast right
         return wide_left + wide_right
-    ;
+    }
 
-    cast_after |left I8, right I8| -> I16, Error!:
+    cast_after |left I8, right I8| -> I16, Error! {
         return cast left + right
-    ;
+    }
 ]
 
 `add_wide(127, 1)` produces `128`. `cast_after(127, 1)` fails in the `I8`
@@ -114,9 +114,9 @@ The constant result exceeds finite `F16` and diagnoses even though `F32` can
 hold the intermediate. Runtime code must check the same boundary:
 
 [codeblock, $code "moth":
-    double_f16 |value F16| -> F16, Error!:
+    double_f16 |value F16| -> F16, Error! {
         return value + value
-    ;
+    }
 
     result F16 = double_f16(65504.0) catch then 0.0
 ]
@@ -134,10 +134,10 @@ to `F16`:
 A runtime function must finish the same operations at `F16` precision:
 
 [codeblock, $code "moth":
-    round_f16 |large F16| -> F16, Error!:
+    round_f16 |large F16| -> F16, Error! {
         one F16 = 1
         return (large + one) - large
-    ;
+    }
 
     runtime_round F16 = round_f16(2048) catch then 0
 ]
@@ -152,9 +152,9 @@ A function with builtin `Error!` as its error slot materialises escaping
 implicit failure as `Error`:
 
 [codeblock, $code "moth":
-    divide |left I32, right I32| -> F64, Error!:
+    divide |left I32, right I32| -> F64, Error! {
         return left / right
-    ;
+    }
 
     ratio = divide(10, 0) catch then 0.0
 ]

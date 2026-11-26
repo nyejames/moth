@@ -7,7 +7,7 @@ Use a type alias when a type annotation would be repetitive or when a name carri
 [codeblock, $code "moth":
     UserId as I32
     HtmlFragment as String
-    RouteParts as {String}
+    RouteParts as [String]
 ]
 
 ### Aliases are transparent
@@ -45,7 +45,7 @@ A struct creates a brand new type with its own fields and constructor. An alias 
 An alias can name a collection type.
 
 [codeblock, $code "moth":
-    Names as {String}
+    Names as [String]
 
-    names Names = {"Priya", "Rob"}
+    names Names = ["Priya", "Rob"]
 ]

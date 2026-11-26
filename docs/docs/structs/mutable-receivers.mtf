@@ -6,10 +6,10 @@ A mutable receiver method declares `this ~Type`.
         y F64,
     |
 
-    reset |this ~Vector2|:
+    reset |this ~Vector2| {
         ~this.x = 0.0
         ~this.y = 0.0
-    ;
+    }
 
     vector ~= Vector2(3.0, 4.0)
     ~vector.reset()

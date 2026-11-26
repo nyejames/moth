@@ -1,4 +1,4 @@
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Documentation"]]
 [$in description:["Moth language, project and compiler documentation."]]
@@ -6,11 +6,13 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Documentation
 
-    Welcome to Moth. Start with the project tool, learn the core language in order and drop into the focused pages when you need a precise rule.
+    Start with @./language-overview (Language basics) to see how field lists, constructors, brackets and blocks fit together. The @./cheatsheet (cheatsheet) collects the same forms for reference.
+
+    These pages describe the syntax being introduced on this branch. Compiler and MON support for the new spellings is still pending.
 
     The @./progress (compiler progress matrix) tracks current language, compiler and backend coverage.
     The @./progress/packages-and-builders (packages and builders progress matrix) tracks first-party

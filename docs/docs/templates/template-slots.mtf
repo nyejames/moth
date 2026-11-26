@@ -1,4 +1,21 @@
-Slots let one template receive content from another.
+A slot collects ordered contributions from the immediate application. A wrapper
+gives each named, positional or default key one receiving type. Every use of
+the same key must agree. A String slot joins text and a sequence slot collects
+elements. Use a function parameter or struct field when exactly one value is
+required.
+
+[codeblock, $code "moth":
+    markers #[I32] = [:
+        [0]
+        [$slot]
+        [99]
+    ]
+
+    ids [I32] = [markers:[1, 2]]
+]
+
+The default slot receives integer sequence output. `ids` contains 0, 1, 2 and
+99. A wrapper's slot types remain the same when it is imported.
 
 ### Declaration and insert forms
 
@@ -37,8 +54,9 @@ named slot and can appear once per head.
 
 ### Defaults
 
-An occurrence can hold a compile-time `String` default, including a literal, a
-constant binding, a cast or a structural resource path:
+Each occurrence can declare a compile-time default of its slot's receiving
+type. A String default can be a literal, a completed constant or a structural
+resource path.
 
 [codeblock, $code "moth":
     fallback #= "Draft"
@@ -50,11 +68,9 @@ constant binding, a cast or a structural resource path:
     ]
 ]
 
-A default is an ordinary compile-time `String` value. It is not an arbitrary
-expression evaluator and it is not a template wrapper value. A fully folded
-template constant is an ordinary String and is accepted. A wrapper template
-with unresolved slots is not. A nonconstant or non-String default is diagnosed
-at the declaration.
+The default must be a completed value of the established type. A fully folded
+String satisfies a String slot. A runtime value, incompatible sequence or open
+wrapper does not.
 
 Each slot occurrence owns its own default, even when another occurrence uses the
 same key. A routed contribution, including an explicitly empty one, suppresses
@@ -69,12 +85,13 @@ contributions but may fall back independently:
         body=[$slot = "Body fallback"]
     ]
 
-    unset #= [card]
+    unset #= [card, ""]
     chosen #= [card:[$in title:Chosen]]
 ]
 
 Both `title` occurrences show `Chosen` in `chosen`. In `unset` they show their
-separate fallbacks. Multiple contributions to one named slot concatenate in
+separate fallbacks. Its empty String supplies the default slot and suppresses
+`"Body fallback"`. Multiple contributions to one named slot concatenate in
 source order. Contributions containing `A-` and `B-` fill both title occurrences
 with `A-B-`. An explicitly empty insert still counts as routed.
 
@@ -105,14 +122,14 @@ filled by `$in`.
 
 ### Routing rules
 
-- Loose contributions fill positional slots in ascending numeric order.
+- Loose contributions fill positional slots in ascending numeric order. A splice is one routed contribution even when it emits several elements.
 - Remaining loose contributions go to the default slot when one exists.
 - Loose content that cannot be assigned is an error when no default slot exists.
 - An occurrence with a default renders that default when nothing is routed to it.
-- An unfilled occurrence without a default renders as an empty string.
-- Repeated slots replay the same contribution.
+- An unfilled occurrence without a default emits the empty result of its established type.
+- Repeated slots replay the same routed contribution without evaluating an effectful source again.
 - Named inserts target only their named slot and never fill positional or default slots.
-- Multiple contributions to one named slot concatenate in source order.
+- Multiple contributions to one named slot combine in source order under its receiving type.
 - An unknown named insert target is diagnosed at the receiving template.
 - One application may combine named, positional and default contributions.
 - Formatting-only body whitespace around named inserts is not a loose contribution.
@@ -133,7 +150,8 @@ filled by `$in`.
 ### Presence guards
 
 `$supplied` tests whether routing supplied a key. It never reads the stored or
-rendered value. The directive syntax and head restrictions live on the template
+rendered value and supplies no type evidence. If a guard is the only use of its key,
+the enclosing construction supplies the receiving type. The directive syntax and head restrictions live on the template
 directives page (see @../templates/#template-directives (Template directives)).
 Presence follows these rules:
 
@@ -194,8 +212,7 @@ Runtime-capable templates support slot contributions from selected template
 
 AST prepares the slot routing before HIR.
 
-Runtime lowering appends the routed contributions through normal string
-accumulators. Presence comes from routing, not from whether rendered content is
+Runtime construction appends routed contributions in order under the slot's receiving type. Presence comes from routing, not from whether rendered content is
 nonempty.
 
 ### Structural helpers in runtime values @#structural-helpers-in-runtime-values
@@ -208,9 +225,9 @@ binding cannot hold one:
 
 [codeblock, $code "moth":
     -- Error: the insert escapes as a function value
-    style_for |colour String| -> String:
+    style_for |colour String| -> String {
         return [$in style: [colour]]
-    ;
+    }
 ]
 
 In this example the diagnostic points at the authored `$in` token.
@@ -220,12 +237,11 @@ application. Here a runtime function produces CSS text that a direct `$in style`
 routes into the slot:
 
 [codeblock, $code "moth":
-    style_for |colour String| -> String:
+    style_for |colour String| -> String {
         return [:color: [colour];]
-    ;
+    }
 
     card #= [:<article style="[$slot style]">[$slot]</article>]
 
     ~[card: [$in style: [style_for("red")]] body]
 ]
-

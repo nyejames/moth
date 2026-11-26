@@ -10,10 +10,10 @@ Use `catch` when this expression needs a local fallback:
 The handler protects the conversion and evaluation of its operand:
 
 [codeblock, $code "moth":
-    narrow |left U32, right U32| -> U8:
+    narrow |left U32, right U32| -> U8 {
         value U8 = cast left + right catch then 0
         return value
-    ;
+    }
 ]
 
 This catches `U32` addition overflow and failure to convert the result to

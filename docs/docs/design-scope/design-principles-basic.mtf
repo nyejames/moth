@@ -11,7 +11,7 @@ add a second way to do it.
     greeting = [: Hello, [name]]
 
     -- Choices handle runtime heterogeneity
-    Status :: Ready, Waiting | reason String |;
+    Status = { Ready, Waiting | reason String | }
 
     -- Error! handles expected failures
     result = parse(text)!

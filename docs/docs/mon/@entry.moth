@@ -6,7 +6,8 @@
     doc_level,
     codeblock,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["MON format"]]
 [$in description:["The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."]]
@@ -14,7 +15,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # The MON format
 
@@ -31,8 +32,11 @@ init_docs_sidebar()!
     with the same API and Rust types. Compiled Moth programs have no runtime
     codec support. Moth-native operations, `$mon`, automatic schema extraction
     and the static project builder remain deferred separately.
-    Source `{=}`, Unicode escapes and contextual `::Variant` construction also
-    remain undelivered. MON's data forms do not implement those source features.
+    The format below specifies square-bracket collections and maps plus schema
+    defaults for choice payloads. Consult @../progress (Progress) for codec
+    implementation status. In data, a contextual `::Variant` takes its choice
+    from the schema. Moth source qualifies the variant with its choice name.
+
     The Rust API uses explicit exact numeric schemas without profile selection
     or aliases. Schemas select the width or scale directly, independently of
     Moth source inference and defaults.

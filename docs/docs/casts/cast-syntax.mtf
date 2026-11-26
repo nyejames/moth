@@ -18,13 +18,13 @@ Integer-to-`Dec2` preserves the integer exactly at that scale.
 [codeblock, $code "moth":
     value Target = cast expression
 
-    value Target = cast expression catch:
+    value Target = cast expression catch {
         then fallback
-    ;
+    }
 
-    value Target = cast expression catch |err|:
+    value Target = cast expression catch |err| {
         then fallback
-    ;
+    }
 ]
 
 There is no cast-specific propagation spelling. A fallible conversion uses

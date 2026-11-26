@@ -4,14 +4,14 @@ are not yet executable in the Alpha compiler.
 An anonymous record groups local values without declaring a named type:
 
 [codeblock, $code "moth":
-    show_window ||:
+    show_window || {
         window ~= (
             title = "Strategy",
             size = (width = 1280, height = 720),
         )
 
         ~window.size.width = 1440
-    ;
+    }
 ]
 
 Every field needs a name and a value. Records can nest directly. Runtime fields

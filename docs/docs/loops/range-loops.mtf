@@ -1,31 +1,37 @@
 A range loop generates numeric values directly from its loop header.
 
 [codeblock, $code "moth":
-    loop 0 to 10 by 2 |value, ordinal|:
+    loop 0 to 10 by 2 |value, ordinal| {
         io.line([: [ordinal]: [value]])
-    ;
+    }
 ]
 
 ### Forms of range loops
 
 [codeblock, $code "moth":
-    loop start to end:
-        ...
+    loop start to end {
+        -- loop body
+    }
 
-    loop start to & end |value|:
-        ...
+    loop start to & end |value| {
+        -- loop body
+    }
 
-    loop start to end by step |value, ordinal|:
-        ...
+    loop start to end by step |value, ordinal| {
+        -- loop body
+    }
 
-    loop start to & end by step |value, ordinal|:
-        ...
+    loop start to & end by step |value, ordinal| {
+        -- loop body
+    }
 
-    loop to end |value|:
-        ...
+    loop to end |value| {
+        -- loop body
+    }
 
-    loop to & end by step:
-        ...
+    loop to & end by step {
+        -- loop body
+    }
 ]
 
 ### Bounds
@@ -45,13 +51,13 @@ Bounds never infer direction, so a range whose step points away from its end
 bound is empty.
 
 [codeblock, $code "moth":
-    loop 5 to 0 by -1 |value|:
+    loop 5 to 0 by -1 |value| {
         io.line([: [value]])
-    ;
+    }
 
-    loop 5 to 0 |value|:
+    loop 5 to 0 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 The first loop visits `5`, `4`, `3`, `2` and `1`. The second loop visits
@@ -71,13 +77,13 @@ never selects or widens that counter.
 - Start and end expressions must have numeric types.
 
 [codeblock, $code "moth":
-    loop 0.0 to 1.0 by 0.1 |amount|:
+    loop 0.0 to 1.0 by 0.1 |amount| {
         io.line([: [amount]])
-    ;
+    }
 
-    loop 1.0 to & 0.0 by -0.5 |amount|:
+    loop 1.0 to & 0.0 by -0.5 |amount| {
         io.line([: [amount]])
-    ;
+    }
 ]
 
 ### Range loop evaluation order
@@ -102,9 +108,9 @@ value or direction. The counter domain and ordinal type remain independent.
 Collection lengths, collection indices and fixed capacities also use `I32`.
 
 [codeblock, $code "moth":
-    loop 5 to 0 by -1 |value, ordinal|:
+    loop 5 to 0 by -1 |value, ordinal| {
         io.line([: [ordinal]: [value]])
-    ;
+    }
 ]
 
 This visits `5` at ordinal `0` through `1` at ordinal `4`.
@@ -138,9 +144,9 @@ authors no step.
 [codeblock, $code "moth":
     near_max U8 = 254
     maximum U8 = 255
-    loop near_max to & maximum by 1 |value, ordinal|:
+    loop near_max to & maximum by 1 |value, ordinal| {
         io.line([: [ordinal]: [value]])
-    ;
+    }
 ]
 
 This range visits `254` and `255` as `U8` values. Its `I32` ordinal runs from

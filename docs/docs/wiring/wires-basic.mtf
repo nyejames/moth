@@ -2,17 +2,17 @@ A Wire parameter asks the caller to preserve the identity of one named local
 binding. No special marker is written on the declaration or argument.
 
 [codeblock, $code "moth":
-    read_name |value Wire of String| -> String:
+    read_name |value Wire of String| -> String {
         return value
-    ;
+    }
 
-    forward_name |value Wire of String| -> String:
+    forward_name |value Wire of String| -> String {
         return read_name(value)
-    ;
+    }
 
-    replace_name |value ~String, replacement String|:
+    replace_name |value ~String, replacement String| {
         ~value = copy replacement
-    ;
+    }
 
     current_name ~= "Priya"
     label = read_name(current_name)

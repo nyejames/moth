@@ -11,28 +11,69 @@
 
 @docs_styles navbar,
     section,
+    codeblock,
     language_theme_head,
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Language basics"]]
-[$in description:["Blocks, comments, naming, core values, strings and MON syntax in Moth."]]
+[$in description:["Blocks, comments, naming, core values, strings and constructor syntax in Moth."]]
 [$in head:[language_theme_head]]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Language basics
 
-    Moth uses a compact set of syntax rules across the whole language. Colons
-    open blocks, semicolons close them and square brackets build strings rather
-    than index collections.
+    Read a Moth declaration from left to right. In the example below, the first line declares a struct called `Size`. Its fields go between pipes. The next declaration names a function, lists its parameters between pipes and gives its return type after the arrow.
 
-    These choices keep declarations, supplied values and blocks visually distinct.
-    Start here before moving to bindings, control flow and user-defined types.
+    [codeblock, $code "moth":
+        Size = | width I32, height I32 = 720 |
+
+        describe |size Size| -> String {
+            return [: [size.width] x [size.height]]
+        }
+
+        screen = Size(1280)
+        caption = describe(screen)
+    ]
+
+    Parentheses supply arguments to a constructor or function. `Size(1280)` supplies the width and takes the default height. Braces enclose the function's statements. Inside the brackets, the colon introduces text and the nested brackets insert field values. The result is the String `1280 x 720`.
+
+    Square brackets also construct collections and maps. The type after a binding's name can tell the compiler what the brackets should produce.
+
+    [codeblock, $code "moth":
+        title = ["Moth", " Guide"]
+        names [String] = ["Priya", "Rob"]
+        sizes [String = Size] = ["screen" = screen]
+    ]
+
+    The first binding joins two Strings. The second stores two separate Strings. The third maps a String key to a Size.
+
+    ## Choose what happens next
+
+    A function, a loop or a conditional can have a block. Braces mark where the block begins and ends. The construct decides which names you can use inside it. A match has one block, and each arm has its own scope.
+
+    [codeblock, $code "moth":
+        State = { Waiting, Ready | size Size | }
+
+        label |state State| -> String {
+            return if state is {
+                case Waiting: then "waiting"
+                case Ready(size): then describe(size)
+            }
+        }
+
+        message = label(State::Ready(screen))
+    ]
+
+    The choice declares two constructors. Only `Ready` has a field. At the call site, `::` selects that constructor. In the match, `case Ready(size):` gives the captured field a name for that arm. The next arm would need its own binding.
+
+    Other features build on these forms. A generic parameter lets a declaration work with more than one type. An alias gives an existing type another name. A named region specifies a storage lifetime. A directive such as `$md` tells a text construction how to format its body. The @../cheatsheet (cheatsheet) collects the spellings, including channel operations. The @../progress (progress matrix) tracks compiler support.
 ]
 
 [section:
@@ -78,7 +119,7 @@ init_docs_sidebar()!
 [section:
     [doc_level:
         [$in key:mon-syntax]
-        [$in title:MON syntax]
+        [$in title:Constructor syntax and MON]
         [$in advanced:[mon_syntax]]
 
         [mon_syntax_basic]

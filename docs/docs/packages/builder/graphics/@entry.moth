@@ -6,7 +6,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["@builder/web/graphics"]]
 [$in description:["WebGL2 rendering as a builder binding-backed runtime package."]]
@@ -14,7 +15,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # @builder/web/graphics
 

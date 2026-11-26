@@ -13,7 +13,7 @@ deferred feature may appear in the progress matrix and may have a structured
 deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
 - local runtime anonymous records with recursive composition and hidden nominal identity
-- declared regions (`name:` / `into name`)
+- declared regions (`name { ... }` / `into name`)
 - mandatory lifetime-region and escape validation
 - choice payload field access without pattern matching
 - nested choice payload patterns
@@ -21,7 +21,7 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - generic external package functions and types
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
-- future compiler-owned `$async:` blocks
+- invocation-owned child tasks and typed channel endpoints
 - first-class filesystem path values, directory values and runtime filesystem access
 - source-file reflection and reading `.moth` source as text
 - constructing a file reference from a runtime `String`
@@ -65,15 +65,13 @@ notation. @../constants/#const-records (Const records) and
 compile-time and runtime contracts. Nominal construction stays explicit, and
 anonymous type declarations, structural conversion and tuples are not added.
 
-Moth MON source syntax allows ordinary expressions according to the receiving
-Moth context. MON serialised data is self-contained literal data only, and a MON
-reader never evaluates Moth expressions, including foldable ones.
+Moth constructor arguments can contain expressions. MON uses the literal-data forms of those constructors. The reader gets field types and defaults from a schema.
 
 The standalone Rust `moth-mon` codec is implemented, with the same API and Rust
 types available through the supported `moth::mon` convenience re-export.
 See @../progress (Progress) for current support. Moth-native `$mon`, automatic
 schema extraction, source/runtime operations and the static project builder
-remain deferred separately. Source `{=}` empty maps, Unicode escapes and
+remain deferred separately. Source `["[=]"]` empty maps, Unicode escapes and
 contextual `::Variant` construction also remain undelivered. Rust availability
 does not make the format Moth-native or give every MON-syntax value a
 serialisation guarantee. Engine and application schemas remain separate from
@@ -102,19 +100,20 @@ Current open questions include:
 - distinct primitive-backed nominal wrapper or newtype syntax
 - narrow references to named, monomorphic, non-capturing functions
 - @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), whose
-  agreed future source-block spelling is `$checked:` but whose proof-tier
+  proposed directive is `$checked` and whose proof-tier
   semantics, placement and soundness evidence remain open
 - `Dec` and `DecN` range domains
 - lossy binary-float/`Dec` conversion helpers and explicit rounded `Dec` scale changes
 - source-level bitwise integer operations
 - speculative `Byte` buffer and text-encoding APIs
-- grouped `if:` handlers, rewind and richer effects
+- grouped error handlers, rewind and richer effects
+- immutable collection results from a statement loop. Revisit this only if bracket loops cannot express the required construction.
 - explicit numeric wrapping and other wrap-or-trap controls beyond the accepted
   `$fast_math` contract, including a possible `$no_wrap`
 - native-trap assertion optimisation
 
 `$checked` concerns a separate borrow-proof budget, not a numeric check mode.
-Its proposed `$checked:` spelling and compiler-owned direction do not make
+Naming this compiler-owned directive does not make
 research obligations, deterministic limits or normal safety laws implemented
 or fully accepted. The safety rules, source meaning and runtime behaviour must
 remain the same inside and outside any eventual scope. The other open questions

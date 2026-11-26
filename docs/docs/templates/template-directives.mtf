@@ -20,9 +20,9 @@ builder extension point, so availability never depends on the selected builder:
 
 - add a prefix and suffix to each direct child. Either directive may be omitted
 - each may appear once per head, so a repeated `$before` or `$after` is rejected
-- accept a compile-time String or constant template wrapper and reject runtime-dependent values
+- take one compile-time operand compatible with the construction. In a String wrapper, use a String or compatible constant template wrapper
 - values may contain named slots but not default or positional slots. Child insertion is implicit
-- produce no wrapper for structurally absent output, but wrap a selected empty String
+- skip structurally absent output and wrap a selected empty String or sequence
 - wrap a direct child loop's aggregate output once
 
 `$fresh`:
@@ -31,7 +31,7 @@ builder extension point, so availability never depends on the selected builder:
 
 `$slot`:
 
-- declares `$slot`, `$slot name`, `$slot 1` and an optional `= <compile-time String>` default
+- declares `$slot`, `$slot name`, `$slot 1` and an optional compile-time default of the receiving type
 - must be the only meaningful item in its head and never opens a body
 
 `$in name`:
@@ -53,7 +53,7 @@ builder extension point, so availability never depends on the selected builder:
 
 `$note`:
 
-- discards its balanced body without evaluating it or producing output
+- discards its balanced body without evaluating it, producing output or supplying type evidence
 - is the sole template comment directive, valid only as a child of a template body
 
 `$doc` and `$todo` annotate following source declarations or statements instead of template heads. They are invalid here. See @../directives (Directives).
@@ -80,7 +80,7 @@ default slot. Two guards cover an optional attribute and a presence-only boolean
         <button[$supplied disabled:[" disabled"]]>[$slot]</button>
     ]
 
-    plain = [card]
+    plain = [card, ""]
     styled = [card:[$in style:red]body]
     empty_style = [card:[$in style:]body]
     press = [button:press]
@@ -110,7 +110,7 @@ a key that only a guard declares:
 Presence comes from routing, not from rendered content. An explicitly empty
 contribution counts, while occurrence defaults and fallback text never satisfy a
 guard. A routed contribution whose runtime branch emits nothing still counts.
-When no `$slot` occurrence consumes the key, the compiler validates the routed
+When a guard is the only use of a key, the enclosing construction supplies its receiving type. The compiler validates the routed
 payload and skips its evaluation. See @../templates/#template-slots (Template
 slots) for those routing and liveness rules.
 
@@ -136,7 +136,7 @@ Builder destinations are builder-interpreted. The HTML builder registers
 
 ### Formatter directives
 
-The compiler owns these template-formatting directives. They are available under every builder:
+Text formatters establish a String context. They report a conflict at a sequence receiver. Every builder uses the same formatter rules.
 
 `$html`:
 

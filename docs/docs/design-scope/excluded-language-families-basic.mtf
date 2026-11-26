@@ -54,8 +54,8 @@ annotations.
 
 Structured control flow introduces scope. Moth has no dedicated general
 lexical-block construct, statement labels, labelled loop exits or `goto`.
-`block` is an ordinary identifier, so `block:` declares a region like any other
-valid `name:` header. Exact `_:` is invalid.
+`block` is an ordinary identifier, so `block { ... }` declares a region like any other
+valid `name { ... }` header. Exact `_ { ... }` is invalid.
 
 ### The pattern
 

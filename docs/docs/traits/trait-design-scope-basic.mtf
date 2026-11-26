@@ -3,9 +3,9 @@ Traits are for static reuse, not runtime flexibility.
 ### Static reuse
 
 [codeblock, $code "moth":
-    render type Item is DISPLAY_TEXT |item Item| -> String:
+    render type Item is DISPLAY_TEXT |item Item| -> String {
         return item.display()
-    ;
+    }
 ]
 
 The compiler knows at compile time which concrete `display` method to call.
@@ -15,10 +15,10 @@ The compiler knows at compile time which concrete `display` method to call.
 When you need different types at runtime, use a choice instead.
 
 [codeblock, $code "moth":
-    Renderable ::
+    Renderable = {
         LabelItem | value Label |,
         ButtonItem | value Button |,
-    ;
+    }
 ]
 
 A choice is a tagged union. The variant tag decides which code to run.

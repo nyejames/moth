@@ -7,17 +7,17 @@ instead.
 
 [codeblock, $code "moth":
     -- @mod.moth
-    private_helper || -> String:
+    private_helper || -> String {
         return "private"
-    ;
+    }
 
     $export
     public_name #= "Moth"
 
     $export
-    render || -> String:
+    render || -> String {
         return private_helper()
-    ;
+    }
 ]
 
 `public_name` and `render` are visible through the module's normal facade. `private_helper` remains private. An unmarked facade exports nothing.
@@ -50,19 +50,19 @@ facade root stays the default:
     root_value #= "root"
 
     $export @forms
-    button #|label String| -> String:
+    button #|label String| -> String {
         return label
-    ;
+    }
 
     $export @forms
-    badge #|label String| -> String:
+    badge #|label String| -> String {
         return [:badge:[label]]
-    ;
+    }
 
     $export @forms/validation
-    validate |value String| -> String:
+    validate |value String| -> String {
         return value
-    ;
+    }
 ]
 
 [codeblock, $code "moth":

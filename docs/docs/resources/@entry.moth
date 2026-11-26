@@ -8,7 +8,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Resources and file values"]]
 [$in description:["Naming project files with file paths, and what those paths evaluate to in Moth."]]
@@ -16,7 +17,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Resources and file values
 

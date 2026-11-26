@@ -17,12 +17,12 @@ The named `title` slot receives `Welcome`.
 The default slot receives the body text.
 
 Without an insert, `title` shows its `Untitled` default while an empty default
-slot renders nothing. Each slot occurrence owns its own compile-time `String`
-default, and an explicitly empty insert still suppresses it.
+slot renders nothing. Each slot occurrence owns its own compile-time
+default of the slot's receiving type, and an explicitly empty insert still suppresses it.
 
 Positional slots use `$slot 1` and are filled by loose head contributions. `$in`
 targets a named slot only and has no positional form. Slots that receive no
-content and have no default become empty strings.
+content and have no default emit their type's empty value. A String slot joins text and a sequence slot collects elements.
 
 See @../templates/#template-slots (Template slots) for declaration forms,
 positional routing, stored inserts and runtime contributions.

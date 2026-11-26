@@ -1,5 +1,5 @@
 @checked-proof-budget-research content as reference_content
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Checked proof-budget research"]]
 [$in description:["Future research into opt-in deep static analysis for difficult borrow proofs."]]
@@ -7,10 +7,10 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
-    This page records a future design proposal and the compiler constraints current Boracle work should preserve. `$checked:` is the agreed future spelling and compiler-owned direction; proof-tier semantics remain open. It is not implemented source behaviour or current compiler behaviour.
+    The proposed `$checked` scope would increase the proof budget for difficult borrow checks. Its source form after the syntax migration, proof tiers and implementation remain open.
 ]
 
 [section, reference_content]

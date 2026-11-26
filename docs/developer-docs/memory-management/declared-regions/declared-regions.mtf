@@ -12,7 +12,7 @@ Declared-region identity is semantic lifetime metadata. It is not a value, type,
 
 ## Status
 
-Accepted end-state design with implementation deferred. This page is the canonical semantic authority for `name:` / `into name`. Implementation sequencing, prerequisites and deferred optimisation investigations live in `docs/roadmap/roadmap.md`. Current implementation support lives in the progress matrix.
+Accepted end-state design with implementation deferred. This page is the canonical semantic authority for `name { ... }` / `into name`. Implementation sequencing, prerequisites and deferred optimisation investigations live in `docs/roadmap/roadmap.md`. Current implementation support lives in the progress matrix.
 
 ## Relationship to the general memory model
 
@@ -45,7 +45,7 @@ A compiler-inferred lifetime owner for ordinary allocations. The compiler may me
 
 ### Declared region
 
-A declared lifetime region introduced by source `name:`. It is a hard lifetime boundary. The compiler must not silently widen it to make an invalid escape legal.
+A declared lifetime region introduced by source `name { ... }`. It is a hard lifetime boundary. The compiler must not silently widen it to make an invalid escape legal.
 
 ### Physical arena
 
@@ -117,10 +117,10 @@ Direct source construction of cyclic graphs remains deferred with the rest of de
 ## Declared region header
 
 [codeblock, $code "moth":
-    request:
+    request {
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)
-    ;
+    }
 ]
 
 [codeblock, $code "text":
@@ -129,10 +129,10 @@ Direct source construction of cyclic graphs remains deferred with the rest of de
 
 Rules:
 
-- `name:` is valid only in runtime executable bodies.
+- `name { ... }` is valid only in runtime executable bodies.
 - The declared region name uses normal value-like identifier policy.
 - There is no `group` keyword.
-- Exact `_:` is invalid and does not create an anonymous declared region or lexical block.
+- Exact `_ { ... }` is invalid and does not create an anonymous declared region or lexical block.
 - `into region_name` appears only on declaration receiving boundaries in V1.
 - Placement may target the current declared region or a lexically enclosing ancestor declared region.
 - Placement may not target a sibling, child, unrelated declared region, or builder lifecycle root by spelling its name.
@@ -146,14 +146,14 @@ Ordinary declarations inside a declared region are not implicitly declared-regio
 
 A declared region with no direct or straight-line nested placement targeting it emits an unused-region warning. A plain declaration does not count as placement merely because it is lexically inside the declared region.
 
-Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Exact `_:` is invalid, and the source language has no control-flow labels. Future compiler-owned scopes such as `$async:` remain separate because their marker carries language-defined execution and lifetime behaviour.
+Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block { ... }` has the same declared-region meaning as any other valid `name { ... }` header. Exact `_ { ... }` is invalid, and the source language has no control-flow labels. Channel task lifetimes belong to the owning function invocation. A region exit bounds storage and cannot join a child task.
 
 ## into declaration placement
 
 [codeblock, $code "moth":
     parsed into scratch = parse_post(post)
     parsed ParsedPost into scratch = parse_post(post)
-    rows ~{Row} into scratch = {}
+    rows ~[Row] into scratch = []
     maybe_name String? into scratch = find_name(id)?
 ]
 
@@ -190,7 +190,7 @@ Canonical V1 rule:
   - loops;
   - repeated template/runtime control flow;
   - any construct that may execute zero or multiple times.
-- A statically known `if true:` remains authored conditional syntax and does not make ancestor placement legal.
+- A statically known `if true { ... }` remains authored conditional syntax and does not make ancestor placement legal.
 - Conditional production must use one declaration in the destination scope whose initializer is a value-producing `if`, match, or `catch`.
 - Loop production must use a collection or aggregate already owned by the destination declared region and mutate it through ordinary exclusive access; it must not repeatedly declare the same ancestor-owned name.
 - Name collisions and definite initialization are checked in the destination scope.
@@ -199,48 +199,48 @@ Canonical V1 rule:
 Valid nested placement:
 
 [codeblock, $code "moth":
-    request:
-        scratch:
+    request {
+        scratch {
             parsed ParsedPost into scratch = parse_post(post)
             html String into request = render_post(parsed)
-        ;
+        }
 
         use(html)
-    ;
+    }
 ]
 
 Invalid branch placement:
 
 [codeblock, $code "moth":
-    request:
-        if condition:
+    request {
+        if condition {
             html String into request = render_post() -- invalid in V1
-        ;
+        }
 
         use(html)
-    ;
+    }
 ]
 
 Conditional replacement:
 
 [codeblock, $code "moth":
-    request:
-        html String into request = if condition:
+    request {
+        html String into request = if condition {
             then render_post()
         else
             then render_fallback()
-        ;
-    ;
+        }
+    }
 ]
 
 Invalid loop placement:
 
 [codeblock, $code "moth":
-    request:
-        loop posts |post|:
+    request {
+        loop posts |post| {
             html String into request = render_post(post) -- invalid repeated declaration
-        ;
-    ;
+        }
+    }
 ]
 
 Loops must mutate a destination-owned aggregate instead of repeatedly declaring an ancestor-owned name.
@@ -264,16 +264,16 @@ A fresh result root may retain parameters or other pre-existing values only when
 Nested declared regions are valid.
 
 [codeblock, $code "moth":
-    request:
+    request {
         config Config into request = load_config()
 
-        scratch:
+        scratch {
             parsed ParsedPost into scratch = parse_post(post)
             html String into request = render_post(parsed, config)
-        ;
+        }
 
         use(html)
-    ;
+    }
 ]
 
 For a child declared region nested in a parent declared region:
@@ -331,14 +331,14 @@ Backend GC representation does not legalise these cases.
 ### Crossing a declared region boundary
 
 [codeblock, $code "moth":
-    request:
-        scratch:
+    request {
+        scratch {
             label String into scratch = [: temporary]
             saved String into request = copy label
-        ;
+        }
 
         use(saved)
-    ;
+    }
 ]
 
 A fresh producer may avoid the copy by allocating directly into the destination declared region.
@@ -348,12 +348,12 @@ A fresh producer may avoid the copy by allocating directly into the destination 
 An interior alias rooted in declared-region-owned storage cannot escape its declared region by itself.
 
 [codeblock, $code "moth":
-    load_name |id String| -> String, Error!:
-        scratch:
+    load_name |id String| -> String, Error! {
+        scratch {
             user User into scratch = load_user(id)!
             return user.name -- invalid
-        ;
-    ;
+        }
+    }
 ]
 
 Use `copy` or produce a fresh value directly in a longer-lived declared region. Interior projections remain rooted in their containing allocation family; see the lifetime-regions leaf for the general projection rule.

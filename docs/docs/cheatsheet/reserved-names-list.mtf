@@ -9,8 +9,7 @@ reclaim reserved words by changing ASCII case or adding leading underscores.
 - **Word operators:** `is`, `not`, `and`, `or`
 - **Literals:** `true`, `false`, `none`
 
-`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places
-allocations in declared regions, although it isn't yet in the compiler's shared reserved-word inventory.
+`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions. A line-initial `case` introduces a match or readiness arm. Whether `case` is reserved outside arm headers, including in MON field names, remains open.
 
 ### Builtin types
 
@@ -39,7 +38,7 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 
 - `$before`, `$after` - prefix and suffix each direct child.
 - `$fresh` - bypass the parent's child wrapper.
-- `$slot` - declare a default, named or positional slot, with an optional compile-time String default.
+- `$slot` - declare a default, named or positional slot, with an optional compile-time default of its receiving type.
 - `$in` - contribute to one named slot.
 - `$note` - discard a balanced comment template in a template body.
 - `$raw` - preserve unformatted template content.

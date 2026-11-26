@@ -8,13 +8,19 @@ MON has no source inference or unconstrained numeric default.
     format_version = 1,
     title = "Strategy",
     window = (width = 1280, height = 720),
-    scores = {"Priya" = 10, "Rob" = 12},
+    names = ["Priya", "Rob"],
+    scores = ["Priya" = 10, "Rob" = 12],
     note = none,
 ]
 
+The `names` sequence contains two Strings. A MON reader never joins or splices
+its items. A prepared schema supplies field types and validated defaults for
+structs and choice payloads. A missing required field fails. An explicit
+`none` stays absent.
+
 The same record may carry explicit outer parentheses. A lone scalar,
 collection or choice is not a document: put it in a named root field.
-Encoding fills only exact missing field defaults and emits the completed
+Decoding applies defaults only to omitted fields. Encoding emits the completed
 record in schema order, including explicit `none` and values equal to
 defaults. See @#mon-format (MON format) for the complete literal-data
 reference.
@@ -32,11 +38,11 @@ Strictness is the point. These inputs fail:
     title = "Strategy"
     width = 1280,
 
-    -- INVALID: `{}` is a collection, never an empty map; use `{=}`
-    scores = {},
+    -- INVALID: [] is a collection, never an empty map; use [=]
+    scores = [],
 
     -- INVALID: duplicate keys are rejected, not merged
-    scores = {"Priya" = 10, "Priya" = 12},
+    scores = ["Priya" = 10, "Priya" = 12],
 
     -- INVALID: decimal spelling never converts to an I32 target
     width = 1280.0,

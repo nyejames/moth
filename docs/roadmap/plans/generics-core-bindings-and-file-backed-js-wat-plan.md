@@ -125,7 +125,7 @@ Every code-bearing slice ends with the repository Slice review. Structured audit
 | G08 | `Item #Type`, `Number = NUMERIC` and `Number #Type = NUMERIC` are valid declaration forms. `Type` without compile-time mode is diagnosed. | Phase 1, D01-D06 |
 | G09 | V1 permits zero or one limit. No trait lists, alternatives, conjunctions, generic copying or generic aliasing. | Phases 1/5, D07-D08, N15 |
 | G10 | A repeated generic name means the same parameter within one signature. Different names mean independent parameters, even with identical limits. Each owning declaration and concrete instantiation is independent. | Phase 2, D15-D20, P07 |
-| G11 | Structs and choices use an explicit ordered list: `Pair of First, Second = ...` or `Maybe of Item :: ...`. | Phases 2/5, N01-N05, N14-N16 |
+| G11 | Structs and choices use an explicit ordered list: `Pair of First, Second = ...` or `Maybe of Item = { ...`. | Phases 2/5, N01-N05, N14-N16 |
 | G12 | A generic constructor needs an explicitly applied receiving type. Argument-only generic construction is removed. `of` stays in type positions, not function-call type arguments. | Phase 5, N06-N13 |
 | G13 | WAT annotations reuse JS Moth signature semantics. Imports, runtime capabilities and non-native adapters are explicit and validated. File authorship is not an unrestricted foreign ABI. | Phases 7/8, A01-A14, W01-W22 |
 | G14 | Core algorithms may live in JS/WAT files. Trusted registration connects semantic operations to target implementations without requiring Moth-source wrappers. | Phases 6-9, B07-B14, A14, M16 |
@@ -214,9 +214,9 @@ Within one signature, all occurrences of the same reusable declaration refer to 
 Left #Type
 Right #Type
 
-first |left Left, right Right| -> Left:
+first |left Left, right Right| -> Left {
     return left
-;
+}
 ```
 
 This signature relates the result to `Left`, not to `Right`. It can be instantiated with two equal or two different concrete types. A result annotated with a third generic name would be a third independent parameter, not an inferred common type.
@@ -232,9 +232,9 @@ Functions collect their owner-local parameters from the declared signature, incl
 ```moth
 Item #Type
 
-identity |value Item| -> Item:
+identity |value Item| -> Item {
     return value
-;
+}
 
 count I32 = 42
 text String = "Priya"
@@ -247,13 +247,13 @@ text_copy = identity(text)
 ```moth
 Number = NUMERIC
 
-add |left Number, right Number| -> Number, Error!:
+add |left Number, right Number| -> Number, Error! {
     return left + right
-;
+}
 
-greater |left Number, right Number| -> Bool:
+greater |left Number, right Number| -> Bool {
     return left > right
-;
+}
 ```
 
 Both functions reuse the declaration but own independent parameters. The two arguments of each call must resolve to the same exact type. Operators do not introduce a common-type search at generic call boundaries.
@@ -283,10 +283,10 @@ item Pair of I32, String = Pair(42, "hello")
 ```moth
 Item #Type
 
-Maybe of Item ::
+Maybe of Item = {
     Some |value Item|,
     Empty,
-;
+}
 
 present Maybe of String = Maybe::Some("hello")
 absent Maybe of String = Maybe::Empty
@@ -309,9 +309,9 @@ Box of Item = |
     value Item,
 |
 
-get |this Box of Item| -> Item:
+get |this Box of Item| -> Item {
     return this.value
-;
+}
 ```
 
 Preserve same-file nominal receiver ownership, mutable access rules and the rejection of methods specialised on one concrete generic instance. Free functions can use independently named parameters in applied nominal types according to their signatures.
@@ -343,10 +343,10 @@ A concrete typed parameter can supply context to `consume_pair(Pair(...))`. An u
 The following function uses the `First`, `Second` and `Pair` declarations in Section 3.5:
 
 ```moth
-make_pair |first First, second Second| -> Pair of First, Second:
+make_pair |first First, second Second| -> Pair of First, Second {
     result Pair of First, Second = Pair(first, second)
     return result
-;
+}
 ```
 
 A call to `make_pair` can infer its arguments from the function signature. Its already resolved result is an ordinary concrete instance. This is not argument-only nominal construction and remains valid without another redundant local annotation.
@@ -457,9 +457,9 @@ Raw literal spelling can receive an active generic numeric parameter at an eligi
 ```moth
 Number = NUMERIC
 
-increment |value Number| -> Number, Error!:
+increment |value Number| -> Number, Error! {
     return value + 1
-;
+}
 ```
 
 Every NUMERIC member can receive the raw whole literal 1. Addition still follows the selected type's normal failure contract.
@@ -467,9 +467,9 @@ Every NUMERIC member can receive the raw whole literal 1. Addition still follows
 ```moth
 Count = INT_32_PLUS
 
-microseconds |seconds Count| -> Count, Error!:
+microseconds |seconds Count| -> Count, Error! {
     return seconds * 1_000_000
-;
+}
 ```
 
 The family admits the embedded constant but does not prove all products fit. This illustrates why minimum-width families are useful.
@@ -530,12 +530,12 @@ The declared parameter/result equality can carry the numeric origin until its pe
 
 An already concrete expected type may be forwarded to a nested generic call's success result. Its source can be an annotation, field/default, return, already known call parameter or an independently typed sibling argument that resolves the outer signature.
 
-Assume `empty` has signature `() -> {T}`, `consume` takes `{I32}` and `pick` has `(T, T) -> T`:
+Assume `empty` has signature `() -> [T]`, `consume` takes `[I32]` and `pick` has `(T, T) -> T`:
 
 ```moth
 consume(empty())
 
-known {I32} = {1, 2}
+known [I32] = [1, 2]
 first = pick(empty(), known)
 second = pick(known, empty())
 ```
@@ -549,7 +549,7 @@ unknown = pick(empty(), empty())
 remains underdetermined without an independent concrete receiver. This is valid with the receiver supplied:
 
 ```moth
-resolved {I32} = pick(empty(), empty())
+resolved [I32] = pick(empty(), empty())
 ```
 
 Forwarding may traverse further nested calls only through already declared signature relationships and known type structure. There is no arbitrary syntactic depth-one exception, but storage and work are bounded by authored calls and edges. A call still unresolved after permitted evidence is exhausted receives an annotation diagnostic.
@@ -785,9 +785,9 @@ The declared Error! slot exists for every specialisation. An unsigned or floatin
 
 Number = NUMERIC
 
-magnitude |value Number| -> Number, Error!:
+magnitude |value Number| -> Number, Error! {
     return abs(value)!
-;
+}
 ```
 
 Keep Error identity and numeric codes with their existing owners. No Math-only error carrier, implicit custom-error conversion or type-dependent signature is introduced.
@@ -1259,11 +1259,11 @@ Use separate witness assertions within L04 and L11 for I8, U8 and F16. A declara
 |---|---|---|
 | I01 | Concrete-return inner call passed to an identity generic | Resolve outward without requiring a named intermediate |
 | I02 | Generic call with explicit immediate result receiver | Substitute missing parameters from the declared result relationship |
-| I03 | `consume(empty())` with concrete `{I32}` parameter | Forward the concrete expected type into the nested call |
-| I04 | `pick(empty(), known)` with known `{I32}` | Complete the waiting argument from independently established sibling type |
+| I03 | `consume(empty())` with concrete `[I32]` parameter | Forward the concrete expected type into the nested call |
+| I04 | `pick(empty(), known)` with known `[I32]` | Complete the waiting argument from independently established sibling type |
 | I05 | I04 with arguments reversed | Same inferred types and diagnostics, source-order runtime evaluation |
 | I06 | `pick(empty(), empty())` with no receiver | Annotation diagnostic, no default for a nonexistent numeric origin |
-| I07 | I06 with explicit `{I32}` result receiver | Resolve both nested calls from concrete expected context |
+| I07 | I06 with explicit `[I32]` result receiver | Resolve both nested calls from concrete expected context |
 | I08 | Existing `identity(1)` followed by direct U64 use | Preserve numeric-origin sharing and one completed concrete instance |
 | I09 | Multiple pending numeric call arguments plus independent concrete witnesses | Complete permitted relationships before defaults, with no first-use winner |
 | I10 | Conflicting concrete siblings or concrete argument/result expectations | Type conflict, no implicit promotion or candidate choice |
@@ -1276,14 +1276,14 @@ Use separate witness assertions within L04 and L11 for I8, U8 and F16. A declara
 | I17 | Generic-to-generic symbolic forwarding during template validation | No premature concrete requirement and no executable instance publication |
 | I18 | Failed/pruned call completion and recursive distinct instance shapes | No stranded tickets or leaked IDs, retained recursion/resource policy and useful diagnostics |
 
-For I03-I07, use a real generic `empty` returning `{Item}` and a real source `pick` relating its arguments/result. These cases do not allow an untyped empty literal to become a generic variable outside the call-owned receiving rule.
+For I03-I07, use a real generic `empty` returning `[Item]` and a real source `pick` relating its arguments/result. These cases do not allow an untyped empty literal to become a generic variable outside the call-owned receiving rule.
 
 ### 12.5 Nominal declarations and construction
 
 | ID | Case | Required result |
 |---|---|---|
 | N01 | `Pair of First, Second = ...` | Explicit ordered nominal parameter list bound to existing reusable declarations |
-| N02 | `Maybe of Item :: ...` | Equivalent ordered choice parameter contract |
+| N02 | `Maybe of Item = { ...` | Equivalent ordered choice parameter contract |
 | N03 | Bare `Pair First, Second` or old `Pair type ...` declaration | Reject replaced declaration spelling |
 | N04 | Missing, duplicate, non-generic or unused listed parameter | Precise nominal declaration diagnostic |
 | N05 | Reorder fields while keeping the `of` list unchanged | Stable type-argument interpretation and public parameter identity |

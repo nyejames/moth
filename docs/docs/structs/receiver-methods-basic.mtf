@@ -9,9 +9,9 @@ Its first parameter is named `this`:
         y F64,
     |
 
-    length_squared |this Vector2| -> F64:
+    length_squared |this Vector2| -> F64 {
         return this.x * this.x + this.y * this.y
-    ;
+    }
 
     vector = Vector2(3.0, 4.0)
     length = vector.length_squared()

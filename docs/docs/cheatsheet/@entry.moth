@@ -1,7 +1,7 @@
 @moth-language-cheatsheet content as cheatsheet_content
 @reserved-names-list content as reserved_names_list
 
-@docs_styles navbar, section, language_theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Language cheatsheet"]]
 [$in description:["A single page, compact reference for the full Moth language surface."]]
@@ -9,11 +9,11 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Moth language cheatsheet
 
-    Moth is a small, statically typed language with first-class string templates,
+    Moth is a small, statically typed language with bracket construction,
     explicit mutable access and mandatory borrow and lifetime validation.
 ]
 

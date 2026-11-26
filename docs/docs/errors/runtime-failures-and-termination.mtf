@@ -319,7 +319,7 @@ substitution for assertion handlers remains unsettled. Any accepted optimisation
 would need to preserve the full observable assertion contract, including
 required message work.
 
-Grouped `if:` handlers, rewind or rollback, richer effects, explicit wrapping,
+Grouped conditional handlers, rewind or rollback, richer effects, explicit wrapping,
 other wrap-or-trap controls and native-trap assertion optimisation remain
 unsettled. This reference reserves
 no syntax or guarantee that they will be added. `$checked` is the separate

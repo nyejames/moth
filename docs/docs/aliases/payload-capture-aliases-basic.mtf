@@ -3,17 +3,17 @@ When you match a choice with a payload, the field name becomes the local variabl
 ### Rename one payload field
 
 [codeblock, $code "moth":
-    Response ::
+    Response = {
         Err | message String |,
         Success | value String |,
-    ;
+    }
 
     response = Response::Err("oops")
 
-    if response is:
-        Err(message as error_message) => io.line(error_message)
-        Success(value as body) => io.line(body)
-    ;
+    if response is {
+        case Err(message as error_message): io.line(error_message)
+        case Success(value as body): io.line(body)
+    }
 ]
 
 `message as error_message` means: take the payload field called `message` and bind it to `error_message` in this arm only.
@@ -23,10 +23,10 @@ When you match a choice with a payload, the field name becomes the local variabl
 [codeblock, $code "moth":
     message = "outer message"
 
-    if response is:
-        Err(message as failure_message) => io.line(failure_message)
-        else => io.line(message)
-    ;
+    if response is {
+        case Err(message as failure_message): io.line(failure_message)
+        else: io.line(message)
+    }
 ]
 
 Without the alias, the capture would collide with the visible outer `message` and be rejected. The alias keeps both names distinct.

@@ -178,7 +178,7 @@ Use browser-side Moth for interaction that benefits materially from local execut
 
 The surrounding page remains ordinary HTML. Hypermedia interactions remain available outside and around islands.
 
-The exact island declaration, hydration model and component semantics are open design. Existing Moth templates remain strings and do not implicitly become hydratable component instances.
+The exact island declaration, hydration model and component semantics are open design. An HTML fragment receives a String. A typed component tree needs an explicit package rendering call before it can supply that fragment.
 
 ## Server and browser target split
 
@@ -323,7 +323,7 @@ It should reuse rather than duplicate:
 - output ownership and manifests
 - development rebuild infrastructure
 
-Templates remain ordinary strings. Static fragments stay compiler-produced folded values. Runtime templates execute through normal Moth runtime code and produce strings. Full-stack behaviour must not introduce a hidden live-template representation to make request handling work.
+The HTML entry boundary receives ordinary Strings. Static fragments stay compiler-produced folded values. Runtime entry fragments execute through normal Moth code and produce Strings. Full-stack behaviour must not introduce a hidden live-template representation to make request handling work.
 
 ## Builder API requirement
 

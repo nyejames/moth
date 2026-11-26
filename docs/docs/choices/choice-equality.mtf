@@ -2,8 +2,8 @@ Two values of the same choice type support structural equality when every
 possible payload field supports equality.
 
 [codeblock, $code "moth":
-    left = Status::Ready
-    right = Status::Ready
+    left = WindowEvent::Opened
+    right = WindowEvent::Opened
 
     same = left is right
     different = left is not right

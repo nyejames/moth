@@ -17,9 +17,9 @@ A compile-time-known `Bool`, including one provided through `$config`, can selec
     $config
     enabled #Bool = false
 
-    if enabled:
+    if enabled {
         perform_optional_work()
-    ;
+    }
 ]
 
 `$config` before a typed `#` binding feeds the same ordinary `if` and cannot remove

@@ -13,9 +13,9 @@ A generic declaration describes a family of types or functions using a placehold
 ### A generic function
 
 [codeblock, $code "moth":
-    identity type A |value A| -> A:
+    identity type A |value A| -> A {
         return value
-    ;
+    }
 ]
 
 `identity` returns whatever type it receives.

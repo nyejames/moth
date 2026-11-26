@@ -202,6 +202,8 @@ Project settings and builder slot values have distinct shapes. Their explicit do
 
 HTML document metadata is not a root directive. The active builder registers a read-only set of named destinations. A bare direct top-level `[$in name: ...]` in `@entry.moth` is const-required and contributes to one registered destination. The compiler validates the name, folds its structural String and records the destination, authored span and runtime insertion index in the existing fragment handoff. Other bare direct `[...]` templates must likewise fold into static body fragments. Only explicit `~[...]` forms produce runtime body fragments, even when foldable. `~[$in name: ...]` is invalid. The removed direct `#[...]` spelling has no alias. The builder does not interpret source annotations or know their compiler-owned documentation identity. Nested or aliased inserts remain ordinary template composition.
 
+The HTML body and each registered destination supply String evidence at their direct bracket. A numeric head can therefore render text there. An existing typed sequence or package-defined node needs an explicit rendering call that returns String. A nested slot never receives the root destination implicitly. The `.mtf` adapter also fixes its output as String independently of the importer.
+
 The HTML builder interprets `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`; the default body destination stays on the ordinary fragment lane. Scalar contributions concatenate in source order, and an explicit empty value counts as supplied. An absent title falls back through the route and then the project name with the configured prefix and postfix. An absent description emits no element, while absent language, favicon and body style use builder settings. Title text and attribute values are escaped. Each `stylesheets` contribution must identify exactly one tracked CSS origin, and the builder keeps the first contribution for each stable origin. Complete `head` contributions deduplicate after URL rendering and are inserted after built-in head content. Explicit `~[...]` runtime top-level templates contribute only to the body; runtime named builder slots remain unsupported.
 
 No root-purpose directive exists. Entry eligibility is a source-structural fact: a directory containing `@entry.moth` is an entry module. Empty, static-only and metadata-only entries count. `@mod.moth` and `@package.moth` never become entries. Importing a module or package never activates its entry. HTML V1 selects at most one directory-derived route per `@entry` directory and derives it from directory position, never from source activity, rendered length, a direct `$in`, a special page filename or non-empty HIR. A project needs no homepage, and descendant-only entries are valid.
@@ -590,6 +592,8 @@ Callers own input IO and supply complete text or values plus a prepared exact sc
 
 A `.mon` file is literal data, not a compilable Moth source kind or semantic provider. It may be referenced as an ordinary resource under the explicit-extension resource rules. Parsing MON never discovers dependencies from its strings.
 
+The migration changes the literal-data format for both the reader and the writer. The codec and its consumers follow the existing format and package compatibility policy.
+
 The accepted static MON builder direction consumes the standalone codec and emits compile-time-known assets through ordinary resource planning, output records and manifest ownership. Exact command/directive and Moth-native integration contracts remain open. This direction creates no alternate parser, resource registry or output-writing path.
 
 ## Generated-function boundary
@@ -648,7 +652,7 @@ For each selected entry, the builder plans:
 
 The builder slot plan interprets the registered named fragments once. It produces scalar metadata, deduplicated stylesheet `href` values in first-origin order and deduplicated complete `head` HTML. The JavaScript and HTML-Wasm document paths consume the same plan, so metadata, link order and body output stay equivalent.
 
-This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. Templates produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
+This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. HTML entry fragments produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
 
 The generated caller branches on the entry's typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
 
@@ -906,6 +910,8 @@ URL maps and site-root policies follow the same physical/output separation. Reso
 ### Persistent compatibility
 
 Persisted modules, packages and generated artefacts preserve the same semantic boundaries. Reuse requires compatible compiler artefact/language versions, stable project/package identity, source/config fingerprints containing their exact typed facts, dependency interface fingerprints, used Core/Builder capabilities, frontend feature selection, relevant ABI/layout policy and generated request identity where applicable.
+
+A grammar cutover changes language compatibility. Changes to an exported typed wrapper or constructor default change the public semantic fingerprint used by consumers.
 
 Persisted physical variants also require the complete validated physical identity, including memory-plan and applicable URL-map/site-root fingerprints. Process-local IDs and absolute paths are not compatibility keys. Canonical identities and self-contained or remappable lookup data preserve meaning across processes.
 

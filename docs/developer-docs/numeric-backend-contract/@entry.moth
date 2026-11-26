@@ -1,5 +1,5 @@
 @numeric-backend-contract content as numeric_backend_contract
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Numeric backend contract"]]
 [$in description:["Ordinary and fast numeric semantics, constraint evidence, trap transport and backend parity."]]
@@ -7,7 +7,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Numeric backend contract

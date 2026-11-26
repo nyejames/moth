@@ -1,7 +1,4 @@
-MON means Moth Object Notation. **MON syntax** names Moth's shared parenthesised
-argument and value-construction notation. **The MON format** is the separate
-serialised-data profile with its own supported values and serialisation rules.
-Using MON syntax does not make a value serialisable or turn a call into a data document.
+Moth uses constructor syntax for named structs, choice variants and anonymous records. Moth Object Notation (MON) shares the literal forms. A MON reader uses a schema to decode one serialised data document.
 
 This reference owns the shared notation and the distinction between grouping,
 supplied arguments and anonymous construction. Calls, constructors, directives
@@ -22,7 +19,7 @@ values or group an expression.
 ]
 
 A nominal value uses its named constructor. Matching field names do not make
-an anonymous record a `Size`. MON syntax adds no implicit nominal construction,
+an anonymous record a `Size`. Constructor syntax adds no implicit nominal construction,
 structural typing, argument spreading or tuple values.
 
 Declaration lists remain flat. A legal default expression may contain nested
@@ -70,7 +67,7 @@ named-entry boundary applies to MON, including implicit and explicit roots,
 nested records and qualified payloads. Newlines do not replace commas or join
 an incomplete label to a later assignment.
 
-Map entry `=` also requires whitespace on both sides. MON's `{=}` empty-map
+Map entry `=` also requires whitespace on both sides. MON's `["[=]"]` empty-map
 spelling is the exception because it is not a non-empty map entry.
 
 A field label does not bind a local name. Every initializer resolves names in
@@ -123,7 +120,7 @@ hidden nominal identity, local composition and escape restrictions.
 
 ### Context determines argument policy
 
-Calls, constructors and directives share MON list syntax without sharing every
+Calls, constructors and directives share argument-list notation without sharing every
 permitted argument or value category.
 
 - User calls and named constructors keep positional-then-named signature routing.
@@ -182,8 +179,7 @@ data.
 
 ### MON format boundary
 
-Moth MON source syntax allows ordinary expressions according to the receiving
-Moth context. MON serialised data is self-contained literal data only. A MON
+Constructor arguments and record entries in Moth source can contain expressions. MON serialised data is self-contained literal data only. A MON
 reader never evaluates Moth expressions, including foldable ones.
 
 @../mon/#mon-format (MON format) owns the serialised literal-data contract:
@@ -199,5 +195,4 @@ clients can use the same API and Rust types through the convenience re-export
 Full compile-time Moth authoring expressions and the self-contained serialised
 representation are distinct surfaces.
 
-Templates remain ordinary strings. MON syntax adds no automatic record printing,
-implicit live bindings, stored Wire capabilities or executable Route values.
+Formatting and serialisation use their own explicit operations. A constructor builds its value without attaching a live binding, Wire or Route.

@@ -13,7 +13,7 @@ then reports a missing-input error, while an optional input resolves to absence.
 [codeblock, $code "moth":
     site_name #= "Moth"
     major_version #I32 = 1
-    names #{String} = {"Priya", "Rob"}
+    names #[String] = ["Priya", "Rob"]
     maybe_name #String? = none
 ]
 

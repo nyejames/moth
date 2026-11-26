@@ -655,6 +655,12 @@ Payload policy:
 - numeric details and other complex lexical facts use a typed source-local side-store ID
 - adding a new token family may not widen `TokenShape`
 
+The syntax migration preserves exact spans for an opening brace or bracket,
+its matching closer and the arm or bracket-head colon in its own lexical
+context. Retained token ranges distinguish code from quoted and raw content.
+Keep the resolved construction kind, slot types and branch scopes with the
+semantic owners. Punctuation carries no inferred type in `TokenShape`.
+
 ### Source-owned token store
 
 ```rust

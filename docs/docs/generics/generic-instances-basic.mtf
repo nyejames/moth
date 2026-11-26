@@ -16,10 +16,10 @@ When you apply concrete types to a generic declaration, you get a concrete insta
 ### A concrete generic choice
 
 [codeblock, $code "moth":
-    Maybe type A ::
+    Maybe type A = {
         Some | value A |,
         Empty,
-    ;
+    }
 
     name Maybe of String = Maybe::Some("Priya")
 ]

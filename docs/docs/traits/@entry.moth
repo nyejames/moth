@@ -18,7 +18,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Traits"]]
 [$in description:["Static trait contracts, explicit conformance and generic bounds in Moth."]]
@@ -26,7 +27,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Traits
 

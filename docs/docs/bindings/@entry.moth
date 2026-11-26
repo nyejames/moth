@@ -14,7 +14,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Values and bindings"]]
 [$in description:["Bindings, mutability, shared access, explicit copies and shadowing in Moth."]]
@@ -22,7 +23,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Values and bindings
 
