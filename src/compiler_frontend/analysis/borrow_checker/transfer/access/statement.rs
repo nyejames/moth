@@ -51,6 +51,14 @@ pub(crate) fn transfer_statement(
                 HirWriteTarget::DefineLocal(local) => (HirPlace::local(*local), true),
                 HirWriteTarget::AssignPlace(place) => (*place, false),
             };
+            let local_index = layout.index_of(target_place.root);
+            let pristine_definition = if is_definition {
+                first_heap_definition_index(layout, state, block_id, statement_order, || {
+                    local_index
+                })
+            } else {
+                None
+            };
             {
                 let mut read_env = SharedReadEnv {
                     context,
@@ -106,6 +114,8 @@ pub(crate) fn transfer_statement(
                 &target_place,
                 *value,
                 is_definition,
+                local_index,
+                pristine_definition,
             )?;
         }
 
@@ -679,20 +689,11 @@ impl CallResultTransfer {
         order: i32,
         results: &[HirLocalDestination],
     ) -> Self {
-        if let [HirLocalDestination::Define(local)] = results
-            && layout.acyclic_entry_block == Some(block)
-            && order >= 0
-            && let Some(index) = layout.index_of(*local)
-            && layout.local_has_in_place_mutation_surface[index]
-            && layout.local_first_write_order[index] == order
-            && state.has_pristine_alloc_binding(index)
-        {
-            // Only parameters enter this block initialized. The prefix has never written this
-            // local, and a read cannot produce coarse observers of an uninitialized local.
-            Self::FirstDefinition(index)
-        } else {
-            Self::Immediate
-        }
+        let [HirLocalDestination::Define(local)] = results else {
+            return Self::Immediate;
+        };
+        first_heap_definition_index(layout, state, block, order, || layout.index_of(*local))
+            .map_or(Self::Immediate, Self::FirstDefinition)
     }
 }
 
@@ -854,14 +855,6 @@ fn transfer_call_arguments_and_result(
             &[][..],
             capture_builtin_element_result(input, args, results.clone().next(), storage),
         ),
-    };
-    // A capture of the old root or one of its projections must have interned that root.
-    // In that case keep the ordinary retirement and remap the already-captured operations.
-    let result_transfer = match result_transfer {
-        CallResultTransfer::FirstDefinition(index) if input.state.alloc_root_is_interned(index) => {
-            CallResultTransfer::Immediate
-        }
-        other => other,
     };
 
     let aliases = match &return_alias {
@@ -1747,17 +1740,17 @@ fn transfer_call_result_alias(
     }
 
     if input.layout.local_has_in_place_mutation_surface[local_index] {
-        let retirement = (!matches!(
-            result_transfer,
-            CallResultTransfer::FirstDefinition(index) if index == local_index
+        let pristine_definition = match result_transfer {
+            CallResultTransfer::FirstDefinition(index) => Some(index),
+            _ => None,
+        };
+        Ok(input.state.rebind_local_after_capture(
+            local_index,
+            new_local_state,
+            input.current_order,
+            pristine_definition,
+            true,
         ))
-        .then(|| {
-            input
-                .state
-                .retire_binding_allocation(local_index, input.current_order)
-        });
-        input.state.update_local_state(local_index, new_local_state);
-        Ok(retirement)
     } else {
         input
             .state

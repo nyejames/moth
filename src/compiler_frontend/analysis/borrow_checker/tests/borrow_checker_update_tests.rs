@@ -1,18 +1,20 @@
-//! Focused tests for mutable binding updates and write-through access.
+//! Focused tests for binding definitions, updates, and write-through access.
 //!
-//! WHAT: checks ordinary and dedicated-result Updates against mixed slot/alias states.
-//! WHY: source fixtures cannot construct some joined holder states without conflicting earlier.
+//! WHAT: checks definition retirement and ordinary/dedicated-result Updates.
+//! WHY: isolated transfers can retain incoming and previous bindings for direct comparison.
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState, RootSet,
+    BorrowState, FieldKey, FunctionLayout, LocalState, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BorrowTransferContext, transfer_block,
+    BlockTransferStats, BorrowTransferContext, transfer_block,
 };
-use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
+use crate::compiler_frontend::analysis::borrow_checker::types::{
+    LocalMode, ValueAccessClassification,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     InvalidMutableAccessView, SharedMutableConflictView, UseOfUninitializedLocalView,
 };
@@ -21,7 +23,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::comp
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
@@ -381,77 +383,188 @@ fn reentered_definition_reinitializes_a_previously_live_local() {
 target ~= \"old\"\n\
 sentinel = 0\n\
 ;";
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let registry = default_external_package_registry(&mut string_table);
-    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the definition fixture should lower");
-    let function = module
-        .functions
-        .iter()
-        .find(|function| {
-            module
-                .side_table
-                .function_name_path(function.id)
-                .and_then(|path| path_fork.component(path))
-                .is_some_and(|name| string_table.resolve(name) == "probe")
-        })
-        .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(
-        &module,
-        &type_environment,
-        &registry,
-        &path_fork,
-        &string_table,
-    );
-    let reachable = checker
-        .collect_reachable_blocks(function)
-        .expect("fixture CFG should be reachable");
-    let layout = checker
-        .build_function_layout(function, &reachable)
-        .expect("fixture local layout should build");
-    let target = local_named(&module, &path_fork, &string_table, "target");
-    let source = local_named(&module, &path_fork, &string_table, "source");
-    let (block, definition) = module
-        .blocks
-        .iter()
-        .find_map(|block| {
-            block
-                .statements
-                .iter()
-                .find(|statement| {
-                    matches!(
-                        &statement.kind,
-                        HirStatementKind::Write {
-                            target: HirWriteTarget::DefineLocal(local),
-                            ..
-                        } if *local == target
-                    )
-                })
-                .map(|statement| (block, statement))
-        })
-        .expect("the fixture should contain a target definition");
-    let local_count = layout.local_count();
-    let source_index = layout
-        .index_of(source)
-        .expect("the source parameter should be in the function layout");
-    let target_index = layout
-        .index_of(target)
-        .expect("the target should be in the function layout");
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-    state.update_local_state(
-        target_index,
-        LocalState::alias_with_direct(source_roots.clone(), source_roots),
-    );
+    with_definition_probe(source, |checker, layout| {
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let source = local_index_named(checker, &layout, "source");
+        let local_count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(local_count);
+        state.initialize_parameter(source);
+        let mut source_roots = RootSet::empty(local_count);
+        source_roots.insert(source);
+        state.update_local_state(
+            target,
+            LocalState::alias_with_direct(source_roots.clone(), source_roots),
+        );
 
-    transfer_isolated_statement(&checker, &layout, block, definition, &mut state)
-        .expect("a reentered definition should establish the new binding");
-    let target_state = state.local_state(target_index);
-    assert!(target_state.mode.contains(LocalMode::SLOT));
-    assert!(!target_state.mode.contains(LocalMode::ALIAS));
-    assert!(target_state.value_roots.is_empty());
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("a reentered definition should establish the new binding");
+        assert_eq!(state.local_state(target), &LocalState::slot(local_count));
+    });
+}
+
+const ENTRY_BOX_DEFINITION: &str = r#"
+Box = |items {I32}|
+probe |input Box|:
+    prior ~= Box(input.items)
+    target ~= Box(prior.items)
+;
+"#;
+
+#[test]
+fn first_heap_definition_matches_retirement_with_sparse_facts() {
+    with_definition_probe(ENTRY_BOX_DEFINITION, |checker, layout| {
+        let (prior, prior_block, prior_definition) = definition_named(checker, &layout, "prior");
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let input = local_index_named(checker, &layout, "input");
+        let (field, child_value) = constructor_field(checker.module, definition);
+        let mut state = BorrowState::new_uninitialized(layout.local_count());
+        state.initialize_parameter(input);
+        transfer_isolated_statement(checker, &layout, prior_block, prior_definition, &mut state)
+            .expect("the prefix constructor should store the immutable input child");
+        assert!(
+            !state.layer_is_empty(),
+            "retirement must have sparse state to scan"
+        );
+        assert!(state.has_pristine_alloc_binding(target));
+        assert!(layout.local_has_in_place_mutation_surface[target]);
+        assert_eq!(layout.acyclic_entry_block, Some(block.id));
+        assert_eq!(
+            layout.local_first_write_order[target],
+            layout.statement_order_or_unknown(definition.id)
+        );
+
+        let mut retirement_state = state.clone();
+        let mut retirement_layout = layout.clone();
+        retirement_layout.acyclic_entry_block = None;
+        let entry_facts =
+            transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+                .expect("the entry definition should keep the captured child");
+        let retirement_facts = transfer_isolated_statement(
+            checker,
+            &retirement_layout,
+            block,
+            definition,
+            &mut retirement_state,
+        )
+        .expect("the same definition should also work with full retirement");
+        assert_eq!(state, retirement_state);
+        assert_eq!(
+            entry_facts.statement_facts,
+            retirement_facts.statement_facts
+        );
+        assert_eq!(entry_facts.value_facts, retirement_facts.value_facts);
+        let (_, child_fact) = entry_facts
+            .value_facts
+            .iter()
+            .find(|(value, _)| *value == child_value)
+            .expect("the incoming projected read should publish a value fact");
+        assert_eq!(
+            child_fact.classification,
+            ValueAccessClassification::SharedRead
+        );
+        assert_eq!(child_fact.roots, [layout.local_ids[prior]]);
+
+        let retained = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        let original = state.resolve_alloc_path(input, &layout.local_mutable, [field]);
+        assert!(retained.layer_only);
+        assert_eq!(retained.ids, original.ids);
+        assert!(
+            retained.readonly,
+            "the mutable holders must not grant write permission"
+        );
+        assert_eq!(retained.readonly_source, Some(input));
+    });
+}
+
+#[test]
+fn reentered_heap_definition_rebases_the_captured_and_retained_child() {
+    let source = r#"
+Box = |items {I32}|
+probe |prior Box, flag Bool|:
+    loop flag:
+        target ~= Box(prior.items)
+        retained = target.items
+        observed = retained.length()
+    ;
+;
+"#;
+    with_definition_probe(source, |checker, layout| {
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let (retained, alias_block, alias_definition) =
+            definition_named(checker, &layout, "retained");
+        let prior = local_index_named(checker, &layout, "prior");
+        let (field, _) = constructor_field(checker.module, definition);
+        let count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(count);
+        // Seed the previous dynamic binding and its carried provenance at the statement
+        // frontier, without the CFG driver's lexical-scope kills.
+        state.update_local_state(target, LocalState::slot(count));
+        let mut roots = RootSet::empty(count);
+        roots.insert(target);
+        state.update_local_state(
+            prior,
+            LocalState::slot_with_value_roots(roots, RootSet::empty(count)),
+        );
+        transfer_isolated_statement(checker, &layout, alias_block, alias_definition, &mut state)
+            .expect("the previous iteration should retain the old projected value");
+        let old = state.resolve_local_allocs(retained);
+        assert!(old.layer_only && !old.readonly);
+        assert_ne!(layout.acyclic_entry_block, Some(block.id));
+
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("re-entry must retire the old binding without losing the capture");
+        let retained = state.resolve_local_allocs(retained);
+        let captured = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        assert_ne!(retained.ids, old.ids);
+        assert_eq!(captured.ids, retained.ids);
+        assert_eq!(retained.ids.len(), 1);
+        assert_eq!(state.alloc_origin_local(retained.ids[0]), Some(target));
+        assert!(
+            !state.alloc_singular(retained.ids[0]),
+            "the old child must be retired"
+        );
+        assert!(
+            !retained.readonly,
+            "the older projection keeps its permission"
+        );
+        assert!(
+            captured.readonly,
+            "the incoming capture came through immutable prior"
+        );
+    });
+}
+
+#[test]
+fn entry_definition_rebases_a_root_first_interned_by_capture() {
+    with_definition_probe(ENTRY_BOX_DEFINITION, |checker, layout| {
+        let (prior, _, _) = definition_named(checker, &layout, "prior");
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let (field, _) = constructor_field(checker.module, definition);
+        let count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(count);
+        // Valid acyclic execution cannot carry the uninitialized target through prior. Seed
+        // just that coarse provenance to exercise the guard when RHS capture interns the root.
+        let mut roots = RootSet::empty(count);
+        roots.insert(target);
+        state.update_local_state(
+            prior,
+            LocalState::slot_with_value_roots(roots, RootSet::empty(count)),
+        );
+        assert_eq!(layout.acyclic_entry_block, Some(block.id));
+        assert!(state.layer_is_empty());
+        assert!(state.has_pristine_alloc_binding(target));
+
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("the captured child must be rebased rather than attached to itself");
+        let captured = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        let new_root = state.resolve_local_allocs(target).ids[0];
+        assert!(captured.layer_only && !captured.readonly);
+        assert_eq!(captured.ids.len(), 1);
+        let child = captured.ids[0];
+        assert_ne!(child, state.alloc_child(new_root, field));
+        assert_eq!(state.alloc_origin_local(child), Some(target));
+        assert!(!state.alloc_singular(child));
+    });
 }
 
 #[test]
@@ -1625,6 +1738,93 @@ fn local_named(
         .unwrap_or_else(|| panic!("fixture local {name} should lower"))
 }
 
+fn with_definition_probe(source: &str, check: impl FnOnce(&BorrowChecker<'_>, FunctionLayout)) {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("definition fixture should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("complete definition fixture should be valid HIR");
+    let function = module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|name| string_table.resolve(name) == "probe")
+        })
+        .expect("probe should lower to HIR");
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
+    let reachable = checker
+        .collect_reachable_blocks(function)
+        .expect("fixture CFG should be reachable");
+    let layout = checker
+        .build_function_layout(function, &reachable)
+        .expect("fixture layout should build");
+    check(&checker, layout);
+}
+
+fn local_index_named(checker: &BorrowChecker<'_>, layout: &FunctionLayout, name: &str) -> usize {
+    let local = local_named(
+        checker.module,
+        checker.path_fork,
+        checker.string_table,
+        name,
+    );
+    layout
+        .index_of(local)
+        .expect("local should be in the layout")
+}
+
+fn definition_named<'a>(
+    checker: &BorrowChecker<'a>,
+    layout: &FunctionLayout,
+    name: &str,
+) -> (usize, &'a HirBlock, &'a HirStatement) {
+    let index = local_index_named(checker, layout, name);
+    let local = layout.local_ids[index];
+    checker
+        .module
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block.statements.iter().find_map(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(id),
+                        ..
+                    } if *id == local
+                )
+                .then_some((index, block, statement))
+            })
+        })
+        .unwrap_or_else(|| panic!("{name} should have an ordinary definition"))
+}
+
+fn constructor_field(module: &HirModule, definition: &HirStatement) -> (FieldKey, HirValueId) {
+    let HirStatementKind::Write { value, .. } = &definition.kind else {
+        panic!("fixture must define the constructor through a write");
+    };
+    let HirExpressionKind::StructConstruct { fields, .. } =
+        &module.expressions.expression(*value).kind
+    else {
+        panic!("fixture must have a struct constructor");
+    };
+    let &[(field, child)] = module.expressions.struct_fields(*fields) else {
+        panic!("fixture constructor must have one field");
+    };
+    (FieldKey::Field(field.0), child)
+}
+
 fn is_local_update(module: &HirModule, statement: &HirStatement, target: LocalId) -> bool {
     matches!(
         &statement.kind,
@@ -1707,7 +1907,7 @@ fn transfer_isolated_statement(
     original_block: &HirBlock,
     statement: &HirStatement,
     state: &mut BorrowState,
-) -> Result<(), BorrowCheckError> {
+) -> Result<BlockTransferStats, BorrowCheckError> {
     let transfer_context = BorrowTransferContext {
         external_package_registry: checker.external_package_registry,
         public_call_summaries: &checker.public_call_summaries,
@@ -1737,5 +1937,5 @@ fn transfer_isolated_statement(
             kind: RuntimeFailureKind::NoMatchFallback,
         },
     };
-    transfer_block(&transfer_context, layout, &isolated_block, state).map(|_| ())
+    transfer_block(&transfer_context, layout, &isolated_block, state)
 }

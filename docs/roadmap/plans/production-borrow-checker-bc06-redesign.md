@@ -11,13 +11,13 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Item | Value |
 | --- | --- |
 | Branch | `docs/const-foundation-profile-independent-semantics` |
-| Published baseline | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
-| Candidate | Set aside. The holder-edge diff on that base (9 files, +697/-63) is preserved as the reference `tmp/bc06/holder_edges_candidate.patch` (sha256 `289e0a74…6d83d81`). |
+| Stage 5 comparator | `7cc05c61bf5d4b6de23abfeec8a67d9623be971d` |
+| Slice 1 | The verified cap-free release build is `a08f2d820e3ed`. Its parent `0e95895fd5` is the user-pushed review base, not the Slice 1 checkpoint. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
-| Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. The candidate fails the performance guard on 5 of the 18 workloads with identical work counters, so dense per-local edge sets are ruled out. The chosen design adds a sparse allocation layer to the existing checker. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions), [5](#section-5-conclusions) and [6](#section-6-conclusions). |
-| Next task | Keep Slice 1 uncommitted at the retirement-elision candidate's failed guard. Keep Slice 2 and shared runtime lowering off. |
-| Next unanswered question | Profile eligibility at ordinary heap `DefineLocal` writes, where the remaining aggregate retirement occurs, and isolate the sibling-loop RSS variance independently? |
+| Last established result | The sparse allocation layer passed all 18 unchanged guard workloads. The original 3,323-case differential has no new acceptances and only the approved hashmap rejection. The earlier holder-edge prototype is historical evidence, not a restart point. |
+| Next task | Keep Slice 2 and C4 shared runtime lowering paused. |
+| Next unanswered question | On owner approval, validate conditional result sharing and per-lane stores in Slice 2. The extra int64 timing miss does not justify more retirement changes. |
 
 **Slice 1 pause.** The sparse draft accepts W1c and renders `20`. Its
 dynamic-index control renders `20 / 21`, while W1 and W1b still reject
@@ -189,6 +189,37 @@ use the same 50,380,800 B as the archive. Do not change storage or
 relax the guard on this evidence. See
 `tmp/bc06-review/retirement-status.md` for the fingerprint, all
 receipts and the attributed profiles. No B1 checkpoint.
+
+**Ordinary heap definition candidate (base `0e95895fd5`).** The
+pre-edit census on `aggregate-forwarding-128` found 1,534 paid
+retirements across 767 eligible ordinary sites, with 773 additional
+executions already using an empty sparse layer. The shared proof
+now covers the first heap definition in a predecessor-free entry
+block. It checks the incoming state and skips retirement only if
+capture did not materialise the old root. Loop revisits, `Update`
+and `Invoke` keep the original transfer. Tests compare state and
+published facts with unconditional retirement, keep an old projected
+child across re-entry and exercise the post-capture veto.
+
+The release build `a08f2d820e3ed` passes the unchanged guard **18 of
+18**, with matching Stage 5 counters. In a separate paired replay,
+`aggregate-forwarding-128` check time fell from 22.234 to 18.767 ms
+and borrow time from 13.945 to 10.634 ms. The int64 case, outside the
+guard, still misses check time (12.916 / 12.373 ms). Observed
+`sibling-loops-64` spikes track private dirty allocator pages even
+as live bytes fall; they do not justify a storage redesign.
+
+All 225 owning Rust tests, 29 witnesses and 11 affected backend
+fixtures passed. Across the original 3,323 case IDs, only
+`hashmap_alias_struct_field_param_return` changed, with the approved
+rejection at `21:2`. `just boracle` and the standalone docs check
+passed. `just validate` reached 3,902 of 3,905 integration cases and
+exited 1: `runtime_call_fresh_box_forward_rejected` and
+`runtime_call_identity_fields_rejected` still accept (C4);
+`runtime_call_disjoint_result_fields` still rejects with
+`MOTH-BORROW-0007` at `10:12` (Slice 2). The expectations are unchanged.
+See `tmp/bc06-review/define-local-status.md` for the exact build,
+measurements and audit evidence.
 
 ## 1. Evidence inventory
 

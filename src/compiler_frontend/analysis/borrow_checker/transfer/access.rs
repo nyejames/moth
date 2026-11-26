@@ -241,6 +241,29 @@ fn record_shared_reads_in_pattern(
     Ok(())
 }
 
+/// Identify a first heap definition before its inputs can materialize allocation identities.
+fn first_heap_definition_index(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    block: BlockId,
+    order: OrderKey,
+    resolve_index: impl FnOnce() -> Option<usize>,
+) -> Option<usize> {
+    if layout.acyclic_entry_block == Some(block)
+        && order >= 0
+        && let Some(index) = resolve_index()
+        && layout.local_has_in_place_mutation_surface[index]
+        && layout.local_first_write_order[index] == order
+        && state.has_pristine_alloc_binding(index)
+    {
+        // Only parameters enter this block initialized. The prefix has never written this
+        // local, and a read cannot produce coarse observers of an uninitialized local.
+        Some(index)
+    } else {
+        None
+    }
+}
+
 /// WHAT: updates borrow state for a single assignment target, checking exclusivity invariants
 /// before committing the new state.
 ///
@@ -257,6 +280,8 @@ fn transfer_assign_target(
     target: &HirPlace,
     value: HirValueId,
     is_definition: bool,
+    local_index: Option<usize>,
+    pristine_definition: Option<usize>,
 ) -> Result<(), BorrowCheckError> {
     let transfer_context = context.context;
     let layout = context.layout;
@@ -279,13 +304,13 @@ fn transfer_assign_target(
         block_id,
     };
 
+    let Some(local_index) = local_index else {
+        return Err(transfer_context.diagnostics.internal_error(format!(
+            "Assignment target local '{}' is not in the active function layout",
+            transfer_context.diagnostics.local_name(target.root)
+        )));
+    };
     if !is_definition {
-        let Some(local_index) = layout.index_of(target.root) else {
-            return Err(transfer_context.diagnostics.internal_error(format!(
-                "Assignment target local '{}' is not in the active function layout",
-                transfer_context.diagnostics.local_name(target.root)
-            )));
-        };
         require_initialized_update_target(
             layout,
             state,
@@ -297,14 +322,6 @@ fn transfer_assign_target(
 
     match target.projections.is_empty() {
         true => {
-            let local_id = target.root;
-            let Some(local_index) = layout.index_of(local_id) else {
-                return Err(transfer_context.diagnostics.internal_error(format!(
-                    "Assignment target local '{}' is not in the active function layout",
-                    transfer_context.diagnostics.local_name(local_id)
-                )));
-            };
-
             let local_state = state.local_state(local_index).clone();
             // A mutable binding receiving a place becomes a mutable alias of it.
             let mutable_alias = rhs_is_place
@@ -454,8 +471,15 @@ fn transfer_assign_target(
                     mutable_alias,
                     value_expression.span.or(location),
                 )?;
-                let retirement = state.rebind_local(local_index, new_state, current_order);
-                captured.remap(state, retirement);
+                if let Some(retirement) = state.rebind_local_after_capture(
+                    local_index,
+                    new_state,
+                    current_order,
+                    pristine_definition,
+                    false,
+                ) {
+                    captured.remap(state, retirement);
+                }
                 captured.apply(state, local_index);
                 return Ok(());
             }
@@ -665,7 +689,7 @@ fn transfer_assign_target(
                 location,
                 span,
                 stats,
-                actor_index_hint: place_root_local_index(layout, target),
+                actor_index_hint: Some(local_index),
                 current_order,
             };
             check_mutable_access(

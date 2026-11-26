@@ -844,6 +844,30 @@ impl BorrowState {
         retirement
     }
 
+    /// Publish a binding after its incoming allocation facts have been captured.
+    pub(in super::super) fn rebind_local_after_capture(
+        &mut self,
+        local_index: usize,
+        new_state: LocalState,
+        order: OrderKey,
+        pristine_definition: Option<usize>,
+        eager_retirement: bool,
+    ) -> Option<AllocationRetirement> {
+        // Reads or capture can intern the old root. Every descendant requires that root too.
+        let retirement = if pristine_definition == Some(local_index)
+            && !self.alloc_root_is_interned(local_index)
+        {
+            None
+        } else if eager_retirement {
+            Some(self.retire_binding_allocation(local_index, order))
+        } else {
+            // Even an empty layer can need a token to remap a captured lazy child.
+            return Some(self.rebind_local(local_index, new_state, order));
+        };
+        self.update_local_state(local_index, new_state);
+        retirement
+    }
+
     /// Whether nothing in the layer can refer to this binding's old allocation or cells.
     ///
     /// The caller must independently rule out coarse observers. An absent root key excludes
@@ -869,7 +893,7 @@ impl BorrowState {
                 .is_err()
     }
 
-    pub(in super::super) fn alloc_root_is_interned(&self, local_index: usize) -> bool {
+    fn alloc_root_is_interned(&self, local_index: usize) -> bool {
         self.layer
             .table
             .borrow()

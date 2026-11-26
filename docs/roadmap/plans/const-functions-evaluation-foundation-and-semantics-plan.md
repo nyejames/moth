@@ -13,7 +13,7 @@
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
 **Current slice:** C4 preserves sharing across supported folded imports and const materialisations. Shared runtime lowering and Phase 5 still depend on the [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point).
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Resolve the BC-06 opaque-call convergence gate. Keep shared runtime lowering off until Slice 1 and Slice 2 pass on their implementing revisions.
+**Next action:** The BC-06 opaque-call convergence gate cleared in Slice 1. Keep Slice 2 paused and shared runtime lowering off. Resume shared lowering only after Slice 2 passes on its implementing revision.
 
 ## Global constraints
 
