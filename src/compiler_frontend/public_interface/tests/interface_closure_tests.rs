@@ -25,7 +25,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
+use crate::compiler_frontend::folded_value::{
+    FoldedAllocationDefinition, PublicFoldedField, PublicFoldedValue,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -412,6 +414,10 @@ fn nested_canonical_and_folded_identities_select_origins() {
     let folded_only_identity = CanonicalTypeIdentity::Option(Box::new(
         CanonicalTypeIdentity::SourceNominal(folded_only_origin.clone()),
     ));
+    let shared_record_type = CanonicalTypeIdentity::Collection {
+        element: Box::new(CanonicalTypeIdentity::AnonymousConstRecord),
+        fixed_capacity: None,
+    };
     let nested_map_identity = CanonicalTypeIdentity::OrderedMap {
         key: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
         value: Box::new(CanonicalTypeIdentity::SourceNominal(
@@ -437,11 +443,32 @@ fn nested_canonical_and_folded_identities_select_origins() {
                             value: PublicFoldedValue::Collection(Vec::new()),
                         },
                         PublicFoldedField {
-                            name: "optional".to_owned(),
-                            type_identity: folded_only_identity,
-                            value: PublicFoldedValue::OptionSome(Box::new(
-                                PublicFoldedValue::Record(Vec::new()),
-                            )),
+                            name: "definition".to_owned(),
+                            type_identity: shared_record_type.clone(),
+                            value: PublicFoldedValue::AllocationDefinition {
+                                index: 0,
+                                definition: Box::new(FoldedAllocationDefinition {
+                                    type_identity: shared_record_type.clone(),
+                                    value: PublicFoldedValue::Collection(vec![
+                                        PublicFoldedValue::Record(vec![PublicFoldedField {
+                                            name: "optional".to_owned(),
+                                            type_identity: folded_only_identity,
+                                            value: PublicFoldedValue::OptionSome(Box::new(
+                                                PublicFoldedValue::Record(Vec::new()),
+                                            )),
+                                        }]),
+                                    ]),
+                                    provenance: SyntheticInterfaceProvenance::empty(),
+                                }),
+                            },
+                        },
+                        PublicFoldedField {
+                            name: "reference".to_owned(),
+                            type_identity: shared_record_type,
+                            value: PublicFoldedValue::AllocationReference {
+                                index: 0,
+                                provenance: SyntheticInterfaceProvenance::empty(),
+                            },
                         },
                         PublicFoldedField {
                             name: "choice".to_owned(),

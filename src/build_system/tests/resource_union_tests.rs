@@ -9,13 +9,16 @@ use crate::build_system::resource_unions::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
-use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
-    PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedValue, PublicTemplateSlotKey,
+    FoldedAllocationDefinition, OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate,
+    PublicConstTemplateKind, PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedValue,
+    PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableResourceUse};
@@ -158,6 +161,39 @@ fn site_root_piece_is_not_a_resource_union_member() {
     );
 
     assert_eq!(union.origins(), &[live]);
+}
+
+#[test]
+fn shared_folded_definition_contributes_its_structural_resources_in_authored_order() {
+    let first = origin("assets/shared.svg");
+    let second = origin("assets/next.svg");
+    let string = |origin| {
+        PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::SiteRoot,
+            OwnedFoldedStringPiece::Resource(origin),
+        ]))
+    };
+    let folded = PublicFoldedValue::Collection(vec![
+        PublicFoldedValue::AllocationDefinition {
+            index: 0,
+            definition: Box::new(FoldedAllocationDefinition {
+                type_identity: CanonicalTypeIdentity::Collection {
+                    element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
+                    fixed_capacity: None,
+                },
+                value: PublicFoldedValue::Collection(vec![string(first.clone())]),
+                provenance: SyntheticInterfaceProvenance::empty(),
+            }),
+        },
+        PublicFoldedValue::Collection(vec![string(second.clone())]),
+        PublicFoldedValue::AllocationReference {
+            index: 0,
+            provenance: SyntheticInterfaceProvenance::empty(),
+        },
+    ]);
+    let mut union = ResourceOriginUnion::new();
+    append_public_folded_value(&mut union, &folded);
+    assert_eq!(union.origins(), &[first, second]);
 }
 
 #[test]

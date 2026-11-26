@@ -45,7 +45,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
-    convert_const_value_to_folded_value,
+    convert_const_value_to_folded_tree,
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -567,11 +567,8 @@ fn project_authored_config_declarations(
             continue;
         };
 
-        let value = convert_const_value_to_folded_value(
-            &ast.const_values,
-            value_id,
-            &folded_value_context,
-        )?;
+        let value =
+            convert_const_value_to_folded_tree(&ast.const_values, value_id, &folded_value_context)?;
         let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)?;
         if let PublicFoldedValue::Record(fields) = &value {
             if fields.len() != direct_field_spans.len() {

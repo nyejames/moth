@@ -345,8 +345,11 @@ pub(super) fn value_own_allocation(
     let Some(metadata) = constants.metadata(value) else {
         return (0, 0);
     };
-    let row_bytes = std::mem::size_of::<ConstValue>()
-        .saturating_add(metadata.synthetic_interface_provenance.owned_allocation_bytes());
+    let row_bytes = std::mem::size_of::<ConstValue>().saturating_add(
+        metadata
+            .synthetic_interface_provenance
+            .owned_allocation_bytes(),
+    );
     let Some(payload) = constants.owned_payload(value) else {
         return (row_bytes, 1);
     };

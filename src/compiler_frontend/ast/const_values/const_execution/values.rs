@@ -12,7 +12,8 @@ use super::{
     },
     state::{ConstInterpreter, FrameBindings},
     storage::{
-        AccessSite, AllocationId, LiveBinding, LivePlace, LiveStorage, LiveValue, Permission, StorageError,
+        AccessSite, AllocationId, LiveBinding, LivePlace, LiveStorage, LiveValue, Permission,
+        StorageError,
     },
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
@@ -22,7 +23,8 @@ use crate::compiler_frontend::ast::const_eval::{
     fold_completed_content, fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstValue, ConstValueCandidate, ConstValueField, ConstValueId, ConstValuePayload, ConstValueStore,
+    ConstValue, ConstValueCandidate, ConstValueField, ConstValueId, ConstValuePayload,
+    ConstValueStore, StagedValueBudget,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, CoercionOperation, ExprId, ExpressionOperationView, SuccessShape,
@@ -45,6 +47,20 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+/// The live allocations for one folded graph evaluation, never shared across evaluations.
+#[derive(Default)]
+struct Materialisation {
+    allocations: FxHashMap<ConstValueId, Materialised>,
+    scratch_bytes: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Materialised {
+    value: LiveValue,
+    /// Number of compound nodes along the longest path, including this node.
+    compound_height: usize,
+}
 
 pub(super) fn constant_index(constants: &ConstValueStore, value: ConstValueId) -> Option<usize> {
     match constants.payload(value)? {
@@ -180,21 +196,43 @@ fn replace_children(
     Ok(())
 }
 
+struct PublicationBudget<'a> {
+    execution: &'a mut ExecutionBudget,
+    scratch: &'a mut usize,
+}
+
+impl StagedValueBudget<ConstantFoldError> for PublicationBudget<'_> {
+    fn step(&mut self) -> Result<(), ConstantFoldError> {
+        self.execution.step()
+    }
+
+    fn charge_scratch(&mut self, bytes: usize) -> Result<(), ConstantFoldError> {
+        self.execution.charge_scratch(self.scratch, bytes)
+    }
+
+    fn release_scratch(&mut self, bytes: usize) {
+        *self.scratch -= bytes;
+        self.execution.release_memory_bytes(bytes);
+    }
+}
+
 /// Allocation identities are local to one ordered publication transaction.
 #[derive(Default)]
 struct FreezeMemo {
     allocations: FxHashMap<AllocationId, (ConstValueId, ConstValueId)>,
     occurrences: FxHashMap<(AllocationId, ConstValueId), ConstValueId>,
+    scratch_bytes: usize,
 }
 
 fn freeze_staged(
     candidate: &mut ConstValueCandidate<'_>,
     storage: &LiveStorage,
-    budget: &mut ExecutionBudget,
+    publication: &mut PublicationBudget<'_>,
     value: LiveValue,
     depth: usize,
     memo: &mut FreezeMemo,
 ) -> Result<ConstValueId, ConstantFoldError> {
+    let budget = &mut *publication.execution;
     budget.step()?;
     check_depth(depth, budget.span)?;
     let Some(allocation) = value.allocation else {
@@ -209,64 +247,104 @@ fn freeze_staged(
         }
         let definition_payload = candidate.payload(definition).ok_or_else(value_invariant)?;
         let occurrence_payload = candidate.payload(value.shape).ok_or_else(value_invariant)?;
-        if std::mem::discriminant(definition_payload) != std::mem::discriminant(occurrence_payload) {
+        if std::mem::discriminant(definition_payload) != std::mem::discriminant(occurrence_payload)
+        {
             return Err(value_invariant());
         }
         retain_scratch::<ConstValue>(budget, 1)?;
-        let metadata = candidate.metadata(value.shape).ok_or_else(value_invariant)?;
+        let metadata = candidate
+            .metadata(value.shape)
+            .ok_or_else(value_invariant)?;
         budget.retain_memory_bytes(
-            metadata.synthetic_interface_provenance.owned_allocation_bytes(),
+            metadata
+                .synthetic_interface_provenance
+                .owned_allocation_bytes(),
             budget.span,
         )?;
         let metadata = metadata.clone();
+        budget.charge_scratch(
+            &mut memo.scratch_bytes,
+            std::mem::size_of::<((AllocationId, ConstValueId), ConstValueId)>(),
+        )?;
+        candidate.reserve_staged_row(publication)?;
         let id = candidate.insert_shared_occurrence(metadata, definition)?;
-        retain_scratch::<((AllocationId, ConstValueId), ConstValueId)>(budget, 1)?;
         memo.occurrences.insert((allocation, value.shape), id);
         return Ok(id);
     }
     let payload = candidate.payload(value.shape).ok_or_else(value_invariant)?;
+    let collection = matches!(payload, ConstValuePayload::Collection(_));
     let count = storage.children(allocation).len();
-    if !matches!(payload, ConstValuePayload::Collection(_)) && count != child_count(payload) {
+    if !collection && count != child_count(payload) {
         return Err(value_invariant());
     }
-    retain_scratch::<ConstValueId>(budget, count)?;
+    let child_bytes = count.saturating_mul(std::mem::size_of::<ConstValueId>());
+    if collection {
+        retain_scratch::<ConstValueId>(budget, count)?;
+    } else {
+        publication.charge_scratch(child_bytes)?;
+    }
     let mut children = Vec::with_capacity(count);
     for child in storage.children(allocation) {
-        children.push(freeze_staged(candidate, storage, budget, child, depth + 1, memo)?);
+        children.push(freeze_staged(
+            candidate,
+            storage,
+            publication,
+            child,
+            depth + 1,
+            memo,
+        )?);
     }
+    let budget = &mut *publication.execution;
     let payload = candidate.payload(value.shape).ok_or_else(value_invariant)?;
     let bytes = match payload {
-        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } =>
-            fields.len().saturating_mul(std::mem::size_of::<ConstValueField>()),
+        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => fields
+            .len()
+            .saturating_mul(std::mem::size_of::<ConstValueField>()),
         _ => 0,
     };
     retain_scratch::<ConstValue>(budget, 1)?;
-    if !matches!(payload, ConstValuePayload::Collection(_)) {
+    if !collection {
         budget.retain_values(count, budget.span)?;
     }
     budget.retain_memory_bytes(bytes, budget.span)?;
-    let payload = if matches!(payload, ConstValuePayload::Collection(_)) {
+    let payload = if collection {
         ConstValuePayload::Collection(children)
     } else {
         let mut payload = payload.clone();
         replace_children(&mut payload, &children)?;
+        drop(children);
+        publication.release_scratch(child_bytes);
         payload
     };
-    let metadata = candidate.metadata(value.shape).ok_or_else(value_invariant)?;
+    let budget = &mut *publication.execution;
+    let metadata = candidate
+        .metadata(value.shape)
+        .ok_or_else(value_invariant)?;
     budget.retain_memory_bytes(
-        metadata.synthetic_interface_provenance.owned_allocation_bytes(),
+        metadata
+            .synthetic_interface_provenance
+            .owned_allocation_bytes(),
         budget.span,
     )?;
     let metadata = metadata.clone();
+    budget.charge_scratch(
+        &mut memo.scratch_bytes,
+        std::mem::size_of::<(AllocationId, (ConstValueId, ConstValueId))>(),
+    )?;
+    candidate.reserve_staged_row(publication)?;
     let definition = candidate.insert_value(metadata, payload)?;
     candidate.mark_shared_allocation(definition)?;
-    retain_scratch::<(AllocationId, (ConstValueId, ConstValueId))>(budget, 1)?;
-    memo.allocations.insert(allocation, (definition, value.shape));
+    memo.allocations
+        .insert(allocation, (definition, value.shape));
     Ok(definition)
 }
 
 fn expanded_child_count(payload: &ConstValuePayload) -> usize {
-    if matches!(payload, ConstValuePayload::Range { .. }) { 2 } else { child_count(payload) }
+    if matches!(payload, ConstValuePayload::Range { .. }) {
+        2
+    } else {
+        child_count(payload)
+    }
 }
 
 fn expanded_child_at(payload: &ConstValuePayload, index: usize) -> Option<ConstValueId> {
@@ -277,46 +355,72 @@ fn expanded_child_at(payload: &ConstValuePayload, index: usize) -> Option<ConstV
     }
 }
 
-/// Count the tree each postorder consumer will visit, without expanding repeated edges.
+struct OccurrenceCountFrame<'a> {
+    definition: ConstValueId,
+    payload: &'a ConstValuePayload,
+    next_child: usize,
+    count: usize,
+}
+
+/// Count tree visits for downstream occurrence walkers. Memoize definition work, but include
+/// the subtree's full count once for every incoming edge and once for every root occurrence.
 fn expanded_occurrences(
     candidate: &ConstValueCandidate<'_>,
     roots: &[ConstValueId],
     budget: &mut ExecutionBudget,
 ) -> Result<usize, ConstantFoldError> {
-    let mut counts = FxHashMap::<ConstValueId, usize>::default();
-    let mut pending = Vec::new();
-    let mut held = 0;
-    let result = (|| {
+    budget.with_scratch(|budget, held| {
+        let mut counts = FxHashMap::<ConstValueId, usize>::default();
+        let mut pending = Vec::<OccurrenceCountFrame<'_>>::new();
+        let mut total = 0usize;
         for &root in roots {
-            budget.reserve_scratch(&mut pending, 1, &mut held)?;
-            pending.push((root, false));
-            while let Some((id, finish)) = pending.pop() {
-                if counts.contains_key(&id) {
-                    continue;
-                }
-                let payload = candidate.payload(id).ok_or_else(value_invariant)?;
-                if finish {
-                    let mut count = 1usize;
-                    for index in 0..expanded_child_count(payload) {
-                        let child = expanded_child_at(payload, index).ok_or_else(value_invariant)?;
-                        count = count.saturating_add(*counts.get(&child).ok_or_else(value_invariant)?);
+            budget.step()?;
+            let mut occurrence = Some(root);
+            loop {
+                let completed = if let Some(id) = occurrence.take() {
+                    let definition = candidate
+                        .allocation_definition(id)
+                        .ok_or_else(value_invariant)?;
+                    if let Some(&count) = counts.get(&definition) {
+                        Some(count)
+                    } else {
+                        budget.step()?;
+                        let payload = candidate.payload(definition).ok_or_else(value_invariant)?;
+                        budget.reserve_scratch(&mut pending, 1, held)?;
+                        pending.push(OccurrenceCountFrame {
+                            definition,
+                            payload,
+                            next_child: 0,
+                            count: 1,
+                        });
+                        None
                     }
-                    budget.charge_scratch(&mut held, std::mem::size_of::<(ConstValueId, usize)>())?;
-                    counts.insert(id, count);
                 } else {
-                    let count = expanded_child_count(payload);
-                    budget.reserve_scratch(&mut pending, count.saturating_add(1), &mut held)?;
-                    pending.push((id, true));
-                    for index in 0..count {
-                        pending.push((expanded_child_at(payload, index).ok_or_else(value_invariant)?, false));
-                    }
+                    let frame = pending.pop().expect("active definition");
+                    budget.charge_scratch(held, std::mem::size_of::<(ConstValueId, usize)>())?;
+                    counts.insert(frame.definition, frame.count);
+                    Some(frame.count)
+                };
+                if let Some(count) = completed {
+                    let Some(parent) = pending.last_mut() else {
+                        total = total.saturating_add(count);
+                        break;
+                    };
+                    parent.count = parent.count.saturating_add(count);
+                }
+                let frame = pending.last_mut().expect("active definition");
+                if frame.next_child < expanded_child_count(frame.payload) {
+                    budget.step()?;
+                    occurrence = Some(
+                        expanded_child_at(frame.payload, frame.next_child)
+                            .ok_or_else(value_invariant)?,
+                    );
+                    frame.next_child += 1;
                 }
             }
         }
-        Ok(roots.iter().fold(0usize, |sum, root| sum.saturating_add(counts[root])))
-    })();
-    budget.release_memory_bytes(held);
-    result
+        Ok(total)
+    })
 }
 
 impl ConstInterpreter<'_> {
@@ -459,7 +563,26 @@ impl ConstInterpreter<'_> {
         shape: ConstValueId,
         permission: Permission,
     ) -> Result<LiveValue, ConstantFoldError> {
-        self.materialize_at(shape, permission, 0)
+        let mut graph = Materialisation::default();
+        let result = self.materialize_at(shape, permission, 0, &mut graph);
+        self.budget.release_memory_bytes(graph.scratch_bytes);
+        result.map(|materialised| materialised.value)
+    }
+
+    pub(super) fn materialize_result_slots(
+        &mut self,
+        shapes: Vec<ConstValueId>,
+    ) -> Result<Vec<LiveValue>, ConstantFoldError> {
+        let mut graph = Materialisation::default();
+        let result = shapes
+            .into_iter()
+            .map(|shape| {
+                self.materialize_at(shape, Permission::Writable, 0, &mut graph)
+                    .map(|materialised| materialised.value)
+            })
+            .collect();
+        self.budget.release_memory_bytes(graph.scratch_bytes);
+        result
     }
 
     fn materialize_at(
@@ -467,7 +590,8 @@ impl ConstInterpreter<'_> {
         shape: ConstValueId,
         permission: Permission,
         depth: usize,
-    ) -> Result<LiveValue, ConstantFoldError> {
+        graph: &mut Materialisation,
+    ) -> Result<Materialised, ConstantFoldError> {
         let payload = self.constants.payload(shape).ok_or_else(value_invariant)?;
         let count = child_count(payload);
         let compound = matches!(
@@ -479,25 +603,60 @@ impl ConstInterpreter<'_> {
                 | ConstValuePayload::OptionSome(_)
         );
         if !compound {
-            return Ok(LiveValue::leaf(shape, permission));
+            return Ok(Materialised {
+                value: LiveValue::leaf(shape, permission),
+                compound_height: 0,
+            });
         }
         self.budget.step()?;
         check_depth(depth, self.budget.span)?;
-        retain_scratch::<LiveValue>(self.budget, count)?;
-        let mut children = Vec::with_capacity(count);
-        for index in 0..count {
-            let child = child_at(
-                self.constants.payload(shape).ok_or_else(value_invariant)?,
-                index,
-            )
-            .ok_or_else(value_invariant)?;
-            children.push(self.materialize_at(child, permission, depth + 1)?);
+        let definition = self.constants.shared_allocation(shape);
+        if let Some(definition) = definition
+            && let Some(&cached) = graph.allocations.get(&definition)
+        {
+            // Sharing removes duplicate allocation work, not the semantic depth limit at
+            // each occurrence. A shallow first encounter can have a deeper consumer.
+            check_depth(depth + cached.compound_height - 1, self.budget.span)?;
+            let mut materialised = cached;
+            materialised.value.shape = shape;
+            materialised.value.permission = permission;
+            return Ok(materialised);
         }
-        let mut result = self
-            .state
-            .storage
-            .allocate(shape, children.into_iter(), self.budget)?;
-        result.permission = permission;
+        let mut child_scratch = 0;
+        let result = (|| {
+            self.budget
+                .charge_scratch(&mut child_scratch, count * std::mem::size_of::<LiveValue>())?;
+            let mut children = Vec::with_capacity(count);
+            let mut height = 0;
+            for index in 0..count {
+                let child = child_at(
+                    self.constants.payload(shape).ok_or_else(value_invariant)?,
+                    index,
+                )
+                .ok_or_else(value_invariant)?;
+                let child = self.materialize_at(child, permission, depth + 1, graph)?;
+                height = height.max(child.compound_height);
+                children.push(child.value);
+            }
+            let mut value =
+                self.state
+                    .storage
+                    .allocate(shape, children.into_iter(), self.budget)?;
+            value.permission = permission;
+            Ok::<_, ConstantFoldError>(Materialised {
+                value,
+                compound_height: height + 1,
+            })
+        })();
+        self.budget.release_memory_bytes(child_scratch);
+        let result = result?;
+        if let Some(definition) = definition {
+            self.budget.charge_scratch(
+                &mut graph.scratch_bytes,
+                std::mem::size_of::<(ConstValueId, Materialised)>(),
+            )?;
+            graph.allocations.insert(definition, result);
+        }
         Ok(result)
     }
 
@@ -562,7 +721,8 @@ impl ConstInterpreter<'_> {
         let mut held = 0;
         let validation = (|| {
             let mut pending = Vec::new();
-            self.budget.reserve_scratch(&mut pending, values.len(), &mut held)?;
+            self.budget
+                .reserve_scratch(&mut pending, values.len(), &mut held)?;
             pending.extend_from_slice(values);
             let mut seen = FxHashSet::default();
             while let Some(value) = pending.pop() {
@@ -570,10 +730,12 @@ impl ConstInterpreter<'_> {
                 if let Some(allocation) = value.allocation
                     && !seen.contains(&allocation)
                 {
-                    self.budget.charge_scratch(&mut held, std::mem::size_of::<AllocationId>())?;
+                    self.budget
+                        .charge_scratch(&mut held, std::mem::size_of::<AllocationId>())?;
                     seen.insert(allocation);
                     let children = self.state.storage.children(allocation);
-                    self.budget.reserve_scratch(&mut pending, children.len(), &mut held)?;
+                    self.budget
+                        .reserve_scratch(&mut pending, children.len(), &mut held)?;
                     pending.extend(children);
                 }
             }
@@ -587,17 +749,40 @@ impl ConstInterpreter<'_> {
         let start = self.constants.value_count();
         charge_new_value_text(self.constants, self.string_table, start, self.budget)?;
         let storage = &self.state.storage;
-        let budget = &mut *self.budget;
-        let mut memo = FreezeMemo::default();
-        let roots = self.constants.stage_values(|candidate| {
-            let mut roots = Vec::with_capacity(values.len());
-            for &value in values {
-                roots.push(freeze_staged(candidate, storage, budget, value, 0, &mut memo)?);
-            }
-            let occurrences = expanded_occurrences(candidate, &roots, budget)?;
-            budget.retain_values(occurrences, budget.span)?;
-            Ok::<_, ConstantFoldError>(Some(roots))
-        })?.ok_or_else(value_invariant)?;
+        let roots = self
+            .budget
+            .with_scratch(|execution, scratch| {
+                let mut budget = PublicationBudget { execution, scratch };
+                self.constants
+                    .stage_values_with_budget(&mut budget, |candidate, budget| {
+                        budget.charge_scratch(
+                            values
+                                .len()
+                                .saturating_mul(std::mem::size_of::<ConstValueId>()),
+                        )?;
+                        let mut roots = Vec::with_capacity(values.len());
+                        let mut memo = FreezeMemo::default();
+                        let frozen = (|| {
+                            for &value in values {
+                                roots.push(freeze_staged(
+                                    candidate, storage, budget, value, 0, &mut memo,
+                                )?);
+                            }
+                            Ok::<_, ConstantFoldError>(())
+                        })();
+                        let memo_bytes = memo.scratch_bytes;
+                        drop(memo);
+                        budget.execution.release_memory_bytes(memo_bytes);
+                        frozen?;
+                        let occurrences =
+                            expanded_occurrences(candidate, &roots, budget.execution)?;
+                        budget
+                            .execution
+                            .retain_values(occurrences, budget.execution.span)?;
+                        Ok::<_, ConstantFoldError>(Some(roots))
+                    })
+            })?
+            .ok_or_else(value_invariant)?;
         for index in start..self.constants.value_count() {
             register_precharged_value(self.constants, self.string_table, index, self.budget)?;
         }
@@ -748,7 +933,9 @@ pub(super) fn attach_live_provenance(
     let (bytes, slots) = if constants.shared_allocation(value).is_some() {
         (
             std::mem::size_of::<ConstValue>().saturating_add(
-                metadata.synthetic_interface_provenance.owned_allocation_bytes(),
+                metadata
+                    .synthetic_interface_provenance
+                    .owned_allocation_bytes(),
             ),
             1,
         )
@@ -989,3 +1176,7 @@ pub(super) fn constant_result_block_slots(
     }
     Ok(Some(slots))
 }
+
+#[cfg(test)]
+#[path = "tests/publication.rs"]
+mod publication_tests;

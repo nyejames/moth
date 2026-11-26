@@ -809,7 +809,9 @@ fn fold_value_callback_failure_precedes_later_field_lookup() {
             .expect("valid field edges");
         // Corrupt a private row after construction to exercise the field lookup invariant.
         let fields = match &mut store.values[root.index()].payload {
-            Some(ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. }) => fields,
+            Some(ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. }) => {
+                fields
+            }
             _ => panic!("record or choice root"),
         };
         fields[1].value = ConstValueId(u32::MAX);

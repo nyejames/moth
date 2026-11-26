@@ -214,11 +214,18 @@ pub(crate) fn append_public_folded_value(
             append_public_folded_value(union, end);
         }
         PublicFoldedValue::OptionSome(value) => append_public_folded_value(union, value),
+        PublicFoldedValue::AllocationDefinition { definition, .. } => {
+            append_public_folded_value(union, &definition.value);
+        }
+        PublicFoldedValue::AllocationCoercion { value, .. } => {
+            append_public_folded_value(union, value);
+        }
         PublicFoldedValue::FixedScalar(_)
         | PublicFoldedValue::Number(_)
         | PublicFoldedValue::Bool(_)
         | PublicFoldedValue::Char(_)
-        | PublicFoldedValue::OptionNone => {}
+        | PublicFoldedValue::OptionNone
+        | PublicFoldedValue::AllocationReference { .. } => {}
     }
 }
 

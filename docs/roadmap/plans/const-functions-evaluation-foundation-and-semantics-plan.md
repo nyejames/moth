@@ -11,9 +11,9 @@
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
-**Current slice:** C4's store transaction landed in `4f976cca92`. The [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point) still gates shared runtime lowering and Phase 5.
+**Current slice:** C4 preserves sharing across supported folded imports and const materialisations. Shared runtime lowering and Phase 5 still depend on the [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point).
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Preserve graph-local allocation references in the public folded-value interface and in const materialisation. Resume BC-06 Slice 1 in parallel. Keep shared runtime lowering off until Slice 1 and Slice 2 pass on their implementing revisions.
+**Next action:** Resolve the BC-06 opaque-call convergence gate. Keep shared runtime lowering off until Slice 1 and Slice 2 pass on their implementing revisions.
 
 ## Global constraints
 
@@ -874,11 +874,36 @@ enable unsupported whole nominal imports. Shared runtime lowering stays
 behind the BC-06 Slice 1 and Slice 2 controls. The experiment isn't part of
 the branch.
 
-The store review also found two metering gaps. The expansion preflight keys
-its memo by occurrence rather than definition and doesn't charge traversal
-steps. Promotion reserves destination rows and remapping scratch while the
-staged suffix remains live. Fix both under the existing limits before C4
-closes.
+**Folded import checkpoint.** The existing folded-value interface emits
+an inline definition at the first occurrence of a shared allocation and
+references it thereafter. Definition indices are local to one root and
+follow authored order. The shared decoder accepts references only to
+completed, type-compatible definitions. It remaps them into the consuming
+store for both exported values and retained provider-private constants.
+Read-only config metadata still consumes trees. The provider interface
+comparison distinguishes shared from equal-distinct allocations without
+depending on store row numbers or physical source spans.
+
+Const materialisation reuses a definition within one evaluation, including
+across ordered result slots. Separate evaluations stay independent.
+Occurrence depth, type, provenance and permission still apply on a memo
+hit. The preflight visits each allocation definition once and charges
+traversal steps while counting every expanded occurrence for remaining tree
+consumers. Promotion charges staged and destination capacity plus remapping
+scratch before publishing. A refused transaction leaves existing rows
+intact.
+
+The independent C4 candidate passed 358 const tests, 20 store tests and
+the focused graph, type closure, resource union and build-service parity
+checks. `const_function_folded_graph_import_success` passed on both debug
+and release compilers. Shared and equal-distinct folded values report
+child lengths `2, 2, 1, 1` in local/shared, imported/shared,
+local/distinct and imported/distinct order. The fixture also checks copy
+independence, imported callable construction, a provider-private folded
+constant and separate evaluations. It observes the graph inside const
+execution, not through shared runtime lowering.
+Both profiles still reject the separate whole nominal import at `39:11`
+with `MOTH-RULE-0068`.
 
 On the linked prototype, 500 focused Rust tests, 177 borrow-tagged checks
 and 163 const-tagged checks passed. Formatting and Clippy passed. The real

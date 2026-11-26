@@ -20634,6 +20634,13 @@ contract = "language.functions.imported_const_function_retains_compile_time_clas
 role = "primary"
 
 [[case]]
+id = "const_function_folded_graph_import_success"
+path = "const_function_folded_graph_import_success"
+tags = ["integration", "functions", "const", "imports", "collections"]
+contract = "language.functions.const_folded_graph_import_preserves_sharing"
+role = "primary"
+
+[[case]]
 id = "const_function_runtime_argument_rejected"
 path = "const_function_runtime_argument_rejected"
 tags = ["integration", "functions", "const", "diagnostics"]

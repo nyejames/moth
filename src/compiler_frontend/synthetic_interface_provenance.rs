@@ -102,7 +102,9 @@ impl SyntheticInterfaceProvenance {
 
     /// Heap storage owned by this provenance, excluding the inline value itself.
     pub(crate) fn owned_allocation_bytes(&self) -> usize {
-        let mut bytes = self.members.capacity()
+        let mut bytes = self
+            .members
+            .capacity()
             .saturating_mul(std::mem::size_of::<SyntheticInterfaceMemberIdentity>());
         for member in &self.members {
             bytes = bytes.saturating_add(member.interface.capacity());

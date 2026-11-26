@@ -1,0 +1,71 @@
+@provider shared_value, distinct_value, make_shared, make_distinct, read_private
+
+local_shared #|| -> {{I32}}:
+    child ~= {1}
+    return {child, child}
+;
+
+local_distinct #|| -> {{I32}}:
+    return {{1}, {1}}
+;
+
+local_shared_value #= local_shared()
+local_distinct_value #= local_distinct()
+
+-- The tens digit is the copied sibling's length; the units digit is the source child's.
+observe #|source {{I32}}| -> I32:
+    owned ~= copy source
+    child ~= ~owned.remove(0) catch:
+        return -1
+    ;
+    ~child.push(2)
+    sibling = owned.get(0) catch:
+        return -2
+    ;
+    original = source.get(0) catch:
+        return -3
+    ;
+    return sibling.length() * 10 + original.length()
+;
+
+-- The nested calls run inside the observer's const evaluation, not as folded arguments.
+observe_local_call #|shared Bool| -> I32:
+    if shared:
+        return observe(local_shared())
+    ;
+    return observe(local_distinct())
+;
+
+observe_imported_call #|shared Bool| -> I32:
+    if shared:
+        return observe(make_shared())
+    ;
+    return observe(make_distinct())
+;
+
+observe_private #|shared Bool| -> I32:
+    return observe(read_private(shared))
+;
+
+-- Evaluate the same constructor twice in one attempt. Mutate the first without copying.
+independent_calls #|| -> I32:
+    first ~= make_shared()
+    second = make_shared()
+    child ~= ~first.remove(0) catch:
+        return -1
+    ;
+    ~child.push(2)
+    first_sibling = first.get(0) catch:
+        return -2
+    ;
+    second_sibling = second.get(0) catch:
+        return -3
+    ;
+    return first_sibling.length() * 10 + second_sibling.length()
+;
+
+-- Shared precedes equal-distinct, and local precedes imported. Only scalars reach JS.
+~[:folded=[observe(local_shared_value)],[observe(shared_value)],[observe(local_distinct_value)],[observe(distinct_value)]]
+~[:constructed=[observe_local_call(true)],[observe_imported_call(true)],[observe_local_call(false)],[observe_imported_call(false)]]
+~[:private=[observe_private(true)],[observe_private(false)]]
+~[:independent=[independent_calls()]]

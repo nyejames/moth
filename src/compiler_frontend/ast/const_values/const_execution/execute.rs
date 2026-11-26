@@ -1065,11 +1065,7 @@ impl ConstInterpreter<'_> {
                 self.string_table,
             ));
         };
-        let slots = slots
-            .into_iter()
-            .map(|value| self.materialize_value(value, Permission::Writable))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(slots))
+        Ok(Some(self.materialize_result_slots(slots)?))
     }
 
     /// Evaluate one typed expression to a constant value, consuming inherited recovery once.
