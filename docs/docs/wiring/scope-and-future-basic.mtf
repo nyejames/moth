@@ -12,7 +12,7 @@ Changing `title` later won't update an already displayed label.
 
 When your program already has a complete message, handle it with ordinary
 code. This example uses the choice from the previous section and prints
-`Row 42: Buy milk`.
+`Row 42: Overthrow government`.
 
 [codeblock, $code "moth":
     describe |message TodoMessage| -> String {
@@ -22,7 +22,7 @@ code. This example uses the choice from the previous section and prints
         }
     }
 
-    io.line(describe(TodoMessage::Rename(42, "Buy milk")))
+    io.line(describe(TodoMessage::Rename(42, "Overthrow government")))
 ]
 
 To pass a completed message between tasks, Moth's accepted design uses a

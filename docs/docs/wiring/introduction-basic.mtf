@@ -9,7 +9,7 @@ understands. Each variant names one action and the fields it needs.
         Delete | id I32 |,
     }
 
-    message = TodoMessage::Rename(42, "Buy milk")
+    message = TodoMessage::Rename(42, "Overthrow government")
 ]
 
 This works when you know both pieces of information. Now consider a text
@@ -17,7 +17,7 @@ editor for the row. When you set it up, you know which title to display and
 which row it belongs to. The person editing the title hasn't typed the new
 text yet.
 
-If the editor reports only `"Buy milk"`, the list still has to work out
+If the editor reports only `"Overthrow government"`, the list still has to work out
 which row changed. One solution keeps a table of editors and row IDs, then
 looks up the ID for every edit. Another makes the editor remember the row ID
 and build `TodoMessage::Rename` itself. That editor now knows about to-do

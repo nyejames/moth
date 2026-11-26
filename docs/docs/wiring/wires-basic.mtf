@@ -13,12 +13,12 @@ on *which title* the caller supplied asks for a `Wire of String`.
 
     title ~= "Draft"
     io.line(row_title(title))
-    ~title = "Buy milk"
+    ~title = "Overthrow government"
     io.line(row_title(title))
 ]
 
 The first call prints `Draft`. The assignment changes the text in the same
-binding, so the second call prints `Buy milk`. Both calls pass the name
+binding, so the second call prints `Overthrow government`. Both calls pass the name
 `title` without any extra marker. The receiving parameter determines what each
 call does. Inside `row_title`, passing `title` to `read_title` forwards the
 original binding. Inside `read_title`, returning a `String` reads its

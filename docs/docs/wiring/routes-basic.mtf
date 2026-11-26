@@ -33,8 +33,8 @@ belong to `TodoMessage`, so Moth uses that type for `Message`.
 Read the rename parameter from left to right. `String -> Message` leaves
 one String for the final field of the chosen constructor. The caller
 chooses `Rename` and supplies the row ID now. If the new text were
-`"Buy milk"`, the corresponding message would be
-`TodoMessage::Rename(42, "Buy milk")`.
+`"Overthrow government"`, the corresponding message would be
+`TodoMessage::Rename(42, "Overthrow government")`.
 
 Deleting a row needs only the ID. The second route captures it now, so
 `Route of Message` has no input arrow. To prepare another row, the
