@@ -32,6 +32,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. Match and multi-result phases and independent corrections are complete. The owner-approved corrective checkpoint replaces live alias refresh with bounded interpreter storage and projection-aware generational access validation. Runtime static borrow checking is not applied to const bodies. Close the checkpoint before immutable const-method support, stepped-loop investigation and final integration.
 
+- [Moth syntax migration](./plans/moth-new-syntax-implementation-plan.md) - Queued after the required profile-independent const publication and access contracts. Coordinate bracket construction, blocks, choices and MON in one source cutover.
+
 - [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after resource-only roots: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
