@@ -19,8 +19,8 @@ accept public API or semantics.
 STATUS: activated; scope and prelude review accepted; Phase 1 snapshot input hardening complete
 CURRENT_SLICE: Phase 2 - portable snapshot additions (candidate selection not started)
 BLOCKERS: Phase 2 needs its candidates chosen with the user; the ordered event queue needs a final
-Moth event value that crosses the binding boundary; scheduling, timers and callbacks need
-structured async and a host-ingress contract
+Moth event value that crosses the binding boundary. Timers and host event delivery need
+the Channels V1 runtime and its host adapters.
 NEXT_ACTION: choose the Phase 2 snapshot additions with the user, then publish and implement them
 ```
 
@@ -137,16 +137,13 @@ backstop. Unreachable IO calls create no requirement.
 - **Final shape or defer for events.** An ordered event queue must return ordinary Moth event
   values. It must not ship as an opaque `Event` handle because the binding ABI cannot yet return
   the right choice or record shape.
-- **Async owns suspension.** Sleep, timeouts, intervals, event waits, fetch, persistent network
-  events and callbacks into Moth need a runtime that suspends work, returns to the host and resumes
-  later. The intended route is host event, runtime host adapter, ordinary Moth value, channel,
-  structured scheduler and waiting coroutine. Structured async and channels must first establish
-  scheduler, suspension, bounded task lifetime and value transfer. A later host-ingress contract must
-  then define how a host callback queues a value, wakes the scheduler, handles re-entry and tears
-  down its registration.
-- **No callback ABI by imitation.** Moth does not adopt JavaScript's callback architecture as its
-  asynchronous model. Design a callback ABI only if channels and structured scheduling demonstrably
-  cannot express an important capability.
+- **Async owns suspension.** Timers, event waits and network completions need the Channels V1
+  scheduler. A trusted host adapter delivers independent Moth values and wakes the waiting task.
+  Its registration belongs to a live invocation or builder lifecycle and ends on cancellation or
+  teardown. The host cannot re-enter a running Moth task. [Channels V1](../../../docs/async/channels.mtf)
+- **Moth callbacks run synchronously.** A closure can consume an event after Moth receives it.
+  Forming or retaining the closure registers no host listener. A closure parameter or field
+  supplies no foreign callback ABI. [Closures V1](../../../docs/closures/closures.mtf)
 
 ## Current work
 
@@ -188,10 +185,9 @@ Candidates only. Nothing here is accepted API.
 
 ## Longer-term candidates
 
-Behind structured async, channels and the host-ingress contract: general callbacks into Moth,
-listener APIs that run Moth later, timers, intervals, sleep, delay, event waits, network and fetch
-completion, WebSocket and server-sent events, asynchronous file selection, asynchronous image
-loading and any API whose result must wake suspended Moth work. Event-time browser decisions such as
+Timers, intervals, sleep, delay, event waits, network and fetch completion, WebSocket and
+server-sent events, asynchronous file selection and asynchronous image loading need the
+scheduler and host ingress to wake suspended Moth work. Event-time browser decisions such as
 arbitrary `preventDefault` or propagation control also wait unless they can be configured completely
 at registration.
 

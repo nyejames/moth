@@ -194,4 +194,4 @@ clients can use the same API and Rust types through the convenience re-export
 Full compile-time Moth authoring expressions and the self-contained serialised
 representation are distinct surfaces.
 
-Formatting and serialisation use their own explicit operations. A constructor builds its value without attaching a live binding, Wire or Route.
+Formatting and serialisation use their own explicit operations.

@@ -990,73 +990,26 @@ Prefix `>>` dispatches a direct call as a child task. Infix `>>` sends a value, 
 
 An expressionless `if` offers channel operations. Guards enable candidates. A receive binding belongs only to the winning body. One fair selection commits at most one operation. Losing arms leave their channels alone. A final `else:` runs immediately if none is ready. Omit it to wait. After the last writer closes and the buffer drains, receives stay ready with `none`. See @../async (Channels and readiness) for endpoint release, failed sends and task lifetimes.
 
-## Wiring
+## Closures
 
-A `Wire` parameter identifies which named binding to read. A `Route` parameter records which choice constructor to use when an input or event arrives. The @../wiring/ (Wiring guide) works through why a consumer might need either one.
-
-### Wires
-
-[codeblock, $code "moth":
-    read_name |value Wire of String| -> String {
-        return value
-    }
-
-    forward_name |value Wire of String| -> String {
-        return read_name(value)
-    }
-
-    name ~= "Priya"
-    label = forward_name(name)
-]
-
-`Wire of T` accepts a named immutable/mutable local or compatible wire parameter and preserves its identity through reassignment.
-Reading it as `T` uses ordinary **shared read-only** access. Only whole named bindings can form wires.
-
-### Routes
-
-A route allows a consumer to turn input into an ordinary choice message. This example shows the parameter interface a UI builder might expose.
-The `text_input` and `button` functions below stand in for UI components. They show route formation, not a built-in event runtime.
+Constrained closures are planned after the syntax migration. Declare the
+callback's signature on a parameter or named struct field. At the call site,
+name its arguments between pipes and write one expression after `=>`.
 
 [codeblock, $code "moth":
-    TodoMessage = {
-        Rename | id I32, text String |,
-        Delete | id I32 |,
+    label |caption String, format |text String| -> String| -> String {
+        return format(caption)
     }
 
-    text_input |value Wire of String, on_change Route of String -> TodoMessage| {
-        io.line(value)  -- illustrative UI component
-    }
-
-    button |label String, on_click Route of TodoMessage| {
-        io.line(label)  -- illustrative UI component
-    }
-
-    update_title |current String, message TodoMessage| -> String {
-        return if message is {
-            case Rename(id, text): then text
-            case Delete(id): then ""
-        }
-    }
-
-    todo_id = 42
-    title ~= "Draft"
-    text_input(title, TodoMessage::Rename(todo_id))
-    button("Delete", TodoMessage::Delete(todo_id))
-
-    -- When the text input supplies "Revised", the route produces this message:
-    changed = TodoMessage::Rename(42, "Revised")
-    ~title = update_title(title, changed)
+    prefix = "Action: "
+    save = label("Save", |name| => [prefix, name])
 ]
 
-`Route of String -> TodoMessage` captures `todo_id` once. The future `String` fills the remaining `text` field.
-The resulting message can be handled by ordinary Moth code, as `update_title` demonstrates.
-A one-input route reserves exactly the final payload field, even when it has a default. A zero-input route applies ordinary constructor defaults and captures the complete payload. Here the Delete action needs no future input.
-Compatible route parameters can forward routes unchanged.
-
-Wires and routes can only appear as parameter capabilities. Their reads and captures follow ordinary access and lifetime rules.
-UI event delivery needs a builder or library that implements it.
-
-See @../wiring/#wiring-reference (Wiring contract).
+`save` contains `"Action: Save"`. The closure reads `prefix` from its
+surrounding scope and receives `name` on each invocation. A plain callback
+parameter lasts for the call. A factory can use `into return` to keep a
+handler in the component it returns. See @../closures/#closures-reference (Closures)
+for the row editor example, retention destinations and access rules.
 
 ## Dependencies and aliases
 

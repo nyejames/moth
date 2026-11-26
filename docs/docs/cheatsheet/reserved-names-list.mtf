@@ -9,7 +9,7 @@ reclaim reserved words by changing ASCII case or adding leading underscores.
 - **Word operators:** `is`, `not`, `and`, `or`
 - **Literals:** `true`, `false`, `none`
 
-`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions. A line-initial `case` introduces a match or readiness arm. Whether `case` is reserved outside arm headers, including in MON field names, remains open.
+`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions and names a retention destination on a planned callback parameter. See @../closures/ (Closures). A line-initial `case` introduces a match or readiness arm. Whether `case` is reserved outside arm headers, including in MON field names, remains open.
 
 ### Builtin types
 
@@ -23,7 +23,6 @@ All spellings of `Dec` followed by ASCII digits are reserved, even invalid types
 ### Other compiler-owned names
 
 - `Error` - builtin error type.
-- `Wire`, `Route` - function parameter-contract heads.
 - `io` - prelude namespace for `@core/io`.
 - `CASTABLE_TO_T`, `TRY_CASTABLE_TO_T` - builtin cast-trait families, replacing `T` with one of:
   `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `BOOL`, `STRING`, `CHAR`, `ERROR`.

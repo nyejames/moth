@@ -1,6 +1,6 @@
 # Unified Bracket Construction for Moth
 
-**Status:** Design proposal for review. The decisions in this document reflect the design discussion, but the redesign as a whole is not yet adopted or scheduled.
+**Status:** Queued syntax migration. Implementation follows the hard removal of Wire and Route and the settled const publication and access contracts in section 15. Closures V1 follows the completed syntax migration.
 
 **Date:** 26 November 2026. The bracket review is dated 25 November. The agreed surface syntax below records the subsequent design decisions.
 
@@ -16,7 +16,7 @@ The motivating uses are binary data, ordinary sequence construction and package-
 
 Square brackets replace the collection and map delimiters in Moth and MON. Moth uses the freed braces for blocks and choice declarations. Braces in raw template text, quoted Strings, comments and embedded languages retain their literal meaning.
 
-The following decision record fixes the surrounding source syntax. The companion document Moth Surface Syntax After Unified Bracket Construction (`moth-surface-syntax-design.md`) gives the full control-flow, constructor and channel examples. Parts I to III cover bracket construction and its cutover. Section 34 identifies the remaining bracket questions. Implementation remains unscheduled.
+The following decision record fixes the surrounding source syntax. The companion document Moth Surface Syntax After Unified Bracket Construction (`moth-surface-syntax-design.md`) gives the full control-flow, constructor and channel examples. Parts I to III cover bracket construction and its cutover. Section 34 identifies the questions to resolve before enabling the affected grammar.
 
 ## Agreed surface syntax (26 November 2026)
 
@@ -45,8 +45,6 @@ Each field has a unique name within its constructor, an explicit type and an opt
 Patterns inspect the completed value. For example, `case Resized(width, height):` binds both fields even if the constructor call omitted `height`. Sharing field declarations does not introduce structural conversions, writable choice payloads or new equality rules. Ordinary record values and calls retain their parenthesised forms.
 
 MON follows the same omission rule for literal data. With the corresponding prepared schema, `Size(width = 1280)` and `WindowEvent::Resized(width = 1280)` both materialise the default height. The codec uses the validated default value in its schema. It never executes Moth code. Optionality alone does not supply a default.
-
-The existing `Route` contract determines when input arrives. Ordinary construction and a zero-input route use complete-constructor argument routing. For a one-input route, the captured arguments fill the required contiguous leading prefix and the future input supplies the trailing field, even if that field declares a default. For example, at a `Route of I32 -> WindowEvent` parameter, `WindowEvent::Resized(1280)` captures the width and leaves the height for the event. [Route construction](https://github.com/nyejames/moth/blob/d6b323082777e73663c8eacd6e03852f97d7e769/docs/docs/wiring/wiring.mtf#L151-L215)
 
 ### Blocks, matches and regions
 
@@ -465,7 +463,7 @@ The completed expression has one authoritative result type and operation. TIR re
 
 For this redesign, require the settled profile-independent semantic foundation and correct const value publication/access contracts before expanding typed construction. Required const evaluation stays in Stage 4 over typed expressions and existing value semantics. Do not reintroduce early optional whole-function evaluation, candidate notes or budgets removed by the active plan, or build a HIR interpreter to recover the old direction. A future optimisation may fold already validated operations only under its own accepted contract; it cannot change type selection, capacity proof, borrow legality, constraint evidence or authored static selection.
 
-The actual implementation baseline must be selected after the active foundation and its blocking provenance work are reconciled. This proposal neither activates that work nor assumes its experimental proof is production-ready.
+Select the implementation baseline after the hard removal and after the active foundation and its blocking provenance work are reconciled. This proposal neither activates that work nor assumes its experimental proof is production-ready.
 
 ### 16. Tokenization and source preparation
 
@@ -596,7 +594,7 @@ Audit backend debug printing, generated code snapshots, HIR display and error me
 
 ### 25. Proposed refactor gates
 
-The following are feasibility and engineering gates for a subsequent implementation plan, not authorisation to begin work before adoption.
+Apply the following feasibility and engineering gates during the queued syntax migration.
 
 **Gate A - grammar and evidence.** Prove head-only brackets can select String, sequence or map from one receiving-context owner. Demonstrate numeric literal materialisation, empty/nested rows, map disambiguation and declaration-time shape stability. Show a simple collection takes a cheap path without allocating a TIR tree or requiring slot composition.
 
@@ -620,7 +618,7 @@ Benchmark ordinary collection-heavy code, text-heavy docs, mixed structural cons
 
 ### 27. Coordinated language cutover
 
-On adoption, replace brace collection and map syntax with square brackets everywhere in Moth source. No legacy aliases or transitional language mode are proposed. Classify brace use in context so that Moth blocks, choice declarations and embedded text keep their intended meaning.
+At the source cutover, replace brace collection and map syntax with square brackets everywhere in Moth source. No legacy aliases or transitional language mode are proposed. Classify brace use in context so that Moth blocks, choice declarations and embedded text keep their intended meaning.
 
 The migration must be syntax-aware. A global substitution of `{` and `}` is unsafe because source contains HTML, CSS, JavaScript, embedded code, literal text, Rust examples and comments. It is also semantically incomplete because `[a, b]` may now concatenate Strings or splice existing collections.
 
@@ -713,17 +711,15 @@ Parts II and III identify the primary owners. During implementation, inventory t
 
 Use token/category and typed-operation searches, not punctuation replacement alone. Check fixture-generating Rust strings and embedded examples as well as ordinary `.moth` and `.mtf` files.
 
-### 31. Roadmap changes conditional on adoption
+### 31. Roadmap handoff
 
-This is a proposal, not an accepted implementation plan. Do not mark the language surface as implemented or activate roadmap work merely by publishing it.
+The roadmap assigns one coordinated source cutover to the syntax migration. Keep its completion gates and downstream contracts aligned with the implementation.
 
-If approved:
-
-1. Add one coordinated redesign implementation plan to `docs/roadmap/plans/` and its sequenced entry to `docs/roadmap/roadmap.md`. The exact filename, branch and activation status follow the project convention at adoption time. Include the complete cutover and deletion gates.
-2. Reconcile the plan with the active const-evaluation work. The supplied branch revision is `e235a04c`, and the current permanent compiler authority describes the AST-owned evaluator. Implement against the settled foundation after its merge and correctness validation, including const graph publication and the prerequisite borrow-provenance correction. Reconcile the distinct main/active-branch optimisation roadmap described in section 15. Do not revive early ordinary-function speculation or incompatible HIR-executor assumptions. Recheck any concurrent template, numeric, diagnostic, resource or memory refactor before assigning work.
-3. Remove collection-producing `loop ... then` from accepted design and the implementation roadmap. Typed bracket loops supersede most of its use. Preserve a concise, explicitly unaccepted future design question describing immutable collection results from full statement loops and the conditions for reopening it. Remove accepted-language claims, queued progress promises and obsolete implementation instructions for that form.
-4. Preserve the independent repeated option-capture loop and its current roadmap/status contract. The combined plan `docs/roadmap/plans/collection-producing-and-repeated-option-loops-plan.md` was identified in the previous inspection. Split or narrow that plan so removing the producing-loop portion does not delete the option-capture work or its unique accepted rules. Recheck its current name and status first.
-5. Update component and browser package proposals to use the new spelling and explicit String output boundary. DOM handle types, typed events, Channels, Wiring, lifetime ownership and host ingress retain their separate decisions and implementation prerequisites. Typed bracket construction is not a reason to make a particular Core HTML component type mandatory.
+1. Use the post-removal tree for the source and codec cutover. The later closure grammar has its own implementation and acceptance tests.
+2. Verify the const foundation and its prerequisite borrow-provenance correction on the activation tree as described in section 15. Recheck concurrent template, numeric, diagnostic, resource and memory changes before assigning work.
+3. Use typed bracket loops for collection construction. Immutable collection results from full statement loops remain an open design question.
+4. Preserve the independent repeated option-capture statement loop and its roadmap entry.
+5. Update component and browser package proposals to use the new spelling and explicit String output boundary. DOM handle types, typed events, Channels, constrained callbacks, lifetime ownership and host ingress retain their separate decisions and implementation prerequisites. Typed bracket construction is not a reason to make a particular Core HTML component type mandatory.
 6. Keep multi-resource stylesheet contribution design, per-head-snippet deduplication, arbitrary typed builder output, wrapper factories, general typed literal grammars and first-class open templates outside this work unless separately approved. Record genuine dependencies or blockers, rather than silently adding them to the accepted redesign.
 7. Review the roadmap for syntax examples and assumptions about collections, map types, byte sequences, MON and typed package APIs. Update accepted future plans only within the superseded scope. Do not alter unrelated feature commitments or suggest that backend support follows automatically from the new frontend syntax.
 
@@ -745,7 +741,7 @@ Update the following as part of the coordinated work:
 - `docs/docs/mon/mon-format.mtf` and its Basic companion: bracket literal data, map spelling and schema-driven distinction from executable Moth templates.
 - `docs/docs/cheatsheet/` and the actual cheatsheet owner: complete syntax migration and representative examples. Search all documentation sources rather than only the main reference pages.
 - `docs/compiler-design-overview.md`, `docs/build-system-design.md` and `docs/compiler-data-layout-design.md` where affected: canonical type interpretation, TIR/constant/public interface boundaries, lowering handoff, source delimiter representation and compatibility. Update memory/backend authorities only for real changed contracts.
-- `docs/docs/progress/@entry.moth` and the packages/builders matrix: distinguish accepted/planned support from implementation. Record simple collection syntax, typed structural construction and typed slots/wrappers accurately if delivery is staged. Preserve target-specific unsupported operations and the separate status of const functions, DOM, events and MON-native integration. Remove collection-producing loop commitments only after adoption; retain repeated option-capture status.
+- `docs/docs/progress/@entry.moth` and the packages/builders matrix: distinguish accepted/planned support from implementation. Record simple collection syntax, typed structural construction and typed slots/wrappers accurately if delivery is staged. Preserve target-specific unsupported operations and the separate status of const functions, DOM, events and MON-native integration. Track typed bracket loops and repeated option-capture statement loops separately.
 
 Maintain the docs' Basic and Advanced division. Basic should teach a straightforward collection and String construction before nested splicing and typed wrapper examples. Advanced should explain shape evidence, sharing, generic stability and why builders accept concrete output values. Avoid dense language that teaches implementation details as syntax requirements. Run the actual docs compiler and render representative pages to catch accidental parsing of examples and wrong wrapper migration.
 
@@ -767,7 +763,7 @@ Run the current `AGENTS.md`-routed format, lint, architecture, test, documentati
 
 The major semantic decisions above were agreed in the interview. The following narrow edges are intentionally not disguised as settled source rules:
 
-- Whitespace-only bodies with no type evidence: distinguish `[:]` (always needs evidence), raw non-layout text (String evidence) and a body containing only formatting whitespace. Review recommendation: require evidence for layout-only bodies and preserve actual whitespace under an explicit String receiver. Confirm before adoption rather than silently defaulting.
+- Whitespace-only bodies with no type evidence: distinguish `[:]` (always needs evidence), raw non-layout text (String evidence) and a body containing only formatting whitespace. Review recommendation: require evidence for layout-only bodies and preserve actual whitespace under an explicit String receiver. Confirm in phase 0 of the migration.
 - Positional slot and nested-head contribution boundaries: preserve the current one-contribution routing unit before splicing; verify how a direct nested row and a dynamic child loop reach a positional slot. If existing routing cannot express the typed contract without new cardinality rules, resolve that explicitly rather than count elements as positions.
 - Exact syntax for explicitly typing an individual slot independently of the enclosing construction, if ordinary receiving evidence cannot express a useful wrapper contract. The invariant is one stable type per key, not a particular new annotation.
 - The exact grammar for a head containing ordinary nested row expressions alongside wrapper/directive operands and text formatting. The required distinctions are specified. A parser prototype must demonstrate unambiguous classification and useful diagnostics, including mixed nested and scalar contributions. Reject unclear cases instead of silently choosing another interpretation.
@@ -779,9 +775,9 @@ The following are excluded, not missing implementation details: user-extensible 
 
 Any further semantic choice that materially changes a worked example, public contract, evaluation order or source acceptance requires design review. Do not hide such choices in a compiler implementation or silently broaden the language to pass migrated tests.
 
-### 35. Adoption and completion
+### 35. Activation and completion
 
-Adoption requires approval of Part I and resolution of the source-visible questions in section 34. Activation requires the settled foundation in section 15. Implementation completes only when gates A-E and section 26 pass, all old grammar/chain-only paths are deleted, permanent docs carry the accepted semantics and the conditional roadmap/matrix changes in sections 31-32 are complete. Review the resulting diff using the code-review guide, separating deletion, consolidation, justified specialisation and deferred opportunities. No new runtime template system, implicit component effect or general parser is permitted as a shortcut.
+Activation requires completed hard removal and the settled foundation in section 15. Resolve the source-visible questions in section 34 before enabling the affected grammar. Implementation completes only when gates A-E and section 26 pass, all old grammar/chain-only paths are deleted, permanent docs carry the accepted semantics and the roadmap and progress updates in sections 31-32 are complete. Review the resulting diff using the code-review guide, separating deletion, consolidation, justified specialisation and deferred opportunities. No new runtime template system, implicit component effect or general parser is permitted as a shortcut.
 
 ## Reference baseline and source anchors
 

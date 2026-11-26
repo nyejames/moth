@@ -10,12 +10,12 @@ directives that transform AST are excluded as well. Compiler-known directives
 may provide constrained language structure, templates, metadata and
 configuration, but they cannot become a user-extensible macro system.
 
-### General closures and broad function-value mechanisms
+### General function values and higher-order polymorphism
 
-The planned replacement for Wiring and Routes accepts an explicit closure at a
-declared callback parameter. See @../functions/#parameters-and-defaults (Parameters
-and defaults) for its syntax. General function values, generic function values,
-higher-order polymorphism and hidden event-handler closures remain outside scope.
+The accepted @../closures/ (closure design) restricts each literal to a
+declared callback parameter or named struct field. General function values,
+generic function values, higher-order polymorphism and implicit event-handler
+closures remain outside scope.
 
 ### Dynamic trait values
 

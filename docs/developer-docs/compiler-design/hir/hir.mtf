@@ -66,13 +66,13 @@ The greeting's runtime pieces, if any remain dynamic, look like ordinary operati
 
 ## Call targets and link facts
 
-Source calls use explicit target classes:
+Direct calls use explicit target classes:
 
 - module-local function identity
 - stable cross-module function identity
 - stable binding-backed external function identity
 
-Generated concrete functions add another stable target class once materialised.
+Generated concrete functions add another stable target class once materialised. In the accepted closure design, formation identifies the private body for linking and gathers its captures. Calling a callback takes its environment and invocation arguments and runs the body.
 
 HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate `NumericProofs` side table paired with executable HIR.
 

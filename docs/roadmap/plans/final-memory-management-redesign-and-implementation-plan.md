@@ -1224,9 +1224,8 @@ automatic observation, subscriptions, event delivery or a replacement scheduler.
 
 - [ ] Define builder-owned lifecycle root metadata.
 - [ ] Instantiate the page, mount, request, frame or render-generation roots required by supported builder operations. Do not invent a root solely to legalise an otherwise invalid escape.
-- [ ] Attach retained state and captures to their actual lifecycle owners. A Route capture follows ordinary provenance, access and outlives rules. A Wire binding identity adds no observer or storage lifetime.
+- [ ] Attach retained state to its actual lifecycle owner. For a supported callback field, trace retained shared captures through its declared destination. Check replacement and owner teardown against any live borrow of an invocation result. A plain callback only borrows its environment for the receiving call. See [Closures V1](../../docs/closures/closures.mtf).
 - [ ] End each supported lifecycle region at its explicit teardown or final cleanup frontier.
-- [ ] Keep future Wiring observation and event lifecycles deferred until their own accepted contract exists. Do not migrate V1 subscription facts into a renamed runtime mechanism.
 - [ ] Preserve outgoing REC obligations at lifecycle teardown.
 - [ ] Keep builder lifecycles unable to change source legality.
 - [ ] Integrate the final topology with HTML JavaScript and Wasm partitioning.
@@ -1234,7 +1233,7 @@ automatic observation, subscriptions, event delivery or a replacement scheduler.
 ### Audit and validation
 
 - [ ] No retained state is freed while a supported capture or builder lifecycle can still access it.
-- [ ] No hidden closure-like retention graph is introduced.
+- [ ] Callback environment references are visible to the existing topology and cleanup checks.
 - [ ] JavaScript GC and collector-free Wasm accept the same source.
 - [ ] Run `just validate`.
 
@@ -1505,7 +1504,6 @@ Accepted but implementation-deferred:
 - expression-site placement
 - declared-region-local graph construction and publication
 - direct source construction of reference cycles inside one declared region
-- lifecycle integration for future Wiring observation, after its separate accepted contract
 
 Final-use interior projection detachment from an allocation family is not accepted
 design. Before it could become accepted architecture, a separate design must define partially moved

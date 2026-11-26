@@ -31,15 +31,13 @@ already typed argument must match that type.
 `WindowEvent::Captioned` omits parentheses from a payload variant.
 Both forms are errors. Inspect a completed payload with a pattern.
 
-### Constructor routes
+### Building a message from later input
 
-An ordinary `WindowEvent` receiver constructs the value immediately. At a
-`Route of WindowEvent` parameter, `WindowEvent::Resized(1280)` captures the
-completed payload, including the default height. At a
-`Route of I32 -> WindowEvent` parameter, the same spelling captures the width
-and reserves the final height for future input, even though it has a default.
-The captured arguments form a contiguous leading prefix and run once in
-written order. See @../wiring (Wiring).
+To construct a message when input arrives, put the complete constructor in a
+@../closures/ (planned closure). For a callback that takes a height, the caller
+can supply `|h| => WindowEvent::Resized(1280, h)`. Each invocation constructs
+an ordinary value with the supplied height. Outside the closure,
+`WindowEvent::Resized(1280)` uses the declared height default of 720.
 
 ### MON choice data
 

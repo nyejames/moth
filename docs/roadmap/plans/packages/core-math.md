@@ -16,7 +16,7 @@ an explicit dependency clause.
 ### Current-state capsule
 
 ```text
-STATUS: the accepted scalar expansion is delivered; package programme remains active in parallel
+STATUS: the accepted scalar expansion is delivered. The main roadmap controls when package work resumes.
 CURRENT_SLICE: exact F64-only API migration delivered through shared numeric/binding owners
 BLOCKERS: compile-time folding waits for Core const evaluation and its accepted Math precision contract
 NEXT_ACTION: retain coverage and finite-boundary ownership; consume later generic/precision work and Wasm Math delivery through their owners

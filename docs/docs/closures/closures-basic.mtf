@@ -1,0 +1,65 @@
+### Read the title when the row is drawn
+
+Suppose you're writing a to-do list. You want to draw the current title of
+a task. The drawing function needs a way to get the text. The caller knows
+where the task keeps it.
+
+[codeblock, $code "moth":
+    Task = | id I32, title String |
+
+    row_label |read_title || -> String| -> String {
+        return [:Title: [read_title()]]
+    }
+
+    task ~= Task(42, "Draft")
+    io.line(row_label(|| => task.title))
+]
+
+This prints `Title: Draft`. The parameter `read_title || -> String` declares
+a *callback*. It tells the drawing function how to ask for a title. The caller
+supplies a *closure*, `|| => task.title`. The empty pipes mean it takes no
+arguments. It can still read `task` because the caller defined the closure
+where `task` is visible. That use of an outer value is a *capture*.
+
+`row_label` calls the closure immediately and returns a String. If the task's
+title changes, call `row_label` again to draw the new text.
+
+### Give each editor its own handler
+
+A row editor can outlive the call that creates it. Give the editor a callback
+field and declare `into return` on the factory parameter so the returned row
+can keep its handler.
+
+[codeblock, $code "moth":
+    EditMessage = { Rename | id I32, text String | }
+    EditRow = | on_edit |text String| -> EditMessage |
+
+    make_row |handler |text String| -> EditMessage into return| -> EditRow {
+        return EditRow(handler)
+    }
+
+    apply_edit |target ~Task, change EditMessage| {
+        if change is {
+            case Rename(id, text) if id is target.id: ~target.title = text
+            else:
+        }
+    }
+
+    row_id = copy task.id
+    row = make_row(|entered| => EditMessage::Rename(row_id, entered))
+
+    change = row.on_edit("Ready for review")
+    apply_edit(~task, change)
+    io.line(row_label(|| => task.title))
+]
+
+When you build the row, you already know its ID. `copy task.id` takes that
+ID once so the handler can use it without borrowing the task. The new text
+arrives later as the argument `entered`. Calling the field produces
+`EditMessage::Rename(42, "Ready for review")`. The application applies that
+message and prints `Title: Ready for review`.
+
+Calling `row.on_edit("Published")` would produce another message for row 42.
+A browser adapter would have to deliver that input, and the application
+would have to apply the message and draw again. Here the ordinary calls show
+exactly when each step happens.

@@ -69,7 +69,7 @@ These items do **not** all have accepted future semantics. Generic const support
 
 ### Permanently enforced compile-time boundary
 
-Required const execution cannot depend on runtime values, IO, async/channels, Wiring, mutable application/module state, arbitrary untrusted foreign effects, runtime-only templates, macro-like AST transformation, physical target inspection or final builder-dependent URL text. Local mutation is permitted. No live mutable interpreter storage or reference handle may escape the evaluation. Trusted registered Core constant operations remain permitted under their existing contracts. Structural resource-bearing `String` values remain valid constants without guessing their final characters.
+Required const execution cannot depend on runtime values, IO, async/channels, runtime callbacks, mutable application/module state, arbitrary untrusted foreign effects, runtime-only templates, macro-like AST transformation, physical target inspection or final builder-dependent URL text. Local mutation is permitted. No live mutable interpreter storage or reference handle may escape the evaluation. Trusted registered Core constant operations remain permitted under their existing contracts. Structural resource-bearing `String` values remain valid constants without guessing their final characters.
 
 Keep the ordinary language's exclusions, such as tuple values, macros and operator overloading. Do not invent const-only language forms to work around an unsupported operation.
 

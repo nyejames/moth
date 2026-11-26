@@ -23,7 +23,7 @@ The compact typed-expression foundation owns the mechanical Boracle migration to
 value/place stores and native zero/one/multiple success slots with a separate error channel. That
 work updates extraction and source replay without promoting a solver experiment, changing reference
 acceptance or adding per-result alias precision. It also retires Reactivity V1 events and fixtures
-with their source contract instead of preserving them as future Wiring support.
+with their source contract.
 
 Future research consumes those merged capabilities and the current normalized event owner. It does
 not rebuild recursive HIR or introduce tuple/fallible wrapper bridges. A static expression ID is

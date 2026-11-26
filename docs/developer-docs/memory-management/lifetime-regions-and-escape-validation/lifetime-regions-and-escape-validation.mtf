@@ -424,15 +424,15 @@ Last-use and future-use facts may prove that an edge is dead, that no source cap
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
 
-Captured values and builder-owned state must satisfy one lifetime owner and the stored-edge
-outlives rule whenever they retain Moth references. A Route capture follows these ordinary rules.
-A Wire binding identity creates no subscription or lifetime extension. The bounded parameter
-contracts do not imply persistent observation or asynchronous delivery.
+For each path that stores or forwards a retained callback, check its declared destination and
+prove that every shared capture outlives the receiving owner. Replacing the field ends its
+retention while preserving outstanding result loans. If an opaque invocation returns a borrow,
+every possible source in its arguments or environment, including nested references, must
+outlive an escaping result. An independent copy made while the sources are live can escape
+under its own lifetime.
 
 A collector-free path may use explicit builder-owned lifecycle regions. A GC path may represent
-the same already-proven topology with ordinary reachability. Future Wiring observation and event
-lifecycles need their own accepted contract before they contribute retained edges or lifecycle
-roots.
+the same proven topology with ordinary reachability.
 
 ## External lifetime boundaries
 

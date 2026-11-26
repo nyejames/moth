@@ -296,7 +296,7 @@ The list creates the nominal declaration's own parameters. Repeated uses in fiel
 
 Reject duplicate entries, an entry that is not a reusable generic declaration, a listed parameter unused by the nominal contract and a generic reference missing from the list. A nominal declaration does not acquire generic parameters from method bodies, default expressions or constructor calls.
 
-`of` remains head-directed. Its ordinary type-application meaning does not change Wire/Route capability syntax or permit arbitrary new heads to define a type grammar.
+`of` remains head-directed. Generic type application preserves the distinct construction and endpoint contracts of `Channel of T`, `ChannelReader of T` and `ChannelWriter of T`.
 
 Existing nested-inline-`of` restrictions remain. A concrete alias can name a fully applied nested type where the ordinary syntax requires one. Parameterised aliases, partial application and aliases of reusable generic declarations remain excluded.
 
@@ -1399,7 +1399,7 @@ Beyond the named rows, preserve these properties wherever the new paths touch th
 - Inactive generic calls produce no durable executable request, target capability or helper after the correct summary-convergence boundary.
 - Published HIR, borrow/proof tables and link facts remain paired to the same final immutable executable after any rewrite.
 - Generic limits never become constraints directives, runtime Bool tests or source-visible physical target predicates.
-- Map keys, anonymous records, Wire/Route parameters and fixed capacities retain their independent eligibility rules. A numeric family does not automatically admit generic map keys or previously forbidden anonymous shapes.
+- Map keys, anonymous records, callback slots and fixed capacities retain their independent eligibility rules. Preserve the declared input types, access, result and retention destination when specialising a callback slot. A numeric family does not automatically admit generic map keys or previously forbidden anonymous shapes.
 - Native result-slot arity, Never/terminality, optional handling and same-file trait conformance retain their permanent contracts.
 - Matching source semantics on debug/release and supported targets produces the same accepted types and specified values. Optional optimisation cannot remove a declared error-handling requirement.
 
@@ -1459,7 +1459,7 @@ Show file-local generic privacy and invalid `Type` at least once in the Basic ma
 
 ### 13.3 Roadmap and later-owner coordination
 
-The authoring/insertion change added the queued plan bullet immediately after the Never return contracts entry, which was retired when that capability was delivered; the bullet now follows Runtime anonymous records. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
+The authoring/insertion change added the queued plan bullet immediately after the Never return contracts entry, which was retired when that capability was delivered; the current roadmap owns its position after the foreign-binding trust foundation. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
 
 Coordinate these existing owners by capability, not by creating links between temporary implementation plans:
 
@@ -1472,7 +1472,7 @@ Coordinate these existing owners by capability, not by creating links between te
 | Package dependency/manager work | Canonical callable identities, file-private reusable declarations and implementation dependency fingerprints, without making those declarations importable |
 | Moth-native MON integration | Concrete nominal parameter/application changes and unchanged requirement that schemas describe concrete types, not reusable generic metadata |
 | Later constraints and fast-math consumers | Explicit limits are separate from directives and inferred effect summaries, with no change to checked ordinary operations or the uniform public abs error slot |
-| Existing nominal, loop, Wiring and source-kind work | Updated examples and producers consuming the same `of`, signature and known-shape rules, without expanding their independent scope |
+| Existing nominal, loop, callback and source-kind work | Updated examples and producers consuming the same `of`, signature and known-shape rules, without expanding their independent scope |
 | LSP and editor follow-ups | Resolved limits shown in hover/documentation, optional advisories remain tooling work and never default compiler warnings |
 
 A future richer Math pass should identify useful generic algorithms from real package use. Record candidates and prerequisites without adding new approved APIs through an implementation note. Generic constants, decimal transcendental accuracy, extra numeric families and generic container bindings remain distinct design questions.
@@ -1660,7 +1660,7 @@ GitHub code search still returned some paths from the older indexed parent durin
 | Receipt | Current inspected source or reference | Relevance |
 |---|---|---|
 | R01 | `AGENTS.md` and `docs/roadmap/roadmap.md` | Authority, test/validation workflow, serial insertion point and exact placeholder removal |
-| R02 | `docs/compiler-design-overview.md` | Generic publication, source-owned metadata, numeric handoff, native result direction, call/proof and Wiring boundaries |
+| R02 | `docs/compiler-design-overview.md` | Generic publication, source-owned metadata, numeric handoff, native result direction, call proofs and the Wiring boundary at the inspected revision |
 | R03 | `docs/build-system-design.md` and `docs/compiler-data-layout-design.md` | Provider ownership, source/physical identity, capabilities, locked spans and diagnostic lanes |
 | R04 | `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf` | Small coherent changes, primary test ownership, assertion preservation and final gate policy |
 | R05 | `src/compiler_frontend/ast/generic_functions/calls.rs` | Shared instance/template-validation lanes, ready/retained arguments, deferred requests and source-ordered tickets |

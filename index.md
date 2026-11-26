@@ -310,7 +310,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/developer-docs/language/overview.mtf)
-- [Wiring](docs/docs/wiring/@entry.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
+- [Constrained closures](docs/docs/closures/@entry.moth) introduces callbacks. [closures.mtf](docs/docs/closures/closures.mtf) owns their signatures, captures, invocation and retention.
 - [Templates](docs/docs/templates/@entry.moth) covers bracket construction. [Template directives](docs/docs/template-directives/@entry.moth) covers directive heads, slots, child wrappers and formatters.
 - [general directives](docs/docs/directives/directives.mtf); [directive contributor routing](docs/docs/directives/overview.mtf)
 - [entry metadata and builder slots](docs/docs/project-structure/entry-config.mtf)

@@ -30,11 +30,13 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 ## Sequenced work
 
 
-- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. Match and multi-result phases and independent corrections are complete. The owner-approved corrective checkpoint replaces live alias refresh with bounded interpreter storage and projection-aware generational access validation. Runtime static borrow checking is not applied to const bodies. Close the checkpoint before immutable const-method support, stepped-loop investigation and final integration.
+- [Hard removal of Wiring and Routes](./plans/remove-wiring.md) - **First on this branch.** Record the runnable behaviour, then remove the special parameter contracts and their compiler paths. The pre-release interval before closures uses ordinary functions and choice constructors.
 
-- [Moth syntax migration](./plans/moth-new-syntax-implementation-plan.md) - Queued after the required profile-independent const publication and access contracts. Coordinate bracket construction, blocks, choices and MON in one source cutover.
+- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. Match and multi-result phases and independent corrections are complete. The owner-approved corrective checkpoint replaces live alias refresh with bounded interpreter storage and projection-aware generational access validation. Runtime static borrow checking is not applied to const bodies. Close the checkpoint before immutable const-method support, stepped-loop investigation and final integration.
 
-- [Constrained closures](./plans/constrained-closures.md) - Queued after the syntax migration. Replace Wire and Route with scoped callbacks and owner-retained handlers. Exposing either form requires validated call effects and borrow evidence. Retention also requires verified lifetime and cleanup across module boundaries.
+- [Moth syntax migration](./plans/moth-new-syntax-implementation-plan.md) - Requires the completed Wiring removal and the existing profile-independent const publication and access contracts. Coordinate bracket construction, blocks, choices and MON in one source cutover.
+
+- [Constrained closures](./plans/constrained-closures.md) - Queued after the syntax migration. Add call-bounded callbacks and owner-retained handlers against the verified retirement baseline. Exposing either form requires validated call effects and borrow evidence. Retention also requires verified lifetime and cleanup across module boundaries.
 
 - [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
@@ -210,7 +212,7 @@ performs semantic symbol resolution or syntax diagnostics.
 
 ## UI event delivery
 
-The compiler currently implements Wire and Route parameter contracts. The queued closure replacement covers explicit reads and synchronous callback invocation. Browser event delivery, cancellation and redraw scheduling belong to the consuming runtime or library. A closure that returns a message supplies an ordinary value for that consumer.
+Constrained closures cover explicit reads and synchronous callback invocation after the syntax migration. Browser event delivery, cancellation and redraw scheduling belong to the consuming runtime or library. A closure that returns a message supplies an ordinary value for that consumer.
 
 ## Hash map follow-ups
 

@@ -1,10 +1,5 @@
 Concrete generic instances are created with `of` in type position.
 
-`of` takes its meaning from the head before it. This reference owns ordinary
-generic application. Compiler-owned `Wire` and `Route` heads instead describe
-parameter capabilities under the @../wiring/#wiring-reference (Wiring reference).
-They do not become ordinary type arguments or change generic nesting rules.
-
 ### Type application syntax
 
 [codeblock, $code "moth":

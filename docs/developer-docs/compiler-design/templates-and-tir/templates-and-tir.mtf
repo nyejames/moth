@@ -157,7 +157,7 @@ TIR ownership must stay distinct from AST finalisation and HIR validation. Post-
 ## Roadmap and current status
 
 - **Accepted design:** TIR remains AST-local. Completed values preserve their resolved types. A typed runtime construction hands off ordinary values and control flow. Open wrappers cross module boundaries only as portable declarations with stable output and slot types.
-- **Current implementation:** template support is tracked in the progress matrix; templates carry no Wire or Route capability.
+- **Current implementation:** the progress matrix tracks template support.
 - **Queued work:** `post-tir-template-parser-optimization-plan.md` for performance discussion, labelled queued or deferred as appropriate.
 - **Deferred or outside scope:** a general macro system or public TIR.
 

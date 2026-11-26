@@ -17,10 +17,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active in parallel under the main roadmap
+STATUS: paused under the main roadmap
 CURRENT_SLICE: `@builder/web/graphics` is scaffolded with its README plan. Fixed `U32`/`F32` slots, flat `U32` constants and error-code exports are delivered while the remaining prerequisite binding designs await user review. Delivered Math and Time work remains complete
 BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI/expression changes require coordination with their serial compiler owners
-NEXT_ACTION: refresh current main and the intended package's living plan, then run the complete package gate for an eligible isolated slice
+NEXT_ACTION: when the roadmap resumes the programme, refresh the intended package's living plan and run the package gate for an eligible slice
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -33,21 +33,15 @@ own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites 
 
 ## Roadmap position and lifecycle
 
-The main roadmap makes this programme active in parallel. That scheduling state
-supersedes the earlier programme-wide pause recorded during MON and data-layout
-integration. MON syntax, Rust tooling v1 and the exact numeric implementation
-are delivered. The compact typed-expression foundation, its native result channels, its later type and
-folding reductions and trusted Core constant evaluation are delivered. Package
-slices consume exact numeric, dense HIR, native result, bounded Wire/Route and Core constant-evaluation
-capabilities where required and merged, without obsolete numeric sequencing or assumed capability merges.
+The main roadmap controls when package work resumes. After resumption, each package uses the compiler
+capabilities its slice needs. The standalone MON codec, exact numeric types, dense HIR,
+native result channels and trusted Core evaluation are delivered. Check the adopted revision
+for target coverage. The syntax migration changes the Moth and MON collection grammar together.
 
-Parallel status does not remove a package's own capability gate. Text v1 and any
-slice requiring Core folding still wait for that merge.
-Numeric-sensitive slices coordinate with the shared numeric and binding owners
-rather than independently extending legacy i32/f64-only representations. A sync
-adopts a completed shared shape directly and runs the complete package gate.
-Historical checkpoint and validation records below do not establish the current
-branch state or reinstate a programme-wide pause.
+Use ordinary values and named functions for package APIs that can express their contract today.
+A package that needs a Moth callback waits for the relevant scoped or owner-retained form of
+Closures V1. A host event source also needs an adapter with a registration lifetime and teardown.
+Numeric-sensitive slices coordinate with the shared numeric and binding owners.
 
 The exact numeric API cutover is delivered: registrations consume exact scalar
 identities, I32 counts/indices, U32 error codes and F64 default-language float
@@ -136,7 +130,7 @@ This programme does not own:
 - a Core cryptography package or cryptography package examples
 - broad compiler diagnostic or source-layout refactors
 - compatibility wrappers around stale shared compiler shapes
-- reintroducing Reactivity V1 or implementing future Wiring observation, subscriptions or event delivery
+- automatic binding observation, subscriptions or event delivery as an effect of forming a closure
 
 ## Confirmed package model
 
@@ -499,8 +493,8 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Implementation merged. Programme active in parallel, with per-slice capability and shared-owner coordination gates | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core constant evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
+| 0 | Package foundations | this plan | Implementation merged. The main roadmap owns resumption and each slice retains its capability gates | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued with native result slots and core constant evaluation available; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered; F64-only exact migration pending | Preserve all six constants, thirty-one helpers, their mathematical contracts and shared finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
@@ -570,17 +564,16 @@ programs. WebGL belongs to `@builder/web/graphics`.
 
 Follow the graphics README. The package stays close to WebGL2 and below any scene or engine
 abstraction. Each binding prerequisite is a shared binding-boundary capability accepted in its
-canonical owner, not a graphics-local workaround. `graphics.frame` waits for structured async or an
-accepted host-reentry design and never ships as a polling handle.
+canonical owner. `graphics.frame` waits for a scheduler-backed host wake-up with bounded registration and teardown.
 
 #### `@core/io`
 
 Follow `core-io.md`. `io` is the broad high-level host-capability facade and the only preluded Core
 package. It may overlap a focused package at the convenient edge without duplicating that package's
 API or semantics. Input stays global, application-oriented and pull-driven through explicitly torn
-down handles. Targeted browser event control belongs to `@builder/web/*`. Sleep, timers, event waits,
-network events and callbacks into Moth wait for structured async and a host-ingress contract, with
-no synchronous-looking stand-ins.
+down handles. Targeted browser event control belongs to `@builder/web/*`. Sleep, timers, event waits
+and network completions require the Channels V1 scheduler and trusted host adapters. A synchronous
+Moth callback can process an event once Moth receives it.
 
 #### `@core/collections`
 

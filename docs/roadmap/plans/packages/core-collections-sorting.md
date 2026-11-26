@@ -106,7 +106,9 @@ Use the delivered mixed-backend owners rather than preserving any path named onl
 The declaration-like contract is:
 
 ```moth
-sort type T |
+T #Type
+
+sort |
     this ~[T],
     stable Bool = true,
     memory SortMemory = SortMemory::Automatic,
@@ -385,8 +387,7 @@ An embedded helper cannot own separate memory, assume a private heap, bypass the
 ## Borrow, lifetime and retained-edge contract
 
 `sort` is one exclusive whole-collection mutation. A live shared element result or collection alias
-prevents it. The receiver requires explicit `~` on an existing mutable place. Reactive observers use
-the established whole-collection invalidation rule.
+prevents it. The receiver requires explicit `~` on an existing mutable place.
 
 Sorting is a permutation. It adds no retained edge, removes no retained edge, creates no cleanup
 frontier and preserves the multiset of element obligations, element allocation identities, the
@@ -523,7 +524,6 @@ Create one complete backend-neutral sort operation and its analysis facts.
 - [ ] Add or extend the single HIR representation chosen in Phase 0.
 - [ ] Add HIR validation, display, remap, side-table and debug handling.
 - [ ] Treat sort as an exclusive whole-collection mutation in borrow validation.
-- [ ] Add normal reactive invalidation.
 - [ ] Record a no-change retained-edge permutation summary.
 - [ ] Preserve allocation-family and element identity facts.
 - [ ] Add per-function sort helper requirements and target validation.

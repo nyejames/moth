@@ -54,4 +54,4 @@ messages and Channels. A sidebar could then react to scroll, resize and user
 expansion without an authored JavaScript file. Until the Channel and
 host-ingress runtime exists, that behaviour stays deferred.
 
-See @../../packages/builder/page/ (@builder/web/page) and @../../wiring (Wiring).
+See @../../packages/builder/page/ (@builder/web/page) and @../../async/ (Channels and tasks).

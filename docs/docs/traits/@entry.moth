@@ -114,7 +114,7 @@ listed = sync_navigation(sidebar_id)!
     [doc_pager:
         [$in previous_path:../generics/]
         [$in previous_title:Generics]
-        [$in next_path:../wiring/]
-        [$in next_title:Wiring]
+        [$in next_path:../closures/]
+        [$in next_title:Closures]
     ]
 ]

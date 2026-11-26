@@ -292,7 +292,7 @@ predicate DSLs.
 Eligibility is derived transitively from the complete concrete schema. Every
 field, element, map entry and variant payload must have a supported mapping,
 and an unsupported member makes the enclosing shape ineligible even when the
-current instance does not use it. Functions, wires, routes, closures, live
+current instance does not use it. Functions, closures, live
 handles, unresolved resource pieces and deferred computations have no
 ordinary data encoding. A completed runtime-generated String is eligible. No
 mandatory serialisation trait, per-type marker, rename or skip attribute,

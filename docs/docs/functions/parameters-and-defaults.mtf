@@ -1,5 +1,4 @@
-Every ordinary function parameter has a name and an explicit exact value type
-or parameter capability contract.
+A function signature gives each value parameter a name and an exact type.
 
 [codeblock, $code "moth":
     describe |prefix String, subject String| -> String {
@@ -11,54 +10,11 @@ or parameter capability contract.
 
 A signature declares the names and types of its parameters between `|` marks. A loop, option test or `catch` already knows what type of value it supplies, so its parameter brackets only need local names.
 
-The constrained closure design follows the syntax migration. A callback parameter uses the same signature spelling as a named function. Its parameter names belong to that callback. A closure expression receives its types from the callback signature.
-
-[codeblock, $code "moth":
-    row_label |
-        title String,
-        format_label |text String| -> String,
-    | -> String {
-        return format_label(title)
-    }
-
-    prefix = "Action: "
-    label = row_label("Save", |caption| => [prefix, caption])
-]
-
-`format_label` takes a String and returns a String. The closure calls its incoming argument `caption` and reads `prefix` from the surrounding scope. Only `prefix` is a lexical capture. The expression after `=>` supplies the closure's result. Empty brackets mean zero arguments, so `|| => prefix` can still read `prefix`.
-
-#### Invoking a callback
-
-In the planned design, a closure takes its parameter types and access modes from its immediate receiver. Its body is one return-like expression. It can call a named function for a longer operation. A callback can complete with zero or one success value. A callback signature with no success value omits the result arrow.
-
-A closure can read outer bindings. A use such as `|| => increment(~count)` asks for exclusive access to the captured place. The ordinary conflict rules apply even when the closure and another argument reach the same place under different names. The callback can be invoked zero or more times. Captures must remain valid for another invocation. To take a snapshot, prepare `saved = copy items` before forming the closure. A copy written in the body runs on each invocation. The snapshot's storage must still be valid for its consumer.
-
-A V1 callback invocation cannot suspend. The compiler checks the helpers it calls, including across modules. A helper may omit `$no_suspend` when its body or trusted contract proves the guarantee. A channel wait, a potentially suspending child join or an unknown host effect cannot satisfy the rule. An event loop may wait between calls to its handler. Any references the loop holds across that wait still obey the ordinary access and lifetime rules. See @../async/#channel-reference (Channels V1).
-
-Checked arithmetic in the body uses the ordinary implicit built-in failure path. The invocation that runs the body owns that failure. A `catch` around registration can handle failure of registration itself. A failure in a later event belongs to the code that invokes the registered handler. An exported invoker must handle the failure or expose a compatible error boundary. V1 callback signatures have no explicit error slot.
-
-#### Keeping a callback in an owner
-
-A plain callback parameter is valid for the receiving call, including a helper it forwards to within that call. A library that keeps a callback declares where it may go. For example, a setter on a writable component can declare `handler |text String| -> EditMessage into this`. A free function can name a writable owner parameter after `into`. A factory with one success result can use `into return` to retain the callback in the component it returns. These declarations grant permission to retain the callback in that owner. Each capture still needs a valid lifetime.
-
-A named struct can declare a callback field as `on_edit |text String| -> EditMessage`. An instance invokes it with `editor.on_edit(text)`. The field can lend the callback to another plain parameter while its owner is live. An installed handler stays with its owner. Replacing the handler ends the old field's retention, subject to any outstanding access to its result. A handler retained in a component can share readable data whose lifetime is proven. To update a mutable model, lend the model as an invocation argument or return a message to its owner. A retained handler cannot capture an external place exclusively.
-
-The row below owns a handler. Calling it constructs the ordinary message `EditMessage::Rename(42, "Published")`.
-
-[codeblock, $code "moth":
-    EditMessage = { Rename | id I32, text String | }
-    Row = | on_edit |text String| -> EditMessage |
-
-    make_row |handler |text String| -> EditMessage into return| -> Row {
-        return Row(handler)
-    }
-
-    row_id = 42
-    row = make_row(|new_title| => EditMessage::Rename(row_id, new_title))
-    message = row.on_edit("Published")
-]
-
-A returned view can borrow from an invocation argument or a capture. When only the signature is visible, the receiver must account for every possible source, including references inside the captured values. A painter can consume a row title immediately and call the renderer with the current row again after an edit. An earlier rendered String keeps its text. Keeping that title in a longer-lived component requires all possible sources to outlive the component, or an independent copy of the title made while it is valid. Explicit regions can supply placement evidence where supported.
+The planned closure design lets a function declare a callback parameter such
+as `format_label |text String| -> String`. The callback has its own parameter
+list inside the function's signature. A caller can supply a closure such as
+`|caption| => caption` to that slot. See @../closures/#closures-reference (Closures)
+for capture, invocation and storage in a named struct field.
 
 ### Parameter forms
 
@@ -73,11 +29,6 @@ A returned view can borrow from an invocation argument or a capture. When only t
 - `= default` provides a value when the caller omits that slot.
 - Parameter names follow the no-shadowing rule.
 - Each parameter name must be unique in the signature.
-
-`Wire of T` and the zero/one-input `Route of ...` forms are separate parameter
-contracts, not ordinary wrapper types or mutable access modes. They have no
-defaults and `$` supplies no parameter mode. Their exact receiving and forwarding
-rules belong to the @../wiring/#wiring-reference (Wiring reference).
 
 Directive calls share the ordinary argument parser and slot routing. Ordinary `f()`
 remains valid. Only directive syntax rejects an authored empty `()`.

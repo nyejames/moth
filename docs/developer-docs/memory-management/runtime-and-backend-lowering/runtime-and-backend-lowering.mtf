@@ -439,10 +439,9 @@ validated lifetime. A GC representation may realise that topology with reachabil
 reachability does not define the semantic owner or legalise an escape. Ordinary runtime fragment
 insertion does not implicitly create an observer.
 
-Wire and Route parameter contracts add no automatic observation, template updates or event
-delivery. A backend consumes their validated reads, forwarding and captures. Future observation
-and event lifecycles require a separate accepted contract before they become memory-planning
-inputs.
+For a stored callback, lowering follows the validated plan for its environment on installation,
+replacement and owner teardown. A failure after a committed store keeps that store's effects.
+A consuming library or runtime owns any event registration and delivery.
 
 ## Backend specialisation
 

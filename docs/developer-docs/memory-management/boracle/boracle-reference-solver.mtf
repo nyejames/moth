@@ -989,11 +989,12 @@ freshness or disjointness. Richer per-result borrow summaries remain a separate 
 
 A fallible failure path that does not store or return a value must not keep its success-only loan live.
 
-## Captures and legacy observation events
+## Callback captures
 
-Ordinary reads, mutations and Route capture evaluation obey the same borrow rules as other values.
-Wire binding identity creates no observer, mutation authority or lifetime extension. Builder
-lifecycle roots and final retained-capture lifetime ownership belong to later analysis.
+In the accepted closure design, the borrow problem includes shared or exclusive capture access
+and the possible sources of borrowed results. An opaque callback's captured environment can
+supply a result even when the invocation takes no arguments. Final lifetime ownership belongs
+to later analysis.
 
 ## Structured witnesses
 
@@ -1097,18 +1098,16 @@ Boracle and the future production design should exploit these facts:
 - no explicit move operator
 - no mandatory ordinary consuming parameters
 - no shadowing
-- no general closures or anonymous captured callables
 - no general function values
 - no trait objects or dynamic trait dispatch
 - no unsafe language escape hatch
 - no arbitrary user-defined builtin collection storage semantics
-- statically resolved calls
+- statically resolved named calls and explicit callback operands with declared signatures
 - concrete generated generics before borrow validation
 - closed external boundary profiles
-- no automatic observation or subscription semantics from Wire/Route parameter contracts
 - no current async suspension model in accepted borrow semantics
 
-These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, closure-capture, async-generator, trait-object, unsafe or drop-check machinery.
+These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, async-generator, trait-object, unsafe or drop-check machinery.
 
 It still needs precise CFG reasoning, aliases, projections, call summaries, loops, fallible paths and aggregate storage.
 

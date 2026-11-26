@@ -19,14 +19,13 @@ functions until a separate language decision changes binding-backed receiver met
 STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered; their compile-time evaluation is delivered
 CURRENT_SLICE: none - the v1 expansion starts from a main containing its delivered compiler prerequisite
 BLOCKERS: none from the compiler; Core const-eval and native result slots are delivered
-NEXT_ACTION: from a main containing the prerequisite, audit its final Text evaluator owner and run this plan's Phase 0
+NEXT_ACTION: when package work resumes, audit the delivered Text evaluator owner and run Phase 0
 ```
 
-The package-foundation baseline this plan waited on is merged. This expansion waits for trusted
-Core constant evaluation to merge. Native success/error slots are already merged in the compact
-typed-expression and dense HIR foundation. Consume the exact numeric migration rather than earlier
-Dec/Uint sequencing. The umbrella package programme remains active in parallel for work whose own
-prerequisites are satisfied. Historical source-token layout closeout `4cfd9d492` remains accepted.
+The package foundation, native success/error slots and trusted Core constant evaluation for the
+five existing Text functions are merged. Consume the delivered exact numeric types. The main
+roadmap controls when the paused package programme resumes. Historical source-token layout
+closeout `4cfd9d492` remains accepted.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
 single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
@@ -235,8 +234,7 @@ external specs.
 ### JavaScript lowering strategy
 
 Every runtime helper first resolves each String argument through `__moth_string_value` exactly once
-and reuses the local concrete string. This avoids repeated reactive-template snapshots and repeated
-boundary work.
+and reuses the local concrete string. This avoids repeated materialisation of a template or slice.
 
 #### Remove trivial runtime wrappers
 
@@ -392,8 +390,7 @@ engine-specific branches from one microbenchmark.
 - One scalar position unit keeps `length`, `Char`, indexing, search and slicing coherent.
 - Exact operations never normalize, case-fold or apply locale rules implicitly.
 - Text transformations return new String values and do not add substring mutation.
-- `__moth_string_value` remains the single JS content materialisation boundary for slices, templates
-  and reactive template values.
+- `__moth_string_value` remains the single JS content materialisation boundary for slices and runtime templates.
 - Runtime representation details stay private to each backend.
 - Optional Core package logic stays out of the always-emitted general JS String runtime.
 

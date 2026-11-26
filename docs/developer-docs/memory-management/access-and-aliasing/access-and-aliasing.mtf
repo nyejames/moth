@@ -186,7 +186,7 @@ Mutable binding syntax differs from call-site exclusive access. Mutability is an
 
 ## Const execution: generational access validation
 
-A source const function executes only at compile time, sequentially and within a bounded evaluation owned by the compiler. It retains Moth's reference, mutation, projection and explicit-copy semantics. It can mutate local evaluation state, but cannot perform IO, asynchronous work, channels, Wiring, external mutable-state access or other externally observable effects. Existing const callable restrictions remain in force. The runtime borrow checker and static lifetime-topology rules do not apply to these bodies.
+A source const function executes only at compile time, sequentially and within a bounded evaluation owned by the compiler. It retains Moth's reference, mutation, projection and explicit-copy semantics. It can mutate local evaluation state, but cannot perform IO, asynchronous work, channels, external mutable-state access or other externally observable effects. Closures are runtime-only. Existing const callable restrictions remain in force. The runtime borrow checker and static lifetime-topology rules do not apply to these bodies.
 
 ### Access permissions and invalidation
 
@@ -229,7 +229,7 @@ The compiler checks signatures, types, eligibility and statically evident mutati
 - A copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region.
 - The copied graph shares no mutable allocation with the source graph.
 - Immutable scalar storage may be physically reused only where identity and alias behaviour are unobservable.
-- Copying through a Wire reads and copies the binding's current value. It does not copy or forward the binding capability.
+- A stored callback makes the enclosing graph non-copyable even when it captures nothing. A copy of an eligible data field in that graph is still valid.
 - External opaque handles and resources are non-copyable unless their semantic profile defines a genuine independent-copy operation.
 - A non-copyable graph member produces a source diagnostic. The compiler must not silently retain an alias.
 String interpolation reads its inputs and produces text. A sequence construction creates fresh membership. A splice reads its source membership and elements once at its authored position. Stored reference-valued elements retain their normal sharing, permissions and lifetime obligations. A direct nested head creates a fresh row. An ordinary insertion of an existing row retains that row itself. Only an explicit eligible `copy` duplicates the reachable graph. A later operand cannot change which elements an earlier splice or copy captured.

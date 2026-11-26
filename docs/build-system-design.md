@@ -600,7 +600,7 @@ The accepted static MON builder direction consumes the standalone codec and emit
 
 Each module receives an immutable view of published generated identities/summaries. The compiler returns its completed generated delta atomically with the module result. Build code publishes, stores, places and reuses complete sidecars without mutating base/generated HIR or installing summaries.
 
-The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. Canonical parameter contracts distinguish ordinary values, wires and constructor routes across publication. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
+The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. The compiler publishes callback signatures and retention destinations using stable identities. Linking consumes the compiler's dependencies for reachable closure bodies. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
 
 Nested requests converge within the compiler transaction. They create no extra source jobs or wave edges. Cross-package instances belong to the consuming boundary and retain concrete canonical numeric types, evidence and applicable ABI/language compatibility. Active-request selection, semantic deduplication and diagnosed transaction rollback follow the compiler authority, not a build-side post-filter.
 
@@ -652,7 +652,7 @@ For each selected entry, the builder plans:
 
 The builder slot plan interprets the registered named fragments once. It produces scalar metadata, deduplicated stylesheet `href` values in first-origin order and deduplicated complete `head` HTML. The JavaScript and HTML-Wasm document paths consume the same plan, so metadata, link order and body output stay equivalent.
 
-This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. HTML entry fragments produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
+This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. HTML entry fragments produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Event registration, delivery and teardown belong to the consuming library or runtime.
 
 The generated caller branches on the entry's typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
 
@@ -771,7 +771,7 @@ Each entry physical variant has a JavaScript companion facade. Its selected Wasm
 
 Link analysis instantiates local summaries with builder lifecycle roots before target assignment. It carries shared validated topology and backend-neutral requirements, not one project-global physical memory plan. Linking does not reopen source or mutate HIR.
 
-Page, mount, request, frame and arena roots are lifecycle inputs when a consumer contract defines them, not exceptions to source memory law. They let storage outlive a lexical function only when the ordinary single-owner and retained-edge outlives rules hold. The existence of a lifecycle category does not imply a Wiring observer or UI runtime.
+Page, mount, request, frame and arena roots are lifecycle inputs when a consumer contract defines them, not exceptions to source memory law. They let storage outlive a lexical function only when the ordinary single-owner and retained-edge outlives rules hold.
 
 Caller/link analysis derives concrete cleanup frontiers from exported effects, aliases, retention domains, future edges and lifecycle roots. Exported summaries stay canonical and carry no donor-local family/region/counter/frontier IDs. Topology-relevant implementation/link changes invalidate affected assemblies.
 

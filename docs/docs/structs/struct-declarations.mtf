@@ -8,6 +8,9 @@ give each field a name, an explicit type and, if needed, a default.
     |
 ]
 
+Under the planned @../closures/ (closure design), a named struct can also
+declare a callback field such as `on_edit |text String| -> EditMessage`.
+
 A named struct has one constructor with the same name as its type. A choice
 variant uses the same field list and default rules. See @../choices (Choices).
 

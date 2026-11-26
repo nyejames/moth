@@ -384,16 +384,14 @@ Affine cleanup responsibility records which runtime path may perform individual 
 
 ## Retained captures and builder-owned lifetimes
 
-Captured values and builder-owned objects may not retain a declared-region-owned alias past that
-region's exit. Route captures obey this rule without a special lifetime exemption. Wire binding
-identity creates no retained subscription or longer-lived owner.
+If a stored callback captures a shared value in a declared region, its owner can keep the
+callback only while the value remains live. The same outlives rule applies to references
+inside captured values and builder-owned objects.
 
 Builder-owned regions obey the same retained-edge rule as source declared regions. The project
 runtime creates and ends them according to a supported lifecycle contract. The compiler may use
 those explicit roots but may not invent a page or mount owner to avoid a source diagnostic. A GC
 backend may use ordinary reachability only for the same already-legal topology.
-
-Future Wiring observation and event delivery require a separate accepted lifecycle design.
 
 ## Diagnostics
 
@@ -429,7 +427,6 @@ Deferred work includes:
 - expression-site placement
 - declared region-local graph construction and publication
 - direct reference-cycle construction inside one declared region
-- builder lifecycle integration for future Wiring observation after its separate design
 - field-sensitive region splitting
 - physical region layout and runtime ABI encoding
 

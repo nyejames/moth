@@ -65,16 +65,14 @@ The accepted Channel direction provides separate reader and writer endpoints:
     reader, writer Channel of SidebarEvent = Channel()
 ]
 
-A `Route of SidebarEvent` or `Route of Bool -> SidebarEvent` is a **function
-parameter contract** for completing a known choice constructor. It holds no
-Channel destination, cannot be stored as a normal component field and never
-runs an arbitrary callback. A `Wire of T` preserves a named binding identity,
-not an event observer.
+An ordinary Moth component could use a @../../closures/ (planned closure)
+such as `|open| => SidebarEvent::Expanded(open)` to turn input into a message.
+The component's caller would decide what to do with that message.
 
-A host subscription will need an explicit writer destination, a validated
-message constructor route and an owned subscription lifetime. It also needs
-host-to-Moth re-entry, task scheduling, cancellation and safe retained capture.
-The final user-facing subscription signature is not designed yet.
+Delivery from the browser needs a host subscription with a writer destination,
+scheduling, cancellation and a lifetime tied to the page. The host must deliver
+independent event data and respect the runtime's re-entry boundary. The public
+subscription signature remains open.
 
 ### Scheduling and failure
 
@@ -87,10 +85,6 @@ Page startup handles its own `Error!` outcome. Later event-handler errors happen
 **after** startup and need an independent policy for reporting or recovery.
 Closing a Channel or removing a component must cancel its listeners. JavaScript
 garbage collection cannot decide when a Moth subscription ends.
-
-Use ordinary functions and explicit activation for predictable lifecycle
-ownership. A future interactive application can combine typed choices, Channels,
-DOM operations and state without closures or an implicit rerendering framework.
 
 The first implementation milestone is synchronous `@builder/web/dom`. Typed
 `@builder/web/events` waits for the Channel, async and host-ingress contracts. HTML-JS

@@ -217,10 +217,8 @@ Generic inference and bounds are documented by @../generics (Generics).
 
 ### Function values
 
-Source functions are named declarations and cannot currently be used as
-ordinary values. The planned replacement for Wiring and Routes accepts a
-closure at a declared callback parameter. See @#parameters-and-defaults
-(Parameters and defaults) for the signature and closure spellings. Generic
-function values and higher-order polymorphism remain outside scope. A separate
-design for references to named, monomorphic, non-capturing functions remains an
-open design question and has no current syntax or implementation commitment.
+Source functions are named declarations. The planned closure design lets a
+caller supply an expression where a parameter or named struct field declares
+a callback. See @../closures/#closures-reference (Closures). Generic function
+values and higher-order polymorphism remain outside scope. References to named,
+monomorphic, non-capturing functions remain an open design question.

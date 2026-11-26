@@ -38,7 +38,7 @@ listed = sync_navigation(sidebar_id)!
     16. @./aliases (Aliases)
     17. @./generics (Generics)
     18. @./traits (Traits)
-    19. @./wiring (Wiring)
+    19. @./closures (Closures, planned)
     20. @./memory (Memory and lifetimes)
 
     ## Projects and content

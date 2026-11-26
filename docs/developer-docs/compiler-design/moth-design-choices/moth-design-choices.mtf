@@ -64,11 +64,13 @@ Accepted boundaries or outside-scope families include:
 
 - no shadowing of user-visible names
 - no source-visible lifetimes or reference categories
-- no general closures or anonymous function values as a broad higher-order system
+- no general-purpose function values
 - no inheritance
 - no trait objects or erased runtime dispatch
 - no broad reflection or runtime type inspection
 - no general-purpose macro language inside the language
+
+A constrained closure takes its signature from a callback parameter or named struct field. This lets a library ask its caller for a particular operation.
 
 If a feature would force solver-heavy reasoning, implicit behaviour or backend leakage into source, the design tends to refuse it. Deferred work still fits the model. Outside-scope work would need an explicit design change first.
 
@@ -83,7 +85,7 @@ Do not call those refusals "missing features" as if every language must collect 
             [$in href: ./]
             [$in eyebrow: Given up]
             [$in title: Source-surface power]
-            Macros, reflection, trait objects, general closures, source-visible lifetimes and shadowing.
+            Macros, reflection, trait objects, first-class function types, source-visible lifetimes and shadowing.
         ]
     ]
 

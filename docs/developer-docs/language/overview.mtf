@@ -174,14 +174,12 @@ Capability-checked runtime title mutation remains deferred.
 - `docs/docs/traits/core-cast-traits.mtf`
 - `docs/docs/traits/trait-design-scope.mtf`
 
-### Wiring
+### Constrained closures
 
-- `docs/docs/wiring/wiring.mtf`
+- `docs/docs/closures/closures.mtf`
 
-This reference owns head-directed `of`, named-binding wires, contextual
-constructor routes, capability restrictions and the channel-construction
-boundary. Ordinary type, call, choice and memory contracts still apply outside
-its explicit parameter-context rules.
+This reference owns contextual closure literals, callback parameters and named
+struct fields, invocation, capture access, borrowed results and retention.
 
 ### Channels
 
@@ -223,10 +221,6 @@ its explicit parameter-context rules.
 - `docs/docs/markdown/markdown-dependencies.mtf`
 - `docs/docs/markdown/rendering-contract.mtf`
 - `docs/docs/markdown/choosing-a-content-format.mtf`
-
-The public Wiring route pairs Basic teaching with the canonical unsuffixed
-reference at `docs/docs/wiring/wiring.mtf`. The reference owns Wire and Route
-semantics; the progress matrix owns their target support.
 
 ## Public documentation
 

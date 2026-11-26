@@ -109,6 +109,6 @@ Compile-time records remain separate folded member groups, with the whole-value
 runtime restrictions in @../constants/#const-records (Const records). A runtime
 record never uses the compile-time record marker as its runtime type.
 
-Wiring retains its own storage rules. Record construction does not turn wire
-identity or routes into ordinary storable field values. Runtime records gain no
-serialisation support from sharing constructor syntax with MON.
+Only a named struct can declare a callback field under the planned
+@../closures/ (closure design). An anonymous record can't declare one.
+Runtime records gain no serialisation support from sharing constructor syntax with MON.

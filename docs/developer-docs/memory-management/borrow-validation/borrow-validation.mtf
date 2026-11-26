@@ -260,20 +260,18 @@ The alpha side table may emit advisory `DropIfOwned` drop candidates. `DropIfOwn
 
 The permanent conceptual conditional operation is `discharge_if_owned`. The memory planner owns final transfer, discharge, destroy and bulk-reclaim plans.
 
-## Binding capabilities and captured values
+## Callback captures and results
 
-Wire and Route parameter contracts use ordinary access and lifetime rules. Reading a Wire reads the
-binding's current value, while forwarding it preserves binding identity. That identity grants no
-mutation authority, creates no subscription and extends no lifetime. A static compiler expression
-ID is not the runtime binding instance.
+Closure formation establishes the accesses needed for its lexical captures. Check resolved
+places for overlap with other captures and arguments. A shared capture permits reads. An
+exclusive capture requires ordinary marked access and a call-bounded callback. Since a
+callback can run more than once, each invocation must leave its captures usable again.
 
-Route captures evaluate when the route forms. Their reads, effects and aliases participate in the
-ordinary access facts. Lifetime analysis owns any retained-edge and outlives constraints. Borrow
-validation does not turn a capture into an implicit copy or an independent allocation.
-
-Automatic observation, subscriptions and event delivery are not part of this handoff. Any future
-observation or event lifecycle needs a separate accepted contract. Builder-owned lifecycle roots
-remain distinct inputs to lifetime topology.
+A result of an opaque invocation can borrow from any invocation argument or capture, including
+references reachable through either. This applies even when the callback takes zero arguments.
+Borrow validation tracks those possible sources and any outstanding result loans across
+replacement of a stored handler. Lifetime validation uses those facts to check escaping results
+and the declared destination of each retained callback.
 
 ## Handoff to lifetime validation
 

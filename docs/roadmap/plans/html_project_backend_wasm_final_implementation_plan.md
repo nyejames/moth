@@ -251,7 +251,7 @@ See `docs/build-system-design.md` "Entry and package link planning" and "Per-fun
 
 - Replace any remaining `BackendBuilder::build_backend(Vec<Module>, ...)` with consumption of `ProjectCompilation`.
 - Build HTML link plans from entry assemblies and per-function link facts.
-- Compute exact reachable function and runtime-fact unions for each entry.
+- Compute exact reachable function and runtime-fact unions for each entry. Include closure bodies and their private dependencies when reachable formation needs them. Charge execution effects to invocation. Preserve the scoped callback workload on supported HTML-Wasm paths and keep precise pre-lowering refusals for unsupported reachable handler uses.
 - Plan one Wasm selected-function closure per entry physical variant. Do not map semantic modules one-to-one to Wasm binaries.
 - Keep backend-facing access narrow: module artefacts, generated sidecars, entry assemblies, package facade and runtime metadata.
 - Remove source-path graph reconstruction from the builder.

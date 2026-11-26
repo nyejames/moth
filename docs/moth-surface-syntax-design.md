@@ -2,7 +2,7 @@
 
 **Design record | 26 November 2026**
 
-This document records the chosen source syntax for Moth after collections, maps and templates move to square brackets. The examples describe the target language. Read each example as a separate scope unless it refers back to the shared `Size` and `WindowEvent` declarations. The checked reference revisions predate this grammar. Compiler delivery, the Channels V1 runtime and the implementation plan are separate work.
+This document records the chosen source syntax for Moth after collections, maps and templates move to square brackets. The examples describe the target language. Read each example as a separate scope unless it refers back to the shared `Size` and `WindowEvent` declarations. The checked reference revisions predate this grammar. The syntax migration follows the hard removal of Wire and Route. Closures V1 follows the migration. The Channels V1 runtime has its own delivery requirements.
 
 The bracket proposal defines construction, splicing, wrappers, capacity proofs and MON collection data. This companion defines blocks, branch and readiness arms, declared regions, choice declarations and shared field defaults. Read the examples using the agreed spellings even when the linked baseline references use the earlier grammar. [Unified Bracket Construction for Moth](https://chatgpt.com/library?file_id=libfile_caae7fff4bf88191a45893104e71ab7c&account_id=personal)
 
@@ -64,7 +64,7 @@ prefix = "Action: "
 label = row_label("Save", |caption| => [prefix, caption])
 ```
 
-The inner `|text String| -> String` belongs to `format_label`. Each invocation supplies a String, which the closure calls `caption`. The closure captures `prefix` from the enclosing scope. A closure can also take zero arguments. In `|| => prefix`, `prefix` is still a capture.
+The inner `|text String| -> String` belongs to `format_label`. Each invocation supplies a String, which the closure calls `caption`. The closure captures `prefix` from the enclosing scope. A closure can also take zero arguments. In `|| => prefix`, `prefix` is still a capture. [Closures V1](docs/closures/closures.mtf)
 
 ## 2. Functions, ordinary blocks and decisions
 
@@ -229,7 +229,7 @@ A field default must fully evaluate at compile time against the field's declared
 
 Anonymous record literals use named entries. In Moth source, `dimensions = (width = 1280, height = 720)` creates a local record with its own identity. Construct a `Size` with `Size(1280, 720)`. Parentheses around a comma-separated pair of positional values do not make a record.
 
-## 5. MON and Route
+## 5. MON field defaults
 
 MON reads literal data against a receiving schema. A field with the `Size` schema accepts either `(width = 1280, height = 720)` or `Size(1280, 720)`. The anonymous form requires names. An explicit qualifier must match the schema's nominal type. For a choice, `::` identifies the alternative and an optional qualifier checks the choice name.
 
@@ -241,16 +241,6 @@ history = [WindowEvent::Opened, ::Resized(1440), ::Closed],
 ```
 
 The example assumes a root schema with a `Size`, two `WindowEvent` fields and a sequence of `WindowEvent`. Both `size` and `event` receive the declared height of 720. The new rule extends MON choice decoding to apply a prevalidated schema default to an omitted field, just as it does for a named record. At an optional field, an explicit `none` remains `none`. A supplied nested record uses its own field rules. Moth source expressions and constructor calls do not run during decoding. [MON records and choices](https://github.com/nyejames/moth/blob/d6b323082777e73663c8eacd6e03852f97d7e769/docs/docs/mon/mon-format.mtf#L204-L252) and [schema defaults](https://github.com/nyejames/moth/blob/d6b323082777e73663c8eacd6e03852f97d7e769/docs/docs/mon/mon-format.mtf#L279-L299).
-
-A `Route` parameter records how a consumer will construct a message. Its immediate parameter contract determines the role of the trailing field before defaults fill any omitted arguments. Under the agreed default rule, the same spelling has three uses.
-
-| Receiver for `WindowEvent::Resized(1280)` | Result |
-|---|---|
-| An ordinary `WindowEvent` | Construct the event now with width `1280` and height `720`. |
-| `Route of WindowEvent` | Capture a complete payload with width `1280` and height `720`. The route takes no future input. |
-| `Route of I32 -> WindowEvent` | Capture width `1280`. The future `I32` supplies height, even though height has a default. |
-
-A one-input route captures a contiguous leading prefix and reserves exactly the final field. Skipping an earlier field or supplying the final height at formation is invalid. Capture expressions run once, in written order, when the route forms. A zero-input route uses the complete constructor's ordinary positional and named argument rules. [Constructor routes](https://github.com/nyejames/moth/blob/d6b323082777e73663c8eacd6e03852f97d7e769/docs/docs/wiring/wiring.mtf#L157-L215).
 
 ## 6. Channels and readiness
 
@@ -372,7 +362,7 @@ The choice declaration `WindowEvent = { ... }` occurs in a type definition. A de
 - Carry the construct, its opener and the boundaries of each branch through parsing. A single brace pair around `if` can enclose sibling scopes. Name resolution must give a match capture to its guard and body, and a readiness receive binding only to its winning body.
 - Publish a choice field's typed default with the constructor signature wherever a caller can omit that field. Apply normal positional and named argument routing and preserve evaluation order for supplied arguments. A completed payload contains every field before pattern matching.
 - A MON reader obtains validated defaults from its prepared data schema. Apply the same omission and nominal type rules to a qualified variant. Preserve explicit `none` when the data supplies it. Generated Moth code or a call into the Moth evaluator is unnecessary for decoding.
-- Preserve region identity and placement, the receiving contract of `Route` and the selected channel operation through later lowering. Changing source punctuation creates no new lifetime, transfer, scheduler or wire-encoding policy.
+- Preserve region identity, placement and the selected channel operation through later lowering. Changing source punctuation creates no new lifetime, transfer, scheduler or wire-encoding policy.
 - Formatters, syntax highlighting and diagnostics need to identify brace and colon roles by context. Embedded CSS, JavaScript, raw template text and MON data each retain their own lexical rules. The old grammar also has inline-closer exceptions. A future implementation needs an explicit account of how those layout rules map to the new closers.
 
 These contracts identify observable information a later plan must preserve. The bracket proposal remains the authority for construction resolution, capacity checks, contribution order and template lowering.

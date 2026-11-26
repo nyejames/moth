@@ -29,7 +29,7 @@ Canonical authorities:
 
 Investigate a richer borrow-level call boundary for Boracle.
 
-Moth calls are statically resolved. Generated generics are concrete before borrow validation. There are no trait objects, general function values, closures or unsafe pointers. Boracle should exploit those restrictions rather than reducing every call to one parameter-access list and one unioned return-alias fact.
+This experiment targets statically resolved calls, including concrete generic instances. For an opaque callback invocation, account conservatively for aliases reachable through both the invocation arguments and the captured environment. A zero-argument callback can return borrowed data. If the normalized problem cannot represent those sources, record the case as unsupported in the experiment. [Closures V1](../../../docs/closures/closures.mtf)
 
 This package explores:
 
@@ -296,7 +296,7 @@ Fallible control flow already has separate success and error edges. Borrow summa
 
 ### Summary and reasoning
 
-Static calls make recursive summary convergence practical. Use a small finite lattice before exposing any new cross-module contract.
+Statically resolved calls identify the edges for recursive summary convergence. Use a small finite lattice before exposing any new cross-module contract.
 
 ### Work
 
@@ -331,7 +331,7 @@ Static calls make recursive summary convergence practical. Use a small finite la
 
 ### Summary and reasoning
 
-Current call argument loans can make an exclusive first argument block later shared argument evaluation. Because calls are static and argument order is explicit, Moth can investigate a broader reservation rule.
+Current call argument loans can make an exclusive first argument block later shared argument evaluation. Investigate a broader reservation rule for direct calls with known argument order and effects. An opaque callback carries no direct-callee proof for this experiment.
 
 Proposed experiment:
 

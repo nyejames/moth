@@ -31,6 +31,8 @@ listed = sync_navigation(sidebar_id)!
     Functions and control flow:
 
     - @../../docs/functions (Functions)
+    - @../../docs/closures (Constrained closures)
+    - @../../docs/async (Channels and readiness)
     - @../../docs/branching (Branching)
     - @../../docs/loops (Loops)
     - @../../docs/errors (Errors, options and assertions)
@@ -49,10 +51,6 @@ listed = sync_navigation(sidebar_id)!
     - @../../docs/aliases (Aliases)
     - @../../docs/generics (Generics)
     - @../../docs/traits (Traits)
-
-    Parameter capabilities and future channels:
-
-    - @../../docs/wiring (Wiring)
 
     Projects and imported content:
 

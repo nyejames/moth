@@ -282,7 +282,7 @@ sidebar #= [$html:
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Moth</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/generics/">Generics</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/traits/">Traits</a>
-            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/wiring/">Wiring</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/closures/">Closures</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/memory/">Memory and lifetimes</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Projects and content</p>

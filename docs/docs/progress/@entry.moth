@@ -46,7 +46,7 @@ listed = sync_navigation(sidebar_id)!
     HTML-JS lowers total and proven numeric operations and proven narrowings to plain values
     without recoverable carriers or dead error branches. Both backends treat that discharge as a proof.
 
-    The compact typed-expression foundation, type and folding reductions, bounded Wiring foundation,
+    The compact typed-expression foundation, type and folding reductions,
     trusted Core constant evaluation and owner hardening are implemented. Fresh Windows Canvas/frontend proof remains pending.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
@@ -491,11 +491,11 @@ template comment, valid only as a template-body child. Presentation-only roles c
         ]
 
         [data:
-            [: Wiring parameter contracts]
-            [: Supported]
-            [: Broad integration coverage for contract parsing and positions, Wire origins and forwarding, route formation, captures, forwarding, generic and imported routes, borrow interactions and target gates.]
-            [: JS / HTML; HTML-Wasm for Wire only]
-            [$md: `Wire of T`, `Route of Output` and `Route of Input -> Output` are function-parameter contracts. Wires accept named locals or unchanged Wire parameters of the exact type and read as immutable values. Routes accept a direct choice constructor with a captured leading payload, or an unchanged matching Route parameter. HTML-Wasm rejects reachable route formation with a target diagnostic. Route application or composition, subscriptions, event delivery, channels and async remain outside this foundation. See @../wiring (Wiring) for the canonical contract.]
+            [: Constrained closures]
+            [: Deferred]
+            [: No closure execution coverage.]
+            [: No target implements closures.]
+            [$md: The current compiler and integration tests still cover the retired Wire and Route design on HTML-JS. HTML-Wasm supports Wire reads and forwarding and rejects reachable Route formation. The compiler will remove both contracts first, leaving a period with neither facility. The general syntax migration comes next, followed by the accepted @../closures/ (Closures V1 design).]
         ]
 
         [data:

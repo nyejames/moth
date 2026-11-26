@@ -103,9 +103,9 @@ page, docs index, sidebar, pager and this map together.
   permanent JS helper.
 - The intended `@builder/web/events` requires Channel delivery, structured async,
   host-to-Moth ingress, scheduling and lifetime ownership. Browser events
-  become ordinary typed messages. `Route of ...` supplies constructor
-  completion, **not** a destination or callback. `Wire of T` preserves a
-  binding's identity, **not** a subscription.
+  become ordinary typed messages. In the planned closure design, a Moth-owned
+  component can call a handler to construct a message. The consumer chooses
+  where to send it and when to redraw.
 - There is no accepted final user-facing event subscription API yet. Do not
   fabricate concrete `listen()`, `mount()`, `on_change()` or callback
   signatures and call them official. Show the message/data flow as a diagram
@@ -173,7 +173,8 @@ the relevant unsuffixed references and the current roadmap/progress matrix:
 - `docs/docs/templates/`, `docs/docs/constants/` and
   `docs/compiler-design-overview.md` for TIR, constant semantics and slots.
 - `docs/docs/directives/directives.mtf` for directive attachment/ownership.
-- `docs/docs/wiring/wiring.mtf` for Wire, Route and Channel constraints.
+- `docs/docs/closures/closures.mtf` for callback signatures, captures and retention.
+- `docs/docs/async/channels.mtf` for channel transport and endpoint lifetimes.
 - `docs/docs/packages/core/`, `docs/docs/packages/builder/` and
   `docs/docs/packages/external-binding-contracts.mtf` for @core/html, @core/css,
   @builder/web/page, DOM prerequisites and JS ABI limits.
