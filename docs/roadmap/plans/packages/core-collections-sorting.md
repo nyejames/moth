@@ -157,7 +157,7 @@ The receiver is not an authored argument slot. `this` documents its mutable rece
 - mutates the existing collection and returns no value
 - requires explicit mutable receiver access
 - is infallible in Moth source semantics
-- accepts neither postfix `!` nor `catch`
+- has no error slot for postfix `!`. A plain call with literal policies is ineligible for `catch`. Apply ordinary safety-catch eligibility to the whole expression when argument evaluation qualifies.
 - traps or aborts on allocation exhaustion instead of returning `Error!`
 - leaves empty and one-element collections unchanged
 - preserves logical length, fixed capacity and collection identity
@@ -496,7 +496,7 @@ Establish the complete source API before sorting reaches HIR.
 - [ ] Require both policies to fold and normalise them to compiler enums.
 - [ ] Diagnose dynamic policies with parameter identity and source location.
 - [ ] Add `sort` to both collection shapes as mutable, infallible and unit-returning.
-- [ ] Reject postfix `!` and `catch` through the normal infallible-call path.
+- [ ] Reject postfix `!` on the sort operation. Use ordinary expression eligibility for `catch`.
 
 ## Coverage
 
@@ -506,7 +506,7 @@ Establish the complete source API before sorting reaches HIR.
 - [ ] Runtime Bool and runtime `SortMemory` rejection
 - [ ] Reserved-name collisions
 - [ ] Existing builtin named-argument rejection
-- [ ] Mutable receiver, fixed/growable, postfix `!` and `catch`
+- [ ] Mutable receiver and both collection shapes. Reject postfix `!` and a catch on a bare sort. Accept a safety catch with authored arithmetic in a foldable policy argument.
 
 # Phase 2 - Classify natural order and carry sort through HIR
 

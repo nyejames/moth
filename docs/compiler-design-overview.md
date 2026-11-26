@@ -959,7 +959,7 @@ Public interfaces, trait conformance, fingerprints and generic materialisation p
 
 The compiler verifies non-suspension through the closure body, its callees and implicit child joins. An opaque callback invocation may fail implicitly, trap or use fast arithmetic. The ordinary error boundary handles recoverable failure at the invocation that ran the body. Forming or storing the closure does not execute it.
 
-Borrow analysis checks captures against each other and the other arguments. A plain parameter permits use of the callback for the duration of the call. Each storing or forwarding path for a retained callback must respect its declared owner. Lifetime validation proves that shared captures outlive that owner and accounts for borrowed results derived from inputs or the environment, including nested references. Retained callbacks cannot capture an external place exclusively. Graph-copy checking rejects a stored callback even if it has no captures.
+Borrow analysis checks captures against each other and the other arguments. A plain parameter permits use of the callback for the duration of the call. Each storing or forwarding path for a retained callback must respect its declared owner. Lifetime validation proves each shared referent, including nested references, stays valid while the owner can retain it. A stored field can release its old environment on replacement. An outstanding result borrow keeps its own sources live. Retained callbacks cannot capture an external place exclusively. Graph-copy checking rejects a stored callback even if it has no captures.
 
 #### Required const execution and deterministic eager folding
 

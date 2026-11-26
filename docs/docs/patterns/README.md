@@ -33,8 +33,8 @@ page, docs index, sidebar, pager and this map together.
 ### Source is the composition system
 
 - Use normal nominal types, values, const functions, functions, collections,
-  choices and templates. Do not invent a `$component` directive, macros,
-  closures or a second HTML-specific expression language.
+  choices and templates. HTML composition uses the same expression language
+  as the rest of Moth.
 - Use local `$slot` / `$in` for immediate template composition. Ordinary
   slots do not search ancestor templates and their contribution routing does
   not escape bindings or function results.

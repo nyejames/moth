@@ -1,4 +1,4 @@
-## Validation gates
+[$html:<h2 id="validation-gates">Validation gates</h2>]
 
 This document defines validation scope and cadence for compiler and documentation
 work. Choose checks by branch, checkpoint and changed behaviour. Feature-branch

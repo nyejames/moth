@@ -1,4 +1,4 @@
-## Testing standards
+[$html:<h2 id="testing-standards">Testing standards</h2>]
 
 This document owns test selection, ownership, structure, assertions, fixture design
 and conservative pruning. `validation.mtf` owns completion gates and commands.

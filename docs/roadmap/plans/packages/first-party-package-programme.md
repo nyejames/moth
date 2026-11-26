@@ -248,8 +248,8 @@ function project.
 Portable Core packages keep semantic registration in the existing Core package owners. Their
 JavaScript implementations stay in the JavaScript package-binding or runtime path.
 
-After the compiler-owned Core constant evaluator lands, deterministic Core packages may also own
-small Rust semantic implementations used by that evaluator. Those Rust functions and runtime
+The compiler-owned Core constant evaluator can use small Rust semantic
+implementations owned by deterministic Core packages. Those Rust functions and runtime
 lowerings implement one Moth contract. They are not a second public package, a backend fallback or
 permission to execute JavaScript at compile time. Reuse the delivered typed evaluator owner instead
 of creating package-local callback registries.
@@ -779,9 +779,8 @@ both. The remaining hardening of the umbrella is not a new package gate once the
 have merged and the package's own prerequisites pass. Adopt their final owners directly and remove
 any planning assumptions made obsolete by the implementation. Do not build a package-local evaluator,
 rehydrate an old expression tree or add tuple/fallible result wrappers to bridge unfinished work.
-The main roadmap's active parallel status permits other eligible package slices.
-It does not authorise competing edits while a shared result or numeric
-representation is actively being replaced.
+The main roadmap controls when the paused package programme resumes. Coordinate edits
+with the owners of any result or numeric representation being replaced.
 
 ### Phase 2 - `@core/text` current v1 slice
 

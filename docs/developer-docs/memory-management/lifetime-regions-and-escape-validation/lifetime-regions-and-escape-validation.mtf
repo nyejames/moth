@@ -424,9 +424,10 @@ Last-use and future-use facts may prove that an edge is dead, that no source cap
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
 
-For each path that stores or forwards a retained callback, check its declared destination and
-prove that every shared capture outlives the receiving owner. Replacing the field ends its
-retention while preserving outstanding result loans. If an opaque invocation returns a borrow,
+For each path that stores or forwards a retained callback, check its declared destination.
+Prove that every shared referent, including nested references, stays valid while the owner
+can retain it. Replacing the field removes that field's old edge. Reclamation still requires
+the ordinary cleanup proof, including any outstanding result loans. If an opaque invocation returns a borrow,
 every possible source in its arguments or environment, including nested references, must
 outlive an escaping result. An independent copy made while the sources are live can escape
 under its own lifetime.

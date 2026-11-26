@@ -231,9 +231,10 @@ proofs clearly.
 
 Moth deliberately removes many features that make general borrow checking hard:
 there are no source-visible lifetime parameters, general closures, function
-values, trait objects, raw pointers or unsafe escape hatches. Calls are static,
-generics are concrete before borrow validation and builtin storage effects are
-compiler-known.
+values, trait objects, raw pointers or unsafe escape hatches. Named calls resolve
+statically, generics are concrete before borrow validation and builtin storage
+effects are compiler-known. When a constrained callback's body is unknown,
+the solver must use its published contract or report that proof as unsupported.
 
 Those restrictions make an unusually strong deep static tier plausible. The
 proposal uses that advantage without forcing every ordinary build to pay its

@@ -4,7 +4,7 @@
 
 This document records the chosen source syntax for Moth after collections, maps and templates move to square brackets. The examples describe the target language. Read each example as a separate scope unless it refers back to the shared `Size` and `WindowEvent` declarations. The checked reference revisions predate this grammar. The syntax migration follows the hard removal of Wire and Route. Closures V1 follows the migration. The Channels V1 runtime has its own delivery requirements.
 
-The bracket proposal defines construction, splicing, wrappers, capacity proofs and MON collection data. This companion defines blocks, branch and readiness arms, declared regions, choice declarations and shared field defaults. Read the examples using the agreed spellings even when the linked baseline references use the earlier grammar. [Unified Bracket Construction for Moth](https://chatgpt.com/library?file_id=libfile_caae7fff4bf88191a45893104e71ab7c&account_id=personal)
+The bracket proposal defines construction, splicing, wrappers, capacity proofs and MON collection data. This companion defines blocks, branch and readiness arms, declared regions, choice declarations and shared field defaults. Read the examples using the agreed spellings even when the linked baseline references use the earlier grammar. [Unified Bracket Construction for Moth](unified-bracket-construction-design.md)
 
 ## 1. Reading the new syntax
 

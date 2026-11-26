@@ -78,8 +78,8 @@ destination.
 The owner may retain shared captures only when their storage and everything
 they reference live long enough. Within that lifetime you can call a stored
 field, replace it through writable access or lend it to a plain parameter.
-Replacing a handler releases the old field's claim subject to outstanding
-result borrows. Extracting the field doesn't grant permission to keep it in
+Replacing a handler removes the field's reference to the old handler. An
+outstanding result borrow keeps its own sources live. Extracting the field doesn't grant permission to keep it in
 another independent owner.
 
 A retained handler can't capture an outside place exclusively. To edit
