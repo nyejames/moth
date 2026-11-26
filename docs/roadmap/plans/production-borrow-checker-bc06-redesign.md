@@ -1,8 +1,8 @@
 # BC-06 redesign investigation
 
-This companion to [BC-06: Relational production provenance](./production-borrow-checker.md#bc-06-relational-production-provenance) records the investigation into projection-precise ordinary borrow checking. It ends at design review. It holds the reduced witnesses, expected outcomes, reproduction commands and decisive measurements, so another session can resume without the local `tmp/bc06/` directory.
+This companion to [BC-06: Relational production provenance](./production-borrow-checker.md#bc-06-relational-production-provenance) records the investigation into projection-precise ordinary borrow checking and its implementation checkpoints. It holds the reduced witnesses, expected outcomes, reproduction commands and decisive measurements.
 
-**Owner direction (2026-11-25):** production implementation is paused. Investigate the design and return one reviewable design and implementation sequence. The holder-edge candidate stays uncommitted and preserved. Before this direction the two plans disagreed: the BC-06 handoff said "resume const C4 on the existing checker", while [C4](./const-functions-evaluation-foundation-and-semantics-plan.md#c4-integrate-required-evaluation-and-close-publication) stayed paused until ordinary access checking preserves correlated sharing and permission. This investigation now gates both.
+**Initial owner direction (2026-11-25):** Pause production implementation until the design and implementation sequence have been reviewed. Preserve the uncommitted holder-edge candidate. The BC-06 handoff had said to resume C4 on the existing checker, while [C4](./const-functions-evaluation-foundation-and-semantics-plan.md#c4-integrate-required-evaluation-and-close-publication) needed ordinary access checking to preserve correlated sharing and permission.
 
 **Approved contract decisions:** `hashmap_alias_struct_field_param_return` and the ordinary `runtime_detached` function must reject at their mutation with `MOTH-BORROW-0007`. The ordinary `runtime_retained` function must accept and render `22`. Fixture manifests change only in the slice whose rule changes them. The owner approved the design with the [Slice 0 decisions](#slice-0-owner-decisions).
 
@@ -16,8 +16,28 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
 | Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. The candidate fails the performance guard on 5 of the 18 workloads with identical work counters, so dense per-local edge sets are ruled out. The chosen design adds a sparse allocation layer to the existing checker. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions), [5](#section-5-conclusions) and [6](#section-6-conclusions). |
-| Next task | Slice 1, the sparse allocation layer, from `7cc05c61b`. C4's freeze transaction, rollback and import witnesses run in parallel. |
-| Next unanswered question | Can slice 1 meet its witness row within the unchanged performance guard? |
+| Next task | Owner decision. The [C4 import witness](./const-functions-evaluation-foundation-and-semantics-plan.md#c4-integrate-required-evaluation-and-close-publication) exposes observable sharing loss across the public folded-value boundary. Slice 1 remains uncommitted. |
+| Next unanswered question | Can the public folded-value interface preserve allocation references within each graph without merging distinct allocations or sharing across materialisations? |
+
+**Slice 1 pause.** The sparse draft accepts W1c and renders `20`. Its
+dynamic-index control renders `20 / 21`, while W1 and W1b still reject
+the push at `8:15` against `owner`. The success edge empties the
+singleton group and the join keeps the detachment only when both lanes
+prove it. The option-binding witness now rejects at `18:22`.
+
+An intermediate build passed 208 borrow-checker unit tests. A later CLI
+build changed two verdicts across the original 3,323 inputs: the approved
+`runtime_detached` rejection at `46:15` and the hashmap rejection at
+`21:2`. The draft splits the removal test into a rendering case and an
+exact-site rejection. Those tests and both hashmap backend expectations
+passed on that build.
+
+The instrumented prototype before the detachment and copy changes passed
+all 18 guard workloads with the same recorded counters as `7cc05c61b`.
+`tmp/bc06/measure_s6_slice1.json` holds the samples and counters. The
+extra int64 case, outside the guard, exceeded the check-time threshold.
+The latest draft hasn't run the guard, Boracle or integrated validation.
+Don't treat the prototype measurements as a Slice 1 checkpoint.
 
 ## 1. Evidence inventory
 
@@ -589,7 +609,7 @@ The owner accepted these four limits for this implementation. Each stays a conse
 | Mixed exits in an uncopied call result | Reading one field of a call result while mutating another field of the same result, with no `copy` in between, when one argument reaches both fields on different exits | W7a and W7c copy first. `runtime_call_disjoint_result_fields` uses distinct arguments. |
 | Loop allocation sites | Two allocations created by one site on different iterations of a loop are treated as possibly the same | L1 and L3 keep one allocation per iteration live at a time |
 | Ambiguous alias writes | `~alias = value` when the alias may name more than one cell is a weak update | L4 writes through an alias that names exactly one cell |
-| Collection elements | All elements of one collection share one field path | W1c moves one element out with `remove`, which is a strong update of the result |
+| Collection elements | All elements of one collection share one field path. A successful `remove` clears that path only when the checker can prove no other element remains. | W1c removes the only element. The fix must preserve disjointness from the result across its catch join. |
 
 ### What happens to the candidate
 

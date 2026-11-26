@@ -13,7 +13,7 @@
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
 **Current slice:** C4's store transaction landed in `4f976cca92`. The [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point) still gates shared runtime lowering and Phase 5.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Finish the ordinary borrow checker's required controls before enabling shared runtime lowering. The [C4 checkpoint](#c4-integrate-required-evaluation-and-close-publication) records the store and import results.
+**Next action:** Owner decision on preserving shared allocations in exported folded values. Keep shared runtime lowering off. The [C4 checkpoint](#c4-integrate-required-evaluation-and-close-publication) records the supported import that exposes the loss.
 
 ## Global constraints
 
@@ -846,10 +846,34 @@ two equal, distinct children:
 | Separate references to exported fields | Both rendered `1`. Each field reference materialises separately. |
 | Imported const function evaluated in the consumer | Both rendered `1`. The consumer runs the callable body before lowering its result. |
 
-No supported consumer distinguished local from imported sharing. The
-public folded-value tree can't represent shared-child identity. Before
-lifting `MOTH-RULE-0068` for whole imported nominal values, the interface
-must preserve observable sharing in that form.
+The nominal witnesses didn't expose an import-only difference. A supported
+whole-value import of `{{I32}}` does. `tmp/c4/import_nested` compares a graph
+with one child stored twice against a graph with two equal, distinct
+children. The const consumer copies the graph, removes one child, pushes
+into it and reads the remaining child's length.
+
+| Input to the consumer | Local shared | Imported shared | Local distinct | Imported distinct |
+| --- | --- | --- | --- | --- |
+| Whole folded value, current materialisation | `1` | `1` | `1` | `1` |
+| Whole folded value, experimental materialisation that preserves store identity | `2` | `1` | `1` | `1` |
+| Const callable executed inside the consumer, both builds | `2` | `2` | `1` | `1` |
+
+The experiment memoised shared store definitions within one const
+materialisation. It didn't change runtime HIR lowering or the public
+interface. Public projection expands the provider's graph to a tree and
+import projection builds a new row for each occurrence. The consumer can't
+recover sharing from equal contents without merging distinct allocations.
+
+Keep the Slice 0 import gate closed. The proposed correction carries
+definition references within each folded public graph and remaps them on
+import. It doesn't expose live interpreter identities or merge separate
+materialisations. The experiment isn't part of the branch.
+
+The store review also found two metering gaps. The expansion preflight keys
+its memo by occurrence rather than definition and doesn't charge traversal
+steps. Promotion reserves destination rows and remapping scratch while the
+staged suffix remains live. Fix both under the existing limits before C4
+closes.
 
 On the linked prototype, 500 focused Rust tests, 177 borrow-tagged checks
 and 163 const-tagged checks passed. Formatting and Clippy passed. The real
