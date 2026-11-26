@@ -16,7 +16,7 @@ Bind individual symbols or the whole namespace:
 
 ### Opaque types
 
-The package exposes three opaque types. Do not construct them with struct syntax or inspect their fields. Pass them to the package functions.
+The package exposes three opaque types. Get these values from the package functions and pass them back when needed. Opaque types expose no public constructor or fields.
 
 [table:
     [th:
@@ -296,7 +296,7 @@ All parameters use shared access. No function requires mutable access. All retur
 
 - Direct symbol-path clauses such as `@core/time/mark_now` face rejection. Use direct selections or a namespace clause.
 - Named arguments are not supported. Binding-backed calls are positional-only.
-- Do not construct `Duration`, `TimeMark` or `Timestamp` with struct syntax.
+- Obtain `Duration`, `TimeMark` and `Timestamp` from the package functions.
 - Do not inspect opaque type fields directly.
 - The package does not expose receiver methods.
 

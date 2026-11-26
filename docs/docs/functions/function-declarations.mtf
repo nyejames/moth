@@ -82,7 +82,7 @@ never receives a runtime body.
   @#returns-and-multiple-values (multi-return rules). Each call runs once at
   its receiving site and delivers every slot in order.
 - A const body may use statement matches with the ordinary
-  @../branching/pattern-matching (pattern contract). The compiler evaluates
+  @../branching/#pattern-matching (pattern contract). The compiler evaluates
   the scrutinee once and tests arms in order. A guard runs only after its
   pattern matches. Unselected arms never execute, but they are still
   type-checked.

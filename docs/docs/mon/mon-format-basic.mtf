@@ -1,8 +1,4 @@
-A small MON document is one root record of literal values. This save record
-shows the accepted shape: named fields, a nested record, a map, an explicit
-`none` and ordinary string data. The standalone schema declares numeric widths
-or decimal scales explicitly and retains lossless Integer and Decimal data.
-MON has no source inference or unconstrained numeric default.
+A MON document holds one record. Each entry gives a field name and a literal value. Here a save file includes a window size, two player names and a score for each player.
 
 [codeblock, $code "text":
     format_version = 1,
@@ -16,16 +12,15 @@ MON has no source inference or unconstrained numeric default.
 The `names` sequence contains two Strings. A MON reader never joins or splices
 its items. A prepared schema supplies field types and validated defaults for
 structs and choice payloads. A missing required field fails. An explicit
-`none` stays absent.
+`none` stays `none`, even when the field has a default.
 
-The same record may carry explicit outer parentheses. A lone scalar,
-collection or choice is not a document: put it in a named root field.
+You can enclose the root record in parentheses. To store a single scalar, collection or choice as a document, give it a named root field.
 Decoding applies defaults only to omitted fields. Encoding emits the completed
 record in schema order, including explicit `none` and values equal to
 defaults. See @#mon-format (MON format) for the complete literal-data
 reference.
 
-Strictness is the point. These inputs fail:
+Each line marked below illustrates a separate error. The schema for these examples declares `width` as I32 and `scores` as a map with String keys.
 
 [codeblock, $code "text":
     -- INVALID: MON never evaluates expressions, including foldable ones
@@ -62,6 +57,6 @@ Independent Rust callers use `moth_mon`. Compiler clients may use the same API
 and Rust types through the convenience re-export `moth::mon`. Prepare a schema
 once and reuse it across documents. The codec returns owned values or a
 structured `MonError` that supports ordinary Rust reporting and propagation.
-The Rust API uses exact numeric schemas without profile selection or aliases. A raw whole literal can receive an `I64` schema directly, but a
+The schema declares numeric widths and decimal scales explicitly. MON also retains lossless Integer and Decimal data. It never infers a default numeric type from source. The Rust API uses exact numeric schemas without profile selection or aliases. A raw whole literal can receive an `I64` schema directly, but a
 programmatic `Value::I32` cannot satisfy it. Binary-float literals round
 directly at their declared precision. See @#mon-format (MON format).

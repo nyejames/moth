@@ -75,8 +75,8 @@ listed = sync_navigation(sidebar_id)!
 
 [section:
     [doc_pager:
-        [$in previous_path:../templates/]
-        [$in previous_title:Templates]
+        [$in previous_path:../template-directives/]
+        [$in previous_title:Template directives]
         [$in next_path:../aliases/]
         [$in next_title:Aliases]
     ]

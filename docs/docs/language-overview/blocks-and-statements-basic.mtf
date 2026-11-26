@@ -13,11 +13,18 @@ Here `name` is the function's parameter. The brackets construct a String from te
 A Boolean decision uses one pair of braces. A bare `else` starts the other branch inside those braces.
 
 [codeblock, $code "moth":
-    if ready {
-        io.line("Ready!")
-    else
-        io.line("Waiting")
+    report |ready Bool| {
+        if ready {
+            message = "Ready!"
+            io.line(message)
+        else
+            io.line("Waiting")
+        }
     }
+
+    report(false)
 ]
 
-Each branch has its own scope. A name you declare in the first branch is visible only there. Indentation helps you see the nesting. The braces and branch headers mark the boundaries.
+This call prints `Waiting`. Both branches belong to the same `if` block.
+Only the first branch can use its local name `message`. Indentation shows
+the nesting. The braces and branch headers determine where names are visible.

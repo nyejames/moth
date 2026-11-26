@@ -1,26 +1,24 @@
-The compiler owns cast evidence. A nominal type can add source evidence for
-one of the supported target families by defining the required method and
-declaring explicit conformance:
+Moth checks the source type and the target type to decide whether they
+support a cast. For builtin numbers, the two types also tell you whether
+the cast can fail.
 
 [codeblock, $code "moth":
-    Label = |
-        text String,
-    |
-
-    to_string |this Label| -> String {
-        return this.text
+    widen |value U8| -> U16 {
+        return cast value
     }
 
-    Label must CASTABLE_TO_STRING
-    value String = cast Label("docs")
+    narrow |value U16| -> U8 {
+        return cast value catch then 0
+    }
+
+    wide = widen(255)
+    small = narrow(300)
 ]
 
-Fifteen source-authored target families have infallible and fallible evidence:
-the eleven fixed numeric types plus `Bool`, `String`, `Char` and `Error`.
-Fallible evidence returns the target with builtin `Error!`; conversion uses
-ordinary failure handling and the same plain `cast` syntax. For one target,
-infallible and fallible evidence cannot coexist.
+Every `U8` fits in a `U16`, so `wide` holds 255. The reverse cast needs a
+range check. The second call passes 300, which exceeds the largest `U8`,
+so `small` holds the fallback of zero.
 
-Builtin conversion evidence also covers `Byte` and `Dec`, but Moth defines no
-source-authored traits for them. See @./#cast-evidence (Cast evidence) for the
-complete trait signatures and conversion rules.
+For a struct or choice, the compiler looks for an explicit promise that its
+receiver method supplies the conversion. See
+@../traits/#core-cast-traits (Core cast traits) for a complete example.

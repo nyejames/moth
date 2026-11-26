@@ -1,8 +1,3 @@
-**Entries and page fragments.** HTML pages come from directories that contain
-`@entry.moth`. A bare direct top-level [$html:<code>&#91;...&#93;</code>] must fold into static page output, while
-[$html:<code>~&#91;...&#93;</code>] deliberately publishes a runtime body fragment.
-Direct const root `$in` inserts supply builder metadata. See @../project-structure/#entry-config (Entry metadata and builder slots) for their rules.
-
 Square brackets construct text or sequences and can compose contributions
 through slots, wrappers and control flow. A non-empty text body establishes
 String. A concrete receiver or formatter can establish the type before the

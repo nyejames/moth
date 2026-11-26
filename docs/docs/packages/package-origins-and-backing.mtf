@@ -55,7 +55,7 @@ Unknown user bindings cannot self-declare these guarantees. The compiler
 checks `$safe_math` and `$infallible` through reachable calls, not by excluding
 an entire package because one foreign function is imported. MothSource
 packages remain analysable regardless of where they are distributed. See
-@../directives/constraints (Constraints).
+@../directives/#constraints (Constraints).
 
 ### Package names and source facades
 

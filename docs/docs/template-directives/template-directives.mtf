@@ -1,0 +1,38 @@
+The compiler defines the template directives and their meanings for every
+builder. A directive applies to the construction whose head contains it. Use
+commas between expressions, directives and a trailing `if` or `loop`. An
+operand belongs to the directive immediately before it. Write `$code "moth"`
+without parentheses or an equals sign.
+
+Each directive name may appear once per head. A head accepts one formatter.
+A slot declaration and a note each need the whole head. A presence guard may
+share its head only with one formatter. An insert may share its head with
+other compatible items and names exactly one destination.
+
+[codeblock, $code "moth":
+    card #= [$html:<aside>[$slot summary]</aside><p>[$slot]</p>]
+    example = [card:[$in summary, $md:Build **passed**]Ready to ship.]
+]
+
+Here `$in summary` chooses the destination and `$md` formats the content sent
+there. A second formatter or a second `$in` in the same head would be an
+error. To fill another slot, write another insert.
+
+### Comments and source annotations
+
+`$note` takes no operand and requires a balanced body. It can appear only as
+a child of a template body. The compiler skips the contents without evaluating
+them. A note contributes no output, establishes no receiving type and supplies
+no slot. It cannot stand alone as a value or an entry fragment.
+
+[codeblock, $code "moth":
+    prompt = [:Run [$note: [old_command] used to go here.]tests]
+]
+
+The note can contain balanced brackets. This example produces `Run tests`
+without looking up `old_command`.
+
+Source code uses `$doc` to document a declaration and `$todo` to annotate
+a following declaration or statement. Source files and packages cannot add
+template directives. Builders can register destination names for root inserts.
+See @../directives (Source directives) for source attachment and diagnostics.

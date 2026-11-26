@@ -1,32 +1,19 @@
-Create a struct by calling its type name.
+Call the struct's constructor to create a value. You can supply arguments
+by position or name the fields you want to set.
 
 [codeblock, $code "moth":
-    Player = |
-        name String,
-        score I32 = 0,
-    |
+    Player = | name String, score I32 = 0 |
 
-    player = Player("Priya")
+    newcomer = Player("Priya")
+    leader = Player(name = "Rob", score = 10)
+    high_score = leader.score
 ]
 
-The constructor uses the default score.
+The first call supplies the name by position and leaves the score at its
+default of zero. The second names both arguments.
+Use a dot to read a field, as in the last line, where `high_score` gets 10.
 
-Named fields make larger constructors easier to read:
-
-[codeblock, $code "moth":
-    player = Player(
-        name = "Priya",
-        score = 10
-    )
-]
-
-Read fields with a dot:
-
-[codeblock, $code "moth":
-    name = player.name
-]
-
-To change a field, the struct binding must be mutable:
+To change a field, start with a mutable binding and mark the write with `~`.
 
 [codeblock, $code "moth":
     player ~= Player("Priya")

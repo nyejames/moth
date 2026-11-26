@@ -1,5 +1,5 @@
-**Accepted deferred implementation.** Runtime anonymous records are planned and
-are not yet executable in the Alpha compiler.
+**Planned feature.** The Alpha compiler doesn't yet support runtime anonymous
+records.
 
 An anonymous record groups local values without declaring a named type:
 
@@ -25,4 +25,4 @@ passed to functions, returned, exported or stored in collections or maps.
 Ordinary values extracted from their fields follow their normal rules.
 
 See @../constants/#const-records (Const records) for compile-time member groups
-and @../language-overview/#mon-syntax (MON syntax) for the shared notation.
+and @../language-overview/#mon-syntax (Constructor syntax) for the shared notation.

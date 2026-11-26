@@ -1,4 +1,4 @@
-Select a variant by name. For this choice, only `Resized` takes arguments.
+A choice gives each variant its own constructor. Use `::` to select one. In this example, `Opened` carries no fields and `Resized` takes arguments.
 
 [codeblock, $code "moth":
     WindowEvent = {

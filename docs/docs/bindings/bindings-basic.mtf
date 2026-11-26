@@ -5,10 +5,12 @@ A binding names a value.
     player_name = "Priya"
 ]
 
-An unannotated numeric origin can stay unresolved while Moth considers eligible
-exact uses in its function body. If none resolves it, whole-number bindings
-default to `I32` and decimal/exponent bindings to `F64`. Other values keep their
-own inferred types.
+Here `score` holds an `I32` and `player_name` holds a `String`. When you leave
+the type off a numeric literal, Moth can use an exact type from elsewhere in
+the same function, for example from a parameter that receives the value.
+Without that information, a whole number defaults to `I32`. A number with
+a decimal point or an exponent defaults to `F64`. See
+@../numbers/#numeric-literals (Numeric literals) for the inference rules.
 
 Write the type when it makes the code clearer or gives the compiler needed
 context:

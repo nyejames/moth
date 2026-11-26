@@ -71,7 +71,7 @@ Examples:
 - `F64 -> String` uses Moth's stable formatter.
 - Compile-time and runtime template interpolation use the same F64 formatting.
 
-The compiler must not change the result of a shared operation by folding it. A required const function has no runtime body. Its deliberate access exception is described in @../functions/function-declarations (Function declarations).
+The compiler must not change the result of a shared operation by folding it. A required const function has no runtime body. Its deliberate access exception is described in @../functions/#function-declarations (Function declarations).
 
 ### Advisory const facts
 

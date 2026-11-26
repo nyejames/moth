@@ -37,10 +37,11 @@ listed = sync_navigation(sidebar_id)!
 
     Data and compile-time construction:
 
-    - @../../docs/structs (Structs)
+    - @../../docs/structs (Structs and methods)
     - @../../docs/choices (Choices)
     - @../../docs/collections (Collections and maps)
     - @../../docs/templates (Templates)
+    - @../../docs/template-directives (Template directives)
     - @../../docs/constants (Constants and compile-time behaviour)
 
     Names and static abstraction:

@@ -35,7 +35,7 @@ Branches are analysed independently. At a control-flow join, alias activity is c
 
 Required const functions preserve reference semantics without the runtime static borrow and lifetime analyses. Multiple mutable aliases to the same storage are legal. A successful mutation invalidates existing overlapping immutable references. If one is used later, the compiler reports an access diagnostic. If it is never used again, the mutation is valid. Independent sibling projections can remain valid and shared child allocations are still shared, regardless of the path used to reach them. Mutating through a read-only reference remains invalid.
 
-These checks follow actual execution. An uncalled function or unselected branch has no dynamic access verdict, though static typing and const eligibility still apply. See @../functions/function-declarations (Function declarations) and the formal access-and-aliasing reference for the contract.
+These checks follow actual execution. An uncalled function or unselected branch has no dynamic access verdict, though static typing and const eligibility still apply. See @../functions/#function-declarations (Function declarations) and the formal access-and-aliasing reference for the contract.
 
 ### References are real
 

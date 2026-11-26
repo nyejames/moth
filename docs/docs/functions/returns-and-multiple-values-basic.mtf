@@ -18,8 +18,15 @@ A function can return more than one success value:
 
 The number of receiving names must match the number of returned success values.
 
-Prefix a receiving name with `~` to update an existing mutable binding. Leave
-new receiving names unmarked, for example `~count, message = next()`.
+A call can update an existing binding and create another in the same step.
+
+[codeblock, $code "moth":
+    total ~= 0
+    name_again, ~total = pair()
+]
+
+`name_again` receives a new String binding. The `~` on `total` updates the
+existing binding to 2.
 
 A function with no success values may fall through. That is not the same as
 `-> !`, which means the function never returns at all.

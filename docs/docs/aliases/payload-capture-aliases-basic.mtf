@@ -1,4 +1,4 @@
-When you match a choice with a payload, the field name becomes the local variable inside that arm. Sometimes that name collides with another variable or feels wrong in context.
+A pattern normally gives a captured field its declared name. Use `as` when that name already belongs to a visible binding or another name would explain the field's role in this arm.
 
 ### Rename one payload field
 
@@ -16,7 +16,7 @@ When you match a choice with a payload, the field name becomes the local variabl
     }
 ]
 
-`message as error_message` means: take the payload field called `message` and bind it to `error_message` in this arm only.
+The first arm reads the field named `message` through the local name `error_message`. The field keeps its declared name.
 
 ### Why rename?
 
@@ -29,4 +29,4 @@ When you match a choice with a payload, the field name becomes the local variabl
     }
 ]
 
-Without the alias, the capture would collide with the visible outer `message` and be rejected. The alias keeps both names distinct.
+The first arm logs the captured failure message. The fallback can still read the outer `message`. Moth rejects a capture that would shadow that outer binding.

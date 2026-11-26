@@ -37,7 +37,7 @@ folded export and provenance rules remain in force.
 ### Anonymous const records
 
 Anonymous construction uses the named-only form of
-@../language-overview/#mon-syntax (MON syntax):
+@../language-overview/#mon-syntax (constructor syntax):
 
 [codeblock, $code "moth":
     labels #= (

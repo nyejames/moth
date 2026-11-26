@@ -22,7 +22,7 @@ same typed field-list syntax as a struct. Its required `width` and defaulted
 - A choice retains its own identity even when another choice has identical variants. A single-variant choice still uses its variant name.
 
 `DoorEvent = { Opened }` introduces `DoorEvent::Opened`. A struct instead has
-one constructor named after its type. See @../structs (Structs) for field lists
+one constructor named after its type. See @../structs (Structs and methods) for field lists
 and @../language-overview/#blocks-and-statements (Blocks and statements) for
 declaration placement. Recursive choice declarations are deferred.
 

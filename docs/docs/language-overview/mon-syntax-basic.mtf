@@ -24,4 +24,14 @@ The label and `=` share one logical line. The value may start on the next line.
 Named types still need their constructors. An anonymous record with matching
 fields does not become a `Size`.
 
-Moth Object Notation (MON) uses the same constructor syntax for literal data. With a Size schema, `(width = 1280, height = 720)` supplies a Size. The schema gives the reader its type. In Moth source, the same anonymous record has its own type. See @../mon/#mon-format (MON format) for the data rules.
+Moth Object Notation (MON) uses the same named entries for literal data.
+Suppose a program reads a MON file using a schema for `Size`. The file can
+contain this record:
+
+[codeblock, $code "text":
+    (width = 1280, height = 720)
+]
+
+The schema identifies the two fields as a `Size`. In Moth source, write
+`Size(...)` to choose that named type. See @../mon/#mon-format (MON format)
+for the data rules.

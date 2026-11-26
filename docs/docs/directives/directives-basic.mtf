@@ -1,54 +1,37 @@
-A directive modifies an existing construct. Template-head directives modify
-their template. Source directives attach to the next declaration or statement
-when their own contract allows it.
-
-### Two locations
+Write a source directive above the declaration or statement it affects. In a
+package facade, you can use `$export` to publish a name and `$doc` to record
+what it means.
 
 [codeblock, $code "moth":
-    message #= [$md: Hello from Moth]
-
-    $export $doc [: Public greeting.]
+    -- @package.moth
+    $export $doc [:The greeting shown to new users.]
     greeting #= "Hello"
-
-    $todo [: Add a better error message.]
-    assert(false, "Not implemented")
 ]
 
-`$export` publishes declarations or direct-selection dependency clauses from
-`@mod.moth` and `@package.moth`, at the facade root or under one public route.
-`$config` marks an explicitly typed top-level compile-time binding as a build
-input.
+Both directives apply to `greeting`. You can put them on consecutive lines or
+separate them with a space on one line. The declaration starts on the next
+line. A blank line breaks the attachment. Each directive name can appear once
+on the same target.
 
-`$doc` documents a declaration. `$todo` annotates a declaration or
-statement. Both take a compile-time `String` value, often written as a
-template. `$doc` records declaration documentation. `$todo` has no runtime
-or builder effect. Use [$html:<code>$doc &#91;$md: ...&#93;</code>] to request Markdown explicitly.
+### Build inputs and notes
 
-`$fast_math`, `$safe_math` and `$infallible` are parameterless numeric
-constraints on a function or complete statement. Ordinary checked arithmetic
-stays the default. See @../directives/#constraints (Constraints).
+`$config` marks an explicitly typed compile-time binding as a build input.
+In this example `"en"` supplies the fallback value.
 
-### Stacking and operands
+[codeblock, $code "moth":
+    $config
+    language #String = "en"
+]
 
-Source directives may share one line or use consecutive lines. No commas
-separate them. Each distinct directive attaches independently to the same
-following-line construct and order never changes its meaning. Any repeated
-directive name on one target is an error.
+`$todo` takes a compile-time String, like `$doc`. Use it to annotate a
+declaration or a complete statement. The compiler checks the text without
+emitting any output for the annotation. `$doc` keeps its text as declaration
+documentation.
 
-Comment-only lines can intervene, but a blank line breaks attachment. Another
-source directive ends a preceding operand only at the outer expression
-boundary, not inside a nested template. A directive cannot skip an invalid
-target.
+### Operands
 
-Directives use `$name`, `$name value` or `$name key = value`, according
-to their contract. Parenthesized calls like `$name(...)` are invalid.
-`$config` takes no operand. `$export` takes no operand or one bare `@route`
-path.
-
-Template-head directives include `$before`, `$after`, `$fresh`,
-`$slot`, `$in`, `$supplied`, `$note`, `$raw`, `$md`, `$html`, `$css`,
-`$escape_html` and `$code`. Template heads use commas between items.
-Only `$note` discards comment content, and only as a child of a template body.
-
-See @../directives (Directives), @../templates/#template-directives (Template
-directives) and @../project-structure/#build-inputs (Build inputs).
+Each directive defines which operand it accepts. Write the operand after a
+space. For example, `$export @forms` publishes a name under the facade's
+`forms` route. On its own, `$export` publishes at the facade root. Inside a template,
+directives go in the head with commas between items. See @../template-directives (Template directives) or
+@../project-structure/#build-inputs (Build inputs).

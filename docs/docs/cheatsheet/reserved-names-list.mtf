@@ -40,6 +40,7 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 - `$fresh` - bypass the parent's child wrapper.
 - `$slot` - declare a default, named or positional slot, with an optional compile-time default of its receiving type.
 - `$in` - contribute to one named slot.
+- `$supplied` - include the guard body when the caller supplied the selected slot, even if the supplied content is empty.
 - `$note` - discard a balanced comment template in a template body.
 - `$raw` - preserve unformatted template content.
 - `$md` - format Moth Markdown.
@@ -52,9 +53,9 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 
 - `$export` - marks one public declaration or direct-selection re-export in `@mod.moth` or `@package.moth`.
 - `$config` - marks one explicitly typed top-level compile-time `#` binding as a build input.
-
 - `$doc` - attach one compile-time String as documentation to a following declaration.
 - `$todo` - annotate a following declaration or executable statement with one compile-time String, with no runtime effect.
+- `$fast_math`, `$safe_math` and `$infallible` - select numeric behaviour or require a proof about arithmetic or escaping failure. See @../directives/#constraints (Numeric constraints) for the rules.
 
 `$config` takes no operand. `$export` takes no operand or one bare `@route`
 path. Source directives may share a line or occupy consecutive lines without
@@ -68,4 +69,4 @@ No `$project`, `$builder` or `$html_builder` directive exists. Project and build
 
 The former `$page` design is superseded and there is no `$entry` directive. Entry eligibility comes from the `@entry.moth` file role. HTML metadata uses direct top-level const `$in` builder slots in that entry.
 
-See @../directives (Directives) and @../templates/#template-directives (Template directives) for their syntax and use.
+See @../directives (Directives) and @../template-directives/ (Template directives) for their syntax and use.

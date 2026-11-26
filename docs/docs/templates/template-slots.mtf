@@ -152,7 +152,7 @@ filled by `$in`.
 `$supplied` tests whether routing supplied a key. It never reads the stored or
 rendered value and supplies no type evidence. If a guard is the only use of its key,
 the enclosing construction supplies the receiving type. The directive syntax and head restrictions live on the template
-directives page (see @../templates/#template-directives (Template directives)).
+directives page (see @../template-directives (Template directives)).
 Presence follows these rules:
 
 - a guard is true when at least one contribution routes to its key in the
@@ -209,8 +209,6 @@ slot defaults and routing.
 
 Runtime-capable templates support slot contributions from selected template
 `if` branches and template loop bodies.
-
-AST prepares the slot routing before HIR.
 
 Runtime construction appends routed contributions in order under the slot's receiving type. Presence comes from routing, not from whether rendered content is
 nonempty.

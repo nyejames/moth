@@ -1,6 +1,9 @@
 Moth keeps the source language small. Compiler complexity is acceptable when it
 makes the programmer-facing model simpler, safer and more predictable. Keep
-source behaviour statically resolved and locally inspectable. Hide backend
+source behaviour statically resolved and locally inspectable. For example, a bracket
+construction can take its type from the binding, parameter or field that receives it.
+Once a binding holds a String, a later call cannot reinterpret that String as
+a collection. Hide backend
 optimisation behind stable semantics so implementation techniques do not become
 source-language obligations.
 

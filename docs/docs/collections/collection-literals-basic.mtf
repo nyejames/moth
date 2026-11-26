@@ -1,5 +1,4 @@
-Square brackets construct an ordered collection. The receiving type can
-determine what to do with the same values.
+Square brackets can construct an ordered collection or a String. Read the receiving type alongside the expression to see which result the program asks for.
 
 [codeblock, $code "moth":
     scores = [10, 20, 30]

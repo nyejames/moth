@@ -1,0 +1,86 @@
+### Slot keys and their defaults
+
+`$slot` declares the default slot. `$slot 1` declares a positional slot
+with a positive whole-number key. `$slot title` declares a named slot.
+Each declaration fills its head and has no body. An occurrence may supply a
+compile-time default of its receiving type.
+
+[codeblock, $code "moth":
+    link #= [$html:<a href="[$slot 1 = "/"]" title="[$slot hint]">[$slot]</a>]
+    guide = [link, "/guide":[$in hint:Read the guide]Guide]
+]
+
+The first loose contribution fills position 1. The named insert supplies the
+hint and the remaining text fills the default slot. Each key has one receiving
+type across its occurrences. A String slot joins text. A sequence slot
+collects elements under its element type.
+
+`$in` accepts one bare name. The receiving application routes it to that named
+slot. Multiple inserts for the same key contribute in source order. Any routed
+contribution, including an explicitly empty one, suppresses the default at
+each occurrence of that key. Without a contribution, each occurrence uses its
+own default or emits its type's empty result. A stored constant insert can
+participate in its immediate parent's routing. Returning an unresolved insert
+from a runtime function is an error. See @../templates/#template-slots (Template
+slots) for routing order, repeated slots and runtime contributions.
+
+### Compose style utilities with named inserts
+
+A style utility can be a constant insert. Its name carries both the CSS and
+the destination. Several utilities can target the same receiving wrapper.
+
+[codeblock, $code "moth":
+    heading #= [$html:<h2 style="[$slot style]">[$slot]</h2>]
+    heavy #= [$in style:font-weight: 700;]
+    red #= [$in style:color: red;]
+
+    warning = [heading, heavy, red:Build failed]
+]
+
+The heading receives `font-weight: 700;color: red;` in that order. To style
+only part of the heading, apply an element wrapper inside its body and pass the
+utility to that nested wrapper. A function that returns a String supplies CSS
+text. Its caller still chooses a destination with `$in style`.
+
+### Presence, output and evaluation
+
+`$supplied` accepts the same default, named and positional keys as `$slot`. A
+guard declares its key even if no slot prints it. It requires a colon and body,
+takes no default and has no `else` form. Only a child within a template body
+can act as a guard. A guard cannot occur as a statement, value, fragment root
+or directive operand. Its only permitted companion in the head is one formatter.
+
+The guard tests whether a contribution reached the key. Defaults and fallback
+text do not satisfy it. A routed payload whose runtime condition emits nothing
+still satisfies it. Each matching guard emits its body once, however many
+contributions reached that key. An absent guard produces no output. A selected
+empty body still counts as a child for `$before` and `$after`.
+
+When a guard alone declares a key, the enclosing construction sets the receiving
+type. The compiler validates the supplied payload but skips its evaluation. A
+slot that also consumes the payload restores ordinary evaluation. A guard
+inside supplied content tests keys in the application that authored that
+content.
+
+A stored or exported wrapper keeps its unresolved guards. A guard in a plain
+loop body can survive storage, but compilation rejects a guard that would have
+to cross a wrapper applied only when output exists. Examples include a
+conditional child wrapper and head content before a loop in that same head.
+
+### Entry destinations
+
+Only a direct, top-level compile-time insert in an active entry routes to a
+builder destination. Nested, stored and aliased inserts keep ordinary
+template routing. The HTML builder recognises `title`, `description`, `lang`,
+`favicon`, `body_style`, `stylesheets` and `head`. An entry cannot send a
+runtime fragment to a named builder destination.
+
+[codeblock, $code "moth":
+    [$in stylesheets:[@assets/site.css]]
+    [$in head:<meta name="theme-color" content="#222222">]
+]
+
+A `stylesheets` insert contributes one tracked CSS resource. The builder
+deduplicates these by resource identity. For `head`, it compares whole
+rendered contributions. See @../project-structure/#entry-config (Entry metadata
+and builder slots) for each destination's content and fallback rules.

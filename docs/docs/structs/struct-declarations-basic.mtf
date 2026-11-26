@@ -1,15 +1,5 @@
-A struct groups named values into one new type.
-
-[codeblock, $code "moth":
-    Player = |
-        name String,
-        score I32,
-    |
-]
-
-Each field has a name and a type. Choice variants use the same field lists.
-
-Fields can have defaults:
+Use a struct when a few values belong together. A game can keep each
+player's name and score in one value.
 
 [codeblock, $code "moth":
     Player = |
@@ -18,5 +8,6 @@ Fields can have defaults:
     |
 ]
 
-`Player` is its own type. Another struct with the same fields is still a
-different type.
+The pipes enclose the fields. Each field declares a name and a type. The
+score also has a default, so you can create a player with just a name.
+Declaring another struct with these same fields creates a different type.

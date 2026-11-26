@@ -7,7 +7,7 @@ This index routes contributors to the canonical directive contract and its compi
 - `docs/docs/directives/directives.mtf` owns the two attachment locations, one-operand grammar, validation and diagnostics.
 - `docs/docs/directives/constraints.mtf` owns `$fast_math`, `$safe_math` and `$infallible` placement, meanings, proof policy, external evidence and user-visible trap boundary.
 - `docs/docs/directives/directives-basic.mtf` presents the short accepted surface.
-- `docs/docs/templates/template-directives.mtf` owns the existing template-head composition and formatting semantics.
+- `docs/docs/template-directives/template-directives.mtf` owns head syntax and child comments. The adjacent `slots.mtf`, `child-wrapping.mtf` and `formatters.mtf` cover individual directives.
 - `docs/docs/project-structure/public-api.mtf` owns `$export` targets and public API contracts. `docs/docs/packages/public-reexports.mtf` owns public selection semantics.
 - `docs/docs/project-structure/project-config.mtf` owns config records. `docs/docs/project-structure/build-inputs.mtf` owns `$config` inputs. `docs/docs/project-structure/entry-config.mtf` owns builder slots.
 

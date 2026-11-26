@@ -19,7 +19,7 @@ Bind individual symbols or the whole namespace:
 
 ### Opaque types
 
-`@builder/web/canvas` exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through `@builder/web/canvas` functions.
+`@builder/web/canvas` exposes seven opaque handle types. Get a handle from a `@builder/web/canvas` function. Opaque handles expose no public fields or constructors.
 
 [table:
     [th:
@@ -1178,7 +1178,7 @@ These are host-operation categories, not HTTP status semantics.
 
 ### Opaque type rules
 
-- Do not construct opaque types with struct syntax.
+- Obtain opaque handles through the package functions.
 - Do not inspect opaque type fields.
 - Opaque types have no source-visible methods. Use the free functions.
 

@@ -31,13 +31,13 @@ listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Traits
 
-    A trait names a static method contract. Matching methods don't imply
-    conformance, so a type must declare the promise explicitly.
+    A trait names a set of methods. A type declares that it provides those
+    methods with `must`. A generic function can then use the trait as a
+    @#generic-trait-bounds (bound) and call those methods on its argument.
+    Moth checks each concrete argument type at compile time.
 
-    Unlike object-oriented interfaces or Rust trait objects, Moth traits don't
-    create runtime values or dynamic dispatch. Generic bounds require conformance
-    evidence for each concrete argument type during compilation. See
-    @#evidence-travels-with-values (Evidence travels with values).
+    The @#core-cast-traits (core cast traits) use the same mechanism to let
+    `cast` convert a struct or choice to a builtin type.
 ]
 
 [section:

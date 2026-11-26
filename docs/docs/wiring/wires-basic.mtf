@@ -1,47 +1,30 @@
-A Wire parameter asks the caller to preserve the identity of one named local
-binding. No special marker is written on the declaration or argument.
+A local binding gives a value a name. If two rows both contain `"Draft"`,
+reading their titles gives you the same text. A helper that needs to pass
+on *which title* the caller supplied asks for a `Wire of String`.
 
 [codeblock, $code "moth":
-    read_name |value Wire of String| -> String {
-        return value
+    read_title |title Wire of String| -> String {
+        return title
     }
 
-    forward_name |value Wire of String| -> String {
-        return read_name(value)
+    row_title |title Wire of String| -> String {
+        return read_title(title)
     }
 
-    replace_name |value ~String, replacement String| {
-        ~value = copy replacement
-    }
-
-    current_name ~= "Priya"
-    label = read_name(current_name)
-    ~current_name = "Rob"
-    replace_name(~current_name, "Emmy")
+    title ~= "Draft"
+    io.line(row_title(title))
+    ~title = "Buy milk"
+    io.line(row_title(title))
 ]
 
-The receiving parameter determines the use. Passing `current_name` to an
-ordinary `String` parameter reads its current value. Passing it to another
-compatible Wire parameter forwards the same binding identity. A Wire grants no
-mutation permission: `replace_name` has an ordinary exclusive parameter, so
-the call supplies `~current_name`. By contrast, `current_name ~= "Priya"`
-declares a mutable binding and later `~current_name = "Rob"` reassigns it. The
-binding declaration and exclusive call argument have different jobs.
+The first call prints `Draft`. The assignment changes the text in the same
+binding, so the second call prints `Buy milk`. Both calls pass the name
+`title` without any extra marker. The receiving parameter determines what each
+call does. Inside `row_title`, passing `title` to `read_title` forwards the
+original binding. Inside `read_title`, returning a `String` reads its
+current text.
 
-The identity belongs to this binding instance, not its current text. Reassigning
-the mutable local keeps the same identity; a later function call or loop
-iteration has its own local instance. A temporary expression, literal, field or
-computed value cannot supply Wire identity directly.
-
-`#=` does not declare a Wire or another runtime binding. A fully folded record
-stored in a named constant is compile-time data, not a runtime type declaration:
-
-[codeblock, $code "moth":
-    labels #= (
-        first = "Priya",
-        second = "Rob",
-    )
-]
-
-Read the ordinary value contract in @../constants/#const-records (Const records)
-and the full binding-identity rules in the detailed Wiring reference.
+If `row_title` took an ordinary `String`, it could print the text, but it
+couldn't pass the caller's binding to `read_title`. A Wire gives it that
+ability and grants read access. The caller can still reassign its mutable
+local.

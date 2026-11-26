@@ -1,0 +1,24 @@
+### Add a prefix with `$before` and a suffix with `$after`
+
+Use these directives when each direct child needs the same prefix or suffix.
+Either works alone. Here each child gets a pair of list-item tags.
+
+[codeblock, $code "moth":
+    items #= [$before "<li>", $after "</li>":[$slot]]
+    steps = [items:[:Build][:Test]]
+]
+
+The result contains two items, `<li>Build</li><li>Test</li>`. The bracket
+around each word gives the parent two children to wrap.
+
+### Skip one wrapper with `$fresh`
+
+Put `$fresh` on the child that should skip its immediate parent's prefix
+and suffix. A child that supplies its own list-item markup can use it to
+avoid a second pair of tags.
+
+[codeblock, $code "moth":
+    steps = [items:[:Build][$fresh:<li class="current">Test</li>]]
+]
+
+Only the first child gets the usual tags. The second keeps its own class.

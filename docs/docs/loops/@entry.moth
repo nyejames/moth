@@ -77,6 +77,6 @@ listed = sync_navigation(sidebar_id)!
         [$in previous_path:../branching/]
         [$in previous_title:Branching]
         [$in next_path:../structs/]
-        [$in next_title:Structs]
+        [$in next_title:Structs and methods]
     ]
 ]

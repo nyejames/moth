@@ -1,37 +1,21 @@
-Moth is a small language by design. Every feature has to earn its place.
-
-### How Moth decides
-
-The language prefers one clear mechanism over many specialised syntax forms.
-When a problem can be solved with an existing feature, the language doesn't
-add a second way to do it.
+Moth favours syntax that lets you answer a question where it comes up. To see what a call can change, look at the parameter and the argument.
 
 [codeblock, $code "moth":
-    -- Templates handle text composition
-    greeting = [: Hello, [name]]
+    increment |count ~I32| {
+        ~count += 1
+    }
 
-    -- Choices handle runtime heterogeneity
-    Status = { Ready, Waiting | reason String | }
-
-    -- Error! handles expected failures
-    result = parse(text)!
+    total ~= 2
+    increment(~total)
 ]
 
-### What this means for you
+The parameter asks for mutable access. The caller grants it by writing `~total`. After the call, `total` holds 3. You can see which existing value the function may change before you read its body.
 
-- fewer syntax forms to learn
-- code from different authors looks similar
-- the compiler can give clear error messages
-- behaviour stays explicit instead of relying on hidden magic
-- the language keeps a small surface area
-- the compiler can resolve code statically
-- optimisations happen behind the scenes
+Moth also reuses the same rules where two operations take arguments. A named struct constructor and an ordinary function call both accept positional arguments followed by named arguments. Once you know how to supply arguments to one, you can read the other. See @../language-overview/ (Language basics) for an example of each.
 
-### Source stays platform-agnostic
+### Write against a package contract
 
-Authors write against Moth and builder-provided capabilities. The builder decides how those semantics
-become JavaScript, Wasm or another artefact; source does not test which target was selected. Build
-configuration is not target detection.
+A program uses Moth and the packages its builder provides. The compiler and builder turn that program into JavaScript, Wasm or another artefact. The same source rules apply on each target.
 
 ### Directives stay constrained
 
@@ -41,9 +25,9 @@ static `if` cannot remove declarations or dependencies.
 
 Future `$feature` is the separate structural mechanism. It selects source
 structure before graph publication from bootstrap-known data and the selected
-builder identity. Known feature names must be distinguished from enabled
-features so a typo cannot silently disable code; its full predicate, nesting and
-config-declaration grammar is future work.
+builder identity. The compiler must distinguish a known but disabled feature from an unknown
+name so a typo cannot silently disable code. The full rules for predicates,
+nesting and configuration declarations remain open.
 
 ### Target and representation boundaries
 
@@ -51,5 +35,4 @@ Source cannot query a physical target, OS, architecture or backend. Builder
 identity is not physical target identity. Excluded regions still need a sound
 structural boundary before unknown syntax can be skipped.
 
-Future `$layout` preserves nominal identity, and `$test` remains a deferred root purpose. `$export` is the source modifier for explicit public-facade declarations and re-exports. Custom
-metadata remains open design. Project configuration stays a closed named record.
+The proposed `$layout` directive would constrain how a type is stored while preserving its identity. The proposed `$test` root purpose also remains deferred. Today `$export` marks public declarations and re-exports on a facade. Project configuration uses a closed named record. Custom metadata remains an open question.

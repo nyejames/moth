@@ -1,34 +1,31 @@
-Use `$md` when a template body should be formatted as Markdown.
+Use `$md` to turn a template body into HTML. A blank line separates a
+heading from the paragraph below it. Two stars on each side make text bold.
 
 [codeblock, $code "moth":
-    content = [$md:
-        # Welcome
+    summary = [$md:
+        # Build report
 
-        This text becomes **formatted content**.
+        All tests **passed**.
     ]
 ]
 
-Small inline code spans use one backtick on each side.
+The result contains a heading and a paragraph. For inline code, use one
+backtick on each side of the text. For a code listing, use a nested
+`$code` template. Moth Markdown supports lists and links. Use a template
+when you need a table.
 
-Use `$code "moth"` or another language name for a full highlighted code block.
+### Link to a section @#section-ids
 
-Moth Markdown stays small. It does not support fenced code
-blocks or pipe tables.
-
-### Section IDs @#section-ids
-
-Add a bare `@#id` at block start or after whitespace to set the HTML `id` of the heading, paragraph or list item that contains it. The marker is zero-width. An ID starts with a Unicode letter and continues with Unicode letters, digits, `_` or `-`, and its authored case is preserved.
+Add a section marker to give a heading a link target. The marker itself stays
+out of the rendered text.
 
 [codeblock, $code "moth":
-    content = [$md:
-        ## Getting started @#getting-started
+    guide = [$md:
+        ## Install @#install
 
-        Jump back to @#getting-started (Getting started).
+        Jump back to @#install (Install).
     ]
 ]
 
-A paragraph containing only a marker renders a standalone empty `span`.
-
-Unmarked headings have no `id`. `$md` does not check page-wide uniqueness, add generic HTML attributes or validate fragment targets. Plain `.md` does not use section markers.
-
-Advanced covers the full rules.
+The heading displays `Install`. The link targets it by the explicit ID
+`install`. An unmarked heading has no ID.

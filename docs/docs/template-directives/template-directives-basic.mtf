@@ -1,0 +1,20 @@
+Write a directive as `$name`. Some directives take an operand. For example,
+`$before "Item: "` supplies a prefix. Separate head items with a comma.
+
+[codeblock, $code "moth":
+    label = [$before "Item: ":[:Install]]
+]
+
+The child contributes `Install`. The parent adds its prefix to produce
+`Item: Install`.
+
+### Leave a comment with `$note`
+
+Put a note inside a template body to leave a comment for the next reader.
+
+[codeblock, $code "moth":
+    message = [:Build[$note: Version numbers go here later.] complete]
+]
+
+The result reads `Build complete`. The space before `complete` comes from the
+outer body. The compiler skips the contents of the note.

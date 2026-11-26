@@ -72,7 +72,7 @@ Passing a non-string value directly to a console helper fails at the output boun
 
 ### Input polling
 
-Input polling lives under `io.input.*`. The handle type `io.input.Input` stays opaque. Pass it to the input functions. Do not construct it with struct syntax or inspect its fields.
+Input polling lives under `io.input.*`. The input functions accept an opaque `io.input.Input` handle. The handle exposes no public constructor or fields.
 
 The host owns the listeners that observe keyboard and pointer events and records their effect inside the handle. Moth never receives a host callback. A program observes recorded input only through explicit `update` and query calls, which run synchronously like any other call.
 
@@ -275,7 +275,7 @@ HTML-JS maps console helpers to the browser console, one entry per call, and inp
 
 ### Unsupported source forms
 
-- Do not construct `Input` with struct syntax.
+- Obtain `Input` through the package functions.
 - Do not inspect `Input` fields directly.
 - Do not pass non-string values to console helpers.
 - Do not pass the `io` namespace record itself as a runtime value.

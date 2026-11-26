@@ -6,7 +6,7 @@
 - `TimeMark` for measuring elapsed time and frame deltas
 - `Timestamp` for real-world UTC instants
 
-These types stay opaque. Pass them to the package functions. Do not construct them with struct syntax.
+Get these values from the package functions. The types expose no public constructor or fields.
 
 ### Measuring elapsed time
 

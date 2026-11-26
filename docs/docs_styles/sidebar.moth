@@ -268,13 +268,14 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/loops/">Loops</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Types</p>
-            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/structs/">Structs</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/structs/">Structs and methods</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/choices/">Choices</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/errors/">Errors and options</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Values</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/collections/">Collections and maps</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/templates/">Templates</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/template-directives/">Template directives</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/constants/">Constants</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/aliases/">Aliases</a>
 

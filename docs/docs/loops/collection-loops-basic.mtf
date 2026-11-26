@@ -9,8 +9,7 @@ last by default.
     }
 ]
 
-The name inside `|...|` is created for the loop body. On each iteration it
-refers to the current item.
+Here the pipes introduce a capture. On each iteration, `name` refers to the current item inside the loop body.
 
 ### Add an index when you need one
 

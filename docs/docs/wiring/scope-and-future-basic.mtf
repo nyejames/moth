@@ -1,33 +1,30 @@
-Wiring contracts stay at function parameters. They cannot be stored in locals,
-struct fields, choice payloads, collections, aliases, defaults or return slots.
-An ordinary message remains a choice value.
+On the JavaScript/HTML target, a function can read and forward a Wire, form a
+Route and forward it to another function. HTML-Wasm supports Wires and
+reports a target error if reachable code forms a Route. The examples on
+this page use the branch's accepted brace syntax. The current Alpha parser
+still uses the earlier declaration and block syntax.
 
-A String template produces an ordinary String. Composition, slots, wrappers,
-formatting and fragment insertion do not attach hidden Wire identity, Route
-application, subscriptions or rerender work.
+A builder that offered an interactive row editor would need to read the Wire,
+listen for an edit, use the Route to make a message and deliver that message
+to the application. Moth doesn't currently supply that event handling.
+Returning a String from `row_label` gives the caller the text from that call.
+Changing `title` later won't update an already displayed label.
 
-Braces enclose function bodies, branches and loops. Statements run in source order until control flow exits or redirects the block. Each conditional branch has its own scope.
+When your program already has a complete message, handle it with ordinary
+code. This example uses the choice from the previous section and prints
+`Row 42: Buy milk`.
 
 [codeblock, $code "moth":
-    greet |name String| -> String {
-        if name is "Priya" {
-            return [: Hello, [name]!]
+    describe |message TodoMessage| -> String {
+        return if message is {
+            case Rename(id, text): then [:Row [id]: [text]]
+            case Delete(id): then [:Delete row [id]]
         }
-
-        return [: Hello, [name].]
     }
+
+    io.line(describe(TodoMessage::Rename(42, "Buy milk")))
 ]
 
-The inner closing brace ends the conditional. The outer one ends the function. Inside the String construction, the colon separates the head from its body. That colon does not open a statement
-block. See the @../language-overview/#blocks-and-statements (Blocks and
-statements) reference and @../templates/#head-and-body (Template head and body).
-
-### Channel construction
-
-[codeblock, $code "moth":
-    reader, writer Channel of AppMessage = Channel()
-]
-
-The annotation supplies the carried type. `reader` and `writer` are
-directional endpoints of one channel. Channel transport, scheduling and
-cancellation are separate from Wiring. See @#wiring-introduction (Wiring reference) for details.
+To pass a completed message between tasks, Moth's accepted design uses a
+channel. Channel execution still awaits compiler and runtime support. See
+@../async (Channels and readiness) and @../progress (implementation status).

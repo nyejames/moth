@@ -1,21 +1,26 @@
-Templates compose ordered output. A text body builds a String.
+A template lets you write text around values. Start its body with a colon.
+Inside the body, put a value in brackets where you want its text to appear.
 
 [codeblock, $code "moth":
     name = "Priya"
-
-    greeting = [:
-        Hello, [name]
-    ]
+    greeting = [:Hello, [name]!]
 ]
 
-Square brackets create the template.
+The outer brackets build a String. The inner brackets read `name` from the
+surrounding scope, so `greeting` contains `Hello, Priya!`.
 
-The colon separates its head from its body.
+The part before the colon is the head. Put a formatter there when the text
+needs one. This formatter turns a Markdown heading into HTML.
 
-A nested template inserts a value from the surrounding scope.
+[codeblock, $code "moth":
+    heading = [$md:# Build report]
+]
 
-Templates can build plain text, Markdown, HTML, CSS or another string-based
-format. They may be finished during compilation or built at runtime.
+An ordinary binding stores the result. In an HTML `@entry.moth`, a bare
+top-level template instead contributes a compile-time page fragment. Prefix a
+top-level template with `~` to produce its body fragment at runtime. See
+@../project-structure/#entry-config (Entry metadata and builder slots).
 
-HTML pages come from `@entry.moth`. A bare direct [$html:<code>&#91;...&#93;</code>] must fold into
-static page output. A direct [$html:<code>~&#91;...&#93;</code>] is an explicit runtime body fragment. Builder metadata uses direct bare [$html:<code>&#91;$in name: ...&#93;</code>] inserts. See @../project-structure/#entry-config (Entry metadata and builder slots) for page metadata. The HTML entry supplies a String receiver. In ordinary code the receiver can also be a sequence.
+A receiving type can also ask a construction to collect a sequence. For how
+to keep each result as an element, see @../collections/#collection-literals
+(Collection literals).

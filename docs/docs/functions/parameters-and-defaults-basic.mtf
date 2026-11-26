@@ -10,7 +10,7 @@ Parameters describe the values a function needs.
 
 Each parameter has a name and a type.
 
-A default makes a parameter optional at the call site:
+A default lets the caller omit an argument. The parameter keeps its declared type.
 
 [codeblock, $code "moth":
     describe |prefix String = "item", subject String| -> String {
@@ -22,5 +22,4 @@ A default makes a parameter optional at the call site:
 
 The call supplies `subject` by name and keeps the default prefix.
 
-Ordinary calls, including empty `f()`, keep their normal syntax. Directive calls share
-the same argument rules but reject an authored empty `()`.
+Write an empty argument list when you call a function that has no parameters. A directive with no operands takes its bare name.

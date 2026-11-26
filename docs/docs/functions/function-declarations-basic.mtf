@@ -6,7 +6,7 @@ A function gives a reusable block of code a name.
     }
 ]
 
-The function name comes first. Parameters live inside `|...|`.
+The function name comes first. The pipes enclose the parameter list. Here `name` gives the function a name for its String argument.
 
 Use `||` when there are no parameters:
 

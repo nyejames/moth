@@ -17,25 +17,22 @@
     sync_navigation,
     sidebar_id
 
-[$in title:["Structs"]]
-[$in description:["Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."]]
+[$in title:["Structs and methods"]]
+[$in description:["Declare structs, construct values and call shared or mutable receiver methods in Moth."]]
 [$in head:[language_theme_head]]
 
 [navbar]
 [sidebar]
 listed = sync_navigation(sidebar_id)!
 [section, $md:
-    # Structs
+    # Structs and methods
 
-    A struct creates a nominal type with named fields. Two structs remain
-    different types even when their fields match, unlike structural record
-    systems.
+    A struct gives a name to a type and its fields. Use its constructor to
+    supply the field values. Define a method in the same file when you want
+    to give values of that type an operation of their own.
 
-    Receiver methods use ordinary top-level function declarations in the same
-    file as the type. Their first parameter shows shared or mutable access.
-
-    Runtime anonymous records are accepted deferred design. Their local hidden
-    types keep nominal identity and use the shared MON construction notation.
+    @#receiver-methods (Receiver methods) shows how to read a value through
+    a method. @#mutable-receivers (Mutable receivers) shows how to change it.
 ]
 
 [section:
@@ -60,16 +57,6 @@ listed = sync_navigation(sidebar_id)!
 
 [section:
     [doc_level:
-        [$in key:anonymous-records]
-        [$in title:Runtime anonymous records]
-        [$in advanced:[anonymous_records]]
-
-        [anonymous_records_basic]
-    ]
-]
-
-[section:
-    [doc_level:
         [$in key:receiver-methods]
         [$in title:Receiver methods]
         [$in advanced:[receiver_methods]]
@@ -85,6 +72,16 @@ listed = sync_navigation(sidebar_id)!
         [$in advanced:[mutable_receivers]]
 
         [mutable_receivers_basic]
+    ]
+]
+
+[section:
+    [doc_level:
+        [$in key:anonymous-records]
+        [$in title:Runtime anonymous records]
+        [$in advanced:[anonymous_records]]
+
+        [anonymous_records_basic]
     ]
 ]
 

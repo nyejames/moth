@@ -1,8 +1,8 @@
-This cheatsheet covers the accepted final Moth language design, including features beyond current compiler support.
-See the @../progress (progress matrix) and @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (roadmap) for implementation status.
-Follow the linked references for ambiguous or detailed rules.
+This cheatsheet describes Moth's target syntax. The @../progress (progress matrix) lists the forms the current compiler accepts. For a first reading, start with @../language-overview (Language basics).
 
-## Read a declaration
+## Read the building blocks
+
+Moth reuses a few forms so you can work out what code does from the surrounding declaration, the call or the arm you are reading. Follow the width and height through this example.
 
 [codeblock, $code "moth":
     Size = | width I32, height I32 = 720 |
@@ -15,7 +15,7 @@ Follow the linked references for ambiguous or detailed rules.
     describe |event WindowEvent| -> String {
         return if event is {
             case Opened: then "opened"
-            case Resized(width, height): then [: [width] x [height]]
+            case Resized(width, height): then [:[width] x [height]]
         }
     }
 
@@ -23,12 +23,12 @@ Follow the linked references for ambiguous or detailed rules.
     label = describe(WindowEvent::Resized(1280))
 ]
 
-- Pipes delimit a function's parameters, a struct's fields or a choice variant's payload fields. A loop or option test uses pipes to introduce captures.
-- Parentheses supply arguments to a function or constructor. Both constructors here use the default height of 720. Anonymous record constructor syntax uses named entries such as `(width = 1280, height = 720)`. In the match, the parentheses after `Resized` capture the completed fields.
-- Braces enclose a body. The choice body lists alternatives. The function body contains statements. Each match arm has its own scope inside one brace pair.
-- A line-initial `case` introduces a pattern or channel operation. The arm's colon ends the header. A bare `else` separates ordinary conditional branches. A final `else:` introduces a match or readiness fallback.
-- Square brackets construct strings, sequences and maps. In `describe`, the colon introduces text and nested brackets insert values. The call produces `1280 x 720`.
-- `then` supplies the result of the selected branch. `return` exits the function.
+- **Parameters, fields and captures.** Pipes declare the parameter `event` for `describe`. The same list form declares the fields of `Size` and the `Resized` variant. A loop or option test uses pipes to name the values it captures.
+- **Constructors and calls.** Parentheses supply arguments. Both constructors in the example use the declared height of 720. A named argument selects a field or parameter. Parentheses containing named entries can also construct an anonymous record. MON uses this constructor syntax for literal data.
+- **Choices and patterns.** `WindowEvent::Resized(1280)` selects a variant and constructs a value. In the match, `Resized(width, height)` gives the stored fields names for that arm.
+- **Brackets.** A bracket construction can produce a String, a collection or a map. Here the colon introduces a text body and the nested brackets insert its values. The call returns `"1280 x 720"`.
+- **Blocks and branches.** Braces mark the boundaries of a body. The choice body lists alternatives. The function body contains statements. One match block holds both arm scopes. Each line-initial `case` starts an arm and its colon ends the header. A Boolean conditional uses bare `else`, while a match or channel readiness fallback uses `else:`.
+- **Results.** `then` supplies a result to the enclosing value-producing construct. `return` exits the function.
 
 ## Names and statements
 
@@ -295,7 +295,7 @@ A const function writes `#` between its name and parameter list. Every call must
     label #= [: result [double(21)]]
 ]
 
-Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots. Their reference and copy semantics remain the same, but multiple mutable aliases may coexist inside const execution. A successful overlapping mutation invalidates existing immutable references. Later use of a stale reference is a compilation error on the executed path. Unused references need no lifetime proof, and unexecuted paths have no dynamic access verdict. Mutation permissions still apply. No IO, async or external mutable state is allowed. A required const call that cannot execute is a source error, not a runtime fallback. See @../functions/function-declarations (Function declarations) for the full contract and @../progress (Progress) for support.
+Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots. Their reference and copy semantics remain the same, but multiple mutable aliases may coexist inside const execution. A successful overlapping mutation invalidates existing immutable references. Later use of a stale reference is a compilation error on the executed path. Unused references need no lifetime proof, and unexecuted paths have no dynamic access verdict. Mutation permissions still apply. No IO, async or external mutable state is allowed. A required const call that cannot execute is a source error, not a runtime fallback. See @../functions/#function-declarations (Function declarations) for the full contract and @../progress (Progress) for support.
 Ordinary function calls stay runtime calls in every build profile, even with constant arguments.
 
 
@@ -599,7 +599,7 @@ The loop body contributes a String for each name. A conditional child can skip a
     person_name = person.display_name()
 ]
 
-Fields have explicit types. Defaults must fold and omitted non-default fields are errors. Constructors use normal arguments.
+Each field declares a type. A constructor uses its field default when the caller omits that argument. Each default must evaluate at compile time. The caller supplies every field without a default.
 Identical fields don't make distinct structs compatible. Field mutation requires mutable access.
 
 Receiver methods are top-level functions starting with `this T` or `this ~T`, defined in the receiver type's file.
@@ -760,9 +760,11 @@ Traits are resolved statically. Use choices to represent runtime alternatives be
 
 ### Custom cast conformance
 
-A method alone doesn't enable a user-defined cast. The source type must explicitly conform to a built-in cast trait:
+A source type opts into a user-defined cast by declaring conformance to a Core cast trait and implementing its required method.
 
 [codeblock, $code "moth":
+    Label = | text String |
+
     to_string |this Label| -> String {
         return this.text
     }
@@ -773,7 +775,7 @@ A method alone doesn't enable a user-defined cast. The source type must explicit
     text String = cast label
 ]
 
-`CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
+For an I32 conversion, the infallible method returns an I32. The fallible method also declares an error slot. See @../traits/#core-cast-traits (Core cast traits) for the supported targets and worked examples.
 Other fixed numeric targets follow the same pattern, alongside supported `Bool`, `String`, `Char` and `Error` casts.
 A source/target pair can conform to only one of the infallible or fallible variants. `Byte` and `Dec` have no custom numeric casts.
 
@@ -925,7 +927,7 @@ Formatters apply to their own templates, and incompatible formatters can't share
 A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content without reevaluating a contribution, multiple contributions keep their order and unassigned loose content is an error.
 An application with routed content closes its own slots. A head-only reference can stay open for later composition. Each bracket applies at most one receiving wrapper. Nest wrappers to compose them.
 `$before` and `$after` take one bare operand and wrap direct children with compatible output. Their operands may contain named slots only. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty result is wrapped.
-Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
+At the top level of an active entry root, a direct const `$in` supplies a builder slot. See @../template-directives/ (Template directives) for the individual directives, their operands and where you can use them.
 
 ### Template control flow
 
@@ -990,8 +992,7 @@ An expressionless `if` offers channel operations. Guards enable candidates. A re
 
 ## Wiring
 
-`Wire` passes the identity of a named binding. `Route` captures a choice constructor for a later input or event.
-Both are parameter contracts, so a UI or other consumer can decide how to use them.
+A `Wire` parameter identifies which named binding to read. A `Route` parameter records which choice constructor to use when an input or event arrives. The @../wiring/ (Wiring guide) works through why a consumer might need either one.
 
 ### Wires
 
@@ -1055,7 +1056,7 @@ Compatible route parameters can forward routes unchanged.
 Wires and routes can only appear as parameter capabilities. Their reads and captures follow ordinary access and lifetime rules.
 UI event delivery needs a builder or library that implements it.
 
-See @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring contract).
+See @../wiring/#wiring-reference (Wiring contract).
 
 ## Dependencies and aliases
 

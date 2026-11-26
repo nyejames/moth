@@ -29,34 +29,44 @@ listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Language basics
 
-    Read a Moth declaration from left to right. In the example below, the first line declares a struct called `Size`. Its fields go between pipes. The next declaration names a function, lists its parameters between pipes and gives its return type after the arrow.
+    Moth aims to make code easy to reason about locally. You can often answer a question by reading a declaration and the expression that uses it. Start with a window size. What does it store, and what does the caller need to supply?
+
+    ## Declare fields and supply arguments
 
     [codeblock, $code "moth":
         Size = | width I32, height I32 = 720 |
 
+        screen = Size(1280)
+        wide = Size(height = 900, width = 1440)
+    ]
+
+    `Size` declares a struct. The names between pipes describe its fields. The constructor takes arguments in parentheses. In the first call, `1280` fills the first field and the declared default supplies the height. The second call names both fields, so you can read which dimension each number sets without counting positions.
+
+    The outer `=` binds a name to the completed value. Inside `Size(...)`, the label in a named argument identifies a field. For example, `height = 900` supplies a value to the constructor without creating a variable called `height` in the caller.
+
+    ## Pass a value to a function
+
+    [codeblock, $code "moth":
         describe |size Size| -> String {
-            return [: [size.width] x [size.height]]
+            return [:[size.width] x [size.height]]
         }
 
-        screen = Size(1280)
         caption = describe(screen)
     ]
 
-    Parentheses supply arguments to a constructor or function. `Size(1280)` supplies the width and takes the default height. Braces enclose the function's statements. Inside the brackets, the colon introduces text and the nested brackets insert field values. The result is the String `1280 x 720`.
+    Pipes after a function name declare its parameters. Here `size` names the argument inside `describe`. The fields `width` and `height` belong to the value itself. The arrow gives the return type and braces enclose the statements. The template inserts the two dimensions into text, so `caption` holds `"1280 x 720"`.
 
-    Square brackets also construct collections and maps. The type after a binding's name can tell the compiler what the brackets should produce.
+    ## Read brackets with their receiving type
 
     [codeblock, $code "moth":
         title = ["Moth", " Guide"]
-        names [String] = ["Priya", "Rob"]
+        parts [String] = ["Moth", " Guide"]
         sizes [String = Size] = ["screen" = screen]
     ]
 
-    The first binding joins two Strings. The second stores two separate Strings. The third maps a String key to a Size.
+    The first two expressions contain identical text. With no other type to guide it, the all-String head joins the parts into `"Moth Guide"`. The type on `parts` asks for a collection, so it keeps two separate Strings, including the space at the start of the second one. In the third expression, the keyed entry places `screen` in a map. Passing `title` to another function later cannot turn it into a collection.
 
-    ## Choose what happens next
-
-    A function, a loop or a conditional can have a block. Braces mark where the block begins and ends. The construct decides which names you can use inside it. A match has one block, and each arm has its own scope.
+    ## Follow a name through a block
 
     [codeblock, $code "moth":
         State = { Waiting, Ready | size Size | }
@@ -71,9 +81,11 @@ listed = sync_navigation(sidebar_id)!
         message = label(State::Ready(screen))
     ]
 
-    The choice declares two constructors. Only `Ready` has a field. At the call site, `::` selects that constructor. In the match, `case Ready(size):` gives the captured field a name for that arm. The next arm would need its own binding.
+    `State` declares two constructors. Only `Ready` has a field. At the call site, `::` selects that constructor and the parentheses supply its field. In a pattern, `Ready(size)` binds the stored field to the name `size` for that arm.
 
-    Other features build on these forms. A generic parameter lets a declaration work with more than one type. An alias gives an existing type another name. A named region specifies a storage lifetime. A directive such as `$md` tells a text construction how to format its body. The @../cheatsheet (cheatsheet) collects the spellings, including channel operations. The @../progress (progress matrix) tracks compiler support.
+    Braces mark a block's boundaries. The construct decides the scope of each name. Both arms belong to the same match block, but only the `Ready` arm can use its capture. `then` supplies the chosen arm's result and `return` sends it back to the caller.
+
+    You will see the same building blocks in other places. A loop uses pipes to name the item for one iteration. A generic parameter lets a declaration work with several types. A named region selects a storage lifetime and a directive such as `$md` selects formatting for a text construction. The @../cheatsheet (cheatsheet) collects the forms, and the @../progress (progress matrix) tracks compiler support.
 ]
 
 [section:
