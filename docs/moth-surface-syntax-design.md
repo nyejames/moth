@@ -37,7 +37,7 @@ The second event carries a width of 1280 and a height of 720. The function reads
 |---|---|
 | `[T]`, `[N T]`, `[K = V]` | A growable collection, a fixed-capacity collection or a map in type position. |
 | `[...]` and `[head: body]` | A construction. A colon at the head boundary introduces body content. |
-| `Name = \| fields \|` | A named struct with one constructor. Pipes also delimit parameters, captures and choice payload declarations in their respective headers. |
+| `Name = \| fields \|` | A named struct with one constructor. Its parameter brackets declare the fields, as they do for a choice payload. |
 | `Type = { ... }` | A choice declaration. Its comma-separated members are alternative constructors. |
 | `Type(...)`, `Choice::Variant(...)` and `f(...)` | A named constructor, a payload constructor or a function call with the normal argument list. An anonymous record has named entries in parentheses. |
 | `header { ... }` | The body of a function, control-flow construct, declaration or named region. Each construct defines visibility inside its body. |
@@ -45,6 +45,26 @@ The second event carries a width of 1280 and a height of 720. The function reads
 | `then` and `return` | `then` supplies a result to an enclosing value-producing construct. `return` exits the function. |
 
 Moth code closes these blocks with `}`. Strings, raw text and embedded languages can still contain literal braces or semicolons. Grouping an expression in parentheses continues to work. Standalone braces introduce neither an anonymous record nor a general-purpose lexical block.
+
+### Parameter brackets
+
+Read `|...|` in its header. A function signature declares named, typed parameters. A trait method requirement uses the same form, with `This` or `~This` for its receiver. A struct or choice variant declares fields. In a loop, an option test or a `catch`, the construct supplies the values and their types. The brackets give those values local names.
+
+Constrained closures follow the syntax migration. A callback parameter declares its own signature inside the enclosing parameter list. At the call site the closure names the incoming arguments and `=>` introduces its result expression.
+
+```moth
+row_label |
+    title String,
+    format_label |text String| -> String,
+| -> String {
+    return format_label(title)
+}
+
+prefix = "Action: "
+label = row_label("Save", |caption| => [prefix, caption])
+```
+
+The inner `|text String| -> String` belongs to `format_label`. Each invocation supplies a String, which the closure calls `caption`. The closure captures `prefix` from the enclosing scope. A closure can also take zero arguments. In `|| => prefix`, `prefix` is still a capture.
 
 ## 2. Functions, ordinary blocks and decisions
 

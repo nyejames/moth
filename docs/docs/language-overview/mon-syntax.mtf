@@ -6,7 +6,7 @@ and const or runtime records retain their own semantic contracts.
 
 ### Declarations and supplied values
 
-Pipes enclose declared parameters and typed nominal fields. Parentheses supply
+A nominal declaration encloses its fields in parameter brackets. Parentheses supply
 values or group an expression.
 
 [codeblock, $code "moth":
@@ -22,9 +22,8 @@ A nominal value uses its named constructor. Matching field names do not make
 an anonymous record a `Size`. Constructor syntax adds no implicit nominal construction,
 structural typing, argument spreading or tuple values.
 
-Declaration lists remain flat. A legal default expression may contain nested
-value construction without introducing a nested type declaration. Defaults
-still need the type and compile-time evidence their receiving declaration requires.
+A field default may contain nested value construction. The field keeps its
+declared type, and the default must be a compile-time value.
 
 ### Grouping and records
 

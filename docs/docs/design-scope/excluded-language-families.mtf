@@ -12,11 +12,10 @@ configuration, but they cannot become a user-extensible macro system.
 
 ### General closures and broad function-value mechanisms
 
-General closures, anonymous callable values, generic function values and
-higher-order polymorphism are outside scope. These mechanisms add broad
-function-value semantics and solver pressure. Constrained template and builder
-contracts can cover explicit UI integration without general function values.
-Hidden event-handler closures remain outside the language model as well.
+The planned replacement for Wiring and Routes accepts an explicit closure at a
+declared callback parameter. See @../functions/#parameters-and-defaults (Parameters
+and defaults) for its syntax. General function values, generic function values,
+higher-order polymorphism and hidden event-handler closures remain outside scope.
 
 ### Dynamic trait values
 

@@ -7,6 +7,26 @@ or parameter capability contract.
     }
 ]
 
+### Parameter brackets and callbacks
+
+A signature declares the names and types of its parameters between `|` marks. A loop, option test or `catch` already knows what type of value it supplies, so its parameter brackets only need local names.
+
+The constrained closure design follows the syntax migration. A callback parameter uses the same signature spelling as a named function. Its parameter names belong to that callback. A closure expression receives its types from the callback signature.
+
+[codeblock, $code "moth":
+    row_label |
+        title String,
+        format_label |text String| -> String,
+    | -> String {
+        return format_label(title)
+    }
+
+    prefix = "Action: "
+    label = row_label("Save", |caption| => [prefix, caption])
+]
+
+`format_label` takes a String and returns a String. The closure calls its incoming argument `caption` and reads `prefix` from the surrounding scope. Only `prefix` is a lexical capture. The expression after `=>` supplies the closure's result. Empty brackets mean zero arguments, so `|| => prefix` can still read `prefix`.
+
 ### Parameter forms
 
 [codeblock, $code "moth":
@@ -72,14 +92,13 @@ Rejected:
 
 Struct fields and choice payload fields can also declare typed, compile-time defaults. An omitted field uses its declared default. Supplying `none` to an optional field keeps the absence.
 
-Pipes declare parameters or typed fields. Supplied values use
+Supplied values use
 @../language-overview/#mon-syntax (Constructor syntax). An anonymous const record requires
 an initializer for every field and declares no constructable type. Its entries
 are values, not parameters or defaults. See @../constants/#const-records (Const records).
 
-Declaration lists remain flat. Nesting a legal value expression in a default does
-not introduce a nested type declaration or make an anonymous record compatible
-with a named parameter type.
+A default may contain nested value construction. It cannot declare a nested
+type or make an anonymous record compatible with a named parameter type.
 
 ### MON data boundary
 

@@ -23,7 +23,7 @@ Moth reuses a few forms so you can work out what code does from the surrounding 
     label = describe(WindowEvent::Resized(1280))
 ]
 
-- **Parameters, fields and captures.** Pipes declare the parameter `event` for `describe`. The same list form declares the fields of `Size` and the `Resized` variant. A loop or option test uses pipes to name the values it captures.
+- **Parameter brackets.** `|...|` declares typed parameters in a signature or fields in a struct or choice variant. A loop, option test or `catch` uses the brackets to give supplied values local names. After the syntax migration, closures follow this rule too. A callback declares `|item I32| -> I32` and a closure such as `|n| => n + offset` names its argument and captures the outer `offset`.
 - **Constructors and calls.** Parentheses supply arguments. Both constructors in the example use the declared height of 720. A named argument selects a field or parameter. Parentheses containing named entries can also construct an anonymous record. MON uses this constructor syntax for literal data.
 - **Choices and patterns.** `WindowEvent::Resized(1280)` selects a variant and constructs a value. In the match, `Resized(width, height)` gives the stored fields names for that arm.
 - **Brackets.** A bracket construction can produce a String, a collection or a map. Here the colon introduces a text body and the nested brackets insert its values. The call returns `"1280 x 720"`.

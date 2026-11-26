@@ -40,7 +40,7 @@ listed = sync_navigation(sidebar_id)!
         wide = Size(height = 900, width = 1440)
     ]
 
-    `Size` declares a struct. The names between pipes describe its fields. The constructor takes arguments in parentheses. In the first call, `1280` fills the first field and the declared default supplies the height. The second call names both fields, so you can read which dimension each number sets without counting positions.
+    `Size` declares a struct. The parameter brackets, `|...|`, enclose its field declarations. The constructor takes arguments in parentheses. In the first call, `1280` fills the first field and the declared default supplies the height. The second call names both fields, so you can read which dimension each number sets without counting positions.
 
     The outer `=` binds a name to the completed value. Inside `Size(...)`, the label in a named argument identifies a field. For example, `height = 900` supplies a value to the constructor without creating a variable called `height` in the caller.
 
@@ -85,7 +85,7 @@ listed = sync_navigation(sidebar_id)!
 
     Braces mark a block's boundaries. The construct decides the scope of each name. Both arms belong to the same match block, but only the `Ready` arm can use its capture. `then` supplies the chosen arm's result and `return` sends it back to the caller.
 
-    You will see the same building blocks in other places. A loop uses pipes to name the item for one iteration. A generic parameter lets a declaration work with several types. A named region selects a storage lifetime and a directive such as `$md` selects formatting for a text construction. The @../cheatsheet (cheatsheet) collects the forms, and the @../progress (progress matrix) tracks compiler support.
+    You will see the same building blocks in other places. A loop, an option test or a `catch` uses parameter brackets to give an incoming value a local name. The same convention applies to closures planned after the syntax migration. In `|item| => item.title`, the callback signature supplies the type of `item`. A generic parameter lets a declaration work with several types. A named region selects a storage lifetime and a directive such as `$md` selects formatting for a text construction. The @../cheatsheet (cheatsheet) collects the forms, and the @../progress (progress matrix) tracks compiler support.
 ]
 
 [section:

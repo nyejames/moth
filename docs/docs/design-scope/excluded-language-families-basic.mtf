@@ -10,8 +10,8 @@ system.
 ### No general closures or higher-order function values
 
 General closures and higher-order function values add complexity to the type
-system and make code harder to follow. Constrained template and builder
-contracts cover explicit integration without general function values.
+system and make code harder to follow. The planned callback form lets a library
+declare the signature it needs and a caller supply a closure at that parameter.
 
 ### No dynamic trait values
 
