@@ -7,17 +7,19 @@
 use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
+use crate::compiler_frontend::analysis::borrow_checker::metadata::CallResultFacts;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState, RootSet,
+    AllocId, AllocationRetirement, BorrowState, FunctionLayout, LocalState, OrderKey, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BlockTransferStats, BorrowTransferContext, transfer_block,
+    BlockTransferStats, BorrowTransferContext, InvokeLayerOp, transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
     LocalMode, ValueBorrowFact,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
@@ -28,6 +30,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 use std::collections::{VecDeque, hash_map::Entry};
 
 #[cfg(test)]
@@ -46,6 +49,8 @@ pub(super) struct BorrowChecker<'a> {
     pub(super) region_parent_by_id: FxHashMap<RegionId, Option<RegionId>>,
     // One frontend-owned local call contract used by transfer and retained for semantic consumers.
     pub(super) public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
+    pub(super) typed_local_results: FxHashMap<FunctionId, Vec<Option<CallResultFacts>>>,
+    pub(super) local_types: FxHashMap<LocalId, TypeId>,
 }
 
 impl<'a> BorrowChecker<'a> {
@@ -78,6 +83,13 @@ impl<'a> BorrowChecker<'a> {
             block_index_by_id,
             region_parent_by_id,
             public_call_summaries: FxHashMap::default(),
+            typed_local_results: FxHashMap::default(),
+            local_types: module
+                .blocks
+                .iter()
+                .flat_map(|block| &block.locals)
+                .map(|local| (local.id, local.ty))
+                .collect(),
         }
     }
 
@@ -88,6 +100,7 @@ impl<'a> BorrowChecker<'a> {
         // WHY: transfer needs allocation-light O(1) metadata lookups, while downstream tooling
         //      expects one consolidated report containing both facts and summary snapshots.
         self.build_public_call_summaries()?;
+        self.typed_local_results = self.build_typed_local_results()?;
 
         let mut report = BorrowCheckReport::default();
 
@@ -136,14 +149,19 @@ impl<'a> BorrowChecker<'a> {
             imported_call_summaries: &self.module.imported_call_summaries,
             module_private_call_summaries: &self.module.module_private_call_summaries,
             generated_call_summaries: &self.module.generated_call_summaries,
+            typed_local_results: &self.typed_local_results,
+            local_types: &self.local_types,
+            structs: &self.module.structs,
+            choices: &self.module.choices,
             expressions: &self.module.expressions,
+            type_environment: self.type_environment,
             diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
         };
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut invoke_results_by_block =
-            FxHashMap::<BlockId, Vec<(LocalId, LocalState)>>::default();
+            FxHashMap::<BlockId, (Vec<(LocalId, LocalState)>, Vec<InvokeLayerOp>)>::default();
         // HIR expression rows are immutable and may be shared across blocks. Keep only the
         // latest facts for each block during fixed-point iteration, then merge those surviving
         // snapshots after the state has stabilized.
@@ -226,11 +244,18 @@ impl<'a> BorrowChecker<'a> {
                     .insert(terminator_block, fact);
             }
             final_value_facts_by_block.insert(block_id, block_stats.value_facts);
+            let has_invoke_effects =
+                !block_stats.invoke_results.is_empty() || !block_stats.invoke_layer_ops.is_empty();
             let changed_out = match out_states.get(&block_id) {
                 Some(existing) => existing != &output_state,
                 None => true,
-            } || (!block_stats.invoke_results.is_empty()
-                && invoke_results_by_block.get(&block_id) != Some(&block_stats.invoke_results));
+            } || (has_invoke_effects
+                && invoke_results_by_block
+                    .get(&block_id)
+                    .is_none_or(|(results, ops)| {
+                        results != &block_stats.invoke_results
+                            || ops != &block_stats.invoke_layer_ops
+                    }));
 
             // If output state is unchanged, successor joins cannot change either.
             if !changed_out {
@@ -248,6 +273,8 @@ impl<'a> BorrowChecker<'a> {
                     &block.terminator,
                     successor,
                     &block_stats.invoke_results,
+                    &block_stats.invoke_layer_ops,
+                    layout.terminator_order_or_unknown(block_id),
                     &mut successor_input,
                 );
                 self.apply_jump_argument_transfer(
@@ -255,6 +282,7 @@ impl<'a> BorrowChecker<'a> {
                     &layout,
                     &block.terminator,
                     successor,
+                    layout.terminator_order_or_unknown(block_id),
                     &mut successor_input,
                 )?;
 
@@ -283,8 +311,11 @@ impl<'a> BorrowChecker<'a> {
             })?;
 
             out_states.insert(block_id, output_state);
-            if !block_stats.invoke_results.is_empty() {
-                invoke_results_by_block.insert(block_id, block_stats.invoke_results);
+            if has_invoke_effects {
+                invoke_results_by_block.insert(
+                    block_id,
+                    (block_stats.invoke_results, block_stats.invoke_layer_ops),
+                );
             }
         }
 
@@ -518,6 +549,7 @@ impl<'a> BorrowChecker<'a> {
         layout: &FunctionLayout,
         terminator: &HirTerminator,
         successor: BlockId,
+        order: OrderKey,
         successor_input: &mut BorrowState,
     ) -> Result<(), BorrowCheckError> {
         let HirTerminator::Jump { target, args } = terminator else {
@@ -528,7 +560,7 @@ impl<'a> BorrowChecker<'a> {
             return Ok(());
         }
 
-        let destination_states = args
+        let mut destination_states = args
             .iter()
             .map(|argument| {
                 let Some(source_index) = layout.index_of(argument.source) else {
@@ -541,6 +573,13 @@ impl<'a> BorrowChecker<'a> {
                 };
 
                 let source_state = successor_input.local_state(source_index);
+                let layer_ids = successor_input.has_layer_binding(source_index).then(|| {
+                    (
+                        successor_input.local_alloc_ids(source_index).0,
+                        successor_input.alloc_binding_readonly(source_index),
+                    )
+                });
+                let detached = successor_input.detached_holders(source_index).collect::<Vec<_>>();
                 let destination_state = if source_state.mode.is_definitely_uninit() {
                     LocalState::uninit(layout.local_count())
                 } else {
@@ -562,7 +601,7 @@ impl<'a> BorrowChecker<'a> {
                     destination
                 };
 
-                Ok(destination_state)
+                Ok((source_index, destination_state, layer_ids, detached))
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
@@ -596,10 +635,44 @@ impl<'a> BorrowChecker<'a> {
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
-        for (destination_state, destination_index) in
-            destination_states.into_iter().zip(destination_indices)
+        let retires = |local| destination_indices.contains(&local);
+        for (source, destination_state, layer_ids, _) in &mut destination_states {
+            if layer_ids.is_none() && destination_state.value_roots.iter_ones().any(retires) {
+                // A root-only source also needs an override when the edge overwrites its root.
+                *layer_ids = Some((successor_input.local_alloc_ids(*source).0, false));
+            }
+        }
+
+        if !successor_input.layer_is_empty()
+            || destination_states
+                .iter()
+                .any(|(_, _, ids, detached)| ids.is_some() || !detached.is_empty())
+        {
+            for &index in &destination_indices {
+                successor_input.retire_binding_allocation(index, order);
+                successor_input.update_local_state(index, LocalState::uninit(layout.local_count()));
+            }
+        }
+
+        // No destination is installed until all sources and their detachments have been captured
+        // and every old destination has been retired.
+        for ((_, destination_state, layer_ids, mut detached), &destination_index) in
+            destination_states.into_iter().zip(&destination_indices)
         {
             successor_input.update_local_state(destination_index, destination_state);
+            let remap = |id| successor_input.remap_retired_alloc_id(id, order, retires);
+            for holder in &mut detached {
+                *holder = remap(*holder);
+            }
+            if let Some((mut ids, readonly)) = layer_ids {
+                for id in &mut ids {
+                    *id = remap(*id);
+                }
+                successor_input.bind_alloc_ids(destination_index, &ids, readonly);
+            }
+            if !detached.is_empty() {
+                successor_input.bind_detached_holders(destination_index, detached);
+            }
         }
 
         Ok(())
@@ -607,11 +680,16 @@ impl<'a> BorrowChecker<'a> {
 }
 
 /// Retire both previous outcomes before installing the selected operation's captured results.
+///
+/// WHY: the success edge also applies the operation's layer effects, which a failed operation
+///      never performed.
 fn apply_invoke_edge_transfer(
     layout: &FunctionLayout,
     terminator: &HirTerminator,
     successor: BlockId,
     operation_results: &[(LocalId, LocalState)],
+    layer_ops: &[InvokeLayerOp],
+    order: OrderKey,
     edge_state: &mut BorrowState,
 ) {
     let HirTerminator::Invoke {
@@ -624,9 +702,17 @@ fn apply_invoke_edge_transfer(
     else {
         return;
     };
+    let apply_layer_effects = successor == *success && !layer_ops.is_empty();
     for local in success_results.iter().chain(std::iter::once(error_result)) {
         if let Some(index) = layout.index_of(*local) {
-            edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+            if apply_layer_effects {
+                // Captures can create the first sparse facts on this edge. Still snapshot any
+                // existing root-only observers before changing the result binding.
+                edge_state.retire_binding_allocation(index, order);
+                edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+            } else {
+                edge_state.rebind_local(index, LocalState::uninit(layout.local_count()), order);
+            }
         }
     }
     if successor == *success {
@@ -635,9 +721,103 @@ fn apply_invoke_edge_transfer(
                 edge_state.update_local_state(index, result.clone());
             }
         }
+        let retires = |index| {
+            let local = layout.local_ids[index];
+            local == *error_result || success_results.contains(&local)
+        };
+        for op in layer_ops {
+            let remap_id = |id: AllocId| edge_state.remap_retired_alloc_id(id, order, retires);
+            match op {
+                InvokeLayerOp::Store {
+                    holders,
+                    key,
+                    values,
+                } => {
+                    let holders = remap_invoke_capture(holders, remap_id);
+                    let values = remap_invoke_capture(values, |mut value| {
+                        value.id = remap_id(value.id);
+                        value
+                    });
+                    edge_state.store_alloc_field(&holders, *key, &values, false);
+                }
+                InvokeLayerOp::Contribute { holder, key, value } => {
+                    let holder = remap_id(*holder);
+                    let mut value = *value;
+                    value.id = remap_id(value.id);
+                    edge_state.add_alloc_edge(holder, *key, value);
+                }
+                InvokeLayerOp::Remove {
+                    holders,
+                    map,
+                    result,
+                } => {
+                    let holders = remap_invoke_capture(holders, remap_id);
+                    edge_state.remove_alloc_element(
+                        &holders,
+                        *map,
+                        result.and_then(|local| layout.index_of(local)),
+                    );
+                }
+                InvokeLayerOp::Bind {
+                    local,
+                    ids,
+                    readonly,
+                } => {
+                    if let Some(index) = layout.index_of(*local) {
+                        let ids = remap_invoke_capture(ids, remap_id);
+                        edge_state.bind_alloc_ids(index, &ids, *readonly);
+                    }
+                }
+            }
+        }
     } else if successor == *failure
         && let Some(index) = layout.index_of(*error_result)
     {
         edge_state.update_local_state(index, LocalState::slot(layout.local_count()));
     }
+}
+
+impl InvokeLayerOp {
+    /// Carry owned captures across one result rebind before publishing any of their effects.
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        match self {
+            Self::Store {
+                holders, values, ..
+            } => {
+                for holder in holders {
+                    retirement.remap_id(state, holder);
+                }
+                for value in values {
+                    retirement.remap_value(state, value);
+                }
+            }
+            Self::Contribute { holder, value, .. } => {
+                retirement.remap_id(state, holder);
+                retirement.remap_value(state, value);
+            }
+            Self::Remove { holders, .. } | Self::Bind { ids: holders, .. } => {
+                for holder in holders {
+                    retirement.remap_id(state, holder);
+                }
+            }
+        }
+    }
+}
+
+/// Keep captures borrowed unless a reused outcome changes at least one of their identities.
+fn remap_invoke_capture<T: Copy + PartialEq>(
+    capture: &[T],
+    remap: impl Fn(T) -> T,
+) -> Cow<'_, [T]> {
+    for (index, &original) in capture.iter().enumerate() {
+        let rebased = remap(original);
+        if rebased != original {
+            let mut result = Vec::with_capacity(capture.len());
+            result.extend_from_slice(&capture[..index]);
+            result.push(rebased);
+            result.extend(capture[index + 1..].iter().copied().map(remap));
+            return Cow::Owned(result);
+        }
+    }
+    Cow::Borrowed(capture)
 }

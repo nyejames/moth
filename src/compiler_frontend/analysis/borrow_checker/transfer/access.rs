@@ -10,7 +10,7 @@ use super::facts::{StatementAccessTracker, ValueFactBuffer, roots_to_local_ids};
 use super::{BlockTransferStats, BorrowTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState, RootSet,
+    AllocationRetirement, BorrowState, FunctionLayout, LocalState, OrderKey, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
@@ -32,11 +32,18 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 mod conflicts;
+mod layer;
 mod move_decision;
 mod statement;
 mod terminator;
+#[cfg(test)]
+mod tests;
 
 use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access};
+use layer::{
+    LayerValueContext, capture_layer_alias_write, capture_local_value, check_layer_place_mutation,
+    check_layer_place_read, transfer_layer_alias_write,
+};
 use move_decision::{MoveDecision, classify_move_decision};
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
@@ -266,6 +273,11 @@ fn transfer_assign_target(
     let rhs_is_place = value_expression.value_kind == ValueKind::Place;
     let is_direct_self_update = !is_definition
         && HirWriteTarget::AssignPlace(*target).is_direct_self_update_of(value_expression);
+    let layer_values = LayerValueContext {
+        context: transfer_context,
+        layout,
+        block_id,
+    };
 
     if !is_definition {
         let Some(local_index) = layout.index_of(target.root) else {
@@ -294,6 +306,10 @@ fn transfer_assign_target(
             };
 
             let local_state = state.local_state(local_index).clone();
+            // A mutable binding receiving a place becomes a mutable alias of it.
+            let mutable_alias = rhs_is_place
+                && layout.local_mutable[local_index]
+                && !is_compiler_owned_scratch_local(transfer_context, layout, local_index);
             let rhs_roots = direct_value_roots_from_expression(
                 layout,
                 state,
@@ -348,7 +364,7 @@ fn transfer_assign_target(
             }
 
             if is_definition {
-                match rhs_roots {
+                let new_state = match rhs_roots {
                     Some(rhs_roots) => {
                         let target_is_mutable = layout.local_mutable[local_index];
                         let target_is_compiler_owned_scratch =
@@ -385,6 +401,9 @@ fn transfer_assign_target(
                                     alias_exclusivity: AliasExclusivity::All,
                                 },
                             )?;
+                            if let HirExpressionKind::Load(place) = &value_expression.kind {
+                                check_layer_place_mutation(&mut check, place, false)?;
+                            }
                         }
 
                         let direct_roots = rhs_direct_alias_roots
@@ -424,15 +443,20 @@ fn transfer_assign_target(
                             transfer_context.expressions,
                             value,
                         );
-                        state.update_local_state(local_index, new_state);
+                        new_state
                     }
-                    None => {
-                        state.update_local_state(
-                            local_index,
-                            LocalState::slot(layout.local_count()),
-                        );
-                    }
-                }
+                    None => LocalState::slot(layout.local_count()),
+                };
+                let mut captured = capture_local_value(
+                    &layer_values,
+                    state,
+                    value,
+                    mutable_alias,
+                    value_expression.span.or(location),
+                )?;
+                let retirement = state.rebind_local(local_index, new_state, current_order);
+                captured.remap(state, retirement);
+                captured.apply(state, local_index);
                 return Ok(());
             }
 
@@ -508,54 +532,49 @@ fn transfer_assign_target(
                 local_state.mode.contains(LocalMode::SLOT),
                 local_state.mode.contains(LocalMode::ALIAS),
             ) {
-                (false, true) => {
-                    // The write goes through to the referent cells and does not rebind this
-                    // alias. The alias and the cells it writes now observe the replacement value.
-                    let _ = refresh_alias_referents(
+                (has_slot, true) => {
+                    // The alias path writes through; a simultaneous slot path makes each
+                    // referent only a possible destination.
+                    transfer_layer_alias_write(
+                        &mut AccessCheckContext {
+                            context: transfer_context,
+                            layout,
+                            state: &*state,
+                            block_id,
+                            tracker,
+                            location,
+                            span,
+                            stats,
+                            actor_index_hint: Some(local_index),
+                            current_order,
+                        },
+                        local_index,
+                    )?;
+                    let captured = capture_layer_alias_write(
+                        &layer_values,
+                        state,
+                        local_index,
+                        &local_state,
+                        value,
+                        has_slot && mutable_alias,
+                        value_expression.span.or(location),
+                    )?;
+                    let (observed, retirement) = refresh_alias_referents(
                         state,
                         local_index,
                         &local_state,
                         rhs_roots.as_ref(),
+                        current_order,
+                        captured.has_facts(),
+                        captured.publishes_weak_whole_ids(),
                     );
-                }
-
-                (true, false) => match rhs_roots {
-                    Some(rhs_roots) if rhs_is_place => {
-                        let direct_roots = rhs_direct_alias_roots
-                            .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        let write_target_roots = rhs_write_target_roots
-                            .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        let mut new_state = LocalState::alias_with_cells(
-                            rhs_roots,
-                            direct_roots,
-                            write_target_roots,
-                        );
-                        new_state.derived_from_roots = rhs_derivation;
-                        state.update_local_state(local_index, new_state);
+                    captured.apply(state, local_index, &local_state, retirement);
+                    if !has_slot {
+                        return Ok(());
                     }
-                    rhs_roots => {
-                        apply_slot_rebinding(
-                            state,
-                            layout.local_count(),
-                            local_index,
-                            rhs_roots,
-                            rhs_direct_alias_roots,
-                        );
-                        state.local_state_mut(local_index).derived_from_roots = rhs_derivation;
-                    }
-                },
 
-                (true, true) => {
-                    // Both alternatives hold the incoming value after this write: the slot path
-                    // rebinds, and the alias path stores the value in its referent cell. The
-                    // joined state has no per-path root partition, so keep every alternative's
-                    // cells and record the value both alternatives now observe.
-                    let observed = refresh_alias_referents(
-                        state,
-                        local_index,
-                        &local_state,
-                        rhs_roots.as_ref(),
-                    );
+                    // Both alternatives now hold the incoming value. Keep their union of
+                    // storage cells, since the joined root state has no per-path partition.
                     let mut direct_alias_roots = local_state.direct_alias_roots;
                     let mut write_target_roots = local_state.write_target_roots;
                     if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
@@ -579,10 +598,48 @@ fn transfer_assign_target(
                     );
                 }
 
+                (true, false) => {
+                    let mut captured = capture_local_value(
+                        &layer_values,
+                        state,
+                        value,
+                        mutable_alias,
+                        value_expression.span.or(location),
+                    )?;
+                    let mut new_state = match rhs_roots {
+                        Some(roots) if rhs_is_place => LocalState::alias_with_cells(
+                            roots,
+                            rhs_direct_alias_roots
+                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
+                            rhs_write_target_roots
+                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
+                        ),
+                        Some(roots) if !roots.is_empty() => LocalState::slot_with_value_roots(
+                            roots,
+                            rhs_direct_alias_roots
+                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
+                        ),
+                        _ => LocalState::slot(layout.local_count()),
+                    };
+                    new_state.derived_from_roots = rhs_derivation;
+                    let retirement = if captured.has_facts() && state.layer_is_empty() {
+                        // The captured RHS may be the first sparse fact about the old allocation.
+                        let retirement =
+                            state.retire_binding_allocation(local_index, current_order);
+                        state.update_local_state(local_index, new_state);
+                        retirement
+                    } else {
+                        state.rebind_local(local_index, new_state, current_order)
+                    };
+                    state.release_projected_observers(local_index, current_order);
+                    captured.remap(state, retirement);
+                    captured.apply(state, local_index);
+                }
+
                 (false, false) => {
                     let mut new_state = LocalState::slot(layout.local_count());
                     new_state.derived_from_roots = rhs_derivation;
-                    state.update_local_state(local_index, new_state);
+                    state.rebind_local(local_index, new_state, current_order);
                 }
             }
         }
@@ -621,6 +678,10 @@ fn transfer_assign_target(
                     alias_exclusivity: AliasExclusivity::All,
                 },
             )?;
+            let field_write = layer::transfer_layer_field_write(&mut check, target, value)?;
+            if let Some(field_write) = field_write {
+                field_write.apply(&layer_values, state, value)?;
+            }
         }
     }
 
@@ -646,26 +707,6 @@ fn is_compiler_owned_scratch_local(
     )
 }
 
-fn apply_slot_rebinding(
-    state: &mut BorrowState,
-    local_count: usize,
-    local_index: usize,
-    rhs_roots: Option<RootSet>,
-    rhs_direct_alias_roots: Option<RootSet>,
-) {
-    match rhs_roots.filter(|roots| !roots.is_empty()) {
-        Some(roots) => {
-            let direct_roots =
-                rhs_direct_alias_roots.unwrap_or_else(|| RootSet::empty(local_count));
-            state.update_local_state(
-                local_index,
-                LocalState::slot_with_value_roots(roots, direct_roots),
-            );
-        }
-        None => state.update_local_state(local_index, LocalState::slot(local_count)),
-    }
-}
-
 fn place_root_local_index(layout: &FunctionLayout, place: &HirPlace) -> Option<usize> {
     layout.index_of(place.root)
 }
@@ -688,20 +729,67 @@ fn refresh_alias_referents(
     local_index: usize,
     alias_state: &LocalState,
     new_value_roots: Option<&RootSet>,
-) -> RootSet {
+    order: OrderKey,
+    preserve_allocation: bool,
+    publishes_weak_whole_ids: bool,
+) -> (RootSet, Option<AllocationRetirement>) {
     let provenance = new_value_roots.filter(|roots| !roots.is_empty());
     let storage_identity = state.write_storage_cells(local_index);
     let observed = match provenance {
         Some(roots) => roots.clone(),
         None => storage_identity,
     };
+    let retirement = if let Some(cell_index) =
+        definite_slot_referent(state, local_index, alias_state)
+    {
+        let retirement = (preserve_allocation || !state.layer_is_empty())
+            .then(|| state.retire_binding_allocation(cell_index, order));
+        let local_count = state.local_state(cell_index).value_roots.bit_len();
+        state.local_state_mut(cell_index).value_roots = provenance
+            .cloned()
+            .unwrap_or_else(|| RootSet::empty(local_count));
+        retirement
+    } else {
+        if let Some(roots) = provenance {
+            for cell_index in alias_state.direct_alias_roots.iter_ones() {
+                if cell_index == local_index {
+                    continue;
+                }
+                if publishes_weak_whole_ids
+                    && state.local_state(cell_index).mode.contains(LocalMode::SLOT)
+                    && !state.has_layer_binding(cell_index)
+                {
+                    // Capture only the old allocations. The incoming coarse roots may name
+                    // a containing allocation rather than the exact child the sparse write uses.
+                    let (old_ids, _) = state.local_alloc_ids(cell_index);
+                    state.bind_alloc_ids(cell_index, &old_ids, false);
+                }
+                let referent = state.local_state_mut(cell_index);
+                if referent.mode.contains(LocalMode::SLOT) {
+                    // Its old value survives on paths that write elsewhere. Make the
+                    // implicit slot root explicit before the incoming roots displace it.
+                    if !referent.mode.contains(LocalMode::ALIAS) && referent.value_roots.is_empty()
+                    {
+                        referent.value_roots.insert(cell_index);
+                    }
+                    referent.value_roots.union_with(roots);
+                }
+            }
+        }
+        None
+    };
     state.local_state_mut(local_index).value_roots = observed.clone();
+    (observed, retirement)
+}
 
-    // WHAT: A definite referent means every path writes one whole cell.
-    // WHY: one direct cell is not definite when the joined state also carries its own slot or a
-    //      write target for another cell; that path leaves the direct cell's value untouched.
+/// The one whole cell a write through `alias_state` definitely replaces.
+///
+/// WHAT: A definite referent means every path writes one whole cell.
+/// WHY: one direct cell is not definite when the joined state also carries its own slot or a
+///      write target for another cell; that path leaves the direct cell's value untouched.
+fn definite_referent(alias_state: &LocalState) -> Option<usize> {
     let mut direct_cells = alias_state.direct_alias_roots.iter_ones();
-    let definite_referent = match (direct_cells.next(), direct_cells.next()) {
+    match (direct_cells.next(), direct_cells.next()) {
         (Some(cell_index), None)
             if alias_state.mode.contains(LocalMode::ALIAS)
                 && !alias_state.mode.contains(LocalMode::SLOT)
@@ -713,46 +801,20 @@ fn refresh_alias_referents(
             Some(cell_index)
         }
         _ => None,
-    };
-
-    if let Some(cell_index) = definite_referent {
-        update_referent_value(state, cell_index, local_index, provenance);
-    } else if let Some(roots) = provenance {
-        for cell_index in alias_state.direct_alias_roots.iter_ones() {
-            if cell_index != local_index
-                && state.local_state(cell_index).mode.contains(LocalMode::SLOT)
-            {
-                state
-                    .local_state_mut(cell_index)
-                    .value_roots
-                    .union_with(roots);
-            }
-        }
     }
-
-    observed
 }
 
-/// Store the value provenance a definite referent cell now holds.
-///
-/// WHY: one cell is a strong update. A fresh value is owned by that cell, so its provenance
-///      clears; an aliased value keeps the incoming provenance.
-fn update_referent_value(
-    state: &mut BorrowState,
-    cell_index: usize,
+/// A definite whole-cell update also requires that the target itself is a definite slot.
+fn definite_slot_referent(
+    state: &BorrowState,
     local_index: usize,
-    provenance: Option<&RootSet>,
-) {
-    if cell_index == local_index || !state.local_state(cell_index).mode.contains(LocalMode::SLOT) {
-        return;
-    }
-    let local_count = state.local_state(cell_index).value_roots.bit_len();
-    match provenance {
-        Some(roots) => state.local_state_mut(cell_index).value_roots = roots.clone(),
-        None => {
-            state.local_state_mut(cell_index).value_roots = RootSet::empty(local_count);
-        }
-    }
+    alias_state: &LocalState,
+) -> Option<usize> {
+    definite_referent(alias_state).filter(|&cell| {
+        cell != local_index
+            && state.local_state(cell).mode == LocalMode::SLOT
+            && state.alias_cells(local_index).is_empty()
+    })
 }
 
 fn mutable_argument_roots(
@@ -1269,6 +1331,7 @@ fn check_shared_place_read(
         current_order: env.current_order,
     };
     check_shared_access(&mut check, &access_roots)?;
+    check_layer_place_read(&check, place)?;
     Ok(value_roots)
 }
 

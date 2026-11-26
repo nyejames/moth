@@ -1525,6 +1525,69 @@ return observed.length()
     );
 }
 
+#[test]
+fn duplicate_collection_children_remain_aliased_after_removal() {
+    for (binding, removed, surviving) in [
+        ("entries ~= {child, child}", "0", "0"),
+        (
+            r#"entries ~{String = {I32}} = {"first" = child, "second" = child}"#,
+            r#""first""#,
+            r#""second""#,
+        ),
+    ] {
+        let source = format!(
+            "probe || -> I32:\n\
+                child ~= {{1}}\n\
+                {binding}\n\
+                detached ~= ~entries.remove({removed}) catch then {{0}}\n\
+                ~detached.push(2)\n\
+                remaining = entries.get({surviving}) catch then {{0}}\n\
+                return remaining.length()\n\
+            ;"
+        );
+        assert_layer_conflict_at(&source, "detached.push");
+    }
+}
+
+#[test]
+fn copy_keeps_a_lazy_child_reachable_by_two_paths() {
+    let source = "\
+Box = |items {I32}|\n\
+Pair = |right {I32}, left Box|\n\
+probe |input Box| -> I32:\n\
+    source = Pair(input.items, input)\n\
+    owned ~= copy source\n\
+    observed = Box(owned.right)\n\
+    ~owned.left.items.push(2)\n\
+    return observed.items.length()\n\
+;";
+    assert_layer_conflict_at(source, "items.push");
+}
+
+fn assert_layer_conflict_at(source: &str, access: &str) {
+    let error = check_source(source).expect_err("a live retained child must block this write");
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("typed borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    let view = diagnostic
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access");
+    assert_eq!(
+        view.reason,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess
+    );
+    let expected = source.find(access).expect("authored access") as u32;
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span.local().inline_range().is_some_and(|range| range.start() == expected)
+        ),
+        "diagnostic should point to the authored access {access}"
+    );
+}
+
 fn check_source(source: &str) -> Result<(), BorrowCheckError> {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
@@ -1651,7 +1714,12 @@ fn transfer_isolated_statement(
         imported_call_summaries: &checker.module.imported_call_summaries,
         module_private_call_summaries: &checker.module.module_private_call_summaries,
         generated_call_summaries: &checker.module.generated_call_summaries,
+        typed_local_results: &checker.typed_local_results,
+        local_types: &checker.local_types,
+        structs: &checker.module.structs,
+        choices: &checker.module.choices,
         expressions: &checker.module.expressions,
+        type_environment: checker.type_environment,
         diagnostics: BorrowDiagnostics::new(
             checker.module,
             checker.path_fork,

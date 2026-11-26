@@ -4,8 +4,19 @@
 //! WHY: keeping statement transfer separate from traversal helpers makes the block transfer
 //! entrypoint easier to inspect without changing the borrow-analysis model.
 
+#[path = "call_results.rs"]
+mod call_results;
+
+use super::layer::{
+    LayerValueContext, layer_store_values, resolve_place_allocs, transfer_layer_alias_write,
+};
 use super::*;
-use crate::compiler_frontend::analysis::borrow_checker::state::RootSet;
+use crate::compiler_frontend::analysis::borrow_checker::metadata::CallResultFacts;
+use crate::compiler_frontend::analysis::borrow_checker::state::{
+    AllocId, AllocationRetirement, FieldKey, ResolvedPlace, RootSet, StoredValue,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::InvokeLayerOp;
+use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::compiler_messages::BorrowAccessKind;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
@@ -15,6 +26,7 @@ use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
+use call_results::call_result_ops;
 
 pub(crate) fn transfer_statement(
     context: &BorrowTransferContext<'_>,
@@ -114,6 +126,13 @@ pub(crate) fn transfer_statement(
                     effect,
                 })
                 .collect::<Vec<_>>();
+            let result_transfer = CallResultTransfer::for_call_definition(
+                layout,
+                state,
+                block_id,
+                statement_order,
+                results,
+            );
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -129,7 +148,8 @@ pub(crate) fn transfer_statement(
                 &call_args,
                 results.iter().copied(),
                 semantics.return_alias,
-                false,
+                result_transfer,
+                CallStorage::for_target(context, target),
             )?;
         }
 
@@ -170,7 +190,8 @@ pub(crate) fn transfer_statement(
                 &call_args,
                 result.iter().copied(),
                 map_result_alias(*op),
-                false,
+                CallResultTransfer::Immediate,
+                CallStorage::for_map_op(*op),
             )?;
         }
 
@@ -196,7 +217,8 @@ pub(crate) fn transfer_statement(
                 }],
                 std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
-                false,
+                CallResultTransfer::Immediate,
+                CallStorage::Builtin,
             )?;
         }
 
@@ -228,7 +250,8 @@ pub(crate) fn transfer_statement(
                 &call_args,
                 std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
-                false,
+                CallResultTransfer::Immediate,
+                CallStorage::Builtin,
             )?;
         }
 
@@ -249,7 +272,8 @@ pub(crate) fn transfer_statement(
                 &[],
                 std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
-                false,
+                CallResultTransfer::Immediate,
+                CallStorage::Builtin,
             )?;
         }
 
@@ -298,18 +322,20 @@ pub(crate) fn transfer_statement(
             transfer_call_result_alias(
                 &mut result_transfer,
                 Some(*candidate_result),
-                &FunctionReturnAliasSummary::Fresh,
+                Some(&[]),
                 &[],
                 &[],
-                false,
+                CallResultTransfer::Immediate,
+                &[],
             )?;
             transfer_call_result_alias(
                 &mut result_transfer,
                 Some(*in_range_result),
-                &FunctionReturnAliasSummary::Fresh,
+                Some(&[]),
                 &[],
                 &[],
-                false,
+                CallResultTransfer::Immediate,
+                &[],
             )?;
         }
 
@@ -468,7 +494,8 @@ pub(super) fn transfer_invoke(
                 &arguments,
                 results,
                 semantics.return_alias,
-                true,
+                CallResultTransfer::Edge,
+                CallStorage::for_target(context, target),
             )
         }
         HirFallibleOperation::MapOp { op, receiver, args } => {
@@ -492,7 +519,8 @@ pub(super) fn transfer_invoke(
                 &arguments,
                 results,
                 map_result_alias(*op),
-                true,
+                CallResultTransfer::Edge,
+                CallStorage::for_map_op(*op),
             )
         }
         _ => {
@@ -504,7 +532,8 @@ pub(super) fn transfer_invoke(
                     &[],
                     results,
                     FunctionReturnAliasSummary::Fresh,
-                    true,
+                    CallResultTransfer::Edge,
+                    CallStorage::Builtin,
                 );
             };
             let first = CallArgumentTransfer {
@@ -523,7 +552,8 @@ pub(super) fn transfer_invoke(
                     ],
                     results,
                     FunctionReturnAliasSummary::Fresh,
-                    true,
+                    CallResultTransfer::Edge,
+                    CallStorage::Builtin,
                 )
             } else {
                 transfer_call_arguments_and_result(
@@ -531,7 +561,8 @@ pub(super) fn transfer_invoke(
                     &[first],
                     results,
                     FunctionReturnAliasSummary::Fresh,
-                    true,
+                    CallResultTransfer::Edge,
+                    CallStorage::Builtin,
                 )
             }
         }
@@ -561,13 +592,64 @@ pub(super) fn transfer_never_call(
         &arguments,
         std::iter::empty(),
         FunctionReturnAliasSummary::Fresh,
-        false,
+        CallResultTransfer::Immediate,
+        CallStorage::for_target(input.context, target),
     )
 }
 
-struct CallArgumentTransfer {
-    argument: HirValueId,
+pub(super) struct CallArgumentTransfer {
+    pub(super) argument: HirValueId,
     effect: ArgEffect,
+}
+
+/// How a call moves values between its arguments' allocations.
+#[derive(Clone, Copy)]
+enum CallStorage<'a> {
+    /// A user function may write through any field a mutable argument reaches.
+    Opaque(&'a [Option<CallResultFacts>]),
+    /// A builtin edits only its receiver's own contents.
+    Builtin,
+    /// A builtin stores these argument positions into its receiver, argument 0.
+    Store(&'static [(usize, FieldKey)]),
+    /// A builtin takes one of its receiver's elements out as its result.
+    Remove { map: bool },
+    /// A builtin returns one of its receiver's elements.
+    Get,
+}
+
+impl<'a> CallStorage<'a> {
+    fn for_target(context: &BorrowTransferContext<'a>, target: &CallTarget) -> Self {
+        let CallTarget::External(id) = target else {
+            let facts = match target {
+                CallTarget::Local(id) => context.typed_local_results.get(id).map(Vec::as_slice),
+                _ => None,
+            };
+            return Self::Opaque(facts.unwrap_or_default());
+        };
+        match CollectionBuiltinOp::from_external_function_id(*id) {
+            Some(CollectionBuiltinOp::PushGrowable | CollectionBuiltinOp::PushFixed) => {
+                Self::Store(&[(1, FieldKey::Elem)])
+            }
+            Some(CollectionBuiltinOp::Set) => Self::Store(&[(2, FieldKey::Elem)]),
+            Some(CollectionBuiltinOp::Remove) => Self::Remove { map: false },
+            Some(CollectionBuiltinOp::Get) => Self::Get,
+            _ => Self::Builtin,
+        }
+    }
+
+    fn for_map_op(op: HirMapOp) -> Self {
+        match op {
+            // Arguments follow the receiver: a key, then a value.
+            HirMapOp::Set => Self::Store(&[(1, FieldKey::MapKey), (2, FieldKey::Elem)]),
+            HirMapOp::Remove => Self::Remove { map: true },
+            HirMapOp::Get => Self::Get,
+            _ => Self::Builtin,
+        }
+    }
+
+    fn reaches_children(self) -> bool {
+        matches!(self, Self::Opaque(_))
+    }
 }
 
 pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
@@ -582,12 +664,45 @@ pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'fa
     pub(super) value_fact_buffer: &'facts mut ValueFactBuffer,
 }
 
+#[derive(Clone, Copy)]
+enum CallResultTransfer {
+    Immediate,
+    FirstDefinition(usize),
+    Edge,
+}
+
+impl CallResultTransfer {
+    fn for_call_definition(
+        layout: &FunctionLayout,
+        state: &BorrowState,
+        block: BlockId,
+        order: i32,
+        results: &[HirLocalDestination],
+    ) -> Self {
+        if let [HirLocalDestination::Define(local)] = results
+            && layout.acyclic_entry_block == Some(block)
+            && order >= 0
+            && let Some(index) = layout.index_of(*local)
+            && layout.local_has_in_place_mutation_surface[index]
+            && layout.local_first_write_order[index] == order
+            && state.has_pristine_alloc_binding(index)
+        {
+            // Only parameters enter this block initialized. The prefix has never written this
+            // local, and a read cannot produce coarse observers of an uninitialized local.
+            Self::FirstDefinition(index)
+        } else {
+            Self::Immediate
+        }
+    }
+}
+
 fn transfer_call_arguments_and_result(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     args: &[CallArgumentTransfer],
     results: impl Iterator<Item = HirLocalDestination> + Clone,
     return_alias: FunctionReturnAliasSummary,
-    edge_local: bool,
+    result_transfer: CallResultTransfer,
+    storage: CallStorage<'_>,
 ) -> Result<(), BorrowCheckError> {
     if args.iter().any(|arg| {
         matches!(
@@ -598,6 +713,7 @@ fn transfer_call_arguments_and_result(
         input.stats.mutable_call_sites += 1;
     }
 
+    let edge_local = matches!(result_transfer, CallResultTransfer::Edge);
     let retains_result = results.clone().next().is_some();
     let mut arg_roots = vec![RootSet::empty(input.layout.local_count()); args.len()];
 
@@ -702,18 +818,110 @@ fn transfer_call_arguments_and_result(
                 &mut RootSet::empty(input.layout.local_count()),
             )?;
         }
-        transfer_call_argument_access(input, arg.argument, effect, argument_location)?;
+        transfer_call_argument_access(
+            input,
+            arg.argument,
+            effect,
+            argument_location,
+            storage.reaches_children(),
+        )?;
+    }
+    if storage.reaches_children()
+        && args.iter().any(|arg| {
+            matches!(
+                arg.effect,
+                ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
+            )
+        })
+    {
+        input.state.invalidate_detachments();
     }
 
-    for result in results.clone() {
-        transfer_call_result_alias(
+    let (evidence, mut layer_ops) = match storage {
+        CallStorage::Opaque(evidence) => (
+            evidence,
+            call_result_ops(input, args, results.clone(), &return_alias, evidence)?,
+        ),
+        CallStorage::Builtin => (
+            &[][..],
+            call_result_ops(input, args, results.clone(), &return_alias, &[])?,
+        ),
+        CallStorage::Store(positions) => {
+            apply_builtin_store(input, args, positions, edge_local)?;
+            (&[][..], Vec::new())
+        }
+        CallStorage::Remove { .. } | CallStorage::Get => (
+            &[][..],
+            capture_builtin_element_result(input, args, results.clone().next(), storage),
+        ),
+    };
+    // A capture of the old root or one of its projections must have interned that root.
+    // In that case keep the ordinary retirement and remap the already-captured operations.
+    let result_transfer = match result_transfer {
+        CallResultTransfer::FirstDefinition(index) if input.state.alloc_root_is_interned(index) => {
+            CallResultTransfer::Immediate
+        }
+        other => other,
+    };
+
+    let aliases = match &return_alias {
+        FunctionReturnAliasSummary::Fresh => Some(&[][..]),
+        FunctionReturnAliasSummary::AliasParams(indices) => Some(indices.as_slice()),
+        FunctionReturnAliasSummary::Unknown => None,
+    };
+    for (slot, result) in results.clone().enumerate() {
+        let sources = match evidence.get(slot).and_then(Option::as_ref) {
+            Some(CallResultFacts::Fresh { .. }) => Some(&[][..]),
+            Some(CallResultFacts::Parameter { index, .. }) => Some(std::slice::from_ref(index)),
+            None => aliases,
+        };
+        if let Some(retirement) = transfer_call_result_alias(
             input,
             Some(result),
-            &return_alias,
+            sources,
             &arg_value_roots,
             &arg_derived_roots,
-            edge_local,
-        )?;
+            result_transfer,
+            &layer_ops,
+        )? {
+            for op in &mut layer_ops {
+                op.remap(input.state, retirement);
+            }
+        }
+    }
+    if edge_local {
+        input.stats.invoke_layer_ops.extend(layer_ops);
+    } else {
+        for op in layer_ops {
+            match op {
+                InvokeLayerOp::Bind {
+                    local,
+                    ids,
+                    readonly,
+                } => {
+                    if let Some(index) = input.layout.index_of(local) {
+                        bind_call_result_ids(input.state, index, &ids, readonly);
+                    }
+                }
+                InvokeLayerOp::Contribute { holder, key, value } => {
+                    input.state.add_alloc_edge(holder, key, value);
+                }
+                InvokeLayerOp::Remove {
+                    holders,
+                    map,
+                    result,
+                } => {
+                    input.state.remove_alloc_element(
+                        &holders,
+                        map,
+                        result.and_then(|local| input.layout.index_of(local)),
+                    );
+                }
+                InvokeLayerOp::Store { .. } => {
+                    unreachable!("builtin stores are handled separately")
+                }
+            }
+        }
     }
     if results.clone().nth(1).is_some() {
         // Native positions are not proof of independent graphs, even for fresh results.
@@ -811,6 +1019,146 @@ fn transfer_call_arguments_and_result(
     }
 
     Ok(())
+}
+
+/// Record what a call result holds in its destination.
+///
+/// WHY: a destination that is a mutable alias of a projected place stores the result into that
+///      field, so the field must hold it too.
+pub(super) fn bind_call_result_ids(
+    state: &mut BorrowState,
+    local_index: usize,
+    ids: &[AllocId],
+    readonly: bool,
+) {
+    let alias = state.local_state(local_index);
+    if !alias.mode.contains(LocalMode::ALIAS) {
+        state.bind_alloc_ids(local_index, ids, readonly);
+        return;
+    }
+    let cells = state.alias_cells(local_index);
+    let exact_projected = state.exact_projected_cell(local_index, &cells);
+    let exact_whole = definite_slot_referent(state, local_index, alias);
+    let possible_whole = if exact_whole.is_none() {
+        alias.direct_alias_roots.iter_ones().collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !cells.is_empty() {
+        let stored = ids
+            .iter()
+            .map(|&id| StoredValue {
+                id,
+                writable: !readonly,
+            })
+            .collect::<Vec<_>>();
+        for (holder, key) in cells {
+            state.store_alloc_field(&[holder], key, &stored, exact_projected);
+        }
+    }
+    if let Some(whole) = exact_whole {
+        state.bind_alloc_ids(whole, ids, readonly);
+    } else {
+        for whole in possible_whole {
+            if whole != local_index && state.local_state(whole).mode.contains(LocalMode::SLOT) {
+                state.extend_alloc_ids(whole, ids, readonly);
+            }
+        }
+    }
+    state.bind_alloc_ids(local_index, ids, readonly);
+}
+
+/// Allocations the receiver argument reaches, when the layer has anything to say about them.
+fn call_receiver_allocs(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    args: &[CallArgumentTransfer],
+) -> Option<ResolvedPlace> {
+    let receiver = args.first()?;
+    let place = direct_place_from_expression(input.context.expressions, receiver.argument)?;
+    resolve_place_allocs(input.layout, input.state, input.context.expressions, &place)
+}
+
+/// A fallible builtin stores nothing when it fails.
+fn apply_builtin_store(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    args: &[CallArgumentTransfer],
+    positions: &[(usize, FieldKey)],
+    edge_local: bool,
+) -> Result<(), BorrowCheckError> {
+    let Some(holders) = call_receiver_allocs(input, args) else {
+        return Ok(());
+    };
+    let values = LayerValueContext {
+        context: input.context,
+        layout: input.layout,
+        block_id: input.block_id,
+    };
+    for &(index, key) in positions {
+        let Some(argument) = args.get(index) else {
+            continue;
+        };
+        let Some(stored) =
+            layer_store_values(&values, input.state, &holders.ids, key, argument.argument)?
+        else {
+            continue;
+        };
+        if edge_local {
+            input.stats.invoke_layer_ops.push(InvokeLayerOp::Store {
+                holders: holders.ids.clone(),
+                key,
+                values: stored,
+            });
+        } else {
+            input
+                .state
+                .store_alloc_field(&holders.ids, key, &stored, false);
+        }
+    }
+    Ok(())
+}
+
+/// Capture the element before removal and before a result can rebind the receiver.
+fn capture_builtin_element_result(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    args: &[CallArgumentTransfer],
+    result: Option<HirLocalDestination>,
+    storage: CallStorage<'_>,
+) -> Vec<InvokeLayerOp> {
+    let heap_result = result
+        .and_then(|result| input.layout.index_of(result.local()))
+        .is_some_and(|index| input.layout.local_has_in_place_mutation_surface[index]);
+    if !heap_result && input.state.layer_is_empty() {
+        return Vec::new();
+    }
+    let Some(mut elements) = call_receiver_allocs(input, args) else {
+        return Vec::new();
+    };
+    let holders = if matches!(storage, CallStorage::Remove { .. }) {
+        elements.ids.clone()
+    } else {
+        Vec::new()
+    };
+    let mut ops = Vec::new();
+    if let Some(result) = result.filter(|_| heap_result) {
+        input
+            .state
+            .step_resolved(&mut elements, FieldKey::Elem, &input.layout.local_mutable);
+        if !elements.ids.is_empty() {
+            ops.push(InvokeLayerOp::Bind {
+                local: result.local(),
+                ids: elements.ids,
+                readonly: elements.readonly || matches!(storage, CallStorage::Get),
+            });
+        }
+    }
+    if let CallStorage::Remove { map } = storage {
+        ops.push(InvokeLayerOp::Remove {
+            holders,
+            map,
+            result: result.map(HirLocalDestination::local),
+        });
+    }
+    ops
 }
 
 fn record_call_argument_reads(
@@ -953,6 +1301,7 @@ fn transfer_call_argument_access(
     argument: HirValueId,
     effect: ArgEffect,
     argument_location: Option<SourceSpan>,
+    reaches_children: bool,
 ) -> Result<(), BorrowCheckError> {
     let argument_span = input.context.expressions.expression(argument).span;
     match effect {
@@ -974,6 +1323,7 @@ fn transfer_call_argument_access(
                 argument_location,
                 argument_span,
             )?;
+            check_call_layer_mutation(input, argument, argument_location, reaches_children)?;
             input.value_fact_buffer.record(
                 argument,
                 ValueAccessClassification::MutableArgument,
@@ -1001,6 +1351,9 @@ fn transfer_call_argument_access(
                 argument_span,
                 fallback_effect,
             )?;
+            if matches!(fallback_effect, ArgEffect::MutableBorrow) {
+                check_call_layer_mutation(input, argument, argument_location, reaches_children)?;
+            }
             input.value_fact_buffer.record(
                 argument,
                 if matches!(fallback_effect, ArgEffect::SharedBorrow) {
@@ -1013,6 +1366,31 @@ fn transfer_call_argument_access(
             Ok(())
         }
     }
+}
+
+/// Check a mutable argument's place against bindings that reach it through the layer.
+fn check_call_layer_mutation(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    argument: HirValueId,
+    argument_location: Option<SourceSpan>,
+    reaches_children: bool,
+) -> Result<(), BorrowCheckError> {
+    let Some(place) = direct_place_from_expression(input.context.expressions, argument) else {
+        return Ok(());
+    };
+    let mut check = AccessCheckContext {
+        context: input.context,
+        layout: input.layout,
+        state: input.state,
+        block_id: input.block_id,
+        tracker: input.tracker,
+        location: argument_location,
+        span: input.context.expressions.expression(argument).span,
+        stats: input.stats,
+        actor_index_hint: input.layout.index_of(place.root),
+        current_order: input.current_order,
+    };
+    check_layer_place_mutation(&mut check, &place, reaches_children)
 }
 
 fn effective_call_argument_effect(
@@ -1237,13 +1615,14 @@ fn check_call_shared_borrow(
 fn transfer_call_result_alias(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     result: Option<HirLocalDestination>,
-    return_alias: &FunctionReturnAliasSummary,
+    alias_arguments: Option<&[usize]>,
     arg_value_roots: &[RootSet],
     arg_derived_roots: &[RootSet],
-    edge_local: bool,
-) -> Result<(), BorrowCheckError> {
+    result_transfer: CallResultTransfer,
+    layer_ops: &[InvokeLayerOp],
+) -> Result<Option<AllocationRetirement>, BorrowCheckError> {
     let Some(destination) = result else {
-        return Ok(());
+        return Ok(None);
     };
     let result_local = destination.local();
 
@@ -1260,9 +1639,8 @@ fn transfer_call_result_alias(
 
     // The result's value provenance and derivation ledger follow the same return-alias argument
     // selection, so one pass fills both and validates each selected index once.
-    match return_alias {
-        FunctionReturnAliasSummary::Fresh => {}
-        FunctionReturnAliasSummary::AliasParams(arg_indices) => {
+    match alias_arguments {
+        Some(arg_indices) => {
             for arg_index in arg_indices {
                 let Some((arg_value_root_set, arg_derivation)) = arg_value_roots
                     .get(*arg_index)
@@ -1276,7 +1654,7 @@ fn transfer_call_result_alias(
                 derived_roots.union_with(arg_derivation);
             }
         }
-        FunctionReturnAliasSummary::Unknown => {
+        None => {
             for (arg_value_root_set, arg_derivation) in
                 arg_value_roots.iter().zip(arg_derived_roots)
             {
@@ -1293,12 +1671,12 @@ fn transfer_call_result_alias(
         state.derived_from_roots = derived_roots.clone();
         state
     };
-    if edge_local {
+    if matches!(result_transfer, CallResultTransfer::Edge) {
         input
             .stats
             .invoke_results
             .push((result_local, new_local_state));
-        return Ok(());
+        return Ok(None);
     }
 
     if matches!(destination, HirLocalDestination::Update(_)) {
@@ -1331,18 +1709,23 @@ fn transfer_call_result_alias(
         )?;
 
         if previous_state.mode.contains(LocalMode::ALIAS) {
-            // The call result is stored through the alias on every path that follows the alias
-            // branch, so this binding and its referent cells now observe the result's provenance.
-            let observed = refresh_alias_referents(
+            transfer_layer_alias_write(&mut check, local_index)?;
+            let publishes_weak_whole_ids = layer_ops.iter().any(|op| {
+                matches!(op, InvokeLayerOp::Bind { local, ids, .. } if *local == result_local && !ids.is_empty())
+            });
+            let (observed, retirement) = refresh_alias_referents(
                 input.state,
                 local_index,
                 &previous_state,
                 Some(&new_local_state.value_roots),
+                input.current_order,
+                input.layout.local_has_in_place_mutation_surface[local_index],
+                publishes_weak_whole_ids,
             );
 
             if previous_state.is_alias_only() {
                 // The binding itself is not rebound, so its derivation ledger stays unchanged.
-                return Ok(());
+                return Ok(retirement);
             }
 
             // A joined state holds the result on both alternatives. Keep the union of cells but
@@ -1359,12 +1742,28 @@ fn transfer_call_result_alias(
                     derived_from_roots,
                 },
             );
-            return Ok(());
+            return Ok(retirement);
         }
     }
 
-    input.state.update_local_state(local_index, new_local_state);
-    Ok(())
+    if input.layout.local_has_in_place_mutation_surface[local_index] {
+        let retirement = (!matches!(
+            result_transfer,
+            CallResultTransfer::FirstDefinition(index) if index == local_index
+        ))
+        .then(|| {
+            input
+                .state
+                .retire_binding_allocation(local_index, input.current_order)
+        });
+        input.state.update_local_state(local_index, new_local_state);
+        Ok(retirement)
+    } else {
+        input
+            .state
+            .rebind_local(local_index, new_local_state, input.current_order);
+        Ok(None)
+    }
 }
 
 fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<HirValueId> {

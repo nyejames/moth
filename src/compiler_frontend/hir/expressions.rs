@@ -233,4 +233,21 @@ pub enum HirExpressionKind {
     MapLiteral(HirMapEntryRange),
 }
 
+impl HirExpressionKind {
+    /// Whether this expression builds a new aggregate from its child values.
+    ///
+    /// WHY: construction stores existing heap values by reference, so borrow analysis records
+    ///      the stored values as held by the result instead of treating it as unrelated.
+    pub(crate) fn is_aggregate_construction(&self) -> bool {
+        matches!(
+            self,
+            Self::StructConstruct { .. }
+                | Self::VariantConstruct { .. }
+                | Self::RouteConstruct { .. }
+                | Self::Collection(_)
+                | Self::MapLiteral(_)
+        )
+    }
+}
+
 // Option none/some are represented through VariantConstruct with HirVariantCarrier::Option.

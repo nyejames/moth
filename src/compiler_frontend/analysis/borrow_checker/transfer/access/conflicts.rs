@@ -5,7 +5,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, FutureUseKind, RootSet,
+    BorrowState, FunctionLayout, FutureUseKind, MutationTarget, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
 use crate::compiler_frontend::compiler_messages::{
@@ -258,6 +258,125 @@ pub(super) fn probe_mutable_access(
         Err(BorrowCheckError::Diagnostic(_)) => Ok(false),
         Err(error) => Err(error),
     }
+}
+
+/// Reject a mutation of `targets` while another active binding reaches one through the layer.
+///
+/// WHAT: candidates follow the root rule's exemptions: the bindings the actor aliases, the
+///       derivation ledger in both directions, and inactive bindings.
+/// WHY: root provenance already rejects overlaps it can name. This check only adds overlaps
+///      that need an explicit holder edge or a binding override to see.
+pub(super) fn check_layer_conflict(
+    check: &mut AccessCheckContext<'_, '_>,
+    actor_index: usize,
+    targets: &[MutationTarget],
+    through_observed_value: bool,
+) -> Result<(), BorrowCheckError> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let activity = AliasActivityContext {
+        context: check.context,
+        layout: check.layout,
+        state: check.state,
+        block_id: check.block_id,
+        current_order: check.current_order,
+        preserve_cfg_future_use_activity: preserves_cfg_future_use_activity(
+            check.context,
+            check.layout,
+            Some(actor_index),
+        ),
+    };
+    let actor_state = check.state.local_state(actor_index);
+    for candidate_index in 0..check.layout.local_count() {
+        if candidate_index == actor_index {
+            continue;
+        }
+        let candidate = check.state.local_state(candidate_index);
+        if !candidate.mode.contains(LocalMode::SLOT) && !candidate.mode.contains(LocalMode::ALIAS) {
+            continue;
+        }
+        if actor_state.direct_alias_roots.contains(candidate_index)
+            || actor_state.write_target_roots.contains(candidate_index)
+            || actor_state.derived_from_roots.contains(candidate_index)
+            || candidate.derived_from_roots.contains(actor_index)
+        {
+            continue;
+        }
+        if !is_local_active_for_alias_conflict(&activity, candidate_index, candidate_index, false) {
+            continue;
+        }
+        let (held, layer_only) = check.state.local_alloc_ids(candidate_index);
+        if through_observed_value && check.state.detached_from(actor_index, &held) {
+            continue;
+        }
+        if !check.state.alloc_reaches(&held, layer_only, targets) {
+            continue;
+        }
+        let diagnostics = &check.context.diagnostics;
+        let candidate_id = check.layout.local_ids[candidate_index];
+        return Err(diagnostics.invalid_mutable_access(
+            diagnostics.local_place(check.layout.local_ids[actor_index]),
+            InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+            Some(diagnostics.local_place(candidate_id)),
+            diagnostics.local_source_span(candidate_id),
+            check.span,
+        ));
+    }
+    Ok(())
+}
+
+/// Check a read against exclusive aliases that can reach the same allocation.
+pub(super) fn check_layer_shared_access(
+    check: &AccessCheckContext<'_, '_>,
+    actor_index: usize,
+    targets: &[MutationTarget],
+) -> Result<(), BorrowCheckError> {
+    let activity = AliasActivityContext {
+        context: check.context,
+        layout: check.layout,
+        state: check.state,
+        block_id: check.block_id,
+        current_order: check.current_order,
+        preserve_cfg_future_use_activity: preserves_cfg_future_use_activity(
+            check.context,
+            check.layout,
+            Some(actor_index),
+        ),
+    };
+    let actor = check.state.local_state(actor_index);
+    for candidate in 0..check.layout.local_count() {
+        if candidate == actor_index
+            || !check.layout.local_mutable[candidate]
+            || !check
+                .state
+                .local_state(candidate)
+                .mode
+                .contains(LocalMode::ALIAS)
+            || actor.derived_from_roots.contains(candidate)
+            || matches!(
+                check.context.diagnostics.local_origin_kind(check.layout.local_ids[candidate]),
+                Some(kind) if kind != HirLocalOriginKind::User
+            )
+            || (!is_local_active_for_alias_conflict(&activity, candidate, candidate, false)
+                && !local_alias_never_read(check.layout, check.state, candidate))
+        {
+            continue;
+        }
+        let (held, layer_only) = check.state.local_alloc_ids(candidate);
+        if check.state.alloc_reaches(&held, layer_only, targets) {
+            let diagnostics = &check.context.diagnostics;
+            return Err(diagnostics.shared_mutable_conflict(
+                diagnostics.local_place(check.layout.local_ids[actor_index]),
+                BorrowAccessKind::Mutable,
+                BorrowAccessKind::Shared,
+                Some(diagnostics.local_place(check.layout.local_ids[candidate])),
+                None,
+                check.span,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn borrow_access_kind(access: AccessKind) -> BorrowAccessKind {

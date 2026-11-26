@@ -1,0 +1,12 @@
+Owner = |items {I32}|
+
+runtime_detached || -> I32:
+    child ~= {1}
+    owner ~= Owner(child)
+    entries ~= {Owner(child)}
+    detached ~= ~entries.remove(0) catch then Owner({0})
+    ~detached.items.push(2)
+    return owner.items.length() * 100 + detached.items.length() * 10 + entries.length()
+;
+
+~[:[runtime_detached()]]

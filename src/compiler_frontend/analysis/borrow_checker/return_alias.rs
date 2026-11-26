@@ -8,13 +8,19 @@
 use super::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalHirReturnAlias};
-use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+#[path = "return_alias/result_paths.rs"]
+mod result_paths;
+
+pub(in crate::compiler_frontend::analysis::borrow_checker) use result_paths::CallResultFacts;
 
 /// Immutable inputs for projecting one callee return-alias summary through a caller.
 struct AliasProjectionContext<'a> {
@@ -24,6 +30,111 @@ struct AliasProjectionContext<'a> {
     param_index_by_local: &'a FxHashMap<LocalId, usize>,
     reachable_blocks: &'a [BlockId],
     callee_description: &'a str,
+}
+
+/// Flow-insensitive may-sharing between locals. A load or transport can share storage in
+/// either direction. A constructor's child does not in turn own the containing allocation.
+#[derive(Default)]
+struct ReturnedStorage {
+    linked: FxHashMap<LocalId, Vec<(LocalId, bool)>>,
+    roots: Vec<LocalId>,
+    alias_writers: FxHashSet<LocalId>,
+    owned: FxHashMap<LocalId, bool>,
+    values: Vec<HirValueId>,
+    visited_values: FxHashSet<HirValueId>,
+}
+
+impl ReturnedStorage {
+    fn link(&mut self, holder: LocalId, child: LocalId, may_alias: bool) {
+        if holder != child {
+            self.linked.entry(holder).or_default().push((child, false));
+            self.linked
+                .entry(child)
+                .or_default()
+                .push((holder, !may_alias));
+        }
+    }
+
+    fn record_writer(&mut self, local: LocalId, owned: bool) {
+        self.owned
+            .entry(local)
+            .and_modify(|all_owned| *all_owned &= owned)
+            .or_insert(owned);
+    }
+
+    fn may_write_through_descendant(&self, local: LocalId, projections: usize) -> bool {
+        projections != 1 || self.owned.get(&local) != Some(&true)
+    }
+
+    fn retain_expression(
+        &mut self,
+        checker: &BorrowChecker<'_>,
+        value: HirValueId,
+        holder: Option<LocalId>,
+        may_alias: bool,
+    ) -> Result<(), BorrowCheckError> {
+        let expressions = &checker.module.expressions;
+        self.visited_values.clear();
+        self.values.push(value);
+        while let Some(value) = self.values.pop() {
+            if !self.visited_values.insert(value) {
+                continue;
+            }
+            let expression = expressions.expression(value);
+            if !classify_hir_type(expression.ty, checker.type_environment)?
+                .has_in_place_mutation_surface()
+            {
+                continue;
+            }
+            match &expression.kind {
+                HirExpressionKind::Load(place) => {
+                    if let Some(holder) = holder {
+                        self.link(holder, place.root, may_alias);
+                    } else {
+                        self.roots.push(place.root);
+                    }
+                }
+                HirExpressionKind::VariantPayloadGet { source, .. } => self.values.push(*source),
+                kind if kind.is_aggregate_construction() => {
+                    self.values.extend(expressions.child_values(value));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// `true` means reachable without walking from a child up into a containing holder.
+    /// Nested stores and stores through an unproven view may touch a shared descendant.
+    fn reachable(&mut self, include_containing: bool) -> FxHashMap<LocalId, bool> {
+        use std::collections::hash_map::Entry;
+
+        let mut reachable = FxHashMap::default();
+        let mut containing = Vec::new();
+        while let Some(local) = self.roots.pop() {
+            if let Entry::Vacant(entry) = reachable.entry(local) {
+                entry.insert(true);
+                if let Some(neighbors) = self.linked.remove(&local) {
+                    for (neighbor, parent) in neighbors {
+                        if !parent {
+                            self.roots.push(neighbor);
+                        } else if include_containing {
+                            containing.push(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+        while let Some(local) = containing.pop() {
+            if let Entry::Vacant(entry) = reachable.entry(local) {
+                entry.insert(false);
+                if let Some(neighbors) = self.linked.remove(&local) {
+                    containing.extend(neighbors.into_iter().map(|(neighbor, _)| neighbor));
+                }
+            }
+        }
+        reachable
+    }
 }
 
 impl<'a> BorrowChecker<'a> {
@@ -70,7 +181,237 @@ impl<'a> BorrowChecker<'a> {
             return Ok(FunctionReturnAliasSummary::Unknown);
         }
 
+        if !function.params.is_empty() && !matches!(summary, FunctionReturnAliasSummary::Unknown) {
+            let success_types = function
+                .return_contract
+                .ordinary()
+                .map(|shape| shape.success());
+            for &ty in success_types.into_iter().flatten() {
+                if classify_hir_type(ty, self.type_environment)?.has_in_place_mutation_surface() {
+                    return self.join_projected_store_aliases(
+                        function,
+                        &reachable_blocks,
+                        &param_index_by_local,
+                        summary,
+                    );
+                }
+            }
+        }
         Ok(summary)
+    }
+
+    /// A heap store can retain an argument in the result, including through an alias of a field.
+    /// Only join stores whose targets could overlap storage in a return.
+    fn join_projected_store_aliases(
+        &self,
+        function: &HirFunction,
+        reachable_blocks: &[BlockId],
+        param_index_by_local: &FxHashMap<LocalId, usize>,
+        mut summary: FunctionReturnAliasSummary,
+    ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
+        let mut stores = Vec::new();
+        for &block_id in reachable_blocks {
+            let block = self.block_by_id_or_error(block_id, function.id)?;
+            for statement in &block.statements {
+                let HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(place),
+                    value,
+                } = &statement.kind
+                else {
+                    continue;
+                };
+                if !classify_hir_type(
+                    self.module.expressions.expression(*value).ty,
+                    self.type_environment,
+                )?
+                .has_in_place_mutation_surface()
+                {
+                    continue;
+                }
+                stores.push((place.root, place.projections.len(), *value));
+            }
+        }
+        if stores.is_empty() {
+            return Ok(summary);
+        }
+
+        let mut storage = ReturnedStorage::default();
+        let expressions = &self.module.expressions;
+        for &block_id in reachable_blocks {
+            let block = self.block_by_id_or_error(block_id, function.id)?;
+            for statement in &block.statements {
+                match &statement.kind {
+                    HirStatementKind::Write { target, value } => {
+                        let (local, whole) = match target {
+                            HirWriteTarget::DefineLocal(local) => (*local, true),
+                            HirWriteTarget::AssignPlace(place) => {
+                                (place.root, place.projections.is_empty())
+                            }
+                        };
+                        let expression = expressions.expression(*value);
+                        let load = whole && matches!(expression.kind, HirExpressionKind::Load(_));
+                        if load && expression.value_kind == ValueKind::Place {
+                            storage.alias_writers.insert(local);
+                        }
+                        if whole && self.storage_local_is_heap(local)? {
+                            storage.record_writer(
+                                local,
+                                matches!(target, HirWriteTarget::DefineLocal(_))
+                                    && expression.kind.is_aggregate_construction(),
+                            );
+                        }
+                        storage.retain_expression(self, *value, Some(local), load)?;
+                    }
+                    HirStatementKind::Call {
+                        target,
+                        args,
+                        results,
+                    } => self.link_call_results(
+                        &mut storage,
+                        target,
+                        expressions.values(*args),
+                        results.iter().map(|result| result.local()),
+                    )?,
+                    HirStatementKind::MapOp {
+                        op: HirMapOp::Get | HirMapOp::Remove,
+                        receiver,
+                        result: Some(result),
+                        ..
+                    } => self.link_extracted_storage(&mut storage, *receiver, result.local())?,
+                    _ => {}
+                }
+            }
+            match &block.terminator {
+                HirTerminator::Return(values) => {
+                    for &value in expressions.values(*values) {
+                        storage.retain_expression(self, value, None, false)?;
+                    }
+                }
+                HirTerminator::Jump { args, .. } => {
+                    for arg in args {
+                        if self.storage_local_is_heap(arg.destination)? {
+                            storage.record_writer(arg.destination, false);
+                            storage.link(arg.destination, arg.source, true);
+                        }
+                    }
+                }
+                HirTerminator::Invoke {
+                    operation,
+                    success_results,
+                    ..
+                } => match operation {
+                    HirFallibleOperation::Call { target, args } => self.link_call_results(
+                        &mut storage,
+                        target,
+                        expressions.values(*args),
+                        success_results.iter().copied(),
+                    )?,
+                    HirFallibleOperation::MapOp {
+                        op: HirMapOp::Get | HirMapOp::Remove,
+                        receiver,
+                        ..
+                    } => {
+                        for &result in success_results {
+                            self.link_extracted_storage(&mut storage, *receiver, result)?;
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        stores.retain(|&(local, projections, _)| {
+            projections != 0 || storage.alias_writers.contains(&local)
+        });
+        let include_containing = stores.iter().any(|&(local, projections, _)| {
+            storage.may_write_through_descendant(local, projections)
+        });
+        let reachable = storage.reachable(include_containing);
+        for (local, projections, value) in stores {
+            if reachable.get(&local).is_some_and(|&owns_storage| {
+                owns_storage || storage.may_write_through_descendant(local, projections)
+            }) {
+                let stored = self.classify_return_expression(
+                    function,
+                    reachable_blocks,
+                    value,
+                    param_index_by_local,
+                )?;
+                summary = merge_return_alias(summary, stored);
+                if matches!(summary, FunctionReturnAliasSummary::Unknown) {
+                    return Ok(summary);
+                }
+            }
+        }
+        Ok(summary)
+    }
+
+    fn link_call_results(
+        &self,
+        storage: &mut ReturnedStorage,
+        target: &CallTarget,
+        args: &[HirValueId],
+        results: impl Iterator<Item = LocalId>,
+    ) -> Result<(), BorrowCheckError> {
+        let retained = self.call_retained_arguments(target);
+        for result in results {
+            if !self.storage_local_is_heap(result)? {
+                continue;
+            }
+            storage.record_writer(result, false);
+            for (index, &argument) in args.iter().enumerate() {
+                if retained.is_none_or(|indices| indices.contains(&index)) {
+                    storage.retain_expression(self, argument, Some(result), true)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn link_extracted_storage(
+        &self,
+        storage: &mut ReturnedStorage,
+        source: HirValueId,
+        result: LocalId,
+    ) -> Result<(), BorrowCheckError> {
+        if self.storage_local_is_heap(result)? {
+            storage.record_writer(result, false);
+            storage.retain_expression(self, source, Some(result), true)?;
+        }
+        Ok(())
+    }
+
+    fn storage_local_is_heap(&self, local: LocalId) -> Result<bool, BorrowCheckError> {
+        let Some(&ty) = self.local_types.get(&local) else {
+            return Err(self.diagnostics.internal_error(
+                "Borrow checker cannot classify returned storage without a HIR local type",
+            ));
+        };
+        Ok(classify_hir_type(ty, self.type_environment)?.has_in_place_mutation_surface())
+    }
+
+    /// Use the existing return contracts, not callee write effects.
+    fn call_retained_arguments(&self, target: &CallTarget) -> Option<&[usize]> {
+        let summary = match target {
+            CallTarget::Local(id) => self.public_call_summaries.get(id),
+            CallTarget::CrossModule(id) => self.module.imported_call_summaries.get(id),
+            CallTarget::ModulePrivate(id) => self.module.module_private_call_summaries.get(id),
+            CallTarget::Generated(id) => self.module.generated_call_summaries.get(id.as_ref()),
+            CallTarget::External(id) => {
+                let function = self.external_package_registry.get_function_by_id(*id)?;
+                return match function.hir_return_alias() {
+                    ExternalHirReturnAlias::Fresh => Some(&[]),
+                    ExternalHirReturnAlias::AliasArgs(indices) => Some(indices),
+                    ExternalHirReturnAlias::Unknown => None,
+                };
+            }
+        }?;
+        match &summary.return_alias {
+            FunctionReturnAliasSummary::Fresh => Some(&[]),
+            FunctionReturnAliasSummary::AliasParams(indices) => Some(indices),
+            FunctionReturnAliasSummary::Unknown => None,
+        }
     }
 
     fn classify_return_expression(
@@ -98,7 +439,8 @@ impl<'a> BorrowChecker<'a> {
         param_index_by_local: &FxHashMap<LocalId, usize>,
         visiting_locals: &mut FxHashSet<LocalId>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
-        match &self.module.expressions.expression(expression).kind {
+        let expression_data = self.module.expressions.expression(expression);
+        match &expression_data.kind {
             HirExpressionKind::Load(place) => {
                 let root_local = place.root;
 
@@ -114,8 +456,53 @@ impl<'a> BorrowChecker<'a> {
                     visiting_locals,
                 )
             }
-            // Copies and computed/constructed expressions produce independent results. Their
-            // input aliases do not become aliases of the result.
+            // Extracting a heap payload reads storage owned by the variant, rather than
+            // creating an independent value from it.
+            HirExpressionKind::VariantPayloadGet { source, .. }
+                if classify_hir_type(expression_data.ty, self.type_environment)?
+                    .has_in_place_mutation_surface() =>
+            {
+                self.classify_return_expression_with_visiting(
+                    function,
+                    reachable_blocks,
+                    *source,
+                    param_index_by_local,
+                    visiting_locals,
+                )
+            }
+            // A construction holds its stored heap values by reference, so the result aliases
+            // whatever those values alias. The coarse summary names only argument origins,
+            // not the storage path that retains them.
+            kind if kind.is_aggregate_construction() => {
+                let mut summary = FunctionReturnAliasSummary::Fresh;
+                for child in self.module.expressions.child_values(expression) {
+                    let child_expression = self.module.expressions.expression(child);
+                    let stores_reference = match &child_expression.kind {
+                        HirExpressionKind::Load(_)
+                        | HirExpressionKind::VariantPayloadGet { .. } => {
+                            classify_hir_type(child_expression.ty, self.type_environment)?
+                                .has_in_place_mutation_surface()
+                        }
+                        kind => kind.is_aggregate_construction(),
+                    };
+                    if !stores_reference {
+                        continue;
+                    }
+                    summary = merge_return_alias(
+                        summary,
+                        self.classify_return_expression_with_visiting(
+                            function,
+                            reachable_blocks,
+                            child,
+                            param_index_by_local,
+                            visiting_locals,
+                        )?,
+                    );
+                }
+                Ok(summary)
+            }
+            // Copies and computed expressions produce independent results. Their input aliases
+            // do not become aliases of the result.
             _ => Ok(FunctionReturnAliasSummary::Fresh),
         }
     }
@@ -145,13 +532,7 @@ impl<'a> BorrowChecker<'a> {
                     HirStatementKind::Write { target, value } => {
                         let target_local = match target {
                             HirWriteTarget::DefineLocal(target_local) => *target_local,
-                            HirWriteTarget::AssignPlace(place)
-                                if self
-                                    .module
-                                    .expressions
-                                    .projections(place.projections)
-                                    .is_empty() =>
-                            {
+                            HirWriteTarget::AssignPlace(place) if place.projections.is_empty() => {
                                 place.root
                             }
                             HirWriteTarget::AssignPlace(_) => continue,

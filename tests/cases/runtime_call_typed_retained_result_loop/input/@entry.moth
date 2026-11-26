@@ -1,0 +1,31 @@
+Link = |items {I32}|
+Holder = |link Link|
+
+wrap |items {I32}| -> Link:
+    return Link(items)
+;
+
+maybe_wrap |items {I32}, retain Bool| -> Link:
+    if retain:
+        return Link(items)
+    ;
+    return Link({2, 3})
+;
+
+walk |input Link, use_opaque Bool, retain Bool| -> I32:
+    holder = Holder(input)
+    cursor ~= wrap(holder.link.items)
+    i ~= 0
+    loop i < 20:
+        if use_opaque:
+            ~cursor = maybe_wrap(cursor.items, retain)
+        ;
+        if not use_opaque:
+            ~cursor = wrap(cursor.items)
+        ;
+        ~i += 1
+    ;
+    return cursor.items.length()
+;
+
+~[:[walk(Link({1}), false, true)] / [walk(Link({1}), true, true)] / [walk(Link({1}), true, false)]]

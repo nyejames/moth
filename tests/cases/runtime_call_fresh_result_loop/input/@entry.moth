@@ -1,0 +1,29 @@
+Link = |items {I32}|
+
+wrap |items {I32}| -> Link:
+    return Link(items)
+;
+
+probe || -> String:
+    previous ~= Link({0})
+    view ~= Link({0})
+    i ~= 0
+    lengths ~= ""
+    loop i < 2:
+        input ~= {1}
+        current ~= wrap(input)
+        if i is 0:
+            ~previous = Link(current.items)
+            ~view = Link(current.items)
+        else
+            before_first = view.items.length()
+            before_second = current.items.length()
+            ~current.items.push(4)
+            ~lengths = [:before=[before_first]/[before_second] after=[view.items.length()]/[current.items.length()]]
+        ;
+        ~i += 1
+    ;
+    return [:iterations=[i] [lengths]]
+;
+
+~[:[probe()]]

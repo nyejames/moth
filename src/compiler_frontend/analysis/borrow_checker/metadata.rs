@@ -31,6 +31,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[path = "return_alias.rs"]
 mod return_alias;
+pub(super) use return_alias::CallResultFacts;
 
 /// Per-block read liveness and direct-assignment facts for one function.
 ///
@@ -622,6 +623,7 @@ impl<'a> BorrowChecker<'a> {
         let mut block_successors = FxHashMap::default();
         let mut block_local_max_use_order = FxHashMap::default();
         let mut block_liveness = FxHashMap::default();
+        let mut entry_has_predecessor = false;
         let mut next_order_key = 0i32;
 
         for block_id in reachable_blocks {
@@ -750,13 +752,12 @@ impl<'a> BorrowChecker<'a> {
 
             block_liveness.insert(*block_id, liveness);
             block_local_max_use_order.insert(*block_id, max_use_order);
-            block_successors.insert(
-                *block_id,
-                terminator_targets(&block.terminator)
-                    .into_iter()
-                    .filter(|successor| reachable_block_set.contains(successor))
-                    .collect(),
-            );
+            let successors = terminator_targets(&block.terminator)
+                .into_iter()
+                .filter(|successor| reachable_block_set.contains(successor))
+                .collect::<Vec<_>>();
+            entry_has_predecessor |= successors.contains(&function.entry);
+            block_successors.insert(*block_id, successors);
         }
 
         // Share lexical visibility with forward state kills so a later loop-local declaration
@@ -780,7 +781,7 @@ impl<'a> BorrowChecker<'a> {
             BlockPropagation::AnyAssignment,
         );
 
-        Ok(FunctionLayout::new(FunctionLayoutInputs {
+        let mut layout = FunctionLayout::new(FunctionLayoutInputs {
             local_ids,
             local_mutable,
             local_has_in_place_mutation_surface,
@@ -794,7 +795,9 @@ impl<'a> BorrowChecker<'a> {
             may_use_from_block,
             must_use_from_block,
             may_assign_from_block,
-        }))
+        });
+        layout.acyclic_entry_block = (!entry_has_predecessor).then_some(function.entry);
+        Ok(layout)
     }
 
     fn compiler_alias_source_roots(

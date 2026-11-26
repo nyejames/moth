@@ -4519,7 +4519,7 @@ role = "backend"
 id = "hashmap_alias_struct_field_param_return"
 path = "hashmap_alias_struct_field_param_return"
 tags = ["integration", "js-backend", "hashmaps"]
-contract = "language.maps.alias_struct_field_param_return_acceptance"
+contract = "language.maps.alias_struct_field_param_return_blocks_mutation"
 role = "primary"
 
 [[case]]
@@ -21342,6 +21342,13 @@ contract = "language.functions.const_alias_remove_mutation_matches_runtime"
 role = "primary"
 
 [[case]]
+id = "runtime_remove_retained_owner_rejected"
+path = "runtime_remove_retained_owner_rejected"
+tags = ["integration", "borrow", "collections", "diagnostics"]
+contract = "language.collections.remove_retains_shared_children_in_other_holders"
+role = "primary"
+
+[[case]]
 id = "const_function_repeated_handler_success"
 path = "const_function_repeated_handler_success"
 tags = ["integration", "functions", "const", "runtime"]
@@ -23273,3 +23280,52 @@ path = "runtime_call_shared_sibling_place_operand_rejected"
 tags = ["integration", "functions", "borrows", "diagnostics"]
 contract = "language.borrows.root_granular_projection_conflicts"
 role = "boundary"
+
+[[case]]
+id = "runtime_call_typed_retained_result_loop"
+path = "runtime_call_typed_retained_result_loop"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.borrows.call_results_retain_typed_field_provenance"
+role = "primary"
+
+[[case]]
+id = "runtime_call_typed_retained_result_permission_rejected"
+path = "runtime_call_typed_retained_result_permission_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.borrows.call_results_retain_typed_field_provenance"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_fresh_result_loop"
+path = "runtime_call_fresh_result_loop"
+tags = ["integration", "functions", "borrows", "control-flow", "runtime"]
+contract = "language.borrows.call_results_retain_typed_field_provenance"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_fresh_result_loop_rejected"
+path = "runtime_call_fresh_result_loop_rejected"
+tags = ["integration", "functions", "borrows", "control-flow", "diagnostics"]
+contract = "language.borrows.call_results_retain_typed_field_provenance"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_opaque_option_retained_result_rejected"
+path = "runtime_call_opaque_option_retained_result_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.borrows.opaque_call_results_retain_possible_option_payloads"
+role = "primary"
+
+[[case]]
+id = "runtime_call_opaque_option_fresh_result"
+path = "runtime_call_opaque_option_fresh_result"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.borrows.opaque_call_results_retain_possible_option_payloads"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_opaque_projected_store_result_rejected"
+path = "runtime_call_opaque_projected_store_result_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.borrows.opaque_call_results_retain_projected_stores"
+role = "primary"

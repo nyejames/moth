@@ -12,18 +12,23 @@ mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
+use crate::compiler_frontend::analysis::borrow_checker::metadata::CallResultFacts;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState,
+    AllocId, BorrowState, FieldKey, FunctionLayout, LocalState, StoredValue,
 };
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     StatementBorrowFact, TerminatorBorrowFact, ValueBorrowFact,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::module::HirChoice;
+use crate::compiler_frontend::hir::structs::HirStruct;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
@@ -50,8 +55,41 @@ pub(super) struct BorrowTransferContext<'a> {
     pub module_private_call_summaries:
         &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
     pub generated_call_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    pub typed_local_results: &'a FxHashMap<FunctionId, Vec<Option<CallResultFacts>>>,
+    pub local_types: &'a FxHashMap<LocalId, TypeId>,
+    pub structs: &'a [HirStruct],
+    pub choices: &'a [HirChoice],
     pub expressions: &'a HirExpressionStore,
+    pub type_environment: &'a TypeEnvironment,
     pub diagnostics: BorrowDiagnostics<'a>,
+}
+
+/// One allocation-layer effect a fallible operation applies only on its success edge.
+///
+/// WHY: a failed insert stores nothing and a failed removal takes nothing, so the effects wait
+///      for the edge like the operation's result locals do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum InvokeLayerOp {
+    Store {
+        holders: Vec<AllocId>,
+        key: FieldKey,
+        values: Vec<StoredValue>,
+    },
+    Contribute {
+        holder: AllocId,
+        key: FieldKey,
+        value: StoredValue,
+    },
+    Remove {
+        holders: Vec<AllocId>,
+        map: bool,
+        result: Option<LocalId>,
+    },
+    Bind {
+        local: LocalId,
+        ids: Vec<AllocId>,
+        readonly: bool,
+    },
 }
 
 /// Accumulated statistics and emitted facts for one block transfer.
@@ -73,6 +111,7 @@ pub(super) struct BlockTransferStats {
     pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
     // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
     pub invoke_results: Vec<(LocalId, LocalState)>,
+    pub invoke_layer_ops: Vec<InvokeLayerOp>,
 }
 
 /// Executes one forward transfer step for a single basic block.

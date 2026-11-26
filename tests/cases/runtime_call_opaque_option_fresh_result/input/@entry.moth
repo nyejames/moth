@@ -1,0 +1,26 @@
+Link = |items {I32}|
+
+fresh_link |seed I32| -> Link:
+    return Link({seed})
+;
+
+fresh_wrap_option |maybe {I32}?, retain Bool| -> Link:
+    if retain:
+        if maybe is |present|:
+            -- A fresh allocation behind a call keeps this exit outside the exact plan.
+            return fresh_link(present.length())
+        ;
+    ;
+    return Link({2, 3})
+;
+
+probe |retain Bool| -> I32:
+    child ~= {1}
+    observer ~= Link(child)
+    source ~{I32}? = child
+    result ~= fresh_wrap_option(source, retain)
+    ~result.items.push(2)
+    return result.items.length() * 10 + observer.items.length()
+;
+
+~[:[probe(true)] / [probe(false)]]

@@ -12,6 +12,13 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
+mod allocation_layer;
+
+use allocation_layer::AllocationLayer;
+pub(super) use allocation_layer::{
+    AllocId, AllocationRetirement, FieldKey, MutationTarget, ResolvedPlace, StoredValue,
+};
+
 // WHAT: Stable intra-function position key used by move/borrow decisions.
 // WHY: Source line numbers are not precise enough when several accesses share a line.
 pub(super) type OrderKey = i32;
@@ -39,6 +46,8 @@ pub(super) struct FunctionLayout {
     // WHY: Enables "future use in this block" checks without rescanning statements.
     pub block_local_max_use_order: FxHashMap<BlockId, Vec<OrderKey>>,
     pub block_successors: FxHashMap<BlockId, Vec<BlockId>>,
+    /// The entry block if no reachable edge can feed it after parameter initialization.
+    pub acyclic_entry_block: Option<BlockId>,
     // Shared by assignment reachability and forward state kills at lexical region exits.
     pub visible_locals_by_block: FxHashMap<BlockId, RootSet>,
     pub may_use_from_block: FxHashMap<BlockId, RootSet>,
@@ -154,6 +163,7 @@ impl FunctionLayout {
             terminator_order_by_block: inputs.terminator_order_by_block,
             block_local_max_use_order: inputs.block_local_max_use_order,
             block_successors: inputs.block_successors,
+            acyclic_entry_block: None,
             visible_locals_by_block: inputs.visible_locals_by_block,
             may_use_from_block: inputs.may_use_from_block,
             must_use_from_block: inputs.must_use_from_block,
@@ -272,6 +282,8 @@ impl FunctionLayout {
 pub(super) struct BorrowState {
     // One lattice state per function-local index.
     locals: Vec<LocalState>,
+    // Allocation identities for values stored by reference inside other values.
+    layer: AllocationLayer,
 }
 
 impl BorrowState {
@@ -280,7 +292,10 @@ impl BorrowState {
             .map(|_| LocalState::uninit(local_count))
             .collect::<Vec<_>>();
 
-        Self { locals }
+        Self {
+            locals,
+            layer: AllocationLayer::new(),
+        }
     }
 
     pub(super) fn initialize_parameter(&mut self, local_index: usize) {
@@ -399,7 +414,8 @@ impl BorrowState {
     /// WHY: the dataflow engine joins at every CFG edge. Joining in place avoids allocating a
     /// whole O(locals²) state per edge only to compare it with the existing one.
     pub(super) fn join_in_place(&mut self, other: &Self) -> bool {
-        let mut changed = false;
+        // The layer reads both sides' roots, so it joins before the locals do.
+        let mut changed = self.join_layer(other);
         for (left, right) in self.locals.iter_mut().zip(&other.locals) {
             let mode = left.mode.union(right.mode);
             changed |= mode != left.mode;
@@ -436,8 +452,11 @@ impl BorrowState {
         if visible_mask.covers_all(self.locals.len()) {
             return;
         }
+        self.narrow_layer(visible_mask);
 
-        for (local_index, local) in self.locals.iter_mut().enumerate() {
+        for local_index in 0..self.locals.len() {
+            let has_layer_binding = self.has_layer_binding(local_index);
+            let local = &mut self.locals[local_index];
             if !visible_mask.contains(local_index) {
                 local.reset(LocalMode::UNINIT);
                 continue;
@@ -455,7 +474,7 @@ impl BorrowState {
             local.write_target_roots.intersect_with(visible_mask);
             local.derived_from_roots.intersect_with(visible_mask);
 
-            if !local.has_alias_roots() {
+            if !local.has_alias_roots() && !has_layer_binding {
                 let mode = if local.mode.contains(LocalMode::SLOT) {
                     LocalMode::SLOT
                 } else {
@@ -721,6 +740,19 @@ impl RootSet {
         let word_index = bit_index / 64;
         let bit_offset = bit_index % 64;
         self.words_mut()[word_index] |= 1u64 << bit_offset;
+    }
+
+    pub(super) fn remove(&mut self, bit_index: usize) {
+        if !self.contains(bit_index) {
+            return;
+        }
+        let word_index = bit_index / 64;
+        let bit_offset = bit_index % 64;
+        self.words_mut()[word_index] &= !(1u64 << bit_offset);
+        // The empty set owns no words.
+        if self.word_slice().iter().all(|word| *word == 0) {
+            self.words = None;
+        }
     }
 
     pub(super) fn contains(&self, bit_index: usize) -> bool {

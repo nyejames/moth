@@ -1,7 +1,9 @@
 //! Focused tests for explicit HIR jump destination transfer.
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
-use crate::compiler_frontend::analysis::borrow_checker::state::{BorrowState, LocalState, RootSet};
+use crate::compiler_frontend::analysis::borrow_checker::state::{
+    BorrowState, FieldKey, LocalState, RootSet, StoredValue,
+};
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
@@ -163,7 +165,7 @@ return source_a
 
     let jump = module.blocks[entry.0 as usize].terminator.clone();
     checker
-        .apply_jump_argument_transfer(function_id, &layout, &jump, entry, &mut state)
+        .apply_jump_argument_transfer(function_id, &layout, &jump, entry, 0, &mut state)
         .expect("explicit local destinations should transfer");
 
     let destination_a_state = state.local_state(source_a_index);
@@ -185,4 +187,68 @@ return source_a
     assert!(!slot_result.mode.contains(LocalMode::ALIAS));
     assert!(slot_result.value_roots.contains(slot_source_index));
     assert!(!slot_result.value_roots.contains(root_a_index));
+
+    // Exercise the same parallel jump when both destinations own live, observed graphs.
+    // Each source transports a projection whose root is retired by the opposite argument.
+    let mut state = BorrowState::new_uninitialized(layout.local_count());
+    state.initialize_parameter(source_a_index);
+    state.initialize_parameter(source_b_index);
+    for (observer, source) in [
+        (root_a_index, source_a_index),
+        (root_b_index, source_b_index),
+    ] {
+        let mut roots = RootSet::empty(layout.local_count());
+        roots.insert(source);
+        state.update_local_state(
+            observer,
+            LocalState::slot_with_value_roots(roots, RootSet::empty(layout.local_count())),
+        );
+    }
+    // The third argument carries the same old root as observer A, without an override.
+    state.update_local_state(slot_source_index, state.local_state(root_a_index).clone());
+    let old_a = state.local_alloc_ids(source_a_index).0[0];
+    let old_b = state.local_alloc_ids(source_b_index).0[0];
+    let field = FieldKey::Field(0);
+    let child_a = state.alloc_child(old_a, field);
+    let child_b = state.alloc_child(old_b, field);
+    let marker_a = state.site_id(0, entry, &layout.block_successors);
+    let marker_b = state.site_id(1, entry, &layout.block_successors);
+    let payload = FieldKey::Field(1);
+    for (child, marker) in [(child_a, marker_a), (child_b, marker_b)] {
+        state.add_alloc_edge(
+            child,
+            payload,
+            StoredValue {
+                id: marker,
+                writable: true,
+            },
+        );
+    }
+    state.bind_alloc_ids(source_a_index, &[child_a], true);
+    state.bind_alloc_ids(source_b_index, &[child_b], false);
+    state.bind_detached_holders(source_a_index, [old_b]);
+    state.bind_detached_holders(source_b_index, [old_a]);
+
+    checker
+        .apply_jump_argument_transfer(function_id, &layout, &jump, entry, 1, &mut state)
+        .expect("the parallel jump should transport pre-edge allocations");
+
+    let (observed_a, observed_b) = (
+        state.local_alloc_ids(root_a_index).0,
+        state.local_alloc_ids(root_b_index).0,
+    );
+    assert_ne!(observed_a, [old_a]);
+    assert_ne!(observed_b, [old_b]);
+    assert_eq!(state.local_alloc_ids(slot_destination_index).0, observed_a);
+    for (destination, observer, marker, readonly, detached) in [
+        (source_b_index, root_a_index, marker_a, true, &observed_b),
+        (source_a_index, root_b_index, marker_b, false, &observed_a),
+    ] {
+        let transported = state.resolve_alloc_path(destination, &layout.local_mutable, [payload]);
+        let observed = state.resolve_alloc_path(observer, &layout.local_mutable, [field, payload]);
+        assert_eq!(transported.ids, [marker]);
+        assert_eq!(transported.ids, observed.ids);
+        assert_eq!(transported.readonly, readonly);
+        assert!(state.detached_from(destination, detached));
+    }
 }

@@ -16,8 +16,8 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
 | Last established result | Root-granular holder edges can't tell the field replacement witness from its negative twin. They keep a removed element's edge, an edge stored by a failed `set` and an edge replaced through a mutable alias. Facts are recorded at the event, so a binding may retire only after nothing reachable names its identity. Today's call summary is one parameter-index union per function, so no checker can separate W7a from W7b. Boracle's reference and oracle both reject W3 by modelling a stored reference as a place loan. C4 loses sharing twice, at the per-slot freeze and at per-occurrence lowering. The candidate fails the performance guard on 5 of the 18 workloads with identical work counters, so dense per-local edge sets are ruled out. The chosen design adds a sparse allocation layer to the existing checker. See the conclusions of [Session 1](#session-1-conclusions) and Sections [3](#section-3-conclusions), [4](#section-4-conclusions), [5](#section-5-conclusions) and [6](#section-6-conclusions). |
-| Next task | Complete and validate the sparse Slice 1 draft in parallel with the approved C4 folded-interface and const materialisation changes. |
-| Next unanswered question | Does the final sparse candidate meet every Slice 1 witness, corpus and performance gate? |
+| Next task | Keep Slice 1 uncommitted at the retirement-elision candidate's failed guard. Keep Slice 2 and shared runtime lowering off. |
+| Next unanswered question | Profile eligibility at ordinary heap `DefineLocal` writes, where the remaining aggregate retirement occurs, and isolate the sibling-loop RSS variance independently? |
 
 **Slice 1 pause.** The sparse draft accepts W1c and renders `20`. Its
 dynamic-index control renders `20 / 21`, while W1 and W1b still reject
@@ -38,6 +38,157 @@ all 18 guard workloads with the same recorded counters as `7cc05c61b`.
 extra int64 case, outside the guard, exceeded the check-time threshold.
 The latest draft hasn't run the guard, Boracle or integrated validation.
 Don't treat the prototype measurements as a Slice 1 checkpoint.
+
+**Resumed sparse candidate (base `ca4184d043`).** The 210 borrow checker
+tests include duplicate-child removal from a collection and from a map,
+and a copy that preserves a shared child reached by a lazy field. The
+Slice 1 witness row passed on the draft. The original corpus produced no
+new accepts. The hashmap fixture changed to the approved rejection at
+`21:2`. Splitting the removal fixture retained its positive and moved
+the approved rejection to its own case at `8:15`.
+
+The capped candidate passed all 18 release guard workloads and the extra
+int64 case. No refusals. Counters matched the recorded baseline. The
+candidate SHA-256 is `563f21ea784aadd53c371db483c682ac00e7275ad1664b777103fda4e5cc5087`.
+`tmp/c4/resume.DaDFcBSG/slice1_guard_measured.json` holds the comparison.
+These measurements are not a checkpoint for a cap-free checker.
+
+`just boracle` passed the ordinary borrow-problem and last-use suites,
+the Boracle library suite, and the CLI suites. The previously recorded
+witness disagreements on W3 and L4 are separate from this recipe.
+
+`just validate` passed formatting, Clippy and the workspace unit tests.
+The integration gate passed 3,895 of 3,898 backend cases. The two
+C4 runtime rejects (`runtime_call_fresh_box_forward_rejected` and
+`runtime_call_identity_fields_rejected`) unexpectedly accepted.
+The Slice 2 positive `runtime_call_disjoint_result_fields` rejected at
+`10:12` with `MOTH-BORROW-0007`. Their expectations are unchanged.
+
+**Convergence gate.** `tmp/c4/resume.DaDFcBSG/opaque-cycle` uses the
+ordinary function `wrap |items {I32}| -> Link`, which returns a new
+`Link(items)`. A loop repeatedly assigns `~cursor = wrap(cursor.items)`.
+The capped draft renders `1`. An isolated build with the numerical
+projection-depth cap removed did not finish checking in 12 seconds.
+The documented Stage 5 comparator `7cc05c61b` accepts the loop
+without errors or warnings.
+The alternative witness using a recursive struct and choice is
+rejected earlier with `MOTH-RULE-0033`, so the recurrence does not
+require recursive source data.
+
+Opaque `AliasParams` binds the `Link` result to the collection argument's
+allocation identity. The next iteration projects `items` from that
+collection as if it were a `Link`, creating a longer path to nonexistent
+storage. Removing the identity instead would lose real retained-child
+provenance. A type-derived depth threshold does not repair that fact.
+
+The owner moved unconditional result-root and retained-field facts into
+Slice 1. For `Link(items)`, the callee's construction proves the `Link`
+root is fresh and `result.items` retains the actual `items` allocation
+with its existing access permission. Types constrain legal projections;
+they don't prove freshness or sharing. Use stable abstract allocation
+sites across worklist visits. If exact facts are unavailable, keep
+possible sharing in a finite typed graph. Conditional sharing across
+exits, per-lane stores and the remaining call summaries stay in Slice 2.
+
+**Cap-free candidate (base `f4d191d662`).** The reduced loop checks
+without the cap. The registered positive also exercises a callee with
+disagreeing exits and renders `1 / 1 / 2`, and the permission negative
+rejects at `10:13` with `MOTH-BORROW-0007` (`immutable_place`). The
+Slice 1 witness row and affected backend manifests passed. The 3,323
+original inputs had no newly accepted program and only the approved
+hashmap rejection at `21:2`.
+
+The release guard passes **16 of 18** inputs. The binary was built with
+`detailed_timers,benchmark_counters` (SHA-256
+`54e2dd2a8165949b23adec89645b0d83d182d816743428fdd880f7ba2b4704d9`).
+`tmp/c4/resume.DaDFcBSG/typed_b1_guard_trial.json` records matched
+archive, baseline and candidate samples. No refusals; the counters match
+`7cc05c61b`, and the separate int64 input passed.
+
+| Workload and metric | Archive | Guard | Candidate |
+| --- | ---: | ---: | ---: |
+| `aggregate-forwarding-128` check | 16.195 ms | 20.243 ms | 24.393 ms |
+| `aggregate-forwarding-128` borrow | 8.135 ms | 13.203 ms | 15.960 ms |
+| `narrow-chains-128` peak RSS | 59.734 MiB | 78.668 MiB | 81.156 MiB |
+
+The forwarding workload repeatedly calls generated `identity` on
+collections and maps. Its unproven result goes through the new opaque
+call graph. That graph and the per-result retirement scan are leads to
+profile, not established explanations for the overruns. The audit also
+found an independent error: an exact option payload result can name an
+argument that the coarse `Fresh` summary caused transfer not to capture.
+Resume with that error tracked; do not accept the slice on the earlier
+capped guard or relax the existing thresholds.
+
+The sparse draft remains uncommitted. `f4d191d662` checkpoints the
+independent C4 import and const materialisation path only. Shared
+runtime lowering is off.
+
+**Repaired cap-free candidate (base `f4d191d662`).** The release compiler
+`0c33f7115017f206a7b7b51eed5adf417591ce5541da1e0161566f23d99d2513`
+keeps option payload provenance and argument permissions, preserves
+possible stored children when an exact result is unavailable, and
+distinguishes weak destination updates from the writer's replacement.
+`tmp/bc06-review/repair-status.md` records the candidate sources,
+review outcomes, and gate receipts. The 222 owning Rust tests, 29
+source witnesses, nine affected backend fixtures and `just boracle`
+passed. The original 3,323 inputs have only the approved hashmap
+rejection and no new acceptances. `just validate` passed 3,900 of 3,903
+integration cases, with the same three later-owned failures above.
+
+The repaired full guard passes **16 of 18** inputs, with check-time
+misses on `origin-fanout-128` (12.632 ms / 9.950 ms) and
+`aggregate-forwarding-32` (21.551 ms / 19.794 ms). The separate int64
+case misses check time (12.934 ms / 12.166 ms). A focused replay did
+not reproduce the two formal misses, but did reproduce the previous
+`aggregate-forwarding-128` miss. The paused profile attributed
+5.96 ms to allocation retirement, including 3.47 ms in the observer
+scan, versus 0.24 ms in opaque result helpers. The narrower scan
+reduced paired borrow time from 46.492 ms to 43.780 ms; the paired
+limit was 37.223 ms. `narrow-chains-128` passed the repaired RSS gate.
+The old RSS miss was not explained by measured live allocations:
+the dominant dense state and HIR allocations were unchanged.
+
+Do not checkpoint B1 against the capped result or the focused replay.
+Retirement elision needs proof that no old root, sparse descendant or
+captured value is observable, including at repeated definitions. Keep
+the cap-free design, existing thresholds and later fixture expectations.
+
+**Retirement-elision trial (base `f4d191d662`).** The owner approved
+elision at heap call definitions only when entry-state facts prove
+observable equivalence. The release compiler `c9cb1ba7c051` captures
+the incoming result once and keeps normal retirement on all
+inconclusive paths, including loop revisits. Invoke keeps its
+existing edge transfer. The paired loop control rejects the write
+to the first retained child at `21:23` and renders
+`iterations=2 before=1/1 after=1/2` for the independent second child.
+
+The 222 owning Rust tests, 29 B1 witnesses and 11 affected backend
+fixtures passed. The original 3,323 inputs retain the same lone
+approved hashmap rejection and no new acceptances. The unchanged
+release guard passes **16 of 18**, with identical Stage 5 counters.
+`aggregate-forwarding-128` misses check (23.110 / 20.807 ms) and
+borrow (14.007 / 13.259 ms). `sibling-loops-64` misses peak RSS
+(102.094 / 99.664 MiB). The extra int64 case misses check time
+(13.870 / 12.986 ms) outside the guard.
+
+`just boracle` passed. With the default timing environment,
+`just validate` passed formatting, Clippy, audits and workspace
+tests and reached 3,902 of 3,905 integration cases. The three
+failures remain `runtime_call_fresh_box_forward_rejected`,
+`runtime_call_identity_fields_rejected` and
+`runtime_call_disjoint_result_fields`, all owned by later slices.
+The standalone docs check passed.
+
+The exact-binary replay reproduces the aggregate miss. Its
+remaining sampled retirement (3.19 ms/run) comes from assignment
+transfer, not call-result transfer. The replay does not reproduce
+the sibling-loop RSS miss. That workload has the same live malloc
+peak before and after elision, and the dominant dense state clones
+use the same 50,380,800 B as the archive. Do not change storage or
+relax the guard on this evidence. See
+`tmp/bc06-review/retirement-status.md` for the fingerprint, all
+receipts and the attributed profiles. No B1 checkpoint.
 
 ## 1. Evidence inventory
 
