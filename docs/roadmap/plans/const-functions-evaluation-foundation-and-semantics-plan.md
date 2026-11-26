@@ -11,9 +11,9 @@
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
-**Current slice:** C4 store work. The owner approved the [BC-06 redesign](./production-borrow-checker-bc06-redesign.md#slice-0-owner-decisions) and its Slice 0 decisions. C4's freeze transaction, rollback and import witnesses proceed in parallel with BC-06 slice 1. Shared runtime lowering and Phase 5 stay paused until the ordinary checker passes its controls.
+**Current slice:** C4's store transaction landed in `4f976cca92`. The [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point) still gates shared runtime lowering and Phase 5.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Freeze the ordered result slots in one transaction with shared definitions and rollback, prove that pre-existing store rows survive and no partial result becomes visible, check how tree walkers expand a graph that repeats one child, and test imported sharing as Slice 0 requires. The investigation's Section 5 records what C4 publication must consume, and Section 7 orders the C4 slices.
+**Next action:** Finish the ordinary borrow checker's required controls before enabling shared runtime lowering. The [C4 checkpoint](#c4-integrate-required-evaluation-and-close-publication) records the store and import results.
 
 ## Global constraints
 
@@ -819,6 +819,37 @@ Before C4 can close, validate decoded folded result slots with the existing
 canonical result contract. Review retained promotion capacity, scratch table
 growth and result-slot charges that outlive their vectors. Keep these in the
 const value, budget and receiving owners rather than adding a second budget.
+
+**Store checkpoint (`4f976cca92`).** One transaction freezes the ordered
+result slots. Repeated references retain one allocation definition with
+separate occurrence metadata. Equal data from distinct allocations stays
+distinct. A later slot failure leaves existing store rows intact and
+publishes no partial group. The warning-clean checks passed 352 const
+tests, 20 store tests and all eight publication fixtures in the subset.
+
+Store folding, HIR lowering, public projection and template visitors
+expand repeated occurrences. The freeze transaction counts those
+occurrences against the existing retained-value limit before publishing
+the group. This bounds expansion per frozen group, not across multiple
+materialisations or independent tree walkers. A depth-16 graph with one
+repeated child per level took 59 ms to check unused on the baseline. Its
+use-site check ran for over a minute before cancellation. The new
+transaction rejected the depth-20 use-site witness with `MOTH-RULE-0053`
+in 20 ms.
+
+The import witnesses used a pair with one shared child and a pair with
+two equal, distinct children:
+
+| Consumer | Local and imported results with current lowering |
+| --- | --- |
+| Whole exported folded value | Local rendered `1`. The imported nominal value failed with `MOTH-RULE-0068`. |
+| Separate references to exported fields | Both rendered `1`. Each field reference materialises separately. |
+| Imported const function evaluated in the consumer | Both rendered `1`. The consumer runs the callable body before lowering its result. |
+
+No supported consumer distinguished local from imported sharing. The
+public folded-value tree can't represent shared-child identity. Before
+lifting `MOTH-RULE-0068` for whole imported nominal values, the interface
+must preserve observable sharing in that form.
 
 On the linked prototype, 500 focused Rust tests, 177 borrow-tagged checks
 and 163 const-tagged checks passed. Formatting and Clippy passed. The real
