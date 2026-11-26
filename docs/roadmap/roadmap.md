@@ -34,6 +34,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Moth syntax migration](./plans/moth-new-syntax-implementation-plan.md) - Queued after the required profile-independent const publication and access contracts. Coordinate bracket construction, blocks, choices and MON in one source cutover.
 
+- [Constrained closures](./plans/constrained-closures.md) - Queued after the syntax migration. Replace Wire and Route with scoped callbacks and owner-retained handlers. Exposing either form requires validated call effects and borrow evidence. Retention also requires verified lifetime and cleanup across module boundaries.
+
 - [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after resource-only roots: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
@@ -197,7 +199,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
 - direct normal-sibling dependencies if real project evidence justifies them
-- later Wiring observation, route application and UI/runtime design beyond the bounded foundation
+- UI event delivery, subscription teardown and redraw scheduling beyond the constrained callback surface
 - additional builder compositions and capability surfaces within the official native-Wasm and browser JavaScript/Wasm execution families
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
@@ -206,13 +208,9 @@ performs semantic symbol resolution or syntax diagnostics.
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 
-## Wiring follow-ups
+## UI event delivery
 
-Wiring replaces Reactivity V1. The compiler implements the bounded foundation: Wire and Route
-parameter contracts, Wire identity forwarding and contextual constructor routes. Later
-observation, route application and UI runtime work require their own accepted contracts. The
-former reactivity follow-up list does not authorise restoring `$bind`, reactive binding modes or
-subscription expansion.
+The compiler currently implements Wire and Route parameter contracts. The queued closure replacement covers explicit reads and synchronous callback invocation. Browser event delivery, cancellation and redraw scheduling belong to the consuming runtime or library. A closure that returns a message supplies an ordinary value for that consumer.
 
 ## Hash map follow-ups
 
