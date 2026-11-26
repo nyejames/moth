@@ -13,7 +13,7 @@
 **Status:** Foundation Phases A-C, Phases 0-4 and const live-execution checkpoints C1-C3 are complete. C4 publication and C5 integration remain open.
 **Current slice:** C4's store transaction landed in `4f976cca92`. The [ordinary borrow checker](./production-borrow-checker-bc06-redesign.md#resume-point) still gates shared runtime lowering and Phase 5.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Owner decision on preserving shared allocations in exported folded values. Keep shared runtime lowering off. The [C4 checkpoint](#c4-integrate-required-evaluation-and-close-publication) records the supported import that exposes the loss.
+**Next action:** Preserve graph-local allocation references in the public folded-value interface and in const materialisation. Resume BC-06 Slice 1 in parallel. Keep shared runtime lowering off until Slice 1 and Slice 2 pass on their implementing revisions.
 
 ## Global constraints
 
@@ -864,10 +864,15 @@ interface. Public projection expands the provider's graph to a tree and
 import projection builds a new row for each occurrence. The consumer can't
 recover sharing from equal contents without merging distinct allocations.
 
-Keep the Slice 0 import gate closed. The proposed correction carries
-definition references within each folded public graph and remaps them on
-import. It doesn't expose live interpreter identities or merge separate
-materialisations. The experiment isn't part of the branch.
+**Owner decision (import gate resolved).** The supported witness runs inside
+a const consumer, so the difference is independent of runtime lowering. The
+public folded value may refer to allocation definitions within its own graph.
+The consumer remaps those references into its store. One child referenced
+twice remains distinct from two equal children. Each independent
+materialisation creates fresh allocations. This internal change doesn't
+enable unsupported whole nominal imports. Shared runtime lowering stays
+behind the BC-06 Slice 1 and Slice 2 controls. The experiment isn't part of
+the branch.
 
 The store review also found two metering gaps. The expansion preflight keys
 its memo by occurrence rather than definition and doesn't charge traversal
