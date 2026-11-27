@@ -9,6 +9,9 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
 use crate::compiler_frontend::ast::{ScopeContext, ScopeDeclarationRef};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ParameterContractKind;
@@ -26,6 +29,51 @@ pub(crate) const ERROR_TYPE_NAME: &str = "Error";
 
 pub(crate) const ERROR_FIELD_MESSAGE: &str = "message";
 pub(crate) const ERROR_FIELD_CODE: &str = "code";
+
+struct ErrorField {
+    name: &'static str,
+    ty: ErrorFieldType,
+}
+
+enum ErrorFieldType {
+    String,
+    Unsigned { scalar: FixedScalar, default: u32 },
+}
+
+impl ErrorFieldType {
+    fn type_id(&self) -> TypeId {
+        match *self {
+            Self::String => builtin_type_ids::STRING,
+            Self::Unsigned { scalar, .. } => builtin_type_ids::fixed_scalar(scalar),
+        }
+    }
+
+    fn canonical_type(&self) -> CanonicalTypeIdentity {
+        CanonicalTypeIdentity::Builtin(match *self {
+            Self::String => CanonicalBuiltinType::String,
+            Self::Unsigned { scalar, .. } => CanonicalBuiltinType::FixedScalar(scalar),
+        })
+    }
+}
+
+/// Declaration order also defines the ordinals of shared call-summary field selectors.
+static ERROR_FIELDS: [ErrorField; 2] = [
+    ErrorField {
+        name: ERROR_FIELD_MESSAGE,
+        ty: ErrorFieldType::String,
+    },
+    ErrorField {
+        name: ERROR_FIELD_CODE,
+        ty: ErrorFieldType::Unsigned {
+            scalar: FixedScalar::U32,
+            default: 0,
+        },
+    },
+];
+
+pub(crate) fn builtin_error_field_type(ordinal: u32) -> Option<CanonicalTypeIdentity> {
+    Some(ERROR_FIELDS.get(ordinal as usize)?.ty.canonical_type())
+}
 
 /// Builtin type lookup result carrying its canonical semantic identity.
 ///
@@ -78,20 +126,23 @@ pub(crate) fn register_builtin_error_types(
     let mut visible_symbol_paths = FxHashSet::default();
     visible_symbol_paths.insert(error_path);
 
-    let message_path = path_fork
-        .try_intern_child(error_path, string_table.intern(ERROR_FIELD_MESSAGE))
-        .expect("builtin Error.message path must fit the path table");
-    let code_path = path_fork
-        .try_intern_child(error_path, string_table.intern(ERROR_FIELD_CODE))
-        .expect("builtin Error.code path must fit the path table");
-
     let mut folded_defaults_by_field_path = FxHashMap::default();
-    folded_defaults_by_field_path.insert(code_path, u32_field_default(0));
-
-    let error_fields = vec![
-        required_field(message_path, builtin_type_ids::STRING, None),
-        defaulted_u32_field(code_path, None),
-    ];
+    let mut error_fields = Vec::with_capacity(ERROR_FIELDS.len());
+    for field in &ERROR_FIELDS {
+        let path = path_fork
+            .try_intern_child(error_path, string_table.intern(field.name))
+            .expect("builtin Error field path must fit the path table");
+        error_fields.push(required_field(path, field.ty.type_id(), None));
+        if let ErrorFieldType::Unsigned { scalar, default } = field.ty {
+            folded_defaults_by_field_path.insert(
+                path,
+                PublicFoldedValue::FixedScalar(
+                    FixedScalarValue::unsigned(scalar, u64::from(default))
+                        .expect("builtin Error field default must fit its fixed-scalar domain"),
+                ),
+            );
+        }
+    }
 
     let declarations = vec![type_declaration(error_path, builtin_type_ids::NONE, None)];
 
@@ -199,28 +250,6 @@ fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Decl
         binding_span: span,
         config_contract: None,
     }
-}
-
-/// The canonical `Error.code` identity: an unsigned 32-bit fixed-scalar field. Its default
-/// is carried in `folded_defaults_by_field_path`, which the AST build materialises.
-fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
-    Declaration {
-        id,
-        type_id: builtin_type_ids::fixed_scalar(FixedScalar::U32),
-        type_syntax: None,
-        value_mode: ValueMode::ImmutableOwned,
-        value: DeclarationValue::Absent,
-        binding_span: span,
-        config_contract: None,
-    }
-}
-
-/// The owned folded default for a `U32` builtin field.
-fn u32_field_default(value: u32) -> PublicFoldedValue {
-    PublicFoldedValue::FixedScalar(
-        FixedScalarValue::unsigned(FixedScalar::U32, u64::from(value))
-            .expect("the builtin Error.code default must fit the U32 fixed-scalar domain"),
-    )
 }
 
 #[cfg(test)]

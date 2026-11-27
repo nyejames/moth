@@ -1,6 +1,5 @@
--- Borrow checking is root-granular: mutating `pair.right` conflicts with the
--- still-needed `pair.left` read, the same verdict as binding `left = pair.left`
--- first. Field-precise disjointness is deferred (see BC-06).
+-- A call that mutates `pair.right` does not conflict with the still-needed `pair.left`
+-- operand: field-precise call effects keep sibling fields disjoint (BC-06 Slice 2).
 Pair = |left {I32}, right {I32}|
 
 inspect |items {I32}, count I32| -> I32:

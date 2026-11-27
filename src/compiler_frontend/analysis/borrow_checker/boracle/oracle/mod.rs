@@ -88,6 +88,9 @@ pub(crate) enum OracleLimitReason {
         call: CallId,
         reason: CallResultUnknownReason,
     },
+    OpaqueCallStores {
+        call: CallId,
+    },
     UndecidableOverlap {
         left: state::RuntimeAccessTarget,
         right: state::RuntimeAccessTarget,

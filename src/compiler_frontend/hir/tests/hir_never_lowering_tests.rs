@@ -30,6 +30,9 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, 
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
+use crate::compiler_frontend::public_call_summary::{
+    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -509,9 +512,6 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
     use crate::compiler_frontend::hir::private_failure_lane::{
         PrivateFailureLaneInstallation, install_private_failure_lanes,
     };
-    use crate::compiler_frontend::public_call_summary::{
-        FunctionReturnAliasSummary, PublicCallSummary,
-    };
 
     let mut module = HirModule::new();
     module.functions.push(HirFunction {
@@ -547,7 +547,7 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
         FunctionId(0),
         PublicCallSummary {
             parameters: vec![],
-            return_alias: FunctionReturnAliasSummary::Fresh,
+            return_alias: FunctionReturnAliasSummary::Known(Box::default()),
             escapes_builtin_failure: true,
             uses_fast_semantics: false,
             may_trap: false,
@@ -578,6 +578,65 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
         module.call_result_contracts.is_empty(),
         "lane installation records no nonlocal Never contract"
     );
+}
+
+#[test]
+fn entry_narrowing_and_unreachable_handler_pruning_are_metadata_only() {
+    use crate::compiler_frontend::hir::private_failure_lane::{
+        PrivateFailureLaneInstallation, install_private_failure_lanes,
+    };
+    use crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries;
+    use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+
+    for (source, prunes_handler) in [
+        ("value = \"plain\"\n~[:[value]]\n", false),
+        (
+            "handler_only |left I32, right I32| -> Bool:\n    return calm(left) < calm(right) catch then false\n;\n\
+             calm |value I32| -> I32:\n    return value\n;\n",
+            true,
+        ),
+    ] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let registry = default_external_package_registry(&mut string_table);
+        let (mut module, mut type_environment) =
+            lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+                .expect("fixture should lower");
+        let start = module.start_function.expect("fixture has an entry");
+        assert!(
+            module.functions[start.0 as usize]
+                .return_contract
+                .ordinary()
+                .expect("fixture entry is ordinary")
+                .is_fallible()
+        );
+        assert_eq!(!module.catch_handlers.is_empty(), prunes_handler);
+        let blocks_before = module.blocks.len();
+        let mut report = run_borrow_checker_with_types(
+            &module,
+            &type_environment,
+            &registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect("fixture must pass borrow checking");
+        infer_builtin_failure_summaries(&module, &mut report);
+
+        let installation =
+            install_private_failure_lanes(&mut module, &report, &mut type_environment, &registry)
+                .expect("installation should leave valid HIR");
+        assert_eq!(installation, PrivateFailureLaneInstallation::MetadataOnly);
+        assert!(
+            !module.functions[start.0 as usize]
+                .return_contract
+                .ordinary()
+                .expect("installation preserves the ordinary entry")
+                .is_fallible()
+        );
+        assert!(module.catch_handlers.is_empty());
+        assert_eq!(module.blocks.len() < blocks_before, prunes_handler);
+    }
 }
 
 #[test]
@@ -794,9 +853,6 @@ fn never_external_binding_lowers_to_an_external_terminating_call() {
 fn never_call_records_the_never_contract_for_an_imported_target() {
     use crate::compiler_frontend::ast::AstImportedFunctionContract;
     use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
-    use crate::compiler_frontend::public_call_summary::{
-        FunctionReturnAliasSummary, PublicCallSummary,
-    };
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
     };
@@ -849,7 +905,7 @@ fn never_call_records_the_never_contract_for_an_imported_target() {
             },
             summary: PublicCallSummary {
                 parameters: vec![],
-                return_alias: FunctionReturnAliasSummary::Fresh,
+                return_alias: FunctionReturnAliasSummary::Known(Box::default()),
                 escapes_builtin_failure: false,
                 uses_fast_semantics: false,
                 may_trap: false,
@@ -876,9 +932,6 @@ fn never_call_records_the_never_contract_for_an_imported_target() {
 fn never_call_records_the_never_contract_for_a_generated_target() {
     use crate::compiler_frontend::ast::AstImportedFunctionContract;
     use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
-    use crate::compiler_frontend::public_call_summary::{
-        FunctionReturnAliasSummary, PublicCallSummary,
-    };
     use crate::compiler_frontend::semantic_identity::{
         GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole, OriginFunctionId,
         StableModuleOriginIdentity, StablePackageIdentity,
@@ -937,7 +990,7 @@ fn never_call_records_the_never_contract_for_a_generated_target() {
             },
             summary: PublicCallSummary {
                 parameters: vec![],
-                return_alias: FunctionReturnAliasSummary::Fresh,
+                return_alias: FunctionReturnAliasSummary::Known(Box::default()),
                 escapes_builtin_failure: false,
                 uses_fast_semantics: false,
                 may_trap: false,
@@ -1018,9 +1071,6 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         PrivateFailureLaneInstallation, install_private_failure_lanes,
     };
     use crate::compiler_frontend::hir::regions::HirRegion;
-    use crate::compiler_frontend::public_call_summary::{
-        FunctionReturnAliasSummary, PublicCallSummary,
-    };
     use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
     let failure_facts = |boundary| HirFunctionFailureFacts {
@@ -1032,17 +1082,18 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         deferred_custom_catches: vec![],
         constraint: Default::default(),
     };
+    let error_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let mut module = HirModule::new();
-    // A private producer call before a terminating call: the lane split moves the NeverCall
-    // terminator into the success continuation.
+    // An already-fallible caller invokes an inferred private producer before a terminating
+    // call. The split moves the NeverCall terminator into the success continuation.
     module.functions.push(HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
         return_contract: HirFunctionReturnContract::returns(CallableReturnShape::from_slots(
             [],
-            None,
+            Some(error_type),
         )),
     });
     module.functions.push(HirFunction {
@@ -1051,6 +1102,15 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         params: vec![],
         return_contract: HirFunctionReturnContract::Never,
     });
+    module.functions.push(HirFunction {
+        id: FunctionId(2),
+        entry: BlockId(2),
+        params: vec![],
+        return_contract: HirFunctionReturnContract::returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
+    });
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
@@ -1058,11 +1118,17 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         .function_origins
         .insert(FunctionId(1), HirFunctionOrigin::Normal);
     module
+        .function_origins
+        .insert(FunctionId(2), HirFunctionOrigin::Normal);
+    module
         .function_provenance
         .insert(FunctionId(0), SyntheticInterfaceProvenance::empty());
     module
         .function_provenance
         .insert(FunctionId(1), SyntheticInterfaceProvenance::empty());
+    module
+        .function_provenance
+        .insert(FunctionId(2), SyntheticInterfaceProvenance::empty());
     module.regions.push(HirRegion::lexical(RegionId(0), None));
     module.blocks.push(HirBlock {
         id: BlockId(0),
@@ -1071,7 +1137,7 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         statements: vec![HirStatement {
             id: HirNodeId(0),
             kind: HirStatementKind::Call {
-                target: CallTarget::Local(FunctionId(0)),
+                target: CallTarget::Local(FunctionId(2)),
                 args: HirValueRange::empty(),
                 results: vec![],
             },
@@ -1092,6 +1158,13 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
             args: HirValueRange::empty(),
         },
     });
+    module.blocks.push(HirBlock {
+        id: BlockId(2),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    });
 
     let mut extended = ExtendedSpanBuilder::new();
     let terminator_span = SourceSpan::new(
@@ -1107,18 +1180,28 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
 
     module.function_failure_facts.insert(
         FunctionId(0),
-        failure_facts(HirBuiltinFailureBoundary::InferPrivate),
+        failure_facts(HirBuiltinFailureBoundary::BuiltinErrorSlot),
     );
     module.function_failure_facts.insert(
         FunctionId(1),
         failure_facts(HirBuiltinFailureBoundary::Never),
     );
+    module.function_failure_facts.insert(
+        FunctionId(2),
+        failure_facts(HirBuiltinFailureBoundary::InferPrivate),
+    );
     let mut report = BorrowCheckReport::default();
     report.analysis.public_call_summaries.insert(
-        FunctionId(0),
+        FunctionId(2),
         PublicCallSummary {
             parameters: vec![],
-            return_alias: FunctionReturnAliasSummary::Fresh,
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                success: CallLaneSummary {
+                    reachable: true,
+                    ..Default::default()
+                },
+                error: CallLaneSummary::default(),
+            })),
             escapes_builtin_failure: true,
             uses_fast_semantics: false,
             may_trap: false,
@@ -1130,7 +1213,7 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
     type_environment
         .register_canonical_identity(
             CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            error_type,
         )
         .expect("fixture builtin Error identity should register");
     let external_packages = super::ExternalPackageRegistry::new();

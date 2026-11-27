@@ -7,7 +7,9 @@
 //!      hooks run beside the root rules and only add rejections the roots cannot see, plus the
 //!      precision the layer's strong updates allow.
 
-use super::conflicts::{check_layer_conflict, check_layer_shared_access};
+use super::conflicts::{
+    check_layer_conflict, check_layer_shared_access, check_mutable_access_with_targets,
+};
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AllocId, FieldKey, MutationTarget, ResolvedPlace, StoredValue,
@@ -78,13 +80,41 @@ fn resolve_path(
     resolved
 }
 
+#[derive(Default, Clone)]
+pub(super) struct CapturedValue {
+    pub values: Vec<StoredValue>,
+    pub views: Vec<AllocId>,
+}
+
+impl CapturedValue {
+    pub(super) fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        for value in &mut self.values {
+            retirement.remap_value(state, value);
+        }
+        for view in &mut self.views {
+            retirement.remap_id(state, view);
+        }
+    }
+
+    fn fresh(id: AllocId) -> Self {
+        Self {
+            values: vec![StoredValue { id, writable: true }],
+            views: Vec::new(),
+        }
+    }
+}
+
 fn stored_allocations(
     layout: &FunctionLayout,
     state: &BorrowState,
     resolved: ResolvedPlace,
     source_writable: bool,
-) -> Vec<StoredValue> {
-    resolved
+) -> CapturedValue {
+    let values = resolved
         .ids
         .into_iter()
         .map(|id| StoredValue {
@@ -95,7 +125,11 @@ fn stored_allocations(
                     .alloc_origin_local(id)
                     .is_none_or(|origin| layout.local_mutable[origin]),
         })
-        .collect()
+        .collect();
+    CapturedValue {
+        values,
+        views: resolved.views,
+    }
 }
 
 /// The holders of `place`'s last field and that field, or `None` for a whole binding.
@@ -257,16 +291,16 @@ pub(super) fn stored_values(
     state: &mut BorrowState,
     expression_id: HirValueId,
     explicit_fresh: bool,
-) -> Result<Vec<StoredValue>, BorrowCheckError> {
+) -> Result<CapturedValue, BorrowCheckError> {
     let context = values.context;
     if !is_heap_value(context, expression_id)? {
-        return Ok(Vec::new());
+        return Ok(CapturedValue::default());
     }
     let expression = context.expressions.expression(expression_id);
     match &expression.kind {
         HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
             let Some(root) = values.layout.index_of(place.root) else {
-                return Ok(Vec::new());
+                return Ok(CapturedValue::default());
             };
             let resolved = resolve_path(
                 values.layout,
@@ -290,13 +324,14 @@ pub(super) fn stored_values(
             let sources = stored_values(values, state, *source, false)?;
             let key = payload_key(*variant_index, *field_index);
             let mut resolved = ResolvedPlace {
-                ids: sources.iter().map(|value| value.id).collect(),
+                ids: sources.values.iter().map(|value| value.id).collect(),
+                views: sources.views,
                 layer_only: false,
-                readonly: sources.iter().any(|value| !value.writable),
+                readonly: sources.values.iter().any(|value| !value.writable),
                 readonly_source: None,
             };
             if resolved.ids.is_empty() {
-                return Ok(Vec::new());
+                return Ok(CapturedValue::default());
             }
             state.step_resolved(&mut resolved, key, &values.layout.local_mutable);
             Ok(stored_allocations(values.layout, state, resolved, true))
@@ -305,28 +340,28 @@ pub(super) fn stored_values(
             let Some(source) =
                 resolve_place_allocs(values.layout, state, context.expressions, place)
             else {
-                return Ok(Vec::new());
+                return Ok(CapturedValue::default());
             };
             let site = state.site_id(
                 expression_id.0,
                 values.block_id,
                 &values.layout.block_successors,
             );
-            let copied = state.copy_alloc_graph(&source.ids, site);
+            let copied = state.copy_alloc_graph(&source, site);
             if copied.is_empty() && explicit_fresh {
-                return Ok(vec![StoredValue {
-                    id: site,
-                    writable: true,
-                }]);
+                return Ok(CapturedValue::fresh(site));
             }
-            Ok(copied
-                .into_iter()
-                .map(|id| StoredValue { id, writable: true })
-                .collect())
+            Ok(CapturedValue {
+                values: copied
+                    .into_iter()
+                    .map(|id| StoredValue { id, writable: true })
+                    .collect(),
+                views: Vec::new(),
+            })
         }
         kind if kind.is_aggregate_construction() => {
             if !explicit_fresh && !needs_allocation_facts(context, state, expression_id)? {
-                return Ok(Vec::new());
+                return Ok(CapturedValue::default());
             }
             let site = state.site_id(
                 expression_id.0,
@@ -334,20 +369,14 @@ pub(super) fn stored_values(
                 &values.layout.block_successors,
             );
             capture_construction(values, state, expression_id)?.apply(state, site);
-            Ok(vec![StoredValue {
-                id: site,
-                writable: true,
-            }])
+            Ok(CapturedValue::fresh(site))
         }
-        _ if explicit_fresh => Ok(vec![StoredValue {
-            id: state.site_id(
-                expression_id.0,
-                values.block_id,
-                &values.layout.block_successors,
-            ),
-            writable: true,
-        }]),
-        _ => Ok(Vec::new()),
+        _ if explicit_fresh => Ok(CapturedValue::fresh(state.site_id(
+            expression_id.0,
+            values.block_id,
+            &values.layout.block_successors,
+        ))),
+        _ => Ok(CapturedValue::default()),
     }
 }
 
@@ -358,7 +387,7 @@ pub(super) struct Construction(Vec<ConstructionEdge>);
 
 enum ConstructionEdge {
     Nested(FieldKey, Construction),
-    Stored(FieldKey, StoredValue),
+    Stored(FieldKey, CapturedValue),
 }
 
 impl Construction {
@@ -366,7 +395,7 @@ impl Construction {
         for edge in &mut self.0 {
             match edge {
                 ConstructionEdge::Nested(_, nested) => nested.remap(state, retirement),
-                ConstructionEdge::Stored(_, value) => retirement.remap_value(state, value),
+                ConstructionEdge::Stored(_, value) => value.remap(state, retirement),
             }
         }
     }
@@ -378,7 +407,15 @@ impl Construction {
                     let child = state.alloc_child(holder, *key);
                     nested.apply(state, child);
                 }
-                ConstructionEdge::Stored(key, value) => state.add_alloc_edge(holder, *key, *value),
+                ConstructionEdge::Stored(key, captured) => {
+                    state.record_constructed_field(
+                        holder,
+                        *key,
+                        &captured.values,
+                        &captured.views,
+                        true,
+                    );
+                }
             }
         }
     }
@@ -404,11 +441,12 @@ fn capture_construction(
                 captured.0.push(ConstructionEdge::Nested(key, nested));
             }
         } else {
-            captured.0.extend(
-                stored_values(values, state, child, list_elements)?
-                    .into_iter()
-                    .map(|value| ConstructionEdge::Stored(key, value)),
-            );
+            let captured_value = stored_values(values, state, child, list_elements)?;
+            if !captured_value.is_empty() {
+                captured
+                    .0
+                    .push(ConstructionEdge::Stored(key, captured_value));
+            }
         }
     }
     Ok(captured)
@@ -420,6 +458,7 @@ pub(super) enum LocalLayerValue {
     Constructed(Construction),
     Bound {
         ids: Vec<AllocId>,
+        views: Vec<AllocId>,
         readonly: bool,
         override_roots: bool,
         cells: Vec<(AllocId, FieldKey)>,
@@ -439,6 +478,7 @@ impl LocalLayerValue {
             Self::Constructed(captured) => captured.remap(state, retirement),
             Self::Bound {
                 ids,
+                views,
                 override_roots,
                 cells,
                 detached,
@@ -448,6 +488,9 @@ impl LocalLayerValue {
                     let old = *id;
                     retirement.remap_id(state, id);
                     *override_roots |= old != *id;
+                }
+                for view in views {
+                    retirement.remap_id(state, view);
                 }
                 for (holder, _) in cells {
                     retirement.remap_id(state, holder);
@@ -484,6 +527,7 @@ impl LocalLayerValue {
             }
             Self::Bound {
                 ids,
+                views,
                 readonly,
                 override_roots,
                 detached,
@@ -491,6 +535,9 @@ impl LocalLayerValue {
             } => {
                 if override_roots {
                     state.bind_alloc_ids(local, &ids, readonly);
+                }
+                if !views.is_empty() {
+                    state.bind_alloc_views(local, &views);
                 }
                 if !detached.is_empty() {
                     state.bind_detached_holders(local, detached);
@@ -562,6 +609,7 @@ pub(super) fn capture_local_value(
                 .collect();
             LocalLayerValue::Bound {
                 ids: resolved.ids,
+                views: resolved.views,
                 readonly: resolved.readonly,
                 override_roots: resolved.layer_only || !place.projections.is_empty(),
                 cells,
@@ -577,9 +625,10 @@ pub(super) fn capture_local_value(
             if stored.is_empty() {
                 LocalLayerValue::None
             } else {
-                let readonly = stored.iter().any(|value| !value.writable);
+                let readonly = stored.values.iter().any(|value| !value.writable);
                 LocalLayerValue::Bound {
-                    ids: stored.into_iter().map(|value| value.id).collect(),
+                    ids: stored.values.into_iter().map(|value| value.id).collect(),
+                    views: stored.views,
                     readonly,
                     override_roots: true,
                     cells: Vec::new(),
@@ -625,13 +674,25 @@ pub(super) fn check_layer_place_mutation(
     let Some(actor) = check.layout.index_of(place.root) else {
         return Ok(());
     };
+    let targets = layer_mutation_targets(check, place, reaches_children)?;
+    check_layer_conflict(check, actor, &targets, true)
+}
+
+pub(super) fn layer_mutation_targets(
+    check: &AccessCheckContext<'_, '_>,
+    place: &HirPlace,
+    reaches_children: bool,
+) -> Result<Vec<MutationTarget>, BorrowCheckError> {
+    let Some(actor) = check.layout.index_of(place.root) else {
+        return Ok(Vec::new());
+    };
     if place.projections.is_empty() && !check.layout.local_has_in_place_mutation_surface[actor] {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let Some(resolved) =
         resolve_place_allocs(check.layout, check.state, check.context.expressions, place)
     else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     if resolved.readonly {
         let values = LayerValueContext {
@@ -647,7 +708,7 @@ pub(super) fn check_layer_place_mutation(
         ));
     }
     if check.state.layer_is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut targets = resolved
         .ids
@@ -671,16 +732,81 @@ pub(super) fn check_layer_place_mutation(
                 }),
         );
     }
-    check_layer_conflict(check, actor, &targets, true)
+    Ok(targets)
 }
 
-/// Check a write into `key` of `holders` made through `actor`.
-pub(super) fn check_layer_cell_write(
+/// Holder targets come first; the remaining allocations only refine coarse root overlap.
+fn projected_write_targets(
+    state: &BorrowState,
+    holders: &ResolvedPlace,
+    key: FieldKey,
+    field_path: bool,
+) -> Vec<MutationTarget> {
+    let (old_values, old_children) = if field_path {
+        // An observer may name the old field's contents rather than its cell. Replacing
+        // the cell does not mutate those allocations, but they can rule out disjointness.
+        let old_values = state.alloc_field_ids(&holders.ids, key);
+        let old_children = state.alloc_readable_closure(&old_values);
+        (old_values, old_children)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    holders
+        .ids
+        .iter()
+        .map(|&id| MutationTarget {
+            id,
+            layer_reached: holders.layer_only,
+            deep: false,
+        })
+        .chain(
+            old_values
+                .into_iter()
+                .chain(old_children)
+                .map(|id| MutationTarget {
+                    id,
+                    layer_reached: true,
+                    deep: true,
+                }),
+        )
+        .collect()
+}
+
+/// Check a projected assignment and keep its resolved cell for the subsequent store.
+pub(super) fn check_layer_field_write(
     check: &mut AccessCheckContext<'_, '_>,
     actor: usize,
-    holders: &ResolvedPlace,
     place: &HirPlace,
-) -> Result<(), BorrowCheckError> {
+    roots: &RootSet,
+    value: HirValueId,
+) -> Result<Option<LayerFieldWrite>, BorrowCheckError> {
+    let (holders, key) =
+        resolve_place_cell(check.layout, check.state, check.context.expressions, place)
+            .expect("projected assignment has a holder and final selector");
+    let has_layer = !check.state.layer_is_empty();
+    let field_path = has_layer
+        && check
+            .context
+            .expressions
+            .projections(place.projections)
+            .iter()
+            .all(|projection| matches!(projection, HirProjection::Field(_)));
+    let targets = if has_layer {
+        projected_write_targets(check.state, &holders, key, field_path)
+    } else {
+        Vec::new()
+    };
+    check_mutable_access_with_targets(
+        check,
+        roots,
+        MutableAccessPolicy {
+            allow_prior_shared: true,
+            require_root_mutable: true,
+            strict_move_exclusivity: false,
+            alias_exclusivity: AliasExclusivity::All,
+        },
+        if field_path { &targets } else { &[] },
+    )?;
     if holders.readonly {
         let values = LayerValueContext {
             context: check.context,
@@ -690,41 +816,13 @@ pub(super) fn check_layer_cell_write(
         return Err(readonly_mutation(
             &values,
             place,
-            holders,
+            &holders,
             check.span.or(check.location),
         ));
     }
-    if check.state.layer_is_empty() {
-        return Ok(());
-    }
-    let targets = holders
-        .ids
-        .iter()
-        .map(|id| MutationTarget {
-            id: *id,
-            layer_reached: holders.layer_only,
-            deep: false,
-        })
-        .collect::<Vec<_>>();
-    check_layer_conflict(check, actor, &targets, true)
-}
-
-/// Apply a projected write `place = value` to the layer after its access checks.
-pub(super) fn transfer_layer_field_write(
-    check: &mut AccessCheckContext<'_, '_>,
-    place: &HirPlace,
-    value: HirValueId,
-) -> Result<Option<LayerFieldWrite>, BorrowCheckError> {
-    let Some(actor) = check.layout.index_of(place.root) else {
-        return Ok(None);
-    };
-    let Some((holders, key)) =
-        resolve_place_cell(check.layout, check.state, check.context.expressions, place)
-    else {
-        return Ok(None);
-    };
-    check_layer_cell_write(check, actor, &holders, place)?;
-    if check.state.layer_is_empty() && !needs_allocation_facts(check.context, check.state, value)? {
+    if has_layer {
+        check_layer_conflict(check, actor, &targets[..holders.ids.len()], true)?;
+    } else if !needs_allocation_facts(check.context, check.state, value)? {
         return Ok(None);
     }
     Ok(Some(LayerFieldWrite { holders, key }))
@@ -746,7 +844,14 @@ impl LayerFieldWrite {
         let stored = stored_values(values, state, value, true)?;
         let strong = self.key != FieldKey::Elem
             && matches!(self.holders.ids.as_slice(), [holder] if state.alloc_singular(*holder));
-        state.store_alloc_field(&self.holders.ids, self.key, &stored, strong);
+        state.store_alloc_field_with_views(
+            &self.holders.ids,
+            self.key,
+            &stored.values,
+            &stored.views,
+            strong,
+            true,
+        );
         Ok(())
     }
 }
@@ -761,7 +866,7 @@ pub(super) fn layer_store_values(
     holders: &[AllocId],
     key: FieldKey,
     value: HirValueId,
-) -> Result<Option<Vec<StoredValue>>, BorrowCheckError> {
+) -> Result<Option<CapturedValue>, BorrowCheckError> {
     let explicit = holders
         .iter()
         .any(|holder| state.alloc_group_is_explicit(*holder, key));
@@ -813,6 +918,7 @@ pub(super) enum LayerAliasWrite {
         cells: Vec<(AllocId, FieldKey)>,
         exact: bool,
         stored: Vec<StoredValue>,
+        views: Vec<AllocId>,
         incoming_alias: LocalLayerValue,
     },
 }
@@ -848,8 +954,12 @@ impl LayerAliasWrite {
                     return;
                 }
                 let (ids, bound) = state.local_alloc_ids(cell);
+                let views: Vec<_> = state.alloc_binding_views(cell).collect();
                 let readonly = state.alloc_binding_readonly(cell);
                 state.bind_alloc_ids(local_index, if bound { &ids } else { &[] }, readonly);
+                if !views.is_empty() {
+                    state.bind_alloc_views(local_index, &views);
+                }
                 let detached = state.detached_holders(cell).collect::<Vec<_>>();
                 if !detached.is_empty() {
                     state.bind_detached_holders(local_index, detached);
@@ -859,24 +969,35 @@ impl LayerAliasWrite {
                 cells,
                 exact,
                 stored,
+                views,
                 incoming_alias,
             } => {
                 // A joined alias may target several projected or whole cells. None of those
                 // targets can drop its old contents unless this is one exact projected write.
                 for (holder, key) in cells {
-                    state.store_alloc_field(&[holder], key, &stored, exact);
+                    state.store_alloc_field_with_views(
+                        &[holder],
+                        key,
+                        &stored,
+                        &views,
+                        exact,
+                        true,
+                    );
                 }
                 let ids = stored.iter().map(|value| value.id).collect::<Vec<_>>();
                 let readonly = stored.iter().any(|value| !value.writable);
                 // Every path replaces what the writer itself observes, even when none of its
                 // possible referents can be strongly updated.
                 state.bind_alloc_ids(local_index, &ids, readonly);
+                if !views.is_empty() {
+                    state.bind_alloc_views(local_index, &views);
+                }
                 if !exact && !ids.is_empty() {
                     for cell in alias_state.direct_alias_roots.iter_ones() {
                         if cell != local_index
                             && state.local_state(cell).mode.contains(LocalMode::SLOT)
                         {
-                            state.extend_alloc_ids(cell, &ids, readonly);
+                            state.extend_alloc_ids(cell, &ids, &views, readonly);
                         }
                     }
                 }
@@ -916,7 +1037,8 @@ pub(super) fn capture_layer_alias_write(
     Ok(LayerAliasWrite::Cells {
         cells,
         exact,
-        stored,
+        stored: stored.values,
+        views: stored.views,
         incoming_alias,
     })
 }

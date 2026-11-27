@@ -26,8 +26,9 @@ use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId,
@@ -37,7 +38,13 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn empty_public_call_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: vec![],
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..CallLaneSummary::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -57,11 +64,7 @@ fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCa
             mutation,
             transfer_effect: PublicCallTransferEffect::MayConsume,
         }],
-        return_alias: FunctionReturnAliasSummary::Fresh,
-        escapes_builtin_failure: false,
-        uses_fast_semantics: false,
-        may_trap: false,
-        may_fail: false,
+        ..empty_public_call_summary()
     }
 }
 
@@ -381,6 +384,25 @@ fn finalization_excludes_private_and_start_summaries() {
             .any(|record| record.origin != public_origin),
         "private and start summaries must not enter the completed public phase"
     );
+}
+
+#[test]
+fn finalization_rejects_pending_callable_allocation_facts() {
+    let origin = OriginFunctionId::new_free(module_origin(), "render".to_owned());
+    let id = FunctionId(1);
+    let hir = public_hir_for_origins(&[(id, origin.clone())]);
+    let mut borrow_analysis = BorrowAnalysis::default();
+    borrow_analysis.public_call_summaries.insert(
+        id,
+        PublicCallSummary {
+            return_alias: FunctionReturnAliasSummary::Pending,
+            ..empty_public_call_summary()
+        },
+    );
+
+    let result = draft_with_records(vec![function_draft_record(origin, vec![])])
+        .finalize_after_borrow_validation(&borrow_analysis, &hir);
+    assert!(result.err().unwrap().message.contains("pending facts"));
 }
 
 #[test]

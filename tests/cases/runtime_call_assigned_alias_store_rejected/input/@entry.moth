@@ -1,0 +1,17 @@
+-- `~writer = box.items` turns the plain slot into an alias of `box.items`, so the next
+-- assignment stores `incoming` there. The caller must see that store.
+Box = |items {I32}|
+stash |box ~Box, incoming {I32}| -> I32:
+    writer ~= {0}
+    ~writer = box.items
+    ~writer = incoming
+    return writer.length()
+;
+probe || -> I32:
+    incoming ~= {1}
+    box ~= Box({0})
+    size = stash(~box, incoming)
+    ~incoming.push(4)
+    return box.items.length() + size
+;
+~[:[probe()]]

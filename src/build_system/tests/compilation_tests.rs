@@ -62,7 +62,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallSummary,
+    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -231,7 +231,13 @@ fn generated_identity_for_origin(
 fn generated_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..Default::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

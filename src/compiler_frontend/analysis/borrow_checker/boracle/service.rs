@@ -9,7 +9,6 @@ use super::super::problem::from_hir;
 use super::{BoracleReport, BoracleSolver, OracleBounds, compare_reference_and_experiments};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 
 use crate::compiler_frontend::hir::module::HirModule;
@@ -18,7 +17,6 @@ use crate::compiler_frontend::utilities::portable_path_display::portable_path_te
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoracleDump {
@@ -287,11 +285,10 @@ pub(crate) fn run_hir_module(
     }
     let source_path = portable_path_text(&input.source_path);
     if options.dump == BoracleDump::Differential {
-        let problems =
-            build_hir_module_problems(&input.hir, &input.external_package_registry, &selection)?;
+        let problems = build_hir_module_problems(input, &selection)?;
         return render_differential_module_report(problems, &source_path, &selection);
     }
-    let report = solve_hir_module_parts(&input.hir, &input.external_package_registry, &selection)?;
+    let report = solve_hir_module_parts(input, &selection)?;
     Ok(render_module_report(&report, &source_path, options.dump))
 }
 
@@ -300,11 +297,7 @@ pub(crate) fn run_hir_module(
 pub(crate) fn solve_hir_module(
     input: &BoracleModuleInput,
 ) -> Result<BoracleModuleReport, InfrastructureFailure> {
-    solve_hir_module_parts(
-        &input.hir,
-        &input.external_package_registry,
-        &BoracleRuleSelection::default(),
-    )
+    solve_hir_module_parts(input, &BoracleRuleSelection::default())
 }
 
 fn ordered_hir_functions<'module>(
@@ -328,19 +321,19 @@ fn ordered_hir_functions<'module>(
 }
 
 fn build_hir_module_problems(
-    module: &HirModule,
-    external_package_registry: &Arc<ExternalPackageRegistry>,
+    input: &BoracleModuleInput,
     rule_selection: &BoracleRuleSelection,
 ) -> Result<Vec<BoracleFunctionProblem>, InfrastructureFailure> {
-    let functions = ordered_hir_functions(module, rule_selection)?;
+    let functions = ordered_hir_functions(&input.hir, rule_selection)?;
 
     let mut problems = Vec::with_capacity(functions.len());
     for function in functions {
         let problem = from_hir(
-            module,
+            &input.hir,
             function,
             None,
-            Some(external_package_registry.as_ref()),
+            Some(input.external_package_registry.as_ref()),
+            Some(&input.type_environment),
         )?;
         problems.push(BoracleFunctionProblem {
             function_id: function.id.0,
@@ -352,18 +345,18 @@ fn build_hir_module_problems(
 }
 
 fn solve_hir_module_parts(
-    module: &HirModule,
-    external_package_registry: &Arc<ExternalPackageRegistry>,
+    input: &BoracleModuleInput,
     rule_selection: &BoracleRuleSelection,
 ) -> Result<BoracleModuleReport, InfrastructureFailure> {
-    let functions = ordered_hir_functions(module, rule_selection)?;
+    let functions = ordered_hir_functions(&input.hir, rule_selection)?;
     let mut reports = Vec::with_capacity(functions.len());
     for function in functions {
         let problem = from_hir(
-            module,
+            &input.hir,
             function,
             None,
-            Some(external_package_registry.as_ref()),
+            Some(input.external_package_registry.as_ref()),
+            Some(&input.type_environment),
         )?;
         let report = BoracleSolver::solve_with_rule_selection(&problem, rule_selection.clone())?;
         reports.push(BoracleFunctionReport {

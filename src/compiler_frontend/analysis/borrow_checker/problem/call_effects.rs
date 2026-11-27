@@ -8,25 +8,34 @@
 use super::super::events::AccessKind;
 use super::super::origins::{CallResultProvenance, CallResultUnknownReason};
 use super::{FunctionProblemBuilder, internal_failure};
+use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAccessKind, ExternalHirReturnAlias,
+    CallTarget, ExternalAccessKind, ExternalReturnAlias,
 };
+use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
+use crate::compiler_frontend::hir::ids::HirValueId;
+use crate::compiler_frontend::hir::statements::HirLocalDestination;
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallParameterAccess,
+    CallAllocationSource, CallField, CallLaneSummary, CallOutputPath, FunctionReturnAliasSummary,
+    PublicCallParameterAccess,
 };
 
 impl<'a> FunctionProblemBuilder<'a> {
     pub(super) fn call_effect(
         &self,
         target: &CallTarget,
-        argument_count: usize,
-    ) -> Result<(Vec<AccessKind>, CallResultProvenance), InfrastructureFailure> {
+        args: &[HirValueId],
+        results: &[HirLocalDestination],
+        success: bool,
+    ) -> Result<(Vec<AccessKind>, CallResultProvenance, bool), InfrastructureFailure> {
+        let argument_count = args.len();
         if let CallTarget::External(id) = target {
             let Some(registry) = self.external_registry else {
                 return Ok((
                     vec![AccessKind::Exclusive; argument_count],
                     CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal),
+                    argument_count != 0,
                 ));
             };
             let Some(definition) = registry.get_function_by_id(*id) else {
@@ -51,16 +60,22 @@ impl<'a> FunctionProblemBuilder<'a> {
                     accesses.len()
                 )));
             }
-            let provenance = match definition.hir_return_alias() {
-                ExternalHirReturnAlias::Fresh => CallResultProvenance::Fresh,
-                ExternalHirReturnAlias::AliasArgs(indices) => {
-                    CallResultProvenance::AliasParams(indices.into())
-                }
-                ExternalHirReturnAlias::Unknown => {
-                    CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal)
-                }
+            let unknown = CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal);
+            let provenance = match (success, definition.hir_return_sources()) {
+                (true, [slot]) => match &slot.alias {
+                    ExternalReturnAlias::Fresh => CallResultProvenance::Fresh,
+                    ExternalReturnAlias::AliasArgs(indices) => {
+                        CallResultProvenance::AliasParams(indices.as_slice().into())
+                    }
+                },
+                // A single origin cannot model independent or correlated native slots.
+                _ => unknown,
             };
-            return Ok((accesses, provenance));
+            let opaque_stores = match CollectionBuiltinOp::from_external_function_id(*id) {
+                Some(operation) => success && operation.requires_mutable_receiver(),
+                None => self.may_have_opaque_stores(args, &accesses)?,
+            };
+            return Ok((accesses, provenance, opaque_stores));
         }
 
         let summary = match target {
@@ -80,9 +95,11 @@ impl<'a> FunctionProblemBuilder<'a> {
                 && let Some(accesses) =
                     self.local_parameter_accesses(*function_id, argument_count)?
             {
+                let opaque_stores = self.may_have_opaque_stores(args, &accesses)?;
                 return Ok((
                     accesses,
                     CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
+                    opaque_stores,
                 ));
             }
             return Ok((
@@ -91,6 +108,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 // unresolved boundary is shared.
                 vec![AccessKind::Exclusive; argument_count],
                 CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
+                argument_count != 0,
             ));
         };
         if summary.parameters.len() != argument_count {
@@ -106,16 +124,104 @@ impl<'a> FunctionProblemBuilder<'a> {
                 PublicCallParameterAccess::Mutable => AccessKind::Exclusive,
                 PublicCallParameterAccess::Shared => AccessKind::Shared,
             })
-            .collect();
-        let provenance = match &summary.return_alias {
-            FunctionReturnAliasSummary::Fresh => CallResultProvenance::Fresh,
-            FunctionReturnAliasSummary::AliasParams(indices) => {
-                CallResultProvenance::AliasParams(indices.iter().copied().collect())
+            .collect::<Vec<_>>();
+        let (provenance, opaque_stores) = match &summary.return_alias {
+            FunctionReturnAliasSummary::Known(facts) => {
+                let lane = if success {
+                    &facts.success
+                } else {
+                    &facts.error
+                };
+                let mut provenance = lane_root_provenance(lane);
+                // Exact scalar lanes do not need allocation rows. The destination's
+                // validated type, not the absence of rows alone, proves a fresh value.
+                if lane.reachable
+                    && lane.sources.is_empty()
+                    && lane.sharing.is_empty()
+                    && let [destination] = results
+                    && let Some(types) = self.type_environment
+                    && let Some(local) = self
+                        .module
+                        .blocks
+                        .iter()
+                        .flat_map(|block| &block.locals)
+                        .find(|local| local.id == destination.local())
+                    && !classify_hir_type(local.ty, types)?.has_in_place_mutation_surface()
+                {
+                    provenance = CallResultProvenance::Fresh;
+                }
+                (provenance, !lane.stores.is_empty())
             }
-            FunctionReturnAliasSummary::Unknown => {
-                CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
-            }
+            FunctionReturnAliasSummary::Pending => (
+                CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
+                self.may_have_opaque_stores(args, &accesses)?,
+            ),
         };
-        Ok((accesses, provenance))
+        Ok((accesses, provenance, opaque_stores))
+    }
+
+    fn may_have_opaque_stores(
+        &self,
+        args: &[HirValueId],
+        accesses: &[AccessKind],
+    ) -> Result<bool, InfrastructureFailure> {
+        for (&value, &access) in args.iter().zip(accesses) {
+            if access != AccessKind::Exclusive {
+                continue;
+            }
+            let Some(types) = self.type_environment else {
+                return Ok(true);
+            };
+            let ty = self.module.expressions.expression(value).ty;
+            if classify_hir_type(ty, types)?.has_in_place_mutation_surface() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// The reference event can carry one root origin, not a correlated graph of result paths.
+fn lane_root_provenance(lane: &CallLaneSummary) -> CallResultProvenance {
+    let unknown = CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown);
+    if !lane.reachable || lane.sources.is_empty() || !lane.sharing.is_empty() {
+        return unknown;
+    }
+    let mut fresh = false;
+    let mut indices = Vec::new();
+    for row in &lane.sources {
+        let CallOutputPath::Result(path) = &row.output else {
+            return unknown;
+        };
+        if path.slot != 0 {
+            return unknown;
+        }
+        if !path.path.is_empty() {
+            if row.source != CallAllocationSource::Fresh
+                || !path
+                    .path
+                    .iter()
+                    .all(|field| matches!(field, CallField::Field(_)))
+            {
+                return unknown;
+            }
+            continue;
+        }
+        match &row.source {
+            CallAllocationSource::Parameter(path) if path.path.is_empty() => {
+                indices.push(path.index);
+            }
+            CallAllocationSource::Fresh => fresh = true,
+            _ => return unknown,
+        }
+    }
+    if indices.is_empty() && fresh {
+        CallResultProvenance::Fresh
+    } else if indices.is_empty() || fresh || lane.sources.len() != indices.len() {
+        unknown
+    } else {
+        indices.sort_unstable();
+        indices.dedup();
+        CallResultProvenance::AliasParams(indices.into_boxed_slice())
     }
 }

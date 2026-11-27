@@ -182,6 +182,44 @@ impl HirModuleLinkFacts {
             .flat_map(|block| block.direct_facts.reachable_external_calls.iter())
     }
 
+    pub(crate) fn local_call_edges(&self) -> impl Iterator<Item = (FunctionId, FunctionId)> + '_ {
+        self.blocks.iter().flat_map(|block| {
+            block
+                .direct_facts
+                .direct_user_calls
+                .iter()
+                .map(|&callee| (block.function_id, callee))
+        })
+    }
+
+    /// Return owners with executable calls to an updated non-local allocation contract.
+    pub(crate) fn callers_of(
+        &self,
+        generated: &FxHashSet<&GeneratedFunctionIdentity>,
+        public: &FxHashSet<&OriginFunctionId>,
+        private: &FxHashSet<&ModulePrivateExecutableIdentity>,
+    ) -> FxHashSet<FunctionId> {
+        self.blocks
+            .iter()
+            .filter_map(|block| {
+                let facts = &block.direct_facts;
+                (facts
+                    .direct_generated_calls
+                    .iter()
+                    .any(|id| generated.contains(id))
+                    || facts
+                        .direct_cross_module_calls
+                        .iter()
+                        .any(|id| public.contains(id))
+                    || facts
+                        .direct_module_private_calls
+                        .iter()
+                        .any(|id| private.contains(id)))
+                .then_some(block.function_id)
+            })
+            .collect()
+    }
+
     /// Return the validated HIR call targets in deterministic block and call-site order.
     ///
     /// WHAT: exposes the existing per-function link-fact call extraction to transient build

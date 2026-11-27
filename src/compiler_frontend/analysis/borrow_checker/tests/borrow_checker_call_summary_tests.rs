@@ -3,9 +3,7 @@
 //! WHAT: verifies how call return aliases and host-call access summaries affect borrow facts.
 //! WHY: call boundaries are where alias metadata is easiest to get wrong and hardest to debug.
 
-use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    CallResultProvenance, CallResultUnknownReason, OriginKind, from_hir,
-};
+use crate::compiler_frontend::analysis::borrow_checker::problem::{EventKind, from_hir};
 use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -40,8 +38,7 @@ use crate::compiler_frontend::external_packages::test_support::{
 };
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
-    ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalNumericContract, ExternalReturnSlot,
-    ExternalSignatureType,
+    ExternalFunctionLowerings, ExternalNumericContract, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::LocalId;
@@ -77,9 +74,32 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::sync::Arc;
 
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallTransferEffect,
+    CallAllocationFacts, CallAllocationSource, CallOutputPath, CallParameterPath, CallResultPath,
+    CallSharingCondition, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallTransferEffect,
 };
+
+fn allocation_facts(summary: &FunctionReturnAliasSummary) -> &CallAllocationFacts {
+    let FunctionReturnAliasSummary::Known(facts) = summary else {
+        panic!("expected completed call allocation facts, got {summary:?}");
+    };
+    facts
+}
+
+fn root_source_arguments(facts: &CallAllocationFacts) -> Vec<usize> {
+    facts
+        .success
+        .sources
+        .iter()
+        .filter_map(|row| {
+            let CallAllocationSource::Parameter(path) = &row.source else {
+                return None;
+            };
+            matches!(&row.output, CallOutputPath::Result(result) if result.path.is_empty())
+                .then_some(path.index)
+        })
+        .collect()
+}
 
 fn i32_expression(
     builder: &mut AstExpressionBuilder,
@@ -288,10 +308,8 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         .get(&start_id)
         .expect("the zero-parameter start function should have a summary");
     assert!(start_summary.parameters.is_empty());
-    assert_eq!(
-        start_summary.return_alias,
-        FunctionReturnAliasSummary::Fresh
-    );
+    let start_facts = allocation_facts(&start_summary.return_alias);
+    assert!(start_facts.success.reachable && start_facts.success.sources.is_empty());
 
     let rendered = format!("{target_summary:?}");
     assert!(!rendered.contains("LocalId"));
@@ -1429,15 +1447,9 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("fallible alias forwarding should validate declared success alias metadata");
 
-    for (function_name, expected_alias) in [
-        (
-            &source_fn_name_for_lookup,
-            FunctionReturnAliasSummary::AliasParams(vec![1]),
-        ),
-        (
-            &forward_fn_name_for_lookup,
-            FunctionReturnAliasSummary::AliasParams(vec![0]),
-        ),
+    for (function_name, argument) in [
+        (&source_fn_name_for_lookup, 1),
+        (&forward_fn_name_for_lookup, 0),
     ] {
         let function_id = hir
             .functions
@@ -1454,7 +1466,25 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             .public_call_summaries
             .get(&function_id)
             .expect("fallible alias function should have a retained call summary");
-        assert_eq!(summary.return_alias, expected_alias);
+        let facts = allocation_facts(&summary.return_alias);
+        assert!(facts.success.reachable);
+        assert_eq!(facts.success.sources.len(), 1);
+        let row = &facts.success.sources[0];
+        assert_eq!(
+            row.output,
+            CallOutputPath::Result(CallResultPath {
+                slot: 0,
+                path: vec![]
+            })
+        );
+        assert_eq!(
+            row.source,
+            CallAllocationSource::Parameter(CallParameterPath {
+                index: argument,
+                path: vec![]
+            })
+        );
+        assert!(!facts.error.reachable);
     }
 }
 
@@ -1603,14 +1633,19 @@ fn fresh_user_return_does_not_alias_caller_roots() {
         .public_call_summaries
         .get(&fresh_function_id)
         .expect("fresh function should have a retained call summary");
-    assert_eq!(
-        fresh_summary.return_alias,
-        FunctionReturnAliasSummary::Fresh
+    let facts = allocation_facts(&fresh_summary.return_alias);
+    assert!(facts.success.reachable);
+    assert!(
+        facts
+            .success
+            .sources
+            .iter()
+            .all(|row| row.source == CallAllocationSource::Fresh)
     );
 }
 
 #[test]
-fn multi_return_fallible_external_retains_unknown_alias_summary() {
+fn multi_return_fallible_external_preserves_ordered_contract() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let const_values = ConstValueStore::default();
     let types = TypeEnvironment::new();
@@ -1635,13 +1670,10 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture registration should succeed");
-    assert_eq!(
-        external_package_registry
-            .get_function_by_id(external_id)
-            .expect("registered external definition")
-            .hir_return_alias(),
-        ExternalHirReturnAlias::Unknown,
-    );
+    let external = external_package_registry
+        .get_function_by_id(external_id)
+        .expect("registered external definition");
+    assert_eq!(external.hir_return_sources().len(), 2);
 
     let imprecise_return_name = symbol("imprecise_return", &mut path_fork, &mut string_table);
     let fallible_external_call = {
@@ -1768,7 +1800,12 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 .public_call_summaries
                 .get(&function_id)
                 .expect("forwarded imprecise function should have a retained call summary");
-            assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Unknown);
+            assert_eq!(
+                summary, &report.analysis.public_call_summaries[&function_id],
+                "declaration order must not affect the forwarded native contract"
+            );
+            let facts = allocation_facts(&summary.return_alias);
+            assert!(facts.success.reachable && facts.error.reachable);
             let function = hir
                 .functions
                 .iter()
@@ -1779,20 +1816,23 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 function,
                 Some(&analysis.public_call_summaries),
                 Some(&external_package_registry),
+                None,
             )
             .expect("external and wrapper provenance should normalize");
-            let expected_reason = if *function_name == imprecise_return_name {
-                CallResultUnknownReason::OpaqueExternal
-            } else {
-                CallResultUnknownReason::SummaryUnknown
-            };
-            assert!(problem.origins().iter().any(|origin| matches!(
-                &origin.kind,
-                OriginKind::CallResult {
-                    provenance: CallResultProvenance::Unknown(reason),
-                    ..
-                } if *reason == expected_reason
-            )));
+            let native_results = problem
+                .events()
+                .iter()
+                .find_map(|event| {
+                    let EventKind::CallEffect(effect) = &event.kind else {
+                        return None;
+                    };
+                    (effect.results.len() == 2).then_some(&effect.results)
+                })
+                .expect("the normalized success edge has both native destinations");
+            assert_eq!(
+                native_results[0].origin, native_results[1].origin,
+                "the Boracle adapter must not invent distinct origins from ABI slot positions"
+            );
         }
     }
 }
@@ -1837,7 +1877,15 @@ return input + 1
         .get(&function_id)
         .expect("numeric return function should have a call summary");
 
-    assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
+    let facts = allocation_facts(&summary.return_alias);
+    assert!(facts.success.reachable);
+    assert!(
+        facts
+            .success
+            .sources
+            .iter()
+            .all(|row| row.source == CallAllocationSource::Fresh)
+    );
 }
 
 #[test]
@@ -1880,11 +1928,13 @@ return ~scores.remove("key")!
         .get(&function_id)
         .expect("map return function should have a call summary");
 
-    assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
+    let facts = allocation_facts(&summary.return_alias);
+    assert!(facts.success.reachable && facts.error.reachable);
+    assert!(facts.success.sharing.is_empty());
 }
 
 #[test]
-fn multi_return_alias_summary_conservatively_unions_returned_elements() {
+fn multi_return_summary_retains_slot_sources_and_sharing_separately() {
     let source = r#"
 Point = |
 x I32,
@@ -1936,22 +1986,37 @@ return value, copy value
             .clone()
     };
 
-    assert_eq!(
-        summary_for("pair"),
-        FunctionReturnAliasSummary::AliasParams(vec![0, 1])
-    );
-    assert_eq!(
-        summary_for("duplicate"),
-        FunctionReturnAliasSummary::AliasParams(vec![0])
-    );
-    assert_eq!(
-        summary_for("copy_one"),
-        FunctionReturnAliasSummary::AliasParams(vec![0])
-    );
+    let parameter = |index| {
+        CallAllocationSource::Parameter(CallParameterPath {
+            index,
+            path: Vec::new(),
+        })
+    };
+    for (name, source0, source1) in [
+        ("pair", parameter(0), parameter(1)),
+        ("duplicate", parameter(0), parameter(0)),
+        ("copy_one", parameter(0), CallAllocationSource::Fresh),
+    ] {
+        let summary = summary_for(name);
+        let facts = allocation_facts(&summary);
+        for (slot, source) in [source0, source1].into_iter().enumerate() {
+            assert!(facts.success.sources.iter().any(|row| {
+                matches!(&row.output, CallOutputPath::Result(path) if path.slot == slot && path.path.is_empty())
+                    && row.source == source
+            }));
+        }
+        match name {
+            "pair" => assert!(facts.success.sharing.iter().any(|row| {
+                matches!(&row.condition, CallSharingCondition::Parameters(a, b) if a.index == 0 && b.index == 1)
+            })),
+            "duplicate" => assert!(facts.success.sharing.iter().any(|row| row.condition == CallSharingCondition::Always)),
+            _ => assert!(facts.success.sharing.is_empty()),
+        }
+    }
 }
 
 #[test]
-fn recursive_return_summary_stays_unknown() {
+fn nonreturning_recursive_cycle_does_not_create_a_fresh_result() {
     let source = r#"
 recursive |value I32| -> I32:
 return recursive(value)
@@ -1982,15 +2047,9 @@ return recursive(value)
         .expect("recursive function should lower to HIR")
         .id;
 
-    assert_eq!(
-        report
-            .analysis
-            .public_call_summaries
-            .get(&recursive_id)
-            .expect("recursive function should have a call summary")
-            .return_alias,
-        FunctionReturnAliasSummary::Unknown
-    );
+    let summary = &report.analysis.public_call_summaries[&recursive_id];
+    let facts = allocation_facts(&summary.return_alias);
+    assert!(!facts.success.reachable && facts.success.sources.is_empty());
 }
 
 #[test]
@@ -3853,12 +3912,8 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
         .find(|function| hir.side_table.function_name_path(function.id) == Some(recover_name))
         .expect("the recovering function must exist");
     let summary = &report.analysis.public_call_summaries[&recover.id];
-    // Unknown is the compact classifier's permitted conservative join. Either summary
-    // must retain the parameter-derived result instead of incorrectly advertising Fresh.
-    assert_ne!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
-    if let FunctionReturnAliasSummary::AliasParams(indices) = &summary.return_alias {
-        assert_eq!(indices, &[0, 1]);
-    }
+    let facts = allocation_facts(&summary.return_alias);
+    assert_eq!(root_source_arguments(facts), [0, 1]);
 
     let return_facts = hir
         .blocks
@@ -3908,13 +3963,10 @@ retained_reference |value ~String, fallback String, trigger I32| -> String:
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("catch joins must preserve native success provenance");
 
-    for (name, expected_alias) in [
-        ("fresh_numeric", FunctionReturnAliasSummary::Fresh),
-        ("fresh_cast", FunctionReturnAliasSummary::Fresh),
-        (
-            "retained_reference",
-            FunctionReturnAliasSummary::AliasParams(vec![0, 1]),
-        ),
+    for (name, expected_arguments) in [
+        ("fresh_numeric", &[][..]),
+        ("fresh_cast", &[][..]),
+        ("retained_reference", &[0, 1][..]),
     ] {
         let function = hir
             .functions
@@ -3927,7 +3979,9 @@ retained_reference |value ~String, fallback String, trigger I32| -> String:
             })
             .expect("each catch fixture must lower to a function");
         let summary = &report.analysis.public_call_summaries[&function.id];
-        assert_eq!(summary.return_alias, expected_alias, "{name}");
+        let facts = allocation_facts(&summary.return_alias);
+        assert!(facts.success.reachable, "{name}");
+        assert_eq!(root_source_arguments(facts), expected_arguments, "{name}");
         assert_eq!(
             summary.parameters[0].access,
             PublicCallParameterAccess::Mutable,

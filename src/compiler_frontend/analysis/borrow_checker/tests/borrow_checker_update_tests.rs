@@ -1639,6 +1639,98 @@ return observed.length()
 }
 
 #[test]
+fn projected_cell_writes_allow_independent_siblings() {
+    let pair = "pair ~= Pair(Box(1), Box(2))";
+    for write in ["~pair.right = Box(3)", "~pair.right.value = 3"] {
+        let source = projected_cell_fixture(pair, "pair.left", write, "hold.value");
+        check_source(&source).unwrap_or_else(|error| panic!("{write} should be legal: {error:?}"));
+    }
+}
+
+#[test]
+fn projected_cell_writes_reject_live_overlaps() {
+    let independent = "pair ~= Pair(Box(1), Box(2))";
+    let shared = "child ~= Box(1)\npair ~= Pair(child, child)";
+    for (pair, observer, write, read, access) in [
+        (
+            independent,
+            "pair.left",
+            "~pair.left = Box(3)",
+            "hold.value",
+            "= Box(3)",
+        ),
+        (
+            independent,
+            "pair",
+            "~pair.right = Box(3)",
+            "hold.left.value",
+            "= Box(3)",
+        ),
+        (
+            shared,
+            "pair.left",
+            "~pair.right.value = 3",
+            "hold.value",
+            "= 3",
+        ),
+        // The read retained the shared allocation, not a proven distinct cell occurrence.
+        (
+            shared,
+            "pair.left",
+            "~pair.right = Box(3)",
+            "hold.value",
+            "= Box(3)",
+        ),
+    ] {
+        let source = projected_cell_fixture(pair, observer, write, read);
+        assert_layer_conflict_at(&source, access);
+    }
+}
+
+#[test]
+fn projected_cell_replacement_checks_explicit_old_descendants() {
+    let source = "\
+Leaf = |value I32|\n\
+Box = |leaf Leaf|\n\
+Pair = |left Box, right Box|\n\
+probe || -> I32:\n\
+leaf ~= Leaf(1)\n\
+pair ~= Pair(Box(leaf), Box(leaf))\n\
+hold = pair.left.leaf\n\
+~pair.right = Box(Leaf(3))\n\
+return hold.value\n\
+;";
+    assert_layer_conflict_at(source, "= Box(Leaf(3))");
+}
+
+#[test]
+fn projected_cell_replacement_does_not_mutate_old_shared_value() {
+    for binding in ["child ~= Box(2)", "child = Box(2)"] {
+        let pair = format!("{binding}\npair ~= Pair(child, child)");
+        let source = projected_cell_fixture(&pair, "child", "~pair.right = Box(3)", "hold.value");
+        check_source(&source).expect("the old shared value is not being mutated");
+    }
+
+    let pair = "child = Box(2)\npair ~= Pair(child, child)";
+    let source = projected_cell_fixture(pair, "child", "~pair.right.value = 3", "hold.value");
+    let error = check_source(&source).expect_err("mutating through the read-only child must fail");
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
+fn projected_cell_fixture(pair: &str, observe: &str, write: &str, read: &str) -> String {
+    format!(
+        "Box = |value I32|\n\
+         Pair = |left Box, right Box|\n\
+         probe || -> I32:\n\
+         {pair}\n\
+         hold = {observe}\n\
+         {write}\n\
+         return {read}\n\
+         ;"
+    )
+}
+
+#[test]
 fn duplicate_collection_children_remain_aliased_after_removal() {
     for (binding, removed, surviving) in [
         ("entries ~= {child, child}", "0", "0"),
@@ -1678,7 +1770,7 @@ probe |input Box| -> I32:\n\
 }
 
 fn assert_layer_conflict_at(source: &str, access: &str) {
-    let error = check_source(source).expect_err("a live retained child must block this write");
+    let error = check_source(source).expect_err("a live alias must block this write");
     let draft = error
         .into_draft_or_infrastructure()
         .expect("typed borrow diagnostic");
@@ -1914,7 +2006,6 @@ fn transfer_isolated_statement(
         imported_call_summaries: &checker.module.imported_call_summaries,
         module_private_call_summaries: &checker.module.module_private_call_summaries,
         generated_call_summaries: &checker.module.generated_call_summaries,
-        typed_local_results: &checker.typed_local_results,
         local_types: &checker.local_types,
         structs: &checker.module.structs,
         choices: &checker.module.choices,

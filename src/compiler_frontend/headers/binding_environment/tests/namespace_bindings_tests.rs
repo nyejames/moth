@@ -54,7 +54,7 @@ use crate::compiler_frontend::headers::types::{
     RetainedDependencyClause,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallSummary,
+    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::public_interface::{
     ConcreteCallSummaryRecord, ProviderDependencyKind, PublicAliasSemantics, PublicBindingExport,
@@ -2310,7 +2310,13 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
             origin: method_origin,
             summary: PublicCallSummary {
                 parameters: Vec::new(),
-                return_alias: FunctionReturnAliasSummary::Fresh,
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                    success: CallLaneSummary {
+                        reachable: true,
+                        ..Default::default()
+                    },
+                    error: CallLaneSummary::default(),
+                })),
                 escapes_builtin_failure: false,
                 uses_fast_semantics: false,
                 may_trap: false,
@@ -3617,7 +3623,13 @@ fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure()
     let origin = OriginFunctionId::new_free(module_origin, "make".to_owned());
     let first = PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..Default::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -3625,7 +3637,7 @@ fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure()
     };
     let second = PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Unknown,
+        return_alias: FunctionReturnAliasSummary::Known(Box::default()),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

@@ -92,6 +92,15 @@ pub(super) fn check_mutable_access(
     roots: &RootSet,
     policy: MutableAccessPolicy,
 ) -> Result<(), BorrowCheckError> {
+    check_mutable_access_with_targets(check, roots, policy, &[])
+}
+
+pub(super) fn check_mutable_access_with_targets(
+    check: &mut AccessCheckContext<'_, '_>,
+    roots: &RootSet,
+    policy: MutableAccessPolicy,
+    projected_targets: &[MutationTarget],
+) -> Result<(), BorrowCheckError> {
     let preserve_cfg_future_use_activity =
         preserves_cfg_future_use_activity(check.context, check.layout, check.actor_index_hint);
     let alias_activity = AliasActivityContext {
@@ -149,12 +158,30 @@ pub(super) fn check_mutable_access(
 
         let direct_alias_only = policy.alias_exclusivity == AliasExclusivity::Direct;
         let actor_index = check.actor_index_hint.unwrap_or(root_index);
+        let disjoint = |candidate| {
+            if projected_targets.is_empty() || candidate == root_index {
+                return false;
+            }
+            let state = check.state.local_state(candidate);
+            if state.direct_alias_roots.contains(root_index)
+                || state.write_target_roots.contains(root_index)
+            {
+                return false;
+            }
+            // Coarse provenance still names the containing slot. A binding with explicit
+            // allocations can observe a sibling instead of the projected value being changed.
+            let (ids, layer_only) = check.state.local_alloc_ids(candidate);
+            layer_only
+                && !ids.is_empty()
+                && !check.state.alloc_reaches(&ids, true, projected_targets)
+        };
         let alias_count = active_alias_count_for_root(
             &alias_activity,
             root_index,
             actor_index,
             policy.strict_move_exclusivity,
             direct_alias_only,
+            &disjoint,
         );
         if alias_count > 1 {
             let conflicting_local_index = conflicting_active_local_for_root(
@@ -163,6 +190,7 @@ pub(super) fn check_mutable_access(
                 actor_index,
                 policy.strict_move_exclusivity,
                 direct_alias_only,
+                &disjoint,
             );
             let place = check
                 .context
@@ -417,6 +445,7 @@ fn active_alias_count_for_root(
     actor_index: usize,
     strict_move_exclusivity: bool,
     direct_alias_only: bool,
+    disjoint: &impl Fn(usize) -> bool,
 ) -> u32 {
     let mut count = 0u32;
     let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
@@ -452,7 +481,8 @@ fn active_alias_count_for_root(
             root_index,
             candidate_index,
             strict_move_exclusivity,
-        ) {
+        ) || disjoint(candidate_index)
+        {
             continue;
         }
 
@@ -528,6 +558,7 @@ fn conflicting_active_local_for_root(
     actor_index: usize,
     strict_move_exclusivity: bool,
     direct_alias_only: bool,
+    disjoint: &impl Fn(usize) -> bool,
 ) -> Option<usize> {
     let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
 
@@ -556,7 +587,8 @@ fn conflicting_active_local_for_root(
             root_index,
             candidate_index,
             strict_move_exclusivity,
-        ) {
+        ) || disjoint(candidate_index)
+        {
             continue;
         }
 

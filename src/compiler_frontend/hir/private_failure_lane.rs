@@ -43,14 +43,12 @@ use crate::compiler_frontend::hir::utils::{collect_structural_blocks, terminator
 use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 
-/// Whether lane installation rewrote the HIR it was given.
-///
-/// WHY: borrow analysis and validation of unchanged HIR would only reproduce the convergence
-///      results, so the caller re-runs them only after a rewrite. Most generated sidecars and
-///      fully proven bodies have no escaping private failure and stay unchanged.
+/// Whether lane installation changed executable allocation inputs or only HIR metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrivateFailureLaneInstallation {
     Unchanged,
+    /// Allocation inputs are unchanged, but link metadata may need refreshing.
+    MetadataOnly,
     Rewritten,
 }
 
@@ -74,10 +72,9 @@ pub(crate) fn install_private_failure_lanes(
         .iter()
         .map(|record| (record.statement, record.handler))
         .collect::<FxHashMap<_, _>>();
-    // Draining records, installing return lanes and pruning handlers all change the HIR.
-    let mut rewritten =
-        !records.is_empty() || !handler_records.is_empty() || !lane_functions.is_empty();
-    {
+    let records_drained = !records.is_empty() || !handler_records.is_empty();
+    let mut bodies_rewritten = !lane_functions.is_empty();
+    let metadata_changed = {
         let mut installer = LaneInstaller {
             hir,
             report,
@@ -91,22 +88,32 @@ pub(crate) fn install_private_failure_lanes(
         installer.assert_records_reference_live_calls(&records)?;
         installer.prepare_ids()?;
         installer.install_return_lanes()?;
-        rewritten |= installer.rewrite_bodies()?;
+        bodies_rewritten |= installer.rewrite_bodies()?;
         installer.retarget_implicit_conversion_failures()?;
-        rewritten |= installer.narrow_entry_return()?;
+        // No structural ReturnError means no error-lane facts to invalidate. The
+        // compiler-owned entry keeps its Vec<String> result, so allocation value
+        // tracking remains enabled even without the heap-allocated Error slot.
+        let entry_narrowed = installer.narrow_entry_return()?;
+        // Only blocks outside every entry-reachable CFG are removed. The drained
+        // records already account for this metadata change.
         installer.prune_unrouted_catch_handlers(&handler_records);
         installer.hir.compact_block_ids();
-        rewritten |= installer
+        let provenance_changed = installer
             .hir
             .finalize_function_provenance_after_rewrites()?;
-    }
-    if !rewritten {
+        records_drained || entry_narrowed || provenance_changed
+    };
+    let result = if bodies_rewritten {
+        PrivateFailureLaneInstallation::Rewritten
+    } else if metadata_changed {
+        PrivateFailureLaneInstallation::MetadataOnly
+    } else {
         return Ok(PrivateFailureLaneInstallation::Unchanged);
-    }
+    };
 
     // Rewrites finish before analysis can consume the final base or generated body.
     validate_hir_module(hir, type_environment, external_packages)?;
-    Ok(PrivateFailureLaneInstallation::Rewritten)
+    Ok(result)
 }
 
 struct LaneInstaller<'a> {

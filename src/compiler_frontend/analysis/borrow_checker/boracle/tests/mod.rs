@@ -771,9 +771,10 @@ fn boracle_alpha_shared_subset_differential_disagreements_are_classified() {
             &external_packages,
             &path_fork,
             &string_table,
+            None,
         )
         .is_ok();
-        let problem = super::super::problem::from_hir(&module, &function, None, None)
+        let problem = super::super::problem::from_hir(&module, &function, None, None, None)
             .expect("shared differential HIR should extract");
         let boracle_accepts = !super::BoracleSolver::solve(&problem)
             .expect("shared differential problem should solve")
@@ -2008,6 +2009,7 @@ fn alias_params_call_parts(parameter_indices: Vec<usize>) -> BorrowProblemParts 
         calls: vec![Call {
             id: super::super::problem::CallId::new(0),
             label: "alias-call".to_owned(),
+            opaque_stores: false,
         }],
         uses: vec![
             Use {
@@ -2117,6 +2119,7 @@ fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
         calls: vec![Call {
             id: super::super::problem::CallId::new(0),
             label: "alias-call".to_owned(),
+            opaque_stores: false,
         }],
         uses: vec![
             Use {
@@ -2221,6 +2224,7 @@ fn partial_argument_alias_params_problem() -> BorrowProblem {
         calls: vec![Call {
             id: super::super::problem::CallId::new(0),
             label: "partial-alias-call".to_owned(),
+            opaque_stores: false,
         }],
         uses: vec![
             Use {
@@ -2695,6 +2699,7 @@ fn same_call_conflict_problem() -> BorrowProblem {
         calls: vec![Call {
             id: super::super::problem::CallId::new(0),
             label: "same-call-conflict".to_owned(),
+            opaque_stores: false,
         }],
         events: vec![
             Event::new(
@@ -2868,7 +2873,7 @@ fn hir_option_projection_problem_with_rebinding(rebind: bool) -> BorrowProblem {
             None,
         )),
     };
-    super::super::problem::from_hir(&module, &function, None, None)
+    super::super::problem::from_hir(&module, &function, None, None, None)
         .expect("option payload projection should extract")
 }
 

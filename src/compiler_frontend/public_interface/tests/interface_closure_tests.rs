@@ -29,7 +29,7 @@ use crate::compiler_frontend::folded_value::{
     FoldedAllocationDefinition, PublicFoldedField, PublicFoldedValue,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallSummary,
+    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
@@ -78,7 +78,13 @@ fn trait_origin(module: &StableModuleOriginIdentity, name: &str) -> OriginTraitI
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..CallLaneSummary::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -735,7 +741,7 @@ fn disagreeing_provider_summaries_fail_deterministically() {
     let module = provider_origin("shared");
     let origin = function_origin(&module, "make_card");
     let mut differing_summary = empty_summary();
-    differing_summary.return_alias = FunctionReturnAliasSummary::AliasParams(vec![0]);
+    differing_summary.return_alias = FunctionReturnAliasSummary::Known(Box::default());
 
     let first = provider_interface(
         &module,

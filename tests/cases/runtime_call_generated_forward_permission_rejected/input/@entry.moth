@@ -1,0 +1,11 @@
+@helper forward
+
+probe || -> I32:
+    child = {1}
+    retained ~= forward(child)
+    ~retained.sibling.push(2)
+    ~retained.items.push(2)
+    return retained.items.length() + retained.sibling.length()
+;
+
+~[:[probe()]]

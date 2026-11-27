@@ -5,6 +5,7 @@
 //! WHY: HIR remains immutable during borrow validation, so signature and layout facts are cached
 //! beside the analysis rather than written back into HIR nodes.
 
+use super::diagnostics::BorrowDiagnostics;
 use super::engine::BorrowChecker;
 use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
@@ -16,6 +17,7 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
@@ -26,12 +28,13 @@ use crate::compiler_frontend::hir::utils::{for_each_terminator_target, terminato
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    validate_public_call_summary_transition,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 
 #[path = "return_alias.rs"]
 mod return_alias;
-pub(super) use return_alias::CallResultFacts;
 
 /// Per-block read liveness and direct-assignment facts for one function.
 ///
@@ -88,22 +91,25 @@ struct LocalLayoutFacts {
 }
 
 impl<'a> BorrowChecker<'a> {
-    pub(super) fn build_public_call_summaries(&mut self) -> Result<(), BorrowCheckError> {
+    pub(super) fn seed_public_call_summaries(
+        module: &HirModule,
+        diagnostics: &BorrowDiagnostics<'_>,
+    ) -> Result<FxHashMap<FunctionId, PublicCallSummary>, BorrowCheckError> {
         // Parameter mutability is stored on locals. Gather it once globally, then project
         // parameter-order access and transfer facts into the single retained call contract.
         let mut local_mutability_by_id = FxHashMap::default();
-        for block in &self.module.blocks {
+        for block in &module.blocks {
             for local in &block.locals {
                 local_mutability_by_id.insert(local.id, local.mutable);
             }
         }
 
-        let mut function_ids = FxHashSet::default();
+        let mut summaries = FxHashMap::default();
         let mut parameter_owner_locals = FxHashSet::default();
 
-        for function in &self.module.functions {
-            if !function_ids.insert(function.id) {
-                return Err(self.diagnostics.internal_error(
+        for function in &module.functions {
+            if summaries.contains_key(&function.id) {
+                return Err(diagnostics.internal_error(
                     format!(
                         "Borrow checker found duplicate local function id '{}' while building public call summaries",
                         function.id
@@ -116,28 +122,28 @@ impl<'a> BorrowChecker<'a> {
 
             for (position, param) in function.params.iter().enumerate() {
                 if !parameter_locals.insert(*param) {
-                    return Err(self.diagnostics.internal_error(
+                    return Err(diagnostics.internal_error(
                         format!(
                             "Borrow checker found duplicate parameter local '{}' at position {} in function '{}'",
-                            self.diagnostics.local_name(*param),
+                            diagnostics.local_name(*param),
                             position,
-                            self.diagnostics.function_name(function.id)
+                            diagnostics.function_name(function.id)
                         ),
                     ));
                 }
                 if !parameter_owner_locals.insert(*param) {
-                    return Err(self.diagnostics.internal_error(format!(
+                    return Err(diagnostics.internal_error(format!(
                         "Borrow checker found parameter local '{}' owned by more than one function",
-                        self.diagnostics.local_name(*param)
+                        diagnostics.local_name(*param)
                     )));
                 }
 
                 let Some(is_mutable) = local_mutability_by_id.get(param).copied() else {
-                    return Err(self.diagnostics.internal_error(
+                    return Err(diagnostics.internal_error(
                         format!(
                             "Borrow checker could not resolve mutability for parameter local '{}' in function '{}'",
-                            self.diagnostics.local_name(*param),
-                            self.diagnostics.function_name(function.id)
+                            diagnostics.local_name(*param),
+                            diagnostics.function_name(function.id)
                         ),
                     ));
                 };
@@ -155,11 +161,11 @@ impl<'a> BorrowChecker<'a> {
                 });
             }
 
-            self.public_call_summaries.insert(
+            summaries.insert(
                 function.id,
                 PublicCallSummary {
                     parameters,
-                    return_alias: FunctionReturnAliasSummary::Fresh,
+                    return_alias: FunctionReturnAliasSummary::Pending,
                     escapes_builtin_failure: false,
                     uses_fast_semantics: false,
                     may_trap: false,
@@ -168,126 +174,110 @@ impl<'a> BorrowChecker<'a> {
             );
         }
 
-        self.stabilize_return_alias_summaries()?;
-
-        if self.public_call_summaries.len() != self.module.functions.len() {
-            return Err(self.diagnostics.internal_error(format!(
-                "Borrow checker retained {} public call summaries for {} local functions",
-                self.public_call_summaries.len(),
-                self.module.functions.len()
-            )));
-        }
-
-        Ok(())
+        Ok(summaries)
     }
 
-    fn stabilize_return_alias_summaries(&mut self) -> Result<(), BorrowCheckError> {
-        // Return aliases form a finite monotone lattice. Recompute every function from the same
-        // retained map, then publish the whole pass so local call chains cannot depend on HIR
-        // declaration order.
-        let recursive_functions = self.recursive_return_alias_functions()?;
-        for function_id in &recursive_functions {
-            let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
-                return Err(self.diagnostics.internal_error(format!(
-                    "Borrow checker is missing the public call summary for recursive function '{}'",
-                    self.diagnostics.function_name(*function_id)
-                )));
-            };
-            // A recursive return-summary cycle has no finite body summary to project through.
-            // Publish Unknown at the cycle boundary so callers cannot mistake the initial Fresh
-            // seed for a proven fresh result.
-            summary.return_alias = FunctionReturnAliasSummary::Unknown;
-        }
+    pub(super) fn build_public_call_summaries(&mut self) -> Result<(), BorrowCheckError> {
+        self.public_call_summaries =
+            Self::seed_public_call_summaries(self.module, &self.diagnostics)?;
 
-        let parameter_count = self
+        let mut indices = Vec::with_capacity(self.module.functions.len());
+        let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
+        for (position, function) in self.module.functions.iter().enumerate() {
+            let index = return_alias::IndexedFunction::new(self, function, true)?;
+            for &callee in &index.callees {
+                callers.entry(callee).or_default().push(position);
+            }
+            indices.push(Some(index));
+        }
+        self.stabilize_return_alias_summaries(
+            indices,
+            &callers,
+            (0..self.module.functions.len()).collect(),
+        )
+    }
+
+    pub(super) fn refresh_return_alias_summaries(
+        &mut self,
+        link_facts: &crate::compiler_frontend::hir::reachability::HirModuleLinkFacts,
+        changed_callers: &FxHashSet<FunctionId>,
+    ) -> Result<(), BorrowCheckError> {
+        let positions: FxHashMap<_, _> = self
             .module
             .functions
             .iter()
-            .map(|function| function.params.len())
-            .sum::<usize>();
-        let max_iterations = parameter_count
-            .saturating_add(self.module.functions.len().saturating_mul(2))
-            .saturating_add(1);
-
-        for _ in 0..max_iterations {
-            let mut retained_by_function = Vec::with_capacity(self.module.functions.len());
-            for function in &self.module.functions {
-                let classified = if recursive_functions.contains(&function.id) {
-                    FunctionReturnAliasSummary::Unknown
-                } else {
-                    self.classify_function_return_alias(function)?
-                };
-                retained_by_function.push((function.id, classified.clone(), classified));
-            }
-
-            let mut changed = false;
-            for (function_id, _, retained) in &retained_by_function {
-                let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
-                    return Err(self.diagnostics.internal_error(format!(
-                        "Borrow checker is missing the public call summary for function '{}'",
-                        self.diagnostics.function_name(*function_id)
-                    )));
-                };
-
-                if summary.return_alias != *retained {
-                    summary.return_alias = retained.clone();
-                    changed = true;
-                }
-            }
-
-            if !changed {
-                return Ok(());
-            }
+            .enumerate()
+            .map(|(position, function)| (function.id, position))
+            .collect();
+        let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
+        for (caller, callee) in link_facts.local_call_edges() {
+            callers.entry(callee).or_default().push(positions[&caller]);
         }
-
-        Err(self
-            .diagnostics
-            .internal_error("Borrow checker could not stabilize local return-alias summaries"))
+        let queue = self
+            .module
+            .functions
+            .iter()
+            .enumerate()
+            .filter_map(|(position, function)| {
+                (changed_callers.contains(&function.id)
+                    || self.public_call_summaries[&function.id].return_alias
+                        == FunctionReturnAliasSummary::Pending)
+                    .then_some(position)
+            })
+            .collect();
+        let indices = (0..positions.len()).map(|_| None).collect();
+        self.stabilize_return_alias_summaries(indices, &callers, queue)
     }
 
-    fn recursive_return_alias_functions(&self) -> Result<FxHashSet<FunctionId>, BorrowCheckError> {
-        let mut edges = FxHashMap::<FunctionId, Vec<FunctionId>>::default();
-        for function in &self.module.functions {
-            let mut callees = Vec::new();
-            let reachable_blocks = self.collect_reachable_blocks(function)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id_or_error(block_id, function.id)?;
-
-                for statement in &block.statements {
-                    let HirStatementKind::Call {
-                        target: CallTarget::Local(callee),
-                        ..
-                    } = &statement.kind
-                    else {
-                        continue;
-                    };
-                    callees.push(*callee);
+    fn stabilize_return_alias_summaries(
+        &mut self,
+        mut indices: Vec<Option<return_alias::IndexedFunction>>,
+        callers: &FxHashMap<FunctionId, Vec<usize>>,
+        mut queue: VecDeque<usize>,
+    ) -> Result<(), BorrowCheckError> {
+        let mut queued = vec![false; indices.len()];
+        for &position in &queue {
+            queued[position] = true;
+        }
+        while let Some(position) = queue.pop_front() {
+            queued[position] = false;
+            let function = &self.module.functions[position];
+            let previous = &self.public_call_summaries[&function.id];
+            let index = match &mut indices[position] {
+                Some(index) => index,
+                entry @ None => {
+                    entry.insert(return_alias::IndexedFunction::new(self, function, false)?)
                 }
-                if let HirTerminator::Invoke {
-                    operation:
-                        HirFallibleOperation::Call {
-                            target: CallTarget::Local(callee),
-                            ..
-                        },
-                    ..
-                } = &block.terminator
-                {
-                    callees.push(*callee);
+            };
+            let return_alias = self.classify_function_return_alias(function, index)?;
+            if previous.return_alias == return_alias {
+                continue;
+            }
+            // Known with both lanes unreachable transfers exactly like Pending at a call, so
+            // callers have nothing new to see even though the summary itself is published.
+            let notify = !previous
+                .return_alias
+                .same_allocation_transfer_as(&return_alias);
+            let summary = PublicCallSummary {
+                parameters: previous.parameters.clone(),
+                return_alias,
+                escapes_builtin_failure: previous.escapes_builtin_failure,
+                uses_fast_semantics: previous.uses_fast_semantics,
+                may_trap: previous.may_trap,
+                may_fail: previous.may_fail,
+            };
+            self.validate_local_allocation_summary(function, &summary)?;
+            validate_public_call_summary_transition(previous, &summary)?;
+            self.public_call_summaries.insert(function.id, summary);
+            if notify && let Some(callers) = callers.get(&function.id) {
+                for &caller in callers {
+                    if !std::mem::replace(&mut queued[caller], true) {
+                        queue.push_back(caller);
+                    }
                 }
             }
-            callees.sort_unstable_by_key(|callee| callee.0);
-            callees.dedup();
-            edges.insert(function.id, callees);
         }
-
-        let mut recursive = FxHashSet::default();
-        for function in &self.module.functions {
-            let mut visited = FxHashSet::default();
-            if reaches_function(function.id, function.id, &edges, &mut visited) {
-                recursive.insert(function.id);
-            }
-        }
-        Ok(recursive)
+        Ok(())
     }
 
     pub(super) fn finalize_public_call_summary_effects(
@@ -310,14 +300,11 @@ impl<'a> BorrowChecker<'a> {
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for statement in &block.statements {
+                // A call with no reachable success lane can stop transfer inside this block.
+                // Do not ascribe effects to a syntactically present but unexecuted suffix.
                 let Some(statement_fact) = report.analysis.statement_facts.get(&statement.id)
                 else {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker is missing statement facts while finalizing public call summary for function '{}'",
-                            self.diagnostics.function_name(function.id)
-                        ),
-                    ));
+                    break;
                 };
 
                 match &statement.kind {
@@ -373,6 +360,9 @@ impl<'a> BorrowChecker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if !report.analysis.terminator_facts.contains_key(block_id) {
+                continue;
             }
             // A terminating call mutates its arguments before divergence exactly like an ordinary
             // call. Its effects must still reach this function's public summary even though the
@@ -1185,28 +1175,6 @@ fn collect_statement_defined_locals(statement: &HirStatement, visitor: &mut impl
         | HirStatementKind::Expr(_)
         | HirStatementKind::PushRuntimeFragment { .. } => {}
     }
-}
-
-fn reaches_function(
-    start: FunctionId,
-    current: FunctionId,
-    edges: &FxHashMap<FunctionId, Vec<FunctionId>>,
-    visited: &mut FxHashSet<FunctionId>,
-) -> bool {
-    let Some(callees) = edges.get(&current) else {
-        return false;
-    };
-
-    for callee in callees {
-        if *callee == start {
-            return true;
-        }
-        if visited.insert(*callee) && reaches_function(start, *callee, edges, visited) {
-            return true;
-        }
-    }
-
-    false
 }
 
 fn collect_statement_loaded_locals(

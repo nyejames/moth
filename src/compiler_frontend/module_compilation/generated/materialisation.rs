@@ -23,7 +23,6 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
     Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
@@ -32,7 +31,7 @@ use crate::compiler_frontend::module_compilation::external_imports::{
     collect_external_import_candidates_for_packages, collect_external_import_package_ids,
 };
 use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionSidecar;
-use crate::compiler_frontend::module_compilation::generated::convergence::exact_generated_sidecar_summary;
+use crate::compiler_frontend::module_compilation::generated::convergence::generated_root_summary;
 use crate::compiler_frontend::module_compilation::generated::never_proofs::GeneratedNeverProofs;
 use crate::compiler_frontend::module_compilation::generated::provider_materialisations::{
     DeclaringMaterialisation, declaring_materialisation,
@@ -41,7 +40,7 @@ use crate::compiler_frontend::module_compilation::generated::requests::install_g
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts, GeneratedRequestId,
 };
-use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
+use crate::compiler_frontend::module_compilation::stages::{lower_hir, seed_call_summaries};
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity,
@@ -429,8 +428,7 @@ fn materialise_generated_request<'build>(
         {
             root_failure_facts.boundary = HirBuiltinFailureBoundary::ExportedNoSlot;
         }
-        increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
-        let borrow_analysis = check_borrows(
+        let borrow_analysis = seed_call_summaries(
             &mut generated_compiler,
             &hir_module,
             &type_environment,
@@ -496,7 +494,7 @@ fn materialise_generated_request<'build>(
 
     // The boundary install tail replaces each sidecar placeholder with the one final path table
     // after all publications, so successful materialisation does not snapshot the growing table.
-    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module);
+    let summary = generated_root_summary(&request.identity, &generated_module).clone();
     transaction.complete(
         request_id,
         summary,

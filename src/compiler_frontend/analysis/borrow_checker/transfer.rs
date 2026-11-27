@@ -12,7 +12,6 @@ mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
-use crate::compiler_frontend::analysis::borrow_checker::metadata::CallResultFacts;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AllocId, BorrowState, FieldKey, FunctionLayout, LocalState, StoredValue,
 };
@@ -36,6 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use rustc_hash::FxHashMap;
 
+pub(super) use access::bind_call_result_ids;
 use access::{
     AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
     transfer_terminator,
@@ -55,7 +55,6 @@ pub(super) struct BorrowTransferContext<'a> {
     pub module_private_call_summaries:
         &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
     pub generated_call_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
-    pub typed_local_results: &'a FxHashMap<FunctionId, Vec<Option<CallResultFacts>>>,
     pub local_types: &'a FxHashMap<LocalId, TypeId>,
     pub structs: &'a [HirStruct],
     pub choices: &'a [HirChoice],
@@ -64,21 +63,26 @@ pub(super) struct BorrowTransferContext<'a> {
     pub diagnostics: BorrowDiagnostics<'a>,
 }
 
-/// One allocation-layer effect a fallible operation applies only on its success edge.
-///
-/// WHY: a failed insert stores nothing and a failed removal takes nothing, so the effects wait
-///      for the edge like the operation's result locals do.
+/// An allocation-layer effect captured before retiring a call's result bindings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InvokeLayerOp {
     Store {
         holders: Vec<AllocId>,
         key: FieldKey,
         values: Vec<StoredValue>,
+        views: Vec<AllocId>,
+        distinct_occurrence: bool,
     },
     Contribute {
         holder: AllocId,
         key: FieldKey,
         value: StoredValue,
+    },
+    ConstructField {
+        holder: AllocId,
+        key: FieldKey,
+        values: Vec<StoredValue>,
+        views: Vec<AllocId>,
     },
     Remove {
         holders: Vec<AllocId>,
@@ -88,8 +92,50 @@ pub(super) enum InvokeLayerOp {
     Bind {
         local: LocalId,
         ids: Vec<AllocId>,
+        views: Vec<AllocId>,
         readonly: bool,
     },
+    ViewMember {
+        view: AllocId,
+        id: AllocId,
+    },
+    ViewField {
+        holder: AllocId,
+        key: FieldKey,
+        view: AllocId,
+    },
+    ViewPair {
+        left: AllocId,
+        right: AllocId,
+        may_share: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum InvokeLane {
+    Success,
+    Error,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct InvokeLaneTransfer {
+    pub results: Vec<(LocalId, LocalState)>,
+    pub operations: Vec<InvokeLayerOp>,
+    pub unreachable: bool,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct InvokeTransfer {
+    pub success: InvokeLaneTransfer,
+    pub error: InvokeLaneTransfer,
+}
+
+impl InvokeTransfer {
+    pub(super) fn is_empty(&self) -> bool {
+        [&self.success, &self.error]
+            .into_iter()
+            .all(|lane| lane.results.is_empty() && lane.operations.is_empty() && !lane.unreachable)
+    }
 }
 
 /// Accumulated statistics and emitted facts for one block transfer.
@@ -110,8 +156,8 @@ pub(super) struct BlockTransferStats {
     pub terminator_fact: Option<(BlockId, TerminatorBorrowFact)>,
     pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
     // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
-    pub invoke_results: Vec<(LocalId, LocalState)>,
-    pub invoke_layer_ops: Vec<InvokeLayerOp>,
+    pub invoke: InvokeTransfer,
+    pub diverges: bool,
 }
 
 /// Executes one forward transfer step for a single basic block.
@@ -143,6 +189,10 @@ pub(super) fn transfer_block(
         )?;
         value_fact_buffer.finish_use();
         stats.statements_analyzed += 1;
+        if stats.diverges {
+            stats.value_facts = value_fact_buffer.into_serialized(layout);
+            return Ok(stats);
+        }
     }
 
     transfer_terminator(

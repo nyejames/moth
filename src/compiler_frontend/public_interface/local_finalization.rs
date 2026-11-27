@@ -10,18 +10,17 @@
 //! point from the pre-HIR draft to the completed phase. Keeping finalization in its own module
 //! separates the post-borrow-validation step from the pre-HIR projection modules.
 
-use super::model::PublicParameterTypeSlot;
 use super::model::{
     ConcreteCallSummaryRecord, LocalPublicInterface, PublicDeclarationSemantics,
-    PublicFunctionCategory, PublicInterfaceDraft, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics,
+    PublicFunctionCategory, PublicInterfaceDraft, PublicParameterTypeSlot,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
-    PublicCallSummary, validate_public_call_summary,
+    FunctionReturnAliasSummary, PublicCallSummary, validate_public_call_parameter_contract,
 };
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeId,
@@ -232,7 +231,7 @@ fn finalize_receiver_method_summaries(
 
 fn finalize_callable_summary(
     origin: &OriginFunctionId,
-    signature_parameters: &[PublicParameterTypeSlot],
+    parameters: &[PublicParameterTypeSlot],
     concrete_call_summaries: &mut FxHashMap<OriginFunctionId, PublicCallSummary>,
     expected_origins: &mut FxHashSet<OriginFunctionId>,
     borrow_analysis: &BorrowAnalysis,
@@ -276,16 +275,25 @@ fn finalize_callable_summary(
                 origin, local_function_id
             ))
         })?;
-    let declared_parameter_access = signature_parameters
-        .iter()
-        .map(|parameter| parameter.access)
-        .collect::<Vec<_>>();
-    validate_public_call_summary(&declared_parameter_access, summary).map_err(|error| {
-        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
-            "public-interface finalization found an invalid call summary for stable origin {:?}: {}",
-            origin, error.message
-        ))
-    })?;
+    let invalid_summary = |message: &str| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization found an invalid call summary for stable origin {origin:?}: {message}"
+            ),
+        )
+    };
+    validate_public_call_parameter_contract(
+        parameters.iter().map(|parameter| parameter.access),
+        summary,
+    )
+    .map_err(|error| invalid_summary(&error.message))?;
+    // Closure input checks layout-dependent facts after direct declaration records are assembled.
+    if matches!(summary.return_alias, FunctionReturnAliasSummary::Pending) {
+        return Err(invalid_summary(
+            "completed callable still has pending facts",
+        ));
+    }
 
     if concrete_call_summaries
         .insert(origin.clone(), summary.clone())

@@ -28,6 +28,8 @@ impl AllocId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in super::super) enum FieldKey {
     Field(u32),
+    /// Ordinal for a reachable concrete type without a caller-local HIR layout.
+    UnmaterializedField(u32),
     Payload {
         variant: u32,
         field: u32,
@@ -44,9 +46,11 @@ enum AllocBase {
     /// A value built by one construction expression.
     Site(u32),
     /// A proven fresh allocation in a specific call result construction.
-    Call(OrderKey, u32),
+    Call(OrderKey, bool, u32),
     /// Any unproven allocation of the given semantic type returned by one call.
-    OpaqueCall(OrderKey, u32),
+    OpaqueCall(OrderKey, bool, u32, u32),
+    /// A correlated value occurrence. It is not an allocation in the reachability graph.
+    CallView(OrderKey, bool, u32),
     /// A binding's previous allocation, renamed when the binding was rebound at an order key.
     Old(u32, OrderKey),
     /// A binding's allocation after the binding left lexical scope.
@@ -59,6 +63,8 @@ enum AllocKey {
     Child(AllocId, FieldKey),
     /// A node of one copy evaluation. Only acyclic sites retain source identities.
     Copied(AllocId, AllocId),
+    CopiedOccurrence(AllocId, AllocId),
+    CopyPair(AllocId, AllocId, AllocId),
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +116,16 @@ impl AllocTable {
         self.intern(AllocKey::Child(parent, key), base, singular)
     }
 
+    fn block_may_repeat(
+        &mut self,
+        block: BlockId,
+        successors: &FxHashMap<BlockId, Vec<BlockId>>,
+    ) -> bool {
+        self.cyclic_blocks
+            .get_or_insert_with(|| cyclic_blocks(successors))
+            .contains(&block)
+    }
+
     fn copied_node(&mut self, graph: AllocId, source: AllocId, singular: bool) -> AllocId {
         self.intern(AllocKey::Copied(graph, source), self.base(graph), singular)
     }
@@ -117,7 +133,10 @@ impl AllocTable {
     fn parent(&self, id: AllocId) -> Option<(AllocId, FieldKey)> {
         match self.infos[id.0 as usize].key {
             AllocKey::Child(parent, key) => Some((parent, key)),
-            AllocKey::Base(_) | AllocKey::Copied(_, _) => None,
+            AllocKey::Base(_)
+            | AllocKey::Copied(..)
+            | AllocKey::CopiedOccurrence(..)
+            | AllocKey::CopyPair(..) => None,
         }
     }
 
@@ -174,6 +193,81 @@ impl AliasCell {
     }
 }
 
+/// A view names an occurrence, not a new allocation. Its members give ordinary provenance,
+/// while a projection can name a new occurrence even when both paths have the same members.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SharingLayer {
+    members: Vec<(AllocId, AllocId)>,
+    projections: Vec<(AllocId, FieldKey, AllocId)>,
+    bindings: Vec<(u32, AllocId)>,
+    pairs: Vec<(AllocId, AllocId, bool)>,
+}
+
+impl SharingLayer {
+    fn members(&self, view: AllocId) -> impl Iterator<Item = AllocId> + '_ {
+        let start = self.members.partition_point(|(key, _)| *key < view);
+        self.members[start..]
+            .iter()
+            .take_while(move |(key, _)| *key == view)
+            .map(|(_, id)| *id)
+    }
+
+    fn projections(&self, view: AllocId, key: FieldKey) -> impl Iterator<Item = AllocId> + '_ {
+        let start = self
+            .projections
+            .partition_point(|&(holder, field, _)| (holder, field) < (view, key));
+        self.projections[start..]
+            .iter()
+            .take_while(move |&&(holder, field, _)| (holder, field) == (view, key))
+            .map(|&(_, _, child)| child)
+    }
+
+    fn bindings(&self, local: usize) -> impl Iterator<Item = AllocId> + '_ {
+        let local = local as u32;
+        let start = self.bindings.partition_point(|(key, _)| *key < local);
+        self.bindings[start..]
+            .iter()
+            .take_while(move |(key, _)| *key == local)
+            .map(|(_, view)| *view)
+    }
+
+    fn possible_pair(&self, left: AllocId, right: AllocId) -> Option<bool> {
+        let (left, right) = ordered_pair(left, right);
+        self.pairs
+            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
+            .ok()
+            .map(|index| self.pairs[index].2)
+    }
+
+    fn union_pair(&mut self, left: AllocId, right: AllocId, may_share: bool) {
+        let (left, right) = ordered_pair(left, right);
+        match self
+            .pairs
+            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
+        {
+            Ok(index) => self.pairs[index].2 |= may_share,
+            Err(index) => self.pairs.insert(index, (left, right, may_share)),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.members.is_empty()
+            && self.projections.is_empty()
+            && self.bindings.is_empty()
+            && self.pairs.is_empty()
+    }
+}
+
+fn ordered_pair(left: AllocId, right: AllocId) -> (AllocId, AllocId) {
+    (left.min(right), left.max(right))
+}
+
+fn insert_fact<T: Ord>(facts: &mut Vec<T>, fact: T) {
+    if let Err(index) = facts.binary_search(&fact) {
+        facts.insert(index, fact);
+    }
+}
+
 /// Explicit holder edges, allocation overrides for bindings, and projected mutable alias cells.
 #[derive(Debug, Clone)]
 pub(in super::super) struct AllocationLayer {
@@ -185,6 +279,7 @@ pub(in super::super) struct AllocationLayer {
     cells: Vec<AliasCell>,
     /// (Result binding, former holder) pairs whose reachable graphs are disjoint on every path.
     detached: Vec<(u32, AllocId)>,
+    sharing: SharingLayer,
 }
 
 impl PartialEq for AllocationLayer {
@@ -193,6 +288,7 @@ impl PartialEq for AllocationLayer {
             && self.bound == other.bound
             && self.cells == other.cells
             && self.detached == other.detached
+            && self.sharing == other.sharing
     }
 }
 
@@ -206,6 +302,7 @@ impl AllocationLayer {
             bound: Vec::new(),
             cells: Vec::new(),
             detached: Vec::new(),
+            sharing: SharingLayer::default(),
         }
     }
 
@@ -214,6 +311,7 @@ impl AllocationLayer {
             && self.bound.is_empty()
             && self.cells.is_empty()
             && self.detached.is_empty()
+            && self.sharing.is_empty()
     }
 
     fn group(&self, holder: AllocId, key: FieldKey) -> &[Edge] {
@@ -226,6 +324,85 @@ impl AllocationLayer {
                 .take_while(|edge| edge.holder == holder && edge.key == key)
                 .count();
         &self.edges[start..end]
+    }
+
+    fn project_views(
+        &self,
+        table: &mut AllocTable,
+        ids: &[AllocId],
+        views: &[AllocId],
+        key: FieldKey,
+    ) -> Vec<AllocId> {
+        let roots = if views.is_empty() { ids } else { views };
+        if !roots
+            .iter()
+            .any(|&root| self.sharing.projections(root, key).next().is_some())
+        {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        for &root in roots {
+            let count = result.len();
+            result.extend(self.sharing.projections(root, key));
+            if count == result.len() {
+                self.project_members(table, root, key, &mut result);
+            }
+        }
+        result.sort_unstable();
+        result.dedup();
+        result
+    }
+
+    fn project_members(
+        &self,
+        table: &mut AllocTable,
+        view: AllocId,
+        key: FieldKey,
+        ids: &mut Vec<AllocId>,
+    ) {
+        self.with_members(view, |holder| self.project_alloc(table, holder, key, ids));
+    }
+
+    fn project_alloc(
+        &self,
+        table: &mut AllocTable,
+        holder: AllocId,
+        key: FieldKey,
+        ids: &mut Vec<AllocId>,
+    ) {
+        let group = self.group(holder, key);
+        if group.is_empty() {
+            ids.push(table.child(holder, key));
+        } else {
+            ids.extend(
+                group
+                    .iter()
+                    .filter_map(|edge| (edge.held != AllocId::EMPTY).then_some(edge.held)),
+            );
+        }
+    }
+
+    fn with_members(&self, view: AllocId, mut each: impl FnMut(AllocId)) {
+        let mut members = self.sharing.members(view).peekable();
+        if members.peek().is_none() {
+            each(view);
+        } else {
+            members.for_each(each);
+        }
+    }
+
+    fn views_may_share(&self, left: AllocId, right: AllocId) -> bool {
+        if left == right {
+            return true;
+        }
+        if let Some(share) = self.sharing.possible_pair(left, right) {
+            return share;
+        }
+        let mut overlap = false;
+        self.with_members(left, |a| {
+            self.with_members(right, |b| overlap |= a == b);
+        });
+        overlap
     }
 
     fn bound_of(&self, local: usize) -> &[(u32, AllocId, bool)] {
@@ -409,6 +586,190 @@ impl AllocationLayer {
         }
     }
 
+    /// Traverse occurrences rather than source IDs. A copied private path never acquires its
+    /// neighbour's alternatives; a pair witness carries only its own common suffix route.
+    fn copy_correlated_edges(
+        &self,
+        table: &mut AllocTable,
+        site: AllocId,
+        root: AllocId,
+        view: AllocId,
+        copied: &mut Vec<Edge>,
+    ) {
+        struct Route {
+            copy: AllocId,
+            ids: Vec<AllocId>,
+            views: Vec<AllocId>,
+            children: Vec<(FieldKey, Option<usize>)>,
+        }
+        let mut ids = Vec::new();
+        self.with_members(view, |id| ids.push(id));
+        let mut routes = vec![Route {
+            copy: root,
+            ids,
+            views: vec![view],
+            children: Vec::new(),
+        }];
+        let mut index = 0;
+        while index < routes.len() {
+            let route = &routes[index];
+            let mut keys = Vec::new();
+            // Include lazy ancestors of explicit holders and held allocations. A referenced
+            // lazy child can share with another branch without ever having an explicit edge.
+            for &source in &route.ids {
+                for edge in &self.edges {
+                    for mut next in [edge.holder, edge.held] {
+                        if next == AllocId::EMPTY || !self.covers(table, source, next) {
+                            continue;
+                        }
+                        while let Some((parent, key)) = table.parent(next) {
+                            if parent == source {
+                                keys.push(key);
+                                break;
+                            }
+                            next = parent;
+                        }
+                    }
+                    if edge.holder == source {
+                        keys.push(edge.key);
+                    }
+                }
+            }
+            for &view in &route.views {
+                let start = self
+                    .sharing
+                    .projections
+                    .partition_point(|(holder, _, _)| *holder < view);
+                keys.extend(
+                    self.sharing.projections[start..]
+                        .iter()
+                        .take_while(|(holder, _, _)| *holder == view)
+                        .map(|(_, key, _)| *key),
+                );
+            }
+            keys.sort_unstable();
+            keys.dedup();
+            for key in keys {
+                let route = &routes[index];
+                let views = self.project_views(table, &route.ids, &route.views, key);
+                let mut ids = Vec::new();
+                if views.is_empty() {
+                    for &source in &route.ids {
+                        self.project_members(table, source, key, &mut ids);
+                    }
+                } else {
+                    for &view in &views {
+                        self.with_members(view, |id| ids.push(id));
+                    }
+                }
+                ids.sort_unstable();
+                ids.dedup();
+                let child = if ids.is_empty() {
+                    None
+                } else {
+                    let node = table.child(route.copy, key);
+                    let offset = routes.len();
+                    routes.push(Route {
+                        copy: node,
+                        ids,
+                        views,
+                        children: Vec::new(),
+                    });
+                    Some(offset)
+                };
+                routes[index].children.push((key, child));
+            }
+            index += 1;
+        }
+
+        let mut occurrences: FxHashMap<AllocId, Vec<usize>> = FxHashMap::default();
+        let mut views: FxHashMap<AllocId, Vec<usize>> = FxHashMap::default();
+        for (index, route) in routes.iter().enumerate() {
+            for &id in &route.ids {
+                occurrences.entry(id).or_default().push(index);
+            }
+            for &view in &route.views {
+                views.entry(view).or_default().push(index);
+            }
+        }
+        let mut candidates = FxHashSet::default();
+        for nodes in occurrences.values() {
+            for (index, &left) in nodes.iter().enumerate() {
+                for &right in &nodes[index + 1..] {
+                    candidates.insert((left, right));
+                }
+            }
+        }
+        for &(left, right, _) in self.sharing.pairs.iter().filter(|row| row.2) {
+            if let (Some(left), Some(right)) = (views.get(&left), views.get(&right)) {
+                for &left in left {
+                    for &right in right {
+                        if left != right {
+                            candidates.insert((left.min(right), left.max(right)));
+                        }
+                    }
+                }
+            }
+        }
+        let mut candidates: Vec<_> = candidates.into_iter().collect();
+        candidates.sort_unstable();
+        let mut witnesses = FxHashMap::default();
+        let mut at_route = vec![Vec::new(); routes.len()];
+        for (left, right) in candidates {
+            let (a, b) = (&routes[left], &routes[right]);
+            let left_views = if a.views.is_empty() { &a.ids } else { &a.views };
+            let right_views = if b.views.is_empty() { &b.ids } else { &b.views };
+            if !left_views
+                .iter()
+                .any(|&a| right_views.iter().any(|&b| self.views_may_share(a, b)))
+            {
+                continue;
+            }
+            let (a, b) = ordered_pair(a.copy, b.copy);
+            let witness = table.intern(AllocKey::CopyPair(site, a, b), table.base(site), false);
+            witnesses.insert((left, right), witness);
+            at_route[left].push(witness);
+            at_route[right].push(witness);
+        }
+        let mut edge = |holder, key, held, single| {
+            copied.push(Edge {
+                holder,
+                key,
+                held,
+                writable: true,
+                single,
+            });
+        };
+        for route in &routes {
+            for &(key, child) in &route.children {
+                if let Some(child) = child {
+                    edge(route.copy, key, routes[child].copy, false);
+                    for &witness in &at_route[child] {
+                        edge(route.copy, key, witness, false);
+                    }
+                } else {
+                    edge(route.copy, key, AllocId::EMPTY, true);
+                }
+            }
+        }
+        for ((left, right), witness) in witnesses.iter().map(|(&pair, &id)| (pair, id)) {
+            for &(key, a) in &routes[left].children {
+                let Ok(index) = routes[right]
+                    .children
+                    .binary_search_by_key(&key, |&(key, _)| key)
+                else {
+                    continue;
+                };
+                let b = routes[right].children[index].1;
+                let matched = match (a, b) {
+                    (Some(a), Some(b)) => witnesses.get(&(a.min(b), a.max(b))).copied(),
+                    _ => None,
+                };
+                edge(witness, key, matched.unwrap_or(AllocId::EMPTY), false);
+            }
+        }
+    }
+
     /// Renumber every id whose base is `from` onto `to`.
     fn rename_base(&mut self, from: AllocBase, to: AllocBase, to_singular: bool) {
         let mut table = self.table.borrow_mut();
@@ -419,7 +780,27 @@ impl AllocationLayer {
             .iter()
             .any(|edge| mentions(edge.holder) || mentions(edge.held))
             || self.bound.iter().any(|(_, id, _)| mentions(*id))
-            || self.cells.iter().any(|cell| mentions(cell.holder));
+            || self.cells.iter().any(|cell| mentions(cell.holder))
+            || self
+                .sharing
+                .members
+                .iter()
+                .any(|&(view, id)| mentions(view) || mentions(id))
+            || self
+                .sharing
+                .projections
+                .iter()
+                .any(|&(from, _, to)| mentions(from) || mentions(to))
+            || self
+                .sharing
+                .bindings
+                .iter()
+                .any(|&(_, view)| mentions(view))
+            || self
+                .sharing
+                .pairs
+                .iter()
+                .any(|&(left, right, _)| mentions(left) || mentions(right));
         if !touched {
             return;
         }
@@ -455,6 +836,34 @@ impl AllocationLayer {
         }
         self.cells.sort_unstable();
         self.cells.dedup_by_key(|cell| cell.sort_key());
+        for (view, id) in &mut self.sharing.members {
+            *view = rename(*view, &mut table);
+            *id = rename(*id, &mut table);
+        }
+        self.sharing.members.sort_unstable();
+        self.sharing.members.dedup();
+        for (holder, _, child) in &mut self.sharing.projections {
+            *holder = rename(*holder, &mut table);
+            *child = rename(*child, &mut table);
+        }
+        self.sharing.projections.sort_unstable();
+        self.sharing.projections.dedup();
+        for (_, view) in &mut self.sharing.bindings {
+            *view = rename(*view, &mut table);
+        }
+        self.sharing.bindings.sort_unstable();
+        self.sharing.bindings.dedup();
+        for (left, right, _) in &mut self.sharing.pairs {
+            (*left, *right) = ordered_pair(rename(*left, &mut table), rename(*right, &mut table));
+        }
+        self.sharing.pairs.sort_unstable();
+        self.sharing.pairs.dedup_by(|right, left| {
+            if (left.0, left.1) != (right.0, right.1) {
+                return false;
+            }
+            left.2 |= right.2;
+            true
+        });
     }
 }
 
@@ -473,6 +882,8 @@ fn normalize_bindings(bindings: &mut Vec<(u32, AllocId, bool)>) {
 #[derive(Debug, Clone)]
 pub(in super::super) struct ResolvedPlace {
     pub ids: Vec<AllocId>,
+    /// Empty uses ordinary allocation identity. Otherwise these names retain path occurrence.
+    pub views: Vec<AllocId>,
     /// Whether the ids depend on layer facts that root provenance does not carry: a binding
     /// override or an explicit holder edge.
     pub layer_only: bool,
@@ -537,18 +948,105 @@ impl BorrowState {
     pub(in super::super) fn call_site_id(
         &self,
         order: OrderKey,
+        error: bool,
         node: u32,
+        summarized: bool,
         block: BlockId,
         successors: &FxHashMap<BlockId, Vec<BlockId>>,
     ) -> AllocId {
-        self.stable_site_id(AllocBase::Call(order, node), block, successors)
+        let base = AllocBase::Call(order, error, node);
+        if summarized {
+            self.layer.table.borrow_mut().base_id(base, false)
+        } else {
+            self.stable_site_id(base, block, successors)
+        }
     }
 
-    pub(in super::super) fn opaque_call_id(&self, order: OrderKey, ty: u32) -> AllocId {
+    pub(in super::super) fn opaque_call_id(
+        &self,
+        order: OrderKey,
+        error: bool,
+        scope: u32,
+        ty: u32,
+    ) -> AllocId {
         self.layer
             .table
             .borrow_mut()
-            .base_id(AllocBase::OpaqueCall(order, ty), false)
+            .base_id(AllocBase::OpaqueCall(order, error, scope, ty), false)
+    }
+
+    pub(in super::super) fn call_view_id(
+        &self,
+        order: OrderKey,
+        error: bool,
+        node: u32,
+    ) -> AllocId {
+        self.layer
+            .table
+            .borrow_mut()
+            .base_id(AllocBase::CallView(order, error, node), false)
+    }
+
+    pub(in super::super) fn add_view_member(&mut self, view: AllocId, id: AllocId) {
+        insert_fact(&mut self.layer.sharing.members, (view, id));
+    }
+
+    pub(in super::super) fn relate_views(&mut self, a: AllocId, b: AllocId, may_share: bool) {
+        self.layer.sharing.union_pair(a, b, may_share);
+    }
+
+    pub(in super::super) fn link_view(&mut self, holder: AllocId, key: FieldKey, held: AllocId) {
+        insert_fact(&mut self.layer.sharing.projections, (holder, key, held));
+    }
+
+    pub(in super::super) fn alloc_binding_views(
+        &self,
+        local: usize,
+    ) -> impl Iterator<Item = AllocId> + '_ {
+        self.layer.sharing.bindings(local)
+    }
+
+    pub(in super::super) fn bind_alloc_views(&mut self, local: usize, views: &[AllocId]) {
+        let local = local as u32;
+        self.layer
+            .sharing
+            .bindings
+            .retain(|&(owner, _)| owner != local);
+        for &view in views {
+            insert_fact(&mut self.layer.sharing.bindings, (local, view));
+        }
+    }
+
+    pub(in super::super) fn alloc_paths_may_share(
+        &self,
+        left: &[AllocId],
+        left_views: &[AllocId],
+        right: &[AllocId],
+        right_views: &[AllocId],
+    ) -> bool {
+        let left = if left_views.is_empty() {
+            left
+        } else {
+            left_views
+        };
+        let right = if right_views.is_empty() {
+            right
+        } else {
+            right_views
+        };
+        left.iter()
+            .any(|&a| right.iter().any(|&b| self.layer.views_may_share(a, b)))
+    }
+
+    pub(in super::super) fn block_may_repeat(
+        &self,
+        block: BlockId,
+        successors: &FxHashMap<BlockId, Vec<BlockId>>,
+    ) -> bool {
+        self.layer
+            .table
+            .borrow_mut()
+            .block_may_repeat(block, successors)
     }
 
     fn stable_site_id(
@@ -558,10 +1056,7 @@ impl BorrowState {
         successors: &FxHashMap<BlockId, Vec<BlockId>>,
     ) -> AllocId {
         let mut table = self.layer.table.borrow_mut();
-        let cyclic = table
-            .cyclic_blocks
-            .get_or_insert_with(|| cyclic_blocks(successors));
-        let singular = !cyclic.contains(&block);
+        let singular = !table.block_may_repeat(block, successors);
         table.base_id(base, singular)
     }
 
@@ -599,8 +1094,10 @@ impl BorrowState {
     /// Allocations reached by the local itself, before following any projections.
     pub(in super::super) fn resolve_local_allocs(&self, local_index: usize) -> ResolvedPlace {
         let (ids, layer_only) = self.local_alloc_ids(local_index);
+        let views = self.alloc_binding_views(local_index).collect();
         ResolvedPlace {
             ids,
+            views,
             layer_only,
             readonly: self.alloc_binding_readonly(local_index),
             readonly_source: None,
@@ -621,6 +1118,22 @@ impl BorrowState {
         resolved
     }
 
+    /// Allocations in a field, without following permissions or correlated views.
+    pub(in super::super) fn alloc_field_ids(
+        &self,
+        holders: &[AllocId],
+        key: FieldKey,
+    ) -> Vec<AllocId> {
+        let mut table = self.layer.table.borrow_mut();
+        let mut ids = Vec::with_capacity(holders.len());
+        for &holder in holders {
+            self.layer.project_alloc(&mut table, holder, key, &mut ids);
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// Advance `resolved` through one field.
     pub(in super::super) fn step_resolved(
         &self,
@@ -629,6 +1142,12 @@ impl BorrowState {
         local_mutable: &[bool],
     ) {
         let mut table = self.layer.table.borrow_mut();
+        let views = if self.layer.sharing.is_empty() {
+            Vec::new()
+        } else {
+            self.layer
+                .project_views(&mut table, &resolved.ids, &resolved.views, key)
+        };
         let mut next = Vec::with_capacity(resolved.ids.len());
         for holder in resolved.ids.drain(..) {
             let group = self.layer.group(holder, key);
@@ -652,6 +1171,7 @@ impl BorrowState {
         next.sort_unstable();
         next.dedup();
         resolved.ids = next;
+        resolved.views = views;
     }
 
     /// Record that `local_index` holds `ids`, replacing any earlier override.
@@ -761,6 +1281,10 @@ impl BorrowState {
     fn clear_alloc_binding(&mut self, local_index: usize) {
         let local = local_index as u32;
         self.layer.bound.retain(|(owner, _, _)| *owner != local);
+        self.layer
+            .sharing
+            .bindings
+            .retain(|&(owner, _)| owner != local);
     }
 
     pub(in super::super) fn detached_holders(
@@ -979,9 +1503,22 @@ impl BorrowState {
         values: &[StoredValue],
         strong: bool,
     ) {
+        self.store_alloc_field_with_views(holders, key, values, &[], strong, true);
+    }
+
+    pub(in super::super) fn store_alloc_field_with_views(
+        &mut self,
+        holders: &[AllocId],
+        key: FieldKey,
+        values: &[StoredValue],
+        views: &[AllocId],
+        strong: bool,
+        distinct_occurrence: bool,
+    ) {
         if holders.is_empty() || (!strong && values.is_empty()) {
             return;
         }
+        self.store_view_projections(holders, key, values, views, strong);
         if !values.is_empty() {
             self.invalidate_detachments();
         }
@@ -1006,14 +1543,17 @@ impl BorrowState {
                 });
             }
             for value in values {
-                let single = self.alloc_singular(value.id);
-                self.layer.add_edge(Edge {
-                    holder: *holder,
-                    key,
-                    held: value.id,
-                    writable: value.writable,
-                    single,
-                });
+                let single = distinct_occurrence && self.alloc_singular(value.id);
+                self.layer.insert_edge(
+                    Edge {
+                        holder: *holder,
+                        key,
+                        held: value.id,
+                        writable: value.writable,
+                        single,
+                    },
+                    distinct_occurrence,
+                );
             }
             if strong && values.is_empty() {
                 self.layer.add_edge(Edge {
@@ -1027,12 +1567,126 @@ impl BorrowState {
         }
     }
 
-    /// Record one construction child edge into a holder that has no explicit group yet.
+    fn store_view_projections(
+        &mut self,
+        holders: &[AllocId],
+        key: FieldKey,
+        values: &[StoredValue],
+        views: &[AllocId],
+        strong: bool,
+    ) {
+        if self.layer.sharing.is_empty() && views.is_empty() {
+            return;
+        }
+        let sources = &self.layer.sharing;
+        let mut affected: Vec<_> = sources
+            .members
+            .iter()
+            .filter_map(|&(view, id)| holders.contains(&id).then_some(view))
+            .collect();
+        affected.extend_from_slice(holders);
+        affected.sort_unstable();
+        affected.dedup();
+        for view in affected {
+            let existing = self.layer.sharing.projections(view, key).next().is_some();
+            if !existing && views.is_empty() {
+                continue;
+            }
+            let mut exact = strong;
+            self.layer
+                .with_members(view, |id| exact &= holders.contains(&id));
+            if exact {
+                self.layer
+                    .sharing
+                    .projections
+                    .retain(|&(holder, field, _)| holder != view || field != key);
+            } else if !existing {
+                let mut previous = Vec::new();
+                self.layer.project_members(
+                    &mut self.layer.table.borrow_mut(),
+                    view,
+                    key,
+                    &mut previous,
+                );
+                for id in previous {
+                    self.link_view(view, key, id);
+                }
+            }
+            if views.is_empty() {
+                for value in values {
+                    self.link_view(view, key, value.id);
+                }
+            } else {
+                for &held in views {
+                    self.link_view(view, key, held);
+                }
+            }
+        }
+    }
+
+    /// Record one construction child occurrence.
+    #[cfg(test)]
     pub(in super::super) fn add_alloc_edge(
         &mut self,
         holder: AllocId,
         key: FieldKey,
         value: StoredValue,
+    ) {
+        self.record_constructed_field(holder, key, std::slice::from_ref(&value), &[], true);
+    }
+
+    /// Publish a summarized relationship, not a count of concrete insertions.
+    pub(in super::super) fn contribute_alloc_edge(
+        &mut self,
+        holder: AllocId,
+        key: FieldKey,
+        value: StoredValue,
+    ) {
+        self.record_constructed_field(holder, key, std::slice::from_ref(&value), &[], false);
+    }
+
+    /// Every concrete child of a tracked field also needs an occurrence. Keep ordinary
+    /// children before or after the first tracked child under the same collapsed selector.
+    pub(in super::super) fn record_constructed_field(
+        &mut self,
+        holder: AllocId,
+        key: FieldKey,
+        values: &[StoredValue],
+        views: &[AllocId],
+        distinct_occurrence: bool,
+    ) {
+        let tracked = self.layer.sharing.projections(holder, key).next().is_some();
+        if !tracked && !views.is_empty() {
+            let previous: Vec<_> = self
+                .layer
+                .group(holder, key)
+                .iter()
+                .filter_map(|edge| (edge.held != AllocId::EMPTY).then_some(edge.held))
+                .collect();
+            for id in previous {
+                self.link_view(holder, key, id);
+            }
+        }
+        if !views.is_empty() {
+            for &view in views {
+                self.link_view(holder, key, view);
+            }
+        } else if tracked {
+            for value in values {
+                self.link_view(holder, key, value.id);
+            }
+        }
+        for &value in values {
+            self.insert_alloc_edge(holder, key, value, distinct_occurrence);
+        }
+    }
+
+    fn insert_alloc_edge(
+        &mut self,
+        holder: AllocId,
+        key: FieldKey,
+        value: StoredValue,
+        distinct_occurrence: bool,
     ) {
         let table = self.layer.table.borrow();
         let fresh = table.singular(holder);
@@ -1043,13 +1697,16 @@ impl BorrowState {
         if !fresh {
             self.invalidate_detachments();
         }
-        self.layer.add_edge(Edge {
-            holder,
-            key,
-            held: value.id,
-            writable: value.writable,
-            single,
-        });
+        self.layer.insert_edge(
+            Edge {
+                holder,
+                key,
+                held: value.id,
+                writable: value.writable,
+                single: single && distinct_occurrence,
+            },
+            distinct_occurrence,
+        );
     }
 
     pub(in super::super) fn alloc_child(&self, parent: AllocId, key: FieldKey) -> AllocId {
@@ -1067,17 +1724,49 @@ impl BorrowState {
     /// value must not generate another identity for the same allocation site.
     pub(in super::super) fn copy_alloc_graph(
         &mut self,
-        sources: &[AllocId],
+        source: &ResolvedPlace,
         site: AllocId,
     ) -> Vec<AllocId> {
+        let sources = source.ids.as_slice();
         if sources.is_empty() || self.layer.edges.is_empty() {
             return Vec::new();
         }
+        let correlated = !source.views.is_empty()
+            || (!self.layer.sharing.projections.is_empty() && {
+                let targets: Vec<_> = self
+                    .layer
+                    .sharing
+                    .projections
+                    .iter()
+                    .map(|&(id, _, _)| MutationTarget {
+                        id,
+                        layer_reached: true,
+                        deep: false,
+                    })
+                    .collect();
+                self.alloc_reaches(sources, true, &targets)
+            });
         let mut table = self.layer.table.borrow_mut();
         let singular = table.singular(site);
         let mut copied = Vec::new();
         let mut roots = Vec::new();
-        if singular {
+        if correlated {
+            let views = if source.views.is_empty() {
+                sources
+            } else {
+                &source.views
+            };
+            for &view in views {
+                let source_key = if singular { view } else { site };
+                let base = table.base(site);
+                let root =
+                    table.intern(AllocKey::CopiedOccurrence(site, source_key), base, singular);
+                self.layer
+                    .copy_correlated_edges(&mut table, site, root, view, &mut copied);
+                roots.push(root);
+            }
+            roots.dedup();
+        } else if singular {
             for &source in sources {
                 let root = table.copied_node(site, source, true);
                 self.layer
@@ -1119,15 +1808,26 @@ impl BorrowState {
         &mut self,
         local_index: usize,
         ids: &[AllocId],
+        views: &[AllocId],
         readonly: bool,
     ) {
         let (mut held, _) = self.local_alloc_ids(local_index);
+        let mut retained: Vec<_> = self.alloc_binding_views(local_index).collect();
+        if retained.is_empty() && !views.is_empty() {
+            retained.extend_from_slice(&held);
+        }
+        if !retained.is_empty() {
+            retained.extend_from_slice(if views.is_empty() { ids } else { views });
+        }
         held.extend_from_slice(ids);
         self.bind_alloc_ids(
             local_index,
             &held,
             readonly || self.alloc_binding_readonly(local_index),
         );
+        if !retained.is_empty() {
+            self.bind_alloc_views(local_index, &retained);
+        }
     }
 
     /// A projected observer of this slot's old allocation does not alias the new slot value.
@@ -1265,7 +1965,7 @@ impl BorrowState {
         if self.layer.is_empty() && other.layer.is_empty() {
             return false;
         }
-        let mut changed = false;
+        let mut changed = self.join_sharing(other);
 
         // Mix the receiver and result only after checking detachment on each incoming path.
         let mut detached = self.layer.detached.clone();
@@ -1353,6 +2053,66 @@ impl BorrowState {
         changed
     }
 
+    fn join_sharing(&mut self, other: &Self) -> bool {
+        let mine = &self.layer.sharing;
+        let theirs = &other.layer.sharing;
+        if mine.is_empty() && theirs.is_empty() {
+            return false;
+        }
+        let mut sharing = SharingLayer::default();
+        for (source, opposite, opposite_state) in [(mine, theirs, other), (theirs, mine, &*self)] {
+            sharing.members.extend_from_slice(&source.members);
+            sharing.bindings.extend_from_slice(&source.bindings);
+            sharing.projections.extend_from_slice(&source.projections);
+            for &(local, _) in &source.bindings {
+                if opposite.bindings(local as usize).next().is_none() {
+                    let (ids, _) = opposite_state.local_alloc_ids(local as usize);
+                    sharing
+                        .bindings
+                        .extend(ids.into_iter().map(|id| (local, id)));
+                }
+            }
+            let mut table = self.layer.table.borrow_mut();
+            let mut last_group = None;
+            for &(holder, key, _) in &source.projections {
+                if last_group.replace((holder, key)) == Some((holder, key))
+                    || opposite.projections(holder, key).next().is_some()
+                    || (matches!(table.base(holder), AllocBase::CallView(..))
+                        && opposite.members(holder).next().is_none())
+                {
+                    continue;
+                }
+                let mut ids = Vec::new();
+                opposite_state
+                    .layer
+                    .project_members(&mut table, holder, key, &mut ids);
+                sharing
+                    .projections
+                    .extend(ids.into_iter().map(|id| (holder, key, id)));
+            }
+            for &(a, b, shares) in &source.pairs {
+                let could_exist = |view| {
+                    !matches!(table.base(view), AllocBase::CallView(..))
+                        || opposite.members(view).next().is_some()
+                };
+                let possible = shares
+                    || (could_exist(a)
+                        && could_exist(b)
+                        && opposite_state.layer.views_may_share(a, b));
+                sharing.union_pair(a, b, possible);
+            }
+        }
+        sharing.members.sort_unstable();
+        sharing.members.dedup();
+        sharing.bindings.sort_unstable();
+        sharing.bindings.dedup();
+        sharing.projections.sort_unstable();
+        sharing.projections.dedup();
+        let changed = &sharing != mine;
+        self.layer.sharing = sharing;
+        changed
+    }
+
     /// Keep departing bindings' allocations named and drop facts no visible binding reaches.
     ///
     /// WHY: runs before the locals are narrowed. A visible binding whose roots name a departing
@@ -1370,22 +2130,40 @@ impl BorrowState {
         }
         for &local in &departing {
             let base = AllocBase::Root(local as u32);
-            let mentioned = {
-                let table = self.layer.table.borrow();
-                self.layer.edges.iter().any(|edge| {
-                    table.base(edge.holder) == base
-                        || (edge.held != AllocId::EMPTY && table.base(edge.held) == base)
-                }) || self
-                    .layer
-                    .bound
-                    .iter()
-                    .any(|(_, id, _)| table.base(*id) == base)
-                    || self
+            let mentioned =
+                {
+                    let table = self.layer.table.borrow();
+                    self.layer.edges.iter().any(|edge| {
+                        table.base(edge.holder) == base
+                            || (edge.held != AllocId::EMPTY && table.base(edge.held) == base)
+                    }) || self
                         .layer
-                        .cells
+                        .bound
                         .iter()
-                        .any(|cell| table.base(cell.holder) == base)
-            };
+                        .any(|(_, id, _)| table.base(*id) == base)
+                        || self
+                            .layer
+                            .cells
+                            .iter()
+                            .any(|cell| table.base(cell.holder) == base)
+                        || self.layer.sharing.members.iter().any(|&(view, id)| {
+                            [view, id].into_iter().any(|id| table.base(id) == base)
+                        })
+                        || self
+                            .layer
+                            .sharing
+                            .bindings
+                            .iter()
+                            .any(|&(_, view)| table.base(view) == base)
+                        || self
+                            .layer
+                            .sharing
+                            .projections
+                            .iter()
+                            .any(|&(holder, _, child)| {
+                                [holder, child].into_iter().any(|id| table.base(id) == base)
+                            })
+                };
             if !mentioned {
                 continue;
             }
@@ -1410,6 +2188,10 @@ impl BorrowState {
         self.layer
             .detached
             .retain(|(owner, _)| visible.contains(*owner as usize));
+        self.layer
+            .sharing
+            .bindings
+            .retain(|&(local, _)| visible.contains(local as usize));
         self.collect_unreachable_allocations(visible);
     }
 
@@ -1437,6 +2219,42 @@ impl BorrowState {
                     stack.push(edge.held);
                 }
             }
+        }
+        if !self.layer.sharing.is_empty() {
+            let sharing = &mut self.layer.sharing;
+            let mut live_views = FxHashSet::default();
+            let mut visit: Vec<AllocId> = sharing.bindings.iter().map(|&(_, view)| view).collect();
+            for &(holder, _, _) in &sharing.projections {
+                if reached
+                    .iter()
+                    .any(|&id| ancestor_or_self(&table, id, holder))
+                {
+                    visit.push(holder);
+                }
+            }
+            while let Some(view) = visit.pop() {
+                if !live_views.insert(view) {
+                    continue;
+                }
+                let start = sharing
+                    .projections
+                    .partition_point(|&(holder, _, _)| holder < view);
+                visit.extend(
+                    sharing.projections[start..]
+                        .iter()
+                        .take_while(|&&(holder, _, _)| holder == view)
+                        .map(|&(_, _, child)| child),
+                );
+            }
+            sharing
+                .members
+                .retain(|&(view, _)| live_views.contains(&view));
+            sharing
+                .projections
+                .retain(|&(holder, _, _)| live_views.contains(&holder));
+            sharing
+                .pairs
+                .retain(|&(a, b, _)| live_views.contains(&a) && live_views.contains(&b));
         }
         drop(table);
         let mut index = 0;
@@ -1470,7 +2288,10 @@ fn base_local(base: AllocBase) -> Option<usize> {
         AllocBase::Root(local) | AllocBase::Old(local, _) | AllocBase::Departed(local) => {
             Some(local as usize)
         }
-        AllocBase::Site(_) | AllocBase::Call(..) | AllocBase::OpaqueCall(..) => None,
+        AllocBase::Site(_)
+        | AllocBase::Call(..)
+        | AllocBase::OpaqueCall(..)
+        | AllocBase::CallView(..) => None,
     }
 }
 

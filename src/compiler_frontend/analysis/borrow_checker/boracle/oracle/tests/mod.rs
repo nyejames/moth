@@ -28,6 +28,63 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 #[test]
+fn resultless_call_with_opaque_stores_is_not_safe_evidence() {
+    let problem = resultless_opaque_store_problem();
+    let call = CallId::new(0);
+    let report = super::super::BoracleSolver::solve(&problem).unwrap();
+    assert_eq!(&*report.opaque_store_calls, &[call]);
+    assert!(matches!(
+        run(problem),
+        OracleOutcome::Inconclusive {
+            reason: OracleLimitReason::OpaqueCallStores { call: unresolved }, ..
+        } if unresolved == call
+    ));
+}
+
+fn resultless_opaque_store_problem() -> BorrowProblem {
+    let mut fixture = Fixture::new(1);
+    let rows = fixture.place(0, []);
+    fixture.fresh(rows);
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "retain-child".to_string(),
+        opaque_stores: true,
+    });
+    let (_, argument) = fixture.call_argument_at(call, 0, rows, AccessKind::Exclusive);
+    fixture.event(EventKind::CallEffect(CallEffect {
+        call,
+        arguments: Box::new([argument]),
+        results: Box::new([]),
+    }));
+
+    fixture.finish()
+}
+
+#[test]
+fn opaque_store_call_still_reports_overlapping_arguments() {
+    let mut fixture = Fixture::new(1);
+    let rows = fixture.place(0, []);
+    fixture.fresh(rows);
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "retain-child".to_string(),
+        opaque_stores: true,
+    });
+    let (_, exclusive) = fixture.call_argument_at(call, 0, rows, AccessKind::Exclusive);
+    let (shared_event, shared) = fixture.call_argument_at(call, 1, rows, AccessKind::Shared);
+    fixture.event(EventKind::CallEffect(CallEffect {
+        call,
+        arguments: Box::new([exclusive, shared]),
+        results: Box::new([]),
+    }));
+
+    let trace = conflict_trace(run(fixture.finish()));
+    assert_eq!(trace.conflict.unwrap().access_event, shared_event);
+}
+
+#[test]
 fn boracle_oracle_many_shared_aliases_on_one_node_do_not_conflict() {
     let mut fixture = Fixture::new(4);
     let owner = fixture.place(0, []);
@@ -276,6 +333,7 @@ fn boracle_oracle_call_result_realias_conflicts_at_owner_write_not_definition() 
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "realiased-result".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) = fixture.call_argument_at(CallId::new(0), 0, owner, AccessKind::Shared);
     fixture.call_effect_result(
@@ -312,6 +370,7 @@ fn boracle_oracle_scope_exit_while_call_result_pending_is_malformed() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "unconfirmed-result".to_string(),
+        opaque_stores: false,
     });
 
     // 1. A fresh `CallEffect` result binds the place to a new generation and registers the
@@ -357,6 +416,7 @@ fn boracle_oracle_definition_before_call_result_confirmation_is_malformed() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "replaced-result".to_string(),
+        opaque_stores: false,
     });
     fixture.call_effect_result(
         CallId::new(0),
@@ -400,6 +460,7 @@ fn boracle_oracle_alias_from_place_rebind_kills_call_argument_holder() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "realiased-call-argument".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, alias, AccessKind::Shared);
@@ -1435,6 +1496,7 @@ fn boracle_oracle_call_argument_interval_extends_to_call_effect() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "interval".to_string(),
+        opaque_stores: false,
     });
     let (first_event, first_argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -1473,6 +1535,7 @@ fn boracle_oracle_call_argument_ends_at_call_effect_before_later_storage_access(
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "call-boundary".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Shared);
@@ -1506,6 +1569,7 @@ fn boracle_oracle_loan_holder_call_argument_exercises_loan_capability() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "loan-holder-argument".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, loan_place, AccessKind::Shared);
@@ -1630,6 +1694,7 @@ fn boracle_oracle_single_alias_params_result_confirmation_is_safe() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "alias-result".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Shared);
@@ -1657,6 +1722,7 @@ fn boracle_oracle_alias_params_result_slot_write_after_effect_is_safe() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "alias-result-write".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Shared);
@@ -1690,6 +1756,7 @@ fn boracle_oracle_call_result_provenance_conflicts_after_argument_mutation() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "alias-result-provenance".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -1735,6 +1802,7 @@ fn boracle_oracle_write_through_call_result_issues_provenance() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "write-through-alias-result-provenance".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -1974,6 +2042,7 @@ fn boracle_oracle_call_result_alias_origins_is_typed_inconclusive() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "alias-origins".to_string(),
+        opaque_stores: false,
     });
     let origins = vec![ValueOriginId::new(0)].into_boxed_slice();
     fixture.call_effect_result(
@@ -2008,6 +2077,7 @@ fn boracle_oracle_call_result_unknown_is_typed_inconclusive() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "unknown-result".to_string(),
+        opaque_stores: false,
     });
     fixture.call_effect_result(
         CallId::new(0),
@@ -2041,6 +2111,7 @@ fn boracle_oracle_multiple_call_result_alias_params_issue_each_provenance_capabi
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "multiple-results".to_string(),
+        opaque_stores: false,
     });
     let (_, first_argument) =
         fixture.call_argument_at(CallId::new(0), 0, first_place, AccessKind::Exclusive);
@@ -2673,6 +2744,52 @@ fn boracle_oracle_never_call_is_explicit_trace_scanned_exit() {
     assert_failure_terminator(TerminatorEventKind::NeverCall);
 }
 
+#[test]
+fn boracle_oracle_checks_arguments_before_a_terminal_call_with_no_stores() {
+    for overlap in [false, true] {
+        let mut fixture = Fixture::new(2);
+        let first = fixture.place(0, []);
+        let second = if overlap { first } else { fixture.place(1, []) };
+        fixture.fresh(first);
+        if !overlap {
+            fixture.fresh(second);
+        }
+        let call = CallId::new(0);
+        fixture.parts.calls.push(Call {
+            id: call,
+            label: "terminal".to_string(),
+            opaque_stores: false,
+        });
+        let (_, shared) = fixture.call_argument_at(call, 0, first, AccessKind::Shared);
+        let (exclusive_event, exclusive) =
+            fixture.call_argument_at(call, 1, second, AccessKind::Exclusive);
+        fixture.event(EventKind::CallEffect(CallEffect {
+            call,
+            arguments: Box::new([shared, exclusive]),
+            results: Box::new([]),
+        }));
+        fixture.terminator(TerminatorEventKind::NeverCall);
+
+        let entry = BlockId::new(0);
+        let events = fixture.take_events();
+        let outcome = run(fixture.finish_cfg(
+            BTreeMap::from([(entry, events)]),
+            Vec::new(),
+            entry,
+            vec![entry],
+        ));
+        if overlap {
+            let trace = conflict_trace(outcome);
+            assert_eq!(trace.conflict.unwrap().access_event, exclusive_event);
+        } else {
+            assert!(matches!(
+                outcome,
+                OracleOutcome::CompleteSafe { executions: 1, .. }
+            ));
+        }
+    }
+}
+
 fn assert_failure_terminator(kind: TerminatorEventKind) {
     let mut fixture = Fixture::new(2);
     let owner = fixture.place(0, []);
@@ -2926,6 +3043,7 @@ fn boracle_oracle_live_loan_conflict_survives_expired_call_argument() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "repeated-effect".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -3055,6 +3173,7 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "second-invocation".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -3245,6 +3364,7 @@ fn boracle_oracle_exercise_capabilities_skip_expired_call_argument() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "expired-argument".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -3330,6 +3450,7 @@ fn boracle_oracle_call_effect_ceiling_clamps_dragged_call_argument_interval() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "ceiling".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -3419,6 +3540,7 @@ fn boracle_oracle_call_effect_respects_explicit_end() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "ended-argument".to_string(),
+        opaque_stores: false,
     });
     let (argument_event, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Exclusive);
@@ -3505,6 +3627,7 @@ fn boracle_oracle_alias_params_provenance_survives_its_confirming_write() {
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "confirmed-alias-result".to_string(),
+        opaque_stores: false,
     });
     let (_, argument) =
         fixture.call_argument_at(CallId::new(0), 0, argument_place, AccessKind::Shared);
@@ -3550,6 +3673,7 @@ fn boracle_native_result_slots_preserve_shared_origin_overlap() {
     fixture.parts.calls.push(Call {
         id: call,
         label: "shared-native-results".to_string(),
+        opaque_stores: false,
     });
     let origin = fixture.origin(OriginKind::CallResult {
         call,
@@ -3615,6 +3739,7 @@ fn boracle_call_argument_origins_follow_event_order_at_a_shared_point() {
     fixture.parts.calls.push(Call {
         id: call,
         label: "shared-point-ordered-argument".to_string(),
+        opaque_stores: false,
     });
     let use_id = UseId::new(fixture.parts.uses.len() as u32);
     fixture.parts.uses.push(Use {
@@ -3703,6 +3828,7 @@ fn boracle_alias_result_loans_preserve_repeated_argument_event_owners() {
     fixture.parts.calls.push(Call {
         id: call,
         label: "repeated-place-ordered-arguments".to_string(),
+        opaque_stores: false,
     });
     let (_, first_argument) = fixture.call_argument_at(call, 0, argument_place, AccessKind::Shared);
     let replacement = fixture.origin(OriginKind::Fresh);
@@ -4390,6 +4516,7 @@ fn apply_matrix_writer(
             fixture.parts.calls.push(Call {
                 id: CallId::new(0),
                 label: "matrix-call-fresh".to_string(),
+                opaque_stores: false,
             });
             let writer_event = fixture.call_effect_result_to(
                 CallId::new(0),
@@ -4403,6 +4530,7 @@ fn apply_matrix_writer(
             fixture.parts.calls.push(Call {
                 id: CallId::new(0),
                 label: "matrix-call-alias-params".to_string(),
+                opaque_stores: false,
             });
             let (_, argument) =
                 fixture.call_argument_at(CallId::new(0), 0, argument_source, AccessKind::Shared);
@@ -5065,6 +5193,7 @@ fn boracle_oracle_false_bit_call_update_confirmation_allows_next_definition() {
     fixture.parts.calls.push(Call {
         id: call,
         label: "update-result".to_string(),
+        opaque_stores: false,
     });
     fixture.call_effect_result_to(
         call,

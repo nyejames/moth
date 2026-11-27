@@ -1,0 +1,17 @@
+$export
+Shell type T = |items T|
+
+$export
+Pair type T = |left T, right T|
+
+select type T |flag Bool, a T, b T, spare T| -> Pair of T:
+    if flag:
+        return Pair(a, spare)
+    ;
+    return Pair(spare, b)
+;
+
+$export
+forward type T |flag Bool, first Shell of T, second Shell of T, spare T| -> Pair of T:
+    return select(flag, first.items, second.items, spare)
+;

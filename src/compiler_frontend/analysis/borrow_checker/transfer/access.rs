@@ -45,6 +45,7 @@ use layer::{
     check_layer_place_read, transfer_layer_alias_write,
 };
 use move_decision::{MoveDecision, classify_move_decision};
+pub(in super::super) use statement::bind_call_result_ids;
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
 
@@ -692,17 +693,8 @@ fn transfer_assign_target(
                 actor_index_hint: Some(local_index),
                 current_order,
             };
-            check_mutable_access(
-                &mut check,
-                &roots,
-                MutableAccessPolicy {
-                    allow_prior_shared: true,
-                    require_root_mutable: true,
-                    strict_move_exclusivity: false,
-                    alias_exclusivity: AliasExclusivity::All,
-                },
-            )?;
-            let field_write = layer::transfer_layer_field_write(&mut check, target, value)?;
+            let field_write =
+                layer::check_layer_field_write(&mut check, local_index, target, &roots, value)?;
             if let Some(field_write) = field_write {
                 field_write.apply(&layer_values, state, value)?;
             }

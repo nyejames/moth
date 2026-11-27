@@ -23,8 +23,9 @@ use super::super::{
 use super::test_support::{module_origin, struct_origin};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
-    CanonicalTraitIdentity, CanonicalTypeIdentity, ExternalOpaqueTypeIdentity,
-    ModulePrivateNominalIdentity, StableTraitRequirementIdentity,
+    CanonicalTraitIdentity, CanonicalTypeIdentity, ExportedGenericParameterIdentity,
+    ExternalOpaqueTypeIdentity, GenericDeclarationOrigin, ModulePrivateNominalIdentity,
+    StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::{
@@ -32,8 +33,10 @@ use crate::compiler_frontend::external_packages::{
     ExternalSymbolCategory, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    CallAllocationFacts, CallAllocationSource, CallField, CallLaneSummary, CallOutputPath,
+    CallParameterPath, CallPathSource, CallResultPath, FunctionReturnAliasSummary,
+    PublicCallMutationEffect, PublicCallParameterAccess, PublicCallParameterSummary,
+    PublicCallSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
@@ -47,7 +50,13 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..CallLaneSummary::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -64,11 +73,7 @@ fn shared_summary(parameter_count: usize) -> PublicCallSummary {
                 transfer_effect: PublicCallTransferEffect::MayConsume,
             })
             .collect(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
-        escapes_builtin_failure: false,
-        uses_fast_semantics: false,
-        may_trap: false,
-        may_fail: false,
+        ..empty_summary()
     }
 }
 
@@ -692,6 +697,281 @@ fn rejects_missing_concrete_receiver_summary() {
     .expect_err("receiver surfaces require their concrete summary closure");
 
     assert!(error.message.contains("missing concrete call summary"));
+}
+
+#[test]
+fn validates_nested_generic_call_path_ordinals_against_the_closed_layout() {
+    let envelope = struct_origin("Envelope");
+    let parameter = ExportedGenericParameterIdentity::new(
+        GenericDeclarationOrigin::nominal_type(envelope.clone()).unwrap(),
+        0,
+        "T".to_owned(),
+    );
+    let layout = PublicDeclarationRecord {
+        origin: OriginDeclarationId::Type(envelope.clone()),
+        synthetic_interface_provenance: Default::default(),
+        semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
+            generic_parameters: vec![super::super::model::PublicGenericParameterSurface {
+                identity: parameter.clone(),
+                bounds: Vec::new(),
+            }],
+            fields: vec![PublicFieldTypeSlot {
+                name: "payload".to_owned(),
+                type_identity: CanonicalTypeIdentity::Option(Box::new(
+                    CanonicalTypeIdentity::GenericParameter(parameter),
+                )),
+                folded_default: None,
+            }],
+            receiver_methods: Vec::new(),
+        }),
+    };
+    let origin = OriginFunctionId::new_free(module_origin(), "unwrap_first".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    let string = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String);
+    function.parameters.push(PublicParameterTypeSlot {
+        name: None,
+        type_identity: CanonicalTypeIdentity::GenericInstance {
+            base: envelope,
+            arguments: Box::new([CanonicalTypeIdentity::Collection {
+                element: Box::new(string.clone()),
+                fixed_capacity: None,
+            }]),
+        },
+        access: PublicCallParameterAccess::Shared,
+        folded_default: None,
+        contract: super::super::model::PublicParameterContract::Value,
+    });
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: string,
+        }],
+        error: None,
+    };
+    let make_summary = |path| PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                sources: vec![CallPathSource {
+                    output: CallOutputPath::Result(CallResultPath {
+                        slot: 0,
+                        path: vec![],
+                    }),
+                    source: CallAllocationSource::Parameter(CallParameterPath { index: 0, path }),
+                }],
+                ..CallLaneSummary::default()
+            },
+            error: CallLaneSummary::default(),
+        })),
+        ..shared_summary(1)
+    };
+    let mut interface = PublicSemanticInterface {
+        module_origin: module_origin(),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![declaration, layout],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: vec![ConcreteCallSummaryRecord {
+            origin,
+            summary: make_summary(vec![
+                CallField::Field(0),
+                CallField::Payload {
+                    variant: 1,
+                    field: 0,
+                },
+                CallField::Elem,
+            ]),
+        }],
+    };
+    interface
+        .validate_for_publication()
+        .expect("instantiated payload matches String");
+    for path in [
+        vec![CallField::Field(1)],
+        vec![CallField::Field(0)],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 0,
+                field: 0,
+            },
+        ],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 1,
+                field: 0,
+            },
+            CallField::MapKey,
+        ],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 1,
+                field: 0,
+            },
+        ],
+    ] {
+        interface.concrete_call_summaries[0].summary = make_summary(path);
+        let error = interface.validate_for_publication().unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("invalid or incompatible success lane parameter source")
+        );
+    }
+
+    interface.concrete_call_summaries[0].summary = make_summary(vec![CallField::Field(0)]);
+    let PublicDeclarationSemantics::Function(function) = &mut interface.declarations[0].semantics
+    else {
+        unreachable!("function declaration fixture");
+    };
+    let CanonicalTypeIdentity::GenericInstance { arguments, .. } =
+        &function.parameters[0].type_identity
+    else {
+        unreachable!("generic parameter fixture");
+    };
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: CanonicalTypeIdentity::Option(Box::new(arguments[0].clone())),
+        }],
+        error: None,
+    };
+    interface
+        .validate_for_publication()
+        .expect("compound generic leaf is exactly substituted");
+
+    interface.declarations.pop();
+    interface
+        .validate_closure_input()
+        .expect("a provider may still supply the projected layout");
+    let error = interface.validate_for_publication().unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("invalid or incompatible success lane parameter source")
+    );
+}
+
+#[test]
+fn scalar_result_cannot_publish_an_allocation_source() {
+    let origin = OriginFunctionId::new_free(module_origin(), "flag".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool),
+        }],
+        error: None,
+    };
+    let mut interface = evidence_interface(&[]);
+    interface.declarations.push(declaration);
+    interface
+        .concrete_call_summaries
+        .push(ConcreteCallSummaryRecord {
+            origin,
+            summary: PublicCallSummary {
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                    success: CallLaneSummary {
+                        reachable: true,
+                        sources: vec![CallPathSource {
+                            output: CallOutputPath::Result(CallResultPath {
+                                slot: 0,
+                                path: vec![],
+                            }),
+                            source: CallAllocationSource::Fresh,
+                        }],
+                        ..CallLaneSummary::default()
+                    },
+                    error: CallLaneSummary::default(),
+                })),
+                ..empty_summary()
+            },
+        });
+    let error = interface.validate_for_publication().unwrap_err();
+    assert!(error.message.contains("invalid success lane output path"));
+}
+
+#[test]
+fn unpublished_error_channel_requires_the_private_builtin_failure_reservation() {
+    let origin = OriginFunctionId::new_free(module_origin(), "helper".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    function.parameters.push(PublicParameterTypeSlot {
+        name: None,
+        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        access: PublicCallParameterAccess::Shared,
+        folded_default: None,
+        contract: super::super::model::PublicParameterContract::Value,
+    });
+    let mut interface = evidence_interface(&[]);
+    interface.declarations.push(declaration);
+    interface
+        .concrete_call_summaries
+        .push(ConcreteCallSummaryRecord {
+            origin,
+            summary: PublicCallSummary {
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                    success: CallLaneSummary::default(),
+                    error: CallLaneSummary {
+                        reachable: true,
+                        sources: vec![
+                            CallPathSource {
+                                output: CallOutputPath::Result(CallResultPath {
+                                    slot: 0,
+                                    path: Vec::new(),
+                                }),
+                                source: CallAllocationSource::Fresh,
+                            },
+                            CallPathSource {
+                                output: CallOutputPath::Result(CallResultPath {
+                                    slot: 0,
+                                    path: vec![CallField::Field(0)],
+                                }),
+                                source: CallAllocationSource::Parameter(CallParameterPath {
+                                    index: 0,
+                                    path: Vec::new(),
+                                }),
+                            },
+                        ],
+                        ..CallLaneSummary::default()
+                    },
+                })),
+                ..shared_summary(1)
+            },
+        });
+    let error = interface.validate_for_publication().unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("reachable error lane has no declared return contract")
+    );
+
+    interface.concrete_call_summaries[0]
+        .summary
+        .escapes_builtin_failure = true;
+    interface
+        .validate_for_publication()
+        .expect("a private builtin Error lane need not alter the canonical authored signature");
+
+    let FunctionReturnAliasSummary::Known(facts) =
+        &mut interface.concrete_call_summaries[0].summary.return_alias
+    else {
+        unreachable!("known allocation facts fixture");
+    };
+    let CallOutputPath::Result(message) = &mut facts.error.sources[1].output else {
+        unreachable!("error message output fixture");
+    };
+    message.path[0] = CallField::Field(1);
+    let error = interface.validate_for_publication().unwrap_err();
+    assert!(error.message.contains("invalid error lane output path"));
 }
 
 #[test]

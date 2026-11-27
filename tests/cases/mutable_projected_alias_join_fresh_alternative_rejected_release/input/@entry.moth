@@ -1,6 +1,6 @@
--- A join keeps every alternative a projected alias may observe. One path replaces the holder
--- with a freshly built value, so the alias's write target keeps the holder cell that owns that
--- allocation as well as the older provenance both paths share.
+-- A join keeps every alternative a value may observe. One path replaces the holder with a
+-- freshly built value and snapshots it, so `snap` may alias the holder after the join. Taking
+-- a mutable projection of the holder while `snap` is still read later conflicts with it.
 
 Pair = | first {I32}, second {I32} |
 

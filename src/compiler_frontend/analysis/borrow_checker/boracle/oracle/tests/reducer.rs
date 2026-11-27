@@ -220,6 +220,32 @@ fn boracle_reducer_preserves_nonzero_bounds_and_limit_reason_for_cyclic_seed() {
 }
 
 #[test]
+fn reduced_resultless_opaque_store_remains_inconclusive() {
+    let reduced = reduce_problem(
+        super::resultless_opaque_store_problem(),
+        OracleBounds::default(),
+    )
+    .expect("the opaque store fixture should reduce");
+    let [call] = reduced.problem.calls() else {
+        panic!("the opaque call must survive remapping")
+    };
+    assert!(call.opaque_stores);
+    assert!(reduced.fixture_skeleton().contains("opaque_stores: true"));
+    assert_eq!(
+        reduced.oracle_outcome(),
+        &OracleOutcomeIdentity::Inconclusive {
+            reason: super::OracleLimitReason::OpaqueCallStores { call: call.id },
+        },
+    );
+    let report = super::super::super::BoracleSolver::solve(&reduced.problem).unwrap();
+    assert!(
+        report
+            .conflicts_debug_dump()
+            .contains("Incomplete: call stores are not modelled")
+    );
+}
+
+#[test]
 fn boracle_reducer_can_make_progress_in_every_ordered_pass() {
     let mut fired = BTreeSet::new();
     let inputs = [
@@ -505,14 +531,14 @@ fn boracle_fixture_skeleton_renders_every_normalized_variant() {
     for expected in [
         "CfgEdge::new(BlockId::new(0), BlockId::new(8))",
         "Loan { id: LoanId::new(0), kind: AccessKind::Shared, issued_at: PointId::new(17), place: PlaceId::new(0), origins: vec![ValueOriginId::new(0)].into_boxed_slice(), holders: vec![PlaceId::new(0)].into_boxed_slice(), uses: vec![].into_boxed_slice(), kills: vec![PointId::new(18)].into_boxed_slice() }",
-        "Call { id: CallId::new(0), label: \"renderer-call\".to_string() }",
+        "Call { id: CallId::new(0), label: \"renderer-call\".to_string(), opaque_stores: false }",
         "Binding::new(BindingId::new(8), None, None, true, false, EventSource::none())",
-        "Call { id: CallId::new(1), label: \"renderer-alias-call\".to_string() }",
-        "Call { id: CallId::new(2), label: \"renderer-alias-params-call\".to_string() }",
-        "Call { id: CallId::new(3), label: \"renderer-summary-unknown-call\".to_string() }",
-        "Call { id: CallId::new(4), label: \"renderer-missing-summary-call\".to_string() }",
-        "Call { id: CallId::new(5), label: \"renderer-opaque-external-call\".to_string() }",
-        "Call { id: CallId::new(6), label: \"renderer-no-result-call\".to_string() }",
+        "Call { id: CallId::new(1), label: \"renderer-alias-call\".to_string(), opaque_stores: false }",
+        "Call { id: CallId::new(2), label: \"renderer-alias-params-call\".to_string(), opaque_stores: false }",
+        "Call { id: CallId::new(3), label: \"renderer-summary-unknown-call\".to_string(), opaque_stores: false }",
+        "Call { id: CallId::new(4), label: \"renderer-missing-summary-call\".to_string(), opaque_stores: false }",
+        "Call { id: CallId::new(5), label: \"renderer-opaque-external-call\".to_string(), opaque_stores: false }",
+        "Call { id: CallId::new(6), label: \"renderer-no-result-call\".to_string(), opaque_stores: false }",
         "Event::new(EventId::new(0), PointId::new(1), EventKind::Fresh { destination: BindingDestination::Define(PlaceId::new(0)), origin: ValueOriginId::new(0) }, EventSource::none()),",
         "Event::new(EventId::new(1), PointId::new(2), EventKind::Alias { source: PlaceId::new(0), destination: BindingDestination::Define(PlaceId::new(1)), origins: vec![ValueOriginId::new(0)].into_boxed_slice() }, EventSource::none()),",
         "Event::new(EventId::new(2), PointId::new(3), EventKind::AliasFromPlace { source: PlaceId::new(0), destination: BindingDestination::Update(PlaceId::new(2)) }, EventSource::none()),",
@@ -1373,30 +1399,37 @@ fn renderer_coverage_problem() -> BorrowProblem {
             Call {
                 id: CallId::new(0),
                 label: "renderer-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(1),
                 label: "renderer-alias-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(2),
                 label: "renderer-alias-params-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(3),
                 label: "renderer-summary-unknown-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(4),
                 label: "renderer-missing-summary-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(5),
                 label: "renderer-opaque-external-call".to_string(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(6),
                 label: "renderer-no-result-call".to_string(),
+                opaque_stores: false,
             },
         ],
         events,

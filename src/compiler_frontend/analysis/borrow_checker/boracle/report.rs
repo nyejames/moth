@@ -8,7 +8,7 @@ use super::super::last_use::{
     LastUseAnalysis, LastUseLocation, LastUseObservation, LastUseResult, LastUseSubject,
     event_for_use,
 };
-use super::super::problem::{BindingDestination, BorrowProblem, EventId};
+use super::super::problem::{BindingDestination, BorrowProblem, CallId, EventId};
 use super::service::BoracleRuleSelection;
 use super::{LoanSolution, OriginSolution};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -24,6 +24,7 @@ pub(crate) struct BoracleReport {
     pub(crate) loan_last_use: Box<[LastUseResult]>,
     pub(crate) loan_last_use_after_event: Box<[LastUseResult]>,
     pub(crate) loans: LoanSolution,
+    pub(crate) opaque_store_calls: Box<[CallId]>,
 }
 
 impl BoracleReport {
@@ -40,6 +41,13 @@ impl BoracleReport {
     }
 
     pub(crate) fn conflicts_debug_dump(&self) -> String {
+        if !self.opaque_store_calls.is_empty() {
+            return format!(
+                "Incomplete: call stores are not modelled for {:?}\n{:#?}",
+                self.opaque_store_calls,
+                self.loans.conflicts(),
+            );
+        }
         format!("{:#?}", self.loans.conflicts())
     }
 
@@ -221,6 +229,12 @@ impl BoracleSolver {
             loan_last_use: loan_last_use.into_boxed_slice(),
             loan_last_use_after_event: loan_last_use_after_event.into_boxed_slice(),
             loans,
+            opaque_store_calls: problem
+                .calls()
+                .iter()
+                .filter(|call| call.opaque_stores)
+                .map(|call| call.id)
+                .collect(),
         })
     }
 }

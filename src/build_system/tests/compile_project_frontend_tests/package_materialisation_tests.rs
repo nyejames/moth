@@ -1089,9 +1089,10 @@ independent_result I32 = independent(42)
         // compiles.
         assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 3.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
-        // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
-        // whose direct callee summaries widen. `seed_helper` and `independent` keep their
-        // materialisation reports because convergence installs no changed summary into them.
+        // Four final diagnostic transfers, plus the two allocation refreshes with newly
+        // reachable lanes: `mutating_helper` receives `public_helper`, then `caller` receives
+        // `mutating_helper`. Installing a proved unreachable callee in place of Pending
+        // does not change allocation transfer; later mutation-only refreshes do not count.
         assert_eq!(
             counter_value("convergence_generated_sidecar_borrow_passes"),
             6.0

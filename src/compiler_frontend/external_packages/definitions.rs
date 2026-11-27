@@ -343,39 +343,13 @@ impl ExternalFunctionDef {
         self.return_contract.is_fallible()
     }
 
-    /// Borrow-analysis projection for ordered HIR success destinations.
-    ///
-    /// The compact boundary summary has no per-slot result graph contract, so multiple
-    /// results remain Unknown even when their individual metadata says Fresh. Calls,
-    /// Invoke edges and wrapper summaries consume this same conservative projection.
-    /// This does not alter the registry's ordered slots or fuse them into a value.
-    ///
-    /// A Never binding produces no call result, so its alias is `Unknown`. HIR lowers every
-    /// external `NeverCall` through this projection and its transfer discards the resulting
-    /// alias, because the call has no successor that could consume a value.
-    pub(crate) fn hir_return_alias(&self) -> ExternalHirReturnAlias<'_> {
-        let Some(returns) = self.return_contract.ordinary() else {
-            return ExternalHirReturnAlias::Unknown;
-        };
-        match returns.success {
-            [] => ExternalHirReturnAlias::Fresh,
-            [single] => match &single.alias {
-                ExternalReturnAlias::Fresh => ExternalHirReturnAlias::Fresh,
-                ExternalReturnAlias::AliasArgs(indices) => {
-                    ExternalHirReturnAlias::AliasArgs(indices)
-                }
-            },
-            _ => ExternalHirReturnAlias::Unknown,
-        }
+    /// Ordered registry facts. These certify which argument roots a result may retain,
+    /// not its projected paths or whether two native results share fresh storage.
+    pub(crate) fn hir_return_sources(&self) -> &[ExternalReturnSlot] {
+        self.return_contract
+            .ordinary()
+            .map_or(&[], |returns| returns.success)
     }
-}
-
-/// Derived borrow-analysis policy, not source-language or registry slot metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExternalHirReturnAlias<'a> {
-    Fresh,
-    AliasArgs(&'a [usize]),
-    Unknown,
 }
 
 /// One success-channel return slot for an external function.

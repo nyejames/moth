@@ -4,6 +4,7 @@ use super::{InvokeLayerOp, apply_invoke_edge_transfer};
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     BorrowState, FieldKey, FunctionLayout, FunctionLayoutInputs, LocalState, RootSet, StoredValue,
 };
+use crate::compiler_frontend::analysis::borrow_checker::transfer::InvokeLaneTransfer;
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::LoopStepFailureCause;
@@ -52,47 +53,30 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
     );
     output.update_local_state(2, LocalState::slot(3));
 
-    let results = [(LocalId(1), output.local_state(1).clone())];
+    let success_lane = InvokeLaneTransfer {
+        results: vec![(LocalId(1), output.local_state(1).clone())],
+        ..Default::default()
+    };
+    let error_lane = InvokeLaneTransfer {
+        results: vec![(LocalId(2), LocalState::slot(3))],
+        ..Default::default()
+    };
     let mut success = output.clone();
-    apply_invoke_edge_transfer(
-        &layout,
-        &terminator,
-        BlockId(1),
-        &results,
-        &[],
-        0,
-        &mut success,
-    );
+    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 0, &mut success);
     assert_eq!(success.local_state(2).mode, LocalMode::UNINIT);
     assert!(success.local_state(1).value_roots.contains(0));
     assert!(success.local_state(2).value_roots.is_empty());
 
     // A following failure cannot observe the preceding successful iteration's payload.
     let mut failure = success;
-    apply_invoke_edge_transfer(
-        &layout,
-        &terminator,
-        BlockId(2),
-        &results,
-        &[],
-        0,
-        &mut failure,
-    );
+    apply_invoke_edge_transfer(&layout, &terminator, &error_lane, 0, &mut failure);
     assert_eq!(failure.local_state(1).mode, LocalMode::UNINIT);
     assert!(failure.local_state(1).value_roots.is_empty());
     assert_eq!(failure.local_state(2).mode, LocalMode::SLOT);
     assert!(failure.local_state(2).value_roots.is_empty());
 
     // Returning to success similarly discards the preceding error.
-    apply_invoke_edge_transfer(
-        &layout,
-        &terminator,
-        BlockId(1),
-        &results,
-        &[],
-        0,
-        &mut failure,
-    );
+    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 0, &mut failure);
     assert_eq!(failure.local_state(2).mode, LocalMode::UNINIT);
     assert!(failure.local_state(1).value_roots.contains(0));
 }
@@ -128,54 +112,86 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
     state.add_alloc_edge(previous_success, FieldKey::Elem, marker_value);
     state.add_alloc_edge(holder, FieldKey::Elem, marker_value);
 
-    let results = [(LocalId(1), LocalState::slot(layout.local_count()))];
-    let ops = [
-        InvokeLayerOp::Bind {
-            local: LocalId(1),
-            ids: vec![previous_error_child],
-            readonly: true,
-        },
-        InvokeLayerOp::Store {
-            holders: vec![previous_success],
-            key: stored,
-            values: vec![StoredValue {
-                id: previous_error_child,
-                writable: false,
-            }],
-        },
-        InvokeLayerOp::Contribute {
-            holder,
-            key: contributed,
-            value: StoredValue {
-                id: previous_success,
-                writable: true,
+    let success_lane = InvokeLaneTransfer {
+        results: vec![(LocalId(1), LocalState::slot(layout.local_count()))],
+        operations: vec![
+            InvokeLayerOp::Bind {
+                local: LocalId(1),
+                ids: vec![previous_error_child],
+                views: Vec::new(),
+                readonly: true,
             },
-        },
-        InvokeLayerOp::Remove {
-            holders: vec![previous_success],
-            map: false,
-            result: Some(LocalId(1)),
-        },
-        InvokeLayerOp::Remove {
-            holders: vec![holder],
-            map: false,
-            result: None,
-        },
-    ];
+            InvokeLayerOp::Store {
+                holders: vec![previous_success],
+                key: stored,
+                values: vec![StoredValue {
+                    id: previous_error_child,
+                    writable: false,
+                }],
+                views: Vec::new(),
+                distinct_occurrence: true,
+            },
+            InvokeLayerOp::Contribute {
+                holder,
+                key: contributed,
+                value: StoredValue {
+                    id: previous_success,
+                    writable: true,
+                },
+            },
+            InvokeLayerOp::Remove {
+                holders: vec![previous_success],
+                map: false,
+                result: Some(LocalId(1)),
+            },
+            InvokeLayerOp::Remove {
+                holders: vec![holder],
+                map: false,
+                result: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let error_only = FieldKey::Field(3);
+    let previous_success_child = state.alloc_child(previous_success, field);
+    let error_lane = InvokeLaneTransfer {
+        results: vec![(LocalId(2), LocalState::slot(layout.local_count()))],
+        operations: vec![
+            InvokeLayerOp::Bind {
+                local: LocalId(2),
+                ids: vec![previous_success_child],
+                views: Vec::new(),
+                readonly: false,
+            },
+            InvokeLayerOp::Store {
+                holders: vec![previous_error],
+                key: error_only,
+                values: vec![StoredValue {
+                    id: previous_success_child,
+                    writable: true,
+                }],
+                views: Vec::new(),
+                distinct_occurrence: true,
+            },
+        ],
+        ..Default::default()
+    };
     let mut failure = state.clone();
-    apply_invoke_edge_transfer(
-        &layout,
-        &terminator,
-        BlockId(2),
-        &results,
-        &ops,
-        1,
-        &mut failure,
-    );
+    apply_invoke_edge_transfer(&layout, &terminator, &error_lane, 1, &mut failure);
     let retired_success = failure.local_alloc_ids(3).0[0];
     assert_ne!(retired_success, previous_success);
-    assert_ne!(failure.local_alloc_ids(4).0, [previous_error]);
-    assert_eq!(failure.local_alloc_ids(2).0, [previous_error]);
+    let retired_error = failure.local_alloc_ids(4).0[0];
+    assert_ne!(retired_error, previous_error);
+    let retired_success_child = failure.alloc_child(retired_success, field);
+    assert_ne!(retired_success_child, previous_success_child);
+    assert_eq!(failure.local_alloc_ids(2).0, [retired_success_child]);
+    assert!(
+        failure
+            .resolve_alloc_path(4, &layout.local_mutable, [error_only])
+            .ids
+            .contains(&retired_success_child)
+    );
+    assert!(!failure.alloc_group_is_explicit(previous_error, error_only));
     assert!(!failure.alloc_group_is_explicit(retired_success, stored));
     assert!(!failure.alloc_group_is_explicit(holder, contributed));
     assert_eq!(
@@ -185,15 +201,7 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
         [marker],
     );
 
-    apply_invoke_edge_transfer(
-        &layout,
-        &terminator,
-        BlockId(1),
-        &results,
-        &ops,
-        1,
-        &mut state,
-    );
+    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 1, &mut state);
     let observed_error = state.resolve_alloc_path(4, &layout.local_mutable, [field]);
     let observed_store = state.resolve_alloc_path(3, &layout.local_mutable, [stored]);
     assert_ne!(observed_error.ids, [previous_error_child]);
@@ -202,6 +210,7 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
     assert!(observed_store.ids.contains(&observed_error.ids[0]));
     assert!(observed_store.readonly);
     assert!(!state.alloc_group_is_explicit(previous_success, stored));
+    assert!(!state.alloc_group_is_explicit(retired_error, error_only));
     assert_eq!(
         state
             .resolve_alloc_path(0, &layout.local_mutable, [contributed])

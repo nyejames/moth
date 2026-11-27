@@ -10,12 +10,12 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstEvalOp,
     ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue,
-    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias,
-    ExternalJsLowering, ExternalNumericContract, ExternalPackageRegistry, ExternalParameter,
-    ExternalRegistrationError, ExternalReturnAlias, ExternalReturnSlot, ExternalReturnsMut,
-    ExternalReturnsView, ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId,
-    ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID,
-    TextConstEvalOp, external_success_returns,
+    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalJsLowering,
+    ExternalNumericContract, ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError,
+    ExternalReturnAlias, ExternalReturnSlot, ExternalReturnsMut, ExternalReturnsView,
+    ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
+    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, TextConstEvalOp,
+    external_success_returns,
 };
 use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -78,55 +78,41 @@ fn return_slots_preserve_alias_metadata() {
         lowerings: ExternalFunctionLowerings::default(),
     };
 
-    let returns = ordinary_returns(&host_function);
-    assert_eq!(returns.success.len(), 1);
+    let success = host_function.hir_return_sources();
+    assert_eq!(success.len(), 1);
     assert_eq!(
-        returns.success[0].value_type,
+        success[0].value_type,
         ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)
     );
-    assert!(matches!(
-        &returns.success[0].alias,
-        ExternalReturnAlias::AliasArgs(parameter_indices) if parameter_indices == &[1usize]
-    ));
-    assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::AliasArgs(&[1]),
-    );
+    assert_eq!(success[0].alias, ExternalReturnAlias::AliasArgs(vec![1]));
     *ordinary_returns_mut(&mut host_function).error = Some(ExternalSignatureType::BuiltinError);
     assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::AliasArgs(&[1]),
+        host_function.hir_return_sources()[0].alias,
+        ExternalReturnAlias::AliasArgs(vec![1]),
     );
     ordinary_returns_mut(&mut host_function).success.extend([
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
         ExternalReturnSlot::alias_args(ExternalAbiType::Utf8Str, vec![0, 1]),
     ]);
     assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::Unknown,
-    );
-    assert_eq!(
-        ordinary_returns(&host_function).success[2].alias,
-        ExternalReturnAlias::AliasArgs(vec![0, 1]),
+        host_function
+            .hir_return_sources()
+            .iter()
+            .map(|slot| &slot.alias)
+            .collect::<Vec<_>>(),
+        [
+            &ExternalReturnAlias::AliasArgs(vec![1]),
+            &ExternalReturnAlias::Fresh,
+            &ExternalReturnAlias::AliasArgs(vec![0, 1]),
+        ],
     );
     *ordinary_returns_mut(&mut host_function).success = vec![
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
     ];
-    assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::Unknown,
-    );
-    ordinary_returns_mut(&mut host_function).success.truncate(1);
-    assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::Fresh,
-    );
+    assert_eq!(host_function.hir_return_sources().len(), 2);
     ordinary_returns_mut(&mut host_function).success.clear();
-    assert_eq!(
-        host_function.hir_return_alias(),
-        ExternalHirReturnAlias::Fresh,
-    );
+    assert!(host_function.hir_return_sources().is_empty());
 }
 
 #[test]

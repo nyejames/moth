@@ -1026,7 +1026,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
         .collect();
     PublicCallSummary {
         parameters,
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Pending,
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

@@ -42,7 +42,9 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
 };
-use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
+use crate::compiler_frontend::public_call_summary::{
+    CallAllocationSource, CallOutputPath, FunctionReturnAliasSummary,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
@@ -2418,12 +2420,15 @@ identity |value User| -> User:
 return value
 ;
 
-load_user || -> User, Error!:
+load_user |available Bool| -> User, Error!:
+if available:
+return User(1)
+;
 return! Error("missing user")
 ;
 
-compute || -> User, Error!:
-return identity(load_user()!)
+compute |available Bool| -> User, Error!:
+return identity(load_user(available)!)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -2531,7 +2536,7 @@ return identity(load_user()!)
 }
 
 #[test]
-fn retained_unknown_result_borrows_possible_final_use_argument() {
+fn a_retained_native_slot_borrows_the_argument_without_aliasing_the_fresh_slot() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let types = TypeEnvironment::new();
@@ -2548,7 +2553,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             }],
             return_contract: external_returns(
                 vec![
-                    ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+                    ExternalReturnSlot::alias_args(ExternalAbiType::Utf8Str, vec![0]),
                     ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
                 ],
                 Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
@@ -2758,15 +2763,15 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         })
         .expect("should locate the unknown-return function")
         .id;
-    assert_eq!(
-        report
-            .analysis
-            .public_call_summaries
-            .get(&unknown_function_id)
-            .expect("unknown-return function should have a call summary")
-            .return_alias,
-        FunctionReturnAliasSummary::Unknown
-    );
+    let FunctionReturnAliasSummary::Known(facts) =
+        &report.analysis.public_call_summaries[&unknown_function_id].return_alias
+    else {
+        panic!("the native forwarder should publish the ordered success slots");
+    };
+    assert!(facts.success.sources.iter().any(|row| {
+        matches!(&row.output, CallOutputPath::Result(path) if path.slot == 0)
+            && matches!(&row.source, CallAllocationSource::Parameter(path) if path.index == 0)
+    }));
 
     let argument_local = find_local_by_name(&hir, &path_fork, &string_table, "argument")
         .expect("should locate the possible aliased argument local");
@@ -2809,7 +2814,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         "a retained unknown result must not move a possible source root, got mode {:?}",
         argument_snapshot.mode
     );
-    for call_result_local in success_results {
+    for (slot, call_result_local) in success_results.iter().enumerate() {
         let result_snapshot = entry_state
             .locals
             .iter()
@@ -2826,9 +2831,10 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             "retained unknown result should not be a write-through alias binding, got mode {:?}",
             result_snapshot.mode
         );
-        assert!(
+        assert_eq!(
             result_snapshot.alias_roots.contains(&argument_local),
-            "retained unknown result should retain the possible argument root, got {:?}",
+            slot == 0,
+            "only the first native slot retains the argument, got {:?}",
             result_snapshot.alias_roots
         );
     }

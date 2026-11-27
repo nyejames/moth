@@ -1,6 +1,6 @@
--- A whole-binding alias transports the holder value through one more binding. A joined fresh
--- alternative cannot be named through that transport, so the projected write target keeps the
--- holder cell as the conservative identity. The shared read then conflicts with the live alias.
+-- A whole-binding alias transports the holder value through one more binding. The joined
+-- path that snapshots the holder keeps `snap` as a possible alias, so taking a mutable
+-- projection through the transport conflicts with the later read of `snap`.
 
 Pair = | first {I32}, second {I32} |
 

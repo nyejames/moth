@@ -211,6 +211,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
     builder.parts.calls.push(Call {
         id: CallId::new(0),
         label: "generated-call".to_string(),
+        opaque_stores: false,
     });
     let call_argument = builder.call_argument(BlockId::new(0), CallId::new(0));
     let call_result_origin = builder.origin(OriginKind::CallResult {

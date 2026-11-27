@@ -4,11 +4,10 @@
 //!       propagates exact base and generated call summaries through materialised sidecars, plus
 //!       the exact-summary installation each pass depends on. Immutable semantic failure facts
 //!       join the same queue; only private no-slot functions infer an escaping builtin-failure bit.
-//! WHY: validated HIR owns executable call topology, so convergence reads it rather than becoming
-//!       a second dependency owner. Reaching this fixed point mutates base and generated HIR
-//!       summaries and reruns borrow analysis, which is compiler semantics: the build system's
-//!       generated store never performs either.
-//! Function boundary diagnostics run only after this fixed point. An explicit Error! slot consumes
+//! WHY: validated HIR owns executable call topology, and the generated store never analyses it.
+//!       Allocation and failure facts settle before diagnostic transfer; subsequent mutation
+//!       widening reuses those transfer facts rather than checking borrows again.
+//! Failure boundary diagnostics run before lane installation. An explicit Error! slot consumes
 //! implicit builtin failure, a custom error slot requires local handling, and exported no-slot
 //! functions may not publish an inferred contract.
 
@@ -50,6 +49,8 @@ use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
     collect_reachability_from_function_link_facts,
 };
+use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::utils::for_each_terminator_target;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
@@ -58,7 +59,7 @@ use crate::compiler_frontend::module_compilation::external_imports::{
 };
 use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
 use crate::compiler_frontend::public_call_summary::{
-    PublicCallSummary, PublicCallSummaryTransition,
+    PublicCallMutationEffect, PublicCallSummary, PublicCallSummaryTransition,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -71,7 +72,9 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
-use crate::compiler_frontend::module_compilation::stages::check_borrows;
+use crate::compiler_frontend::module_compilation::stages::{
+    check_borrows, refresh_call_allocations, refresh_call_mutation_effects,
+};
 use crate::timed_stage_attributed;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -132,6 +135,28 @@ impl ConvergenceModel {
             base_public_origins,
             Some(base_private_identities),
         )
+    }
+
+    fn for_active_transaction(
+        base: &HirModule,
+        base_link_facts: &HirModuleLinkFacts,
+        transaction: &GeneratedFunctionTransaction<'_>,
+        base_public_origins: &FxHashSet<OriginFunctionId>,
+        base_private_identities: &FxHashSet<ModulePrivateExecutableIdentity>,
+    ) -> Self {
+        let mut model = Self::from_link_facts_for_base_callees(
+            base_link_facts,
+            transaction.completed_link_facts(),
+            base_public_origins,
+            base_private_identities,
+        );
+        model.include_failure_dependencies(
+            base,
+            transaction,
+            base_public_origins,
+            base_private_identities,
+        );
+        model
     }
 
     fn build<'a>(
@@ -300,34 +325,28 @@ impl ConvergenceModel {
             .collect()
     }
 
-    /// Keep every summary-dependent failure check in the existing dependency model.
-    ///
-    /// WHAT: adds each node's runtime failure contributors and deferred catch candidates as
-    ///       summary dependencies, including work that has no runtime call edge; assertion-message
-    ///       calls tolerate an absent summary and are projected only when one exists.
-    /// WHY: a runtime contributor's activity is decided by its callee's exact summary, so summary
-    ///      availability must hold before convergence and the caller must be rescheduled when the
-    ///      summary changes. A dependency edge alone does not imply execution or escaping failure.
-    fn include_deferred_validation_dependencies(
+    /// Include failure dependencies not yet linked in the runtime CFG. In particular, the
+    /// installer follows a newly routed catch immediately and needs current lane decisions for
+    /// any statement calls it encounters there.
+    fn include_failure_dependencies(
         &mut self,
         base: &HirModule,
-        transaction: &mut GeneratedFunctionTransaction<'_>,
+        transaction: &GeneratedFunctionTransaction<'_>,
         base_public_origins: &FxHashSet<OriginFunctionId>,
         base_private_identities: &FxHashSet<ModulePrivateExecutableIdentity>,
     ) {
         for index in 0..self.nodes.len() {
-            let mut targets = match &self.nodes[index].node {
-                ConvergenceNode::BaseModule => deferred_validation_call_targets(base),
-                ConvergenceNode::Generated(identity) => deferred_validation_call_targets(
-                    &transaction.sidecar_mut(identity).module.executable.hir,
-                ),
+            let hir = match &self.nodes[index].node {
+                ConvergenceNode::BaseModule => base,
+                ConvergenceNode::Generated(identity) => {
+                    &transaction.sidecar(identity).module.executable.hir
+                }
             };
-            // Exact summary availability is independent of whether HIR lowered the call. A
-            // retained runtime contributor or deferred catch candidate cannot diagnose around an
-            // absent summary, so its generated target must have one installed even when HIR
-            // omitted the call as skipped evidence. Assertion-only calls keep the existing
-            // tolerance: an absent summary diagnoses after convergence instead of inventing a
-            // false executable dependency.
+            let mut targets = deferred_validation_call_targets(hir);
+            append_latent_handler_calls(hir, &mut targets);
+            // Retained contributors and latent statement calls must resolve even if there is
+            // no runtime edge yet. Assertion-only calls may lack a summary and diagnose at the
+            // boundary instead of forcing an executable dependency.
             targets.retain(|target| {
                 let CallTarget::Generated(identity) = &target.target else {
                     return true;
@@ -338,7 +357,7 @@ impl ConvergenceModel {
                 if matches!(target.summary_requirement, SummaryRequirement::Required) {
                     crate::compiler_bug!(
                         CompilerStage::ProjectBuildAssembly,
-                        "retained failure contributor has no materialised generated summary for {identity:?}"
+                        "required failure-lane dependency has no materialised generated summary for {identity:?}"
                     );
                 }
                 false
@@ -417,6 +436,39 @@ fn deferred_validation_call_targets(hir: &HirModule) -> Vec<DeferredValidationTa
     targets
 }
 
+fn append_latent_handler_calls(hir: &HirModule, targets: &mut Vec<DeferredValidationTarget>) {
+    // Protected-call edges are not linked until lane installation. Overlapping handlers share
+    // one walk, and only statement calls need their lane contract before the rewrite.
+    let mut pending = hir
+        .catch_handlers
+        .iter()
+        .map(|record| record.handler.block)
+        .collect::<Vec<_>>();
+    let mut visited = FxHashSet::default();
+    while let Some(block_id) = pending.pop() {
+        if !visited.insert(block_id) {
+            continue;
+        }
+        let block = hir.block(block_id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "latent catch handler reaches unknown HIR block {block_id:?}"
+            )
+        });
+        for statement in &block.statements {
+            if let HirStatementKind::Call { target, .. } = &statement.kind
+                && !matches!(target, CallTarget::Local(_) | CallTarget::External(_))
+            {
+                targets.push(DeferredValidationTarget {
+                    target: target.clone(),
+                    summary_requirement: SummaryRequirement::Required,
+                });
+            }
+        }
+        for_each_terminator_target(&block.terminator, |target| pending.push(target));
+    }
+}
+
 fn add_model_edges(
     callers: &mut [Vec<ConvergenceNodeId>],
     ids_by_generated: &FxHashMap<GeneratedFunctionIdentity, ConvergenceNodeId>,
@@ -492,14 +544,9 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         .keys()
         .cloned()
         .collect::<FxHashSet<_>>();
-    let mut convergence_model = ConvergenceModel::from_link_facts_for_base_callees(
-        function_link_facts,
-        generated_transaction.completed_link_facts(),
-        &base_public_origins,
-        &base_private_identities,
-    );
-    convergence_model.include_deferred_validation_dependencies(
+    let mut convergence_model = ConvergenceModel::for_active_transaction(
         hir_module,
+        function_link_facts,
         generated_transaction,
         &base_public_origins,
         &base_private_identities,
@@ -512,9 +559,52 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     }
 
     let mut borrow_analysis = bootstrap_borrow_analysis;
-    while let Some(node_id) = convergence_queue.pop_front() {
+    let mut phase = ConvergencePhase::Failure;
+    let mut first_visits = convergence_model.node_count();
+    loop {
+        let Some(node_id) = convergence_queue.pop_front() else {
+            phase = match phase {
+                ConvergencePhase::Failure => {
+                    if install_convergence_lanes(
+                        compiler,
+                        hir_module,
+                        function_link_facts,
+                        generated_transaction,
+                        &borrow_analysis,
+                        type_environment,
+                        warnings,
+                        &convergence_model,
+                        #[cfg(feature = "timers")]
+                        timing_context,
+                    )? {
+                        // Newly routed handlers may add executable dependencies. Node
+                        // identities stay stable because installation doesn't add sidecars.
+                        convergence_model = ConvergenceModel::for_active_transaction(
+                            hir_module,
+                            function_link_facts,
+                            generated_transaction,
+                            &base_public_origins,
+                            &base_private_identities,
+                        );
+                    }
+                    // Declaration contracts and escape proofs survive the rewrite. Body
+                    // allocation facts are still pending, so no pre-rewrite CFG facts enter
+                    // the final-HIR fixed point, even across base/sidecar recursion.
+                    ConvergencePhase::Allocation
+                }
+                ConvergencePhase::Allocation => ConvergencePhase::Diagnostics,
+                ConvergencePhase::Diagnostics => break,
+            };
+            first_visits = convergence_model.node_count();
+            for node_id in convergence_model.all_node_ids() {
+                enqueue_convergence_node(node_id, &mut convergence_queue, &mut queued_nodes);
+            }
+            continue;
+        };
         queued_nodes[node_id.index()] = false;
-        let node = convergence_model.node(node_id).cloned().unwrap_or_else(|| {
+        let first_visit = first_visits != 0;
+        first_visits = first_visits.saturating_sub(1);
+        let node = convergence_model.node(node_id).unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::ProjectBuildAssembly,
                 "convergence queue received unknown node {node_id:?}"
@@ -531,26 +621,43 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
 
         match node {
             ConvergenceNode::BaseModule => {
-                let summaries_changed = install_convergence_summaries(
+                let input_changes = install_convergence_summaries(
                     hir_module,
                     &direct_summaries.generated,
                     &direct_summaries.active_public,
                     &direct_summaries.module_private,
                 );
-                // The transition check needs only the previous summaries, not the whole report.
-                let previous_summaries = borrow_analysis.analysis.public_call_summaries.clone();
-                // The current report already analysed this exact HIR and summary set.
-                if summaries_changed {
+                let Some((visit, changed_callers)) =
+                    BorrowVisit::select(phase, first_visit, &input_changes, function_link_facts)
+                else {
+                    continue;
+                };
+                if let BorrowVisit::Check = visit {
+                    increment_convergence_counter(
+                        FrontendCounter::ConvergenceInitialBaseBorrowPasses,
+                    );
+                } else if matches!(visit, BorrowVisit::Summarize) && !first_visit {
                     increment_convergence_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
-                    borrow_analysis = timed_stage_attributed!(
-                        crate::timing::TimingMetric::FrontendBorrowConverge,
-                        timing_context,
-                        check_borrows(compiler, hir_module, type_environment, warnings, None)
-                    )?;
                 }
-                // A reused bootstrap report still carries unset failure bits, so inference runs
-                // whether or not borrow analysis was repeated.
-                infer_builtin_failure_summaries(hir_module, &mut borrow_analysis);
+                let previous_summaries = timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendBorrowConverge,
+                    timing_context,
+                    visit.update(
+                        compiler,
+                        hir_module,
+                        type_environment,
+                        warnings,
+                        None,
+                        &mut borrow_analysis,
+                        (function_link_facts, &changed_callers),
+                        !matches!(visit, BorrowVisit::Summarize)
+                            || convergence_model.node_count() != 1,
+                    )
+                )?;
+                let Some(previous_summaries) = previous_summaries else {
+                    // The local solver validated every transition and there are no sidecars.
+                    continue;
+                };
                 let summary_changes = base_summary_changes(
                     hir_module,
                     &previous_summaries,
@@ -567,45 +674,62 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 }
             }
             ConvergenceNode::Generated(identity) => {
-                let identity = *identity;
+                let identity = identity.as_ref();
                 let source_identity_handle = FrozenIdentityHandle::for_domain(
                     identity.declaration().module_origin().package().clone(),
                 );
                 let summary = {
                     let (sidecar, sidecar_warnings) =
-                        generated_transaction.sidecar_and_warnings_mut(&identity);
-                    let summaries_changed = install_convergence_summaries(
+                        generated_transaction.sidecar_and_warnings_mut(identity);
+                    let input_changes = install_convergence_summaries(
                         &mut sidecar.module.executable.hir,
                         &direct_summaries.generated,
                         &direct_summaries.active_public,
                         &direct_summaries.module_private,
                     );
-                    // Materialisation or an earlier visit already analysed this exact HIR and
-                    // summary set.
-                    if summaries_changed {
+                    let links = &sidecar.module.link_facts.functions;
+                    let Some((visit, changed_callers)) =
+                        BorrowVisit::select(phase, first_visit, &input_changes, links)
+                    else {
+                        continue;
+                    };
+                    if matches!(visit, BorrowVisit::Check)
+                        || (matches!(visit, BorrowVisit::Summarize) && !first_visit)
+                    {
                         increment_convergence_counter(
                             FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
                         );
-                        sidecar.module.executable.borrow_analysis = timed_stage_attributed!(
-                            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
-                            timing_context,
-                            check_borrows(
-                                compiler,
-                                &sidecar.module.executable.hir,
-                                &sidecar.module.executable.type_environment,
-                                sidecar_warnings,
-                                Some(&source_identity_handle),
-                            )
-                        )?;
                     }
-                    // Materialisation reports carry unset failure bits, so inference always runs.
-                    infer_builtin_failure_summaries(
-                        &sidecar.module.executable.hir,
-                        &mut sidecar.module.executable.borrow_analysis,
-                    );
-                    exact_generated_sidecar_summary(&identity, &sidecar.module)
+                    let executable = &mut sidecar.module.executable;
+                    timed_stage_attributed!(
+                        crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
+                        timing_context,
+                        visit.update(
+                            compiler,
+                            &executable.hir,
+                            &executable.type_environment,
+                            sidecar_warnings,
+                            Some(&source_identity_handle),
+                            &mut executable.borrow_analysis,
+                            (links, &changed_callers),
+                            false,
+                        )
+                    )?;
+                    let summary = generated_root_summary(identity, &sidecar.module);
+                    if (first_visit
+                        && matches!(visit, BorrowVisit::InferFailure)
+                        && !summary.escapes_builtin_failure)
+                        || (matches!(visit, BorrowVisit::Check)
+                            && summary.parameters.iter().all(|parameter| {
+                                parameter.mutation == PublicCallMutationEffect::NoWrite
+                            }))
+                    {
+                        // The first failure/diagnostic visit can only set its own component.
+                        continue;
+                    }
+                    summary.clone()
                 };
-                if update_generated_summary(generated_transaction, &identity, summary)
+                if update_generated_summary(generated_transaction, identity, summary)
                     .map_err(PreparedFailure::from)?
                 {
                     enqueue_convergence_callers(
@@ -619,54 +743,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         }
     }
 
-    validate_builtin_failure_boundaries(
-        compiler,
-        hir_module,
-        &borrow_analysis,
-        type_environment,
-        warnings,
-        None,
-    )?;
-    for node_id in convergence_model.generated_node_ids() {
-        let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
-            crate::compiler_bug!(
-                CompilerStage::ProjectBuildAssembly,
-                "generated convergence node has no generated identity"
-            );
-        };
-        let (sidecar, sidecar_warnings) = generated_transaction.sidecar_and_warnings_mut(identity);
-        let source_owner = FrozenIdentityHandle::for_domain(
-            identity.declaration().module_origin().package().clone(),
-        );
-        validate_builtin_failure_boundaries(
-            compiler,
-            &sidecar.module.executable.hir,
-            &sidecar.module.executable.borrow_analysis,
-            &sidecar.module.executable.type_environment,
-            sidecar_warnings,
-            Some(&source_owner),
-        )?;
-    }
     discard_validated_failure_captures(hir_module);
-    // Unchanged base HIR keeps the link facts the service collected before convergence.
-    // The refresh re-runs borrow analysis over the installed lanes, so it is borrow convergence.
-    let refreshed = timed_stage_attributed!(
-        crate::timing::TimingMetric::FrontendBorrowConverge,
-        timing_context,
-        refresh_private_failure_lanes(
-            compiler,
-            hir_module,
-            &borrow_analysis,
-            type_environment,
-            warnings,
-            None,
-        )
-    )?;
-    if let Some(report) = refreshed {
-        *function_link_facts =
-            collect_module_function_link_facts(hir_module).map_err(PreparedFailure::from)?;
-        borrow_analysis = report;
-    }
     for node_id in convergence_model.generated_node_ids() {
         let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
             crate::compiler_bug!(
@@ -674,37 +751,17 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 "generated convergence node has no generated identity"
             );
         };
-        let identity = identity.clone();
-        let source_owner = FrozenIdentityHandle::for_domain(
-            identity.declaration().module_origin().package().clone(),
+        discard_validated_failure_captures(
+            &mut generated_transaction
+                .sidecar_mut(identity)
+                .module
+                .executable
+                .hir,
         );
-        let (sidecar, sidecar_warnings) = generated_transaction.sidecar_and_warnings_mut(&identity);
-        discard_validated_failure_captures(&mut sidecar.module.executable.hir);
-        let refreshed = timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
-            timing_context,
-            refresh_private_failure_lanes(
-                compiler,
-                &mut sidecar.module.executable.hir,
-                &sidecar.module.executable.borrow_analysis,
-                &mut sidecar.module.executable.type_environment,
-                sidecar_warnings,
-                Some(&source_owner),
-            )
-        )?;
-        // Unchanged sidecar HIR keeps the link facts materialisation collected from it.
-        if let Some(report) = refreshed {
-            sidecar.module.link_facts.functions =
-                collect_module_function_link_facts(&sidecar.module.executable.hir)
-                    .map_err(PreparedFailure::from)?;
-            sidecar.module.executable.borrow_analysis = report;
-        }
     }
 
-    // Phase B runs on the final lane-delivered HIR, after every refresh/rewrite above and before
-    // any pruning or exact-summary installation. It is the only writer of the three constraint
-    // bits; a later `check_borrows` would re-seed them false, so no pass below may rebuild a
-    // summary.
+    // Phase B owns the proof bits. Run it only after allocation, diagnostic transfer, and
+    // mutation effects are settled, and do not rebuild a summary afterwards.
     crate::compiler_frontend::module_compilation::generated::constraint_convergence::
         converge_constraint_summaries(
             hir_module,
@@ -893,22 +950,103 @@ fn reachable_generated_sidecars(
     reachable
 }
 
-/// Install private failure lanes and re-run analysis of the rewritten HIR.
-///
-/// Returns `None` when installation left the HIR unchanged, so the converged report stands.
-fn refresh_private_failure_lanes(
+/// Validate inferred failure boundaries, then install lanes once and refresh rewritten link facts.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "lane installation needs the existing convergence owners without taking ownership"
+)]
+fn install_convergence_lanes(
     compiler: &mut CompilerFrontend<'_>,
     hir: &mut HirModule,
+    link_facts: &mut HirModuleLinkFacts,
+    transaction: &mut GeneratedFunctionTransaction<'_>,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
-    source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<Option<BorrowCheckReport>, PreparedFailure> {
-    let installation = install_private_failure_lanes(
+    model: &ConvergenceModel,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> Result<bool, PreparedFailure> {
+    validate_builtin_failure_boundaries(compiler, hir, report, type_environment, warnings, None)?;
+    for node_id in model.generated_node_ids() {
+        let Some(ConvergenceNode::Generated(identity)) = model.node(node_id) else {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "generated convergence node has no generated identity"
+            );
+        };
+        let (sidecar, sidecar_warnings) = transaction.sidecar_and_warnings_mut(identity);
+        let source_owner = FrozenIdentityHandle::for_domain(
+            identity.declaration().module_origin().package().clone(),
+        );
+        let executable = &sidecar.module.executable;
+        validate_builtin_failure_boundaries(
+            compiler,
+            &executable.hir,
+            &executable.borrow_analysis,
+            &executable.type_environment,
+            sidecar_warnings,
+            Some(&source_owner),
+        )?;
+    }
+
+    let mut changed = install_validated_failure_lanes(
+        compiler,
         hir,
+        link_facts,
         report,
         type_environment,
-        compiler.external_package_registry.as_ref(),
+        None,
+        #[cfg(feature = "timers")]
+        timing_context,
+    )?;
+    for node_id in model.generated_node_ids() {
+        let Some(ConvergenceNode::Generated(identity)) = model.node(node_id) else {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "generated convergence node has no generated identity"
+            );
+        };
+        let source_owner = FrozenIdentityHandle::for_domain(
+            identity.declaration().module_origin().package().clone(),
+        );
+        let sidecar = transaction.sidecar_mut(identity);
+        let executable = &mut sidecar.module.executable;
+        changed |= install_validated_failure_lanes(
+            compiler,
+            &mut executable.hir,
+            &mut sidecar.module.link_facts.functions,
+            &executable.borrow_analysis,
+            &mut executable.type_environment,
+            Some(&source_owner),
+            #[cfg(feature = "timers")]
+            timing_context,
+        )?;
+    }
+    Ok(changed)
+}
+
+fn install_validated_failure_lanes(
+    compiler: &mut CompilerFrontend<'_>,
+    hir: &mut HirModule,
+    link_facts: &mut HirModuleLinkFacts,
+    report: &BorrowCheckReport,
+    type_environment: &mut TypeEnvironment,
+    source_owner: Option<&FrozenIdentityHandle>,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> Result<bool, PreparedFailure> {
+    let installation = timed_stage_attributed!(
+        if source_owner.is_some() {
+            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck
+        } else {
+            crate::timing::TimingMetric::FrontendBorrowConverge
+        },
+        timing_context,
+        install_private_failure_lanes(
+            hir,
+            report,
+            type_environment,
+            compiler.external_package_registry.as_ref(),
+        )
     )
     .map_err(|failure| match failure {
         HirConstructionFailure::Diagnosed(mut diagnostic) => {
@@ -925,11 +1063,90 @@ fn refresh_private_failure_lanes(
         HirConstructionFailure::Infrastructure(error) => PreparedFailure::from(error),
     })?;
     if installation == PrivateFailureLaneInstallation::Unchanged {
-        return Ok(None);
+        return Ok(false);
     }
-    let mut refreshed = check_borrows(compiler, hir, type_environment, warnings, source_owner)?;
-    infer_builtin_failure_summaries(hir, &mut refreshed);
-    Ok(Some(refreshed))
+    *link_facts = collect_module_function_link_facts(hir).map_err(PreparedFailure::from)?;
+    Ok(installation == PrivateFailureLaneInstallation::Rewritten)
+}
+
+#[derive(Clone, Copy)]
+enum ConvergencePhase {
+    Failure,
+    Allocation,
+    Diagnostics,
+}
+
+#[derive(Clone, Copy)]
+enum BorrowVisit {
+    Summarize,
+    InferFailure,
+    Check,
+    RefreshMutation,
+}
+
+impl BorrowVisit {
+    fn select(
+        phase: ConvergencePhase,
+        first_visit: bool,
+        changes: &CallInputChanges<'_>,
+        links: &HirModuleLinkFacts,
+    ) -> Option<(Self, FxHashSet<FunctionId>)> {
+        let mut callers = FxHashSet::default();
+        let visit = match phase {
+            ConvergencePhase::Failure if first_visit || changes.failure => Self::InferFailure,
+            ConvergencePhase::Allocation => {
+                if !first_visit {
+                    callers = changes.allocation_callers(links);
+                    if callers.is_empty() {
+                        return None;
+                    }
+                }
+                Self::Summarize
+            }
+            ConvergencePhase::Diagnostics if first_visit => Self::Check,
+            ConvergencePhase::Diagnostics if changes.mutation => Self::RefreshMutation,
+            _ => return None,
+        };
+        Some((visit, callers))
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "convergence shares the same update for base and generated reports"
+    )]
+    fn update(
+        self,
+        compiler: &mut CompilerFrontend<'_>,
+        hir: &HirModule,
+        types: &TypeEnvironment,
+        warnings: &mut DiagnosticBag,
+        owner: Option<&FrozenIdentityHandle>,
+        report: &mut BorrowCheckReport,
+        allocation_inputs: (&HirModuleLinkFacts, &FxHashSet<FunctionId>),
+        compare_base_summaries: bool,
+    ) -> Result<Option<FxHashMap<FunctionId, PublicCallSummary>>, PreparedFailure> {
+        let previous =
+            compare_base_summaries.then(|| report.analysis.public_call_summaries.clone());
+        match self {
+            Self::Summarize => {
+                refresh_call_allocations(
+                    compiler,
+                    hir,
+                    types,
+                    warnings,
+                    owner,
+                    allocation_inputs,
+                    report,
+                )?;
+            }
+            Self::InferFailure => infer_builtin_failure_summaries(hir, report),
+            Self::Check => check_borrows(compiler, hir, types, warnings, owner, report)?,
+            Self::RefreshMutation => {
+                refresh_call_mutation_effects(compiler, hir, types, warnings, owner, report)?;
+            }
+        }
+        Ok(previous)
+    }
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.
@@ -1056,50 +1273,116 @@ pub(crate) fn direct_convergence_summaries(
     })
 }
 
-/// Install one node's exact direct-call summaries, reporting whether any summary changed.
-///
-/// WHY: borrow analysis is a pure function of the HIR and these summaries, so the queue may
-///      reuse the node's current report when installation changed nothing.
-pub(crate) fn install_convergence_summaries(
-    hir: &mut HirModule,
-    generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
-    active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
-    private_summaries: &[(ModulePrivateExecutableIdentity, PublicCallSummary)],
-) -> bool {
-    let generated_unchanged = hir.generated_call_summaries.len() == generated_summaries.len()
-        && generated_summaries
-            .iter()
-            .all(|(identity, summary)| hir.generated_call_summaries.get(identity) == Some(summary));
-    if !generated_unchanged {
-        hir.generated_call_summaries.clear();
-        for (identity, summary) in generated_summaries {
-            hir.generated_call_summaries
-                .insert(identity.clone(), summary.clone());
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CallInputChanges<'a> {
+    generated: FxHashSet<&'a GeneratedFunctionIdentity>,
+    public: FxHashSet<&'a OriginFunctionId>,
+    private: FxHashSet<&'a ModulePrivateExecutableIdentity>,
+    failure: bool,
+    mutation: bool,
+}
+
+impl CallInputChanges<'_> {
+    fn allocations_changed(&self) -> bool {
+        !self.generated.is_empty() || !self.public.is_empty() || !self.private.is_empty()
+    }
+
+    fn allocation_callers(&self, links: &HirModuleLinkFacts) -> FxHashSet<FunctionId> {
+        if !self.allocations_changed() {
+            return FxHashSet::default();
         }
+        links.callers_of(&self.generated, &self.public, &self.private)
     }
-    let mut changed = !generated_unchanged;
+}
 
-    // Active-base public calls are represented as CrossModule targets in generated HIR. Update
-    // only those stable origins; provider and cross-boundary imports remain fixed bootstrap
-    // leaves in the same imported-summary map.
-    for (origin, summary) in active_public_summaries {
-        changed |= hir
-            .imported_call_summaries
-            .insert(origin.clone(), summary.clone())
-            .as_ref()
-            != Some(summary);
+/// Install exact inputs for the two analyses that consume the call contract. Escape bits are
+/// installed too, but only failure inference reads them before lane delivery is rewritten.
+pub(crate) fn install_convergence_summaries<'a>(
+    hir: &mut HirModule,
+    generated_summaries: &'a [(GeneratedFunctionIdentity, PublicCallSummary)],
+    active_public_summaries: &'a [(OriginFunctionId, PublicCallSummary)],
+    private_summaries: &'a [(ModulePrivateExecutableIdentity, PublicCallSummary)],
+) -> CallInputChanges<'a> {
+    let mut failure = false;
+    let mut mutation = false;
+    // Keep latent and validation-only inputs until link pruning. The lists contain only
+    // direct generated dependencies and active-base origins; fixed provider leaves stay put.
+    let generated = install_call_inputs(
+        &mut hir.generated_call_summaries,
+        generated_summaries,
+        &mut failure,
+        &mut mutation,
+    );
+    let public = install_call_inputs(
+        &mut hir.imported_call_summaries,
+        active_public_summaries,
+        &mut failure,
+        &mut mutation,
+    );
+    let private = install_call_inputs(
+        &mut hir.module_private_call_summaries,
+        private_summaries,
+        &mut failure,
+        &mut mutation,
+    );
+    CallInputChanges {
+        generated,
+        public,
+        private,
+        failure,
+        mutation,
     }
+}
 
-    // Provider-private summaries remain fixed bootstrap leaves. Active-base private identities
-    // receive exact replacements, while no complete private map is rebuilt or retained.
-    for (identity, summary) in private_summaries {
-        changed |= hir
-            .module_private_call_summaries
-            .insert(identity.clone(), summary.clone())
-            .as_ref()
-            != Some(summary);
+fn install_call_inputs<'a, K: Clone + Eq + std::hash::Hash>(
+    installed: &mut FxHashMap<K, PublicCallSummary>,
+    incoming: &'a [(K, PublicCallSummary)],
+    failure: &mut bool,
+    mutation: &mut bool,
+) -> FxHashSet<&'a K> {
+    let mut allocations = FxHashSet::default();
+    for (target, summary) in incoming {
+        let Some(previous) = installed.get_mut(target) else {
+            installed.insert(target.clone(), summary.clone());
+            allocations.insert(target);
+            *failure |= summary.escapes_builtin_failure;
+            *mutation = true;
+            continue;
+        };
+        if !previous
+            .return_alias
+            .same_allocation_transfer_as(&summary.return_alias)
+        {
+            previous.return_alias.clone_from(&summary.return_alias);
+            allocations.insert(target);
+        } else if std::mem::discriminant(&previous.return_alias)
+            != std::mem::discriminant(&summary.return_alias)
+        {
+            // Equal transfer does not erase the difference between pending and proved bottom.
+            previous.return_alias.clone_from(&summary.return_alias);
+        }
+        if previous.parameters != summary.parameters {
+            if previous.parameters.len() != summary.parameters.len()
+                || previous
+                    .parameters
+                    .iter()
+                    .zip(&summary.parameters)
+                    .any(|(old, new)| {
+                        old.access != new.access || old.transfer_effect != new.transfer_effect
+                    })
+            {
+                allocations.insert(target);
+            }
+            *mutation = true;
+            previous.parameters.clone_from(&summary.parameters);
+        }
+        *failure |= previous.escapes_builtin_failure != summary.escapes_builtin_failure;
+        previous.escapes_builtin_failure = summary.escapes_builtin_failure;
+        previous.uses_fast_semantics = summary.uses_fast_semantics;
+        previous.may_trap = summary.may_trap;
+        previous.may_fail = summary.may_fail;
     }
-    changed
+    allocations
 }
 
 /// Resolve a semantic pending-call contributor against its retained summary.
@@ -1707,10 +1990,10 @@ fn increment_convergence_counter(counter: FrontendCounter) {
     add_frontend_counter(counter, 1);
 }
 
-pub(crate) fn exact_generated_sidecar_summary(
+pub(crate) fn generated_root_summary<'a>(
     identity: &GeneratedFunctionIdentity,
-    module: &Module,
-) -> PublicCallSummary {
+    module: &'a Module,
+) -> &'a PublicCallSummary {
     let function_id = module
         .executable
         .hir
@@ -1735,7 +2018,6 @@ pub(crate) fn exact_generated_sidecar_summary(
         .analysis
         .public_call_summaries
         .get(&function_id)
-        .cloned()
         .unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::ProjectBuildAssembly,

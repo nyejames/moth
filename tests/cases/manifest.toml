@@ -18065,6 +18065,125 @@ contract = "language.memory.retained_field_replacement_and_disjoint_access"
 role = "boundary"
 
 [[case]]
+id = "runtime_call_copy_separate_exits"
+path = "runtime_call_copy_separate_exits"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "primary"
+
+[[case]]
+id = "runtime_call_copy_separate_exits_rejected"
+path = "runtime_call_copy_separate_exits_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_copy_joined_value"
+path = "runtime_call_copy_joined_value"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_copy_joined_value_rejected"
+path = "runtime_call_copy_joined_value_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_copy_generated_forward"
+path = "runtime_call_copy_generated_forward"
+tags = ["integration", "borrows", "functions", "generics", "dependencies", "runtime"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_copy_generated_forward_rejected"
+path = "runtime_call_copy_generated_forward_rejected"
+tags = ["integration", "borrows", "functions", "generics", "dependencies", "diagnostics"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_copy_generated_forward_distinct_children"
+path = "runtime_call_copy_generated_forward_distinct_children"
+tags = ["integration", "borrows", "functions", "generics", "dependencies", "runtime"]
+contract = "language.borrows.call_result_copy_preserves_conditional_sharing"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_store_success_lane"
+path = "runtime_call_store_success_lane"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_store_effects_follow_return_lane"
+role = "primary"
+
+[[case]]
+id = "runtime_call_store_success_lane_rejected"
+path = "runtime_call_store_success_lane_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_store_effects_follow_return_lane"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_store_failure_lane"
+path = "runtime_call_store_failure_lane"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_store_effects_follow_return_lane"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_store_failure_lane_rejected"
+path = "runtime_call_store_failure_lane_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_store_effects_follow_return_lane"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_recursive_option_holder_write"
+path = "runtime_call_recursive_option_holder_write"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.recursive_call_summaries_converge_monotonically"
+role = "primary"
+
+[[case]]
+id = "runtime_call_recursive_option_holder_write_rejected"
+path = "runtime_call_recursive_option_holder_write_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.recursive_call_summaries_converge_monotonically"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutual_recursive_holder_write"
+path = "runtime_call_mutual_recursive_holder_write"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.recursive_call_summaries_converge_monotonically"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_assigned_alias_store_rejected"
+path = "runtime_call_assigned_alias_store_rejected"
+tags = ["integration", "borrows", "functions", "diagnostics"]
+contract = "language.borrows.call_store_effects_follow_assigned_aliases"
+role = "primary"
+
+[[case]]
+id = "runtime_call_callee_local_binding_mutable"
+path = "runtime_call_callee_local_binding_mutable"
+tags = ["integration", "borrows", "functions", "runtime"]
+contract = "language.borrows.callee_local_bindings_do_not_restrict_call_results"
+role = "primary"
+
+[[case]]
+id = "runtime_call_generated_forward_permission_rejected"
+path = "runtime_call_generated_forward_permission_rejected"
+tags = ["integration", "borrows", "functions", "generics", "dependencies", "diagnostics"]
+contract = "language.borrows.call_results_retain_typed_field_provenance"
+role = "boundary"
+
+[[case]]
 id = "runtime_call_copy_operand_order"
 path = "runtime_call_copy_operand_order"
 tags = ["integration", "functions", "borrows", "runtime"]
@@ -23275,10 +23394,10 @@ contract = "language.functions.call_shared_place_operands_read_where_written"
 role = "boundary"
 
 [[case]]
-id = "runtime_call_shared_sibling_place_operand_rejected"
-path = "runtime_call_shared_sibling_place_operand_rejected"
-tags = ["integration", "functions", "borrows", "diagnostics"]
-contract = "language.borrows.root_granular_projection_conflicts"
+id = "runtime_call_shared_sibling_place_operand"
+path = "runtime_call_shared_sibling_place_operand"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.borrows.sibling_projection_call_operands_are_disjoint"
 role = "boundary"
 
 [[case]]

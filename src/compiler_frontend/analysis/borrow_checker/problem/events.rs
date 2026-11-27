@@ -208,6 +208,8 @@ pub(crate) struct CallEffect {
 pub(crate) struct Call {
     pub(crate) id: CallId,
     pub(crate) label: String,
+    /// The selected lane can retain values in existing storage, which this model cannot apply.
+    pub(crate) opaque_stores: bool,
 }
 
 /// A rebinding preserves an explicit value meaning instead of mutating an old origin.

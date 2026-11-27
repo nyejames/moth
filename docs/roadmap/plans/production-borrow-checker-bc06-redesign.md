@@ -15,9 +15,147 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Slice 1 | The verified cap-free release build is `a08f2d820e3ed`. Its parent `0e95895fd5` is the user-pushed review base, not the Slice 1 checkpoint. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
-| Last established result | The sparse allocation layer passed all 18 unchanged guard workloads. The original 3,323-case differential has no new acceptances and only the approved hashmap rejection. The earlier holder-edge prototype is historical evidence, not a restart point. |
-| Next task | Keep Slice 2 and C4 shared runtime lowering paused. |
-| Next unanswered question | On owner approval, validate conditional result sharing and per-lane stores in Slice 2. The extra int64 timing miss does not justify more retirement changes. |
+| Last established result | B1 (`f2390602e`) remains the accepted checkpoint. B2 stopped again: a whole-parameter write can hide an executable path from borrow checking. See [B2 resume stop](#b2-resume-stop). |
+| Next task | Review the missing caller-cell write and false lane pruning before resuming B2 validation. Keep shared C4 runtime HIR lowering disabled and both C4 fixture expectations unchanged. |
+| Next unanswered question | How should a whole mutable parameter replacement reach the caller's actual cell, distinct from mutation of its old allocation, without losing effects or making convergence schedule-dependent? |
+
+### B2 resume stop
+
+**Correctness gate failed.** `tmp/bc06-review/b2/whole_param_replacement/@entry.moth`
+starts with an empty `boxes`, fills it through `seed(~boxes)`, removes the
+first box, and writes through `removed.items`. B1 rejects the subsequent
+conflicting `~child.push(2)` at `26:6` (`MOTH-BORROW-0007`); resumed B2
+accepts and the generated JS renders `result=2`. The comparison and
+runtime output are in `tmp/bc06-review/b2/gates/resume-whole-param.log`.
+The instrumented B2 binary's SHA-256 is
+`01347dbebb6c06568ea1d587f24bf660a2ccc7950566d78cf242d66e4a379105`.
+
+A whole assignment to a mutable parameter replaces its graph-local
+cell but publishes no caller-cell store. The wrapper then analyses the
+collection as empty and the later field write sees an unresolved holder.
+It publishes an unreachable success lane, and the diagnostic pass skips
+the real continuation. The holder rule must not turn an unmodelled
+store into proof that an edge cannot execute. A correction must
+distinguish replacement of the caller's cell from mutation of its old
+referent and preserve local rebinding, both lane effects and recursive
+transition validation.
+
+**Retained candidate.** Private failure-lane installation consumes
+signature and failure facts only; the existing metadata queue extracts
+allocation facts on final HIR and refreshes affected callers without a
+provisional whole-module allocation pass. Cold recomputation tests
+cover local and generated recursion, handler pruning, and stores on
+both lanes. The review also found and corrected a missing fresh
+`Error.message` path. Direct assignment accepts proven-disjoint sibling
+cells; overlapping projections and live whole-aggregate observers still
+reject in the focused controls. The assigned-alias store regression
+still rejects in its focused check.
+
+Boracle remains independent. B1's generic bootstrap guessed `Fresh`
+without body evidence; source mode correctly reports `MissingSummary`.
+A mutable heap argument without a retained contract and collection
+`push` can still be explicitly inconclusive. The terminating-call
+control uses normalized call facts, and a push-free source control
+retains the self-update coverage. The 266-test Boracle library lane
+passed before the final typed-source changes; the resultless scalar
+mutation control passed afterward. The complete final recipe was not
+verified.
+
+The resumed 18-input release guard, the paired B1 timings and separate
+int64 comparison, and final integrated validation were not run after the
+correctness failure. No B2 commit. The uncommitted candidate is
+preserved under `tmp/bc06-review/b2/handoff/`.
+
+### Slice 2 stop
+
+**Candidate.** Uncommitted on top of `f2390602e`. The measured release
+build (`detailed_timers,benchmark_counters`) has SHA-256
+`8872167ac31d8a633137b4bca7ec5cebe74b73228bb5e94516b30942233ac3b1`.
+Formatting and two Clippy signature fixes landed after that build and
+don't change behaviour. `tmp/bc06-review/b2/gates` holds every log.
+
+**Monotone summary transfer.** Summary extraction separates five cases.
+A pending or unreachable callee lane binds nothing, so the path stays
+incomplete until widening resolves it. Unknown provenance is an opaque
+origin and never supports a strong update. A definite write, erase,
+push or map update through a holder that no allocation reaches yet
+leaves the path incomplete. It never becomes a no-op. Ambiguous alias
+targets, callee store rows and opaque stores are may-writes, so an
+absent alternative adds nothing. Strong updates need an exact origin:
+one source, no repeated site, and no element or key selector on the
+cell, the parameter path or the fresh output route (a store target's
+route included). A plain mutable slot that receives a place becomes
+that place's alias, as at its definition. A control-flow join keeps the
+slot as an alternative, and each projected alias keeps its own holder,
+keyed by acquisition site. Definition-order tests over recursive,
+mutual and late-resolving callees reach identical summaries.
+
+**Functional gates.** The library suite passed 7,926 tests. The Clippy
+and formatting gates pass. The integration gate passed 3,920 of 3,922
+cases. The two failures are the known C4 cases
+`runtime_call_fresh_box_forward_rejected` and
+`runtime_call_identity_fields_rejected`. All 29 B1 witnesses match the
+recorded set. The Slice 2 row passes: W7a and W7c render
+`left=2 right=1 original=1` for both flags, `runtime_call_disjoint_result_fields`
+accepts, and W7b, W7d and both store fixtures reject.
+
+Against B1, 8 of the 3,323 original inputs change:
+
+- `runtime_call_disjoint_result_fields` now accepts, as the Slice 2 row requires.
+- `runtime_call_shared_sibling_place_operand_rejected` now accepts and
+  renders `12`, under the approved W7a decision. It's renamed to
+  `runtime_call_shared_sibling_place_operand`. A direct assignment
+  `~pair.right = {3, 4}` with a live `left = pair.left` still rejects on
+  B1 and on the candidate. That inconsistency stays open.
+- The three `mutable_projected_alias_*` pairs now report `MOTH-BORROW-0007`
+  when the mutable projection is taken (`19:22`, `19:11` and `23:11`),
+  not `MOTH-BORROW-0003` at the later read. `snap` may alias the holder
+  on the joined path, so the first conflicting access moves earlier.
+  The rejections still depend on the join keeping that alternative.
+
+New fixtures cover recursive and mutual holder writes, an assignment
+that acquires an alias, and a callee-local binding that must not
+restrict the caller. B1 accepts `runtime_call_assigned_alias_store_rejected`,
+which the candidate rejects at `14:6`.
+
+**Accepted imprecision.** Nested sharing that isn't transitive, such as
+A–B on one exit and B–C on another inside one value, flattens child
+projections and can report false A–C sharing. This only causes false
+rejections, and no test asserts acceptance.
+
+**Release guard.** These rows fail against the archive limits:
+
+| Input | Check ms (limit) | Borrow ms (limit) | RSS MiB (limit) |
+| --- | --- | --- | --- |
+| `speed-test` | 12.645 → 18.400 (15.806) | 3.837 → 8.644 (6.755) | 21.406 → 23.203 (30.758) |
+| int64 (extra) | 10.697 → 22.203 (13.372) | 6.236 → 17.120 (10.354) | 21.094 → 30.406 (30.367) |
+
+B1 measured 13.675 and 13.398 ms check time on the same two inputs in
+the paired run. Summary changes and comparisons match B1 on both. The
+extra time sits in `frontend.borrow.converge`. Checked arithmetic gives
+a private function an error lane, so lane installation rewrites the
+base module and schedules a summarising visit. B1 also refreshed after
+installation but didn't count it, which explains the counter moving
+from 0 to 1. The refresh is needed because the error lanes widen. The
+avoidable cost is re-extracting every function's summary from scratch.
+Reusing the local metadata queue, seeded with the previous summaries
+and the rewritten functions, would remove it. That tuning is past the
+guard, so the slice stops here.
+
+**Boracle.** Three source tests fail:
+
+- `boracle_source_generic_call_exposes_generated_typed_boundary`: source
+  mode snapshots HIR before convergence, and the generated call's result
+  origin is now `MissingSummary`, not `Fresh`. The likely cause is that
+  the seeded generated summary stays pending there now that the
+  constructed-return special case is gone. This isn't yet confirmed.
+- `boracle_source_never_call_records_arguments_before_terminal_exit` and
+  `boracle_source_self_update_preserves_slot_before_a_different_place_update`:
+  normalised calls now carry `opaque_stores`. Source mode passes no
+  local summaries, so an unknown callee with a `~` argument, or a
+  mutating collection builtin, makes the oracle return
+  `Inconclusive(OpaqueCallStores)`. B1 assumed those calls stored
+  nothing.
 
 **Slice 1 pause.** The sparse draft accepts W1c and renders `20`. Its
 dynamic-index control renders `20 / 21`, while W1 and W1b still reject

@@ -1,0 +1,27 @@
+Link = |items {I32}|
+
+pick |again Bool, holder ~Link| -> Link?:
+    if again:
+        if pick(false, ~holder) is none:
+            return holder
+        ;
+    ;
+    return none
+;
+
+through |holder ~Link, first {I32}, next {I32}, flag Bool| -> Link?:
+    writer ~= pick(flag, ~holder)?
+    ~holder.items = first
+    ~writer.items = next
+    return writer
+;
+
+run |flag Bool| -> I32:
+    holder ~= Link({0})
+    if through(~holder, {1}, {2, 3}, flag) is |value|:
+        return value.items.length()
+    ;
+    return 0
+;
+
+~[:[run(true)] / [run(false)]]

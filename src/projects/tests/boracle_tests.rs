@@ -1337,7 +1337,6 @@ slot ~= {"slot"}
 ~slot = slot
 ~slot = source
 ~slot = {"replacement"}
-~slot.push("changed")
 result = source
 "#;
     let report = solve_source(source);
@@ -1463,6 +1462,22 @@ result = source
             .all(|outcome| outcome.starts_with("CompleteSafe {")),
         "both reference/oracle comparisons should complete safely:\n{differential}"
     );
+}
+
+#[test]
+fn boracle_source_push_requires_collection_store_effects() {
+    let source = r#"
+source ~= {"source"}
+slot ~= {"slot"}
+~slot = slot
+~slot = source
+~slot = {"replacement"}
+~slot.push("changed")
+result = source
+"#;
+    // Push changes the receiver's element graph even when the new element is fresh.
+    let differential = assert_source_differential_replay(source, &["OracleInconclusive"; 2]);
+    assert_eq!(differential.matches("reason: OpaqueCallStores").count(), 2);
 }
 
 #[test]
@@ -2032,11 +2047,11 @@ result = wrap(value = item)
         matches!(
             &function.problem.origins()[result.origin.index()].kind,
             OriginKind::CallResult {
-                provenance: CallResultProvenance::Fresh,
+                provenance: CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
                 ..
             }
         ),
-        "generated summary should preserve the fresh wrapper result"
+        "the pre-materialisation signature proves access, not the generated body's result origin"
     );
 }
 
@@ -2875,6 +2890,22 @@ fn boracle_source_loop_copy_keeps_independent_roots() {
 }
 
 #[test]
+fn boracle_source_resultless_scalar_mutation_is_representable() {
+    assert_source_differential_replay(
+        r#"
+put |value ~I32|:
+    ~value = 2
+;
+
+value ~I32 = 1
+put(~value)
+result = value
+"#,
+        &["Agreement", "Agreement", "Agreement", "Agreement"],
+    );
+}
+
+#[test]
 fn boracle_source_never_call_records_arguments_before_terminal_exit() {
     let source = r#"
 fatal |first String, second ~String| -> !:
@@ -2960,7 +2991,19 @@ wrapper |first String, second ~String| -> !:
         "shared and mutable terminating-call arguments are legal here"
     );
 
-    assert_source_differential_replay(source, &["Agreement"; 6]);
+    // The source-mode handoff has the local signature but no store contract.
+    let differential = assert_source_differential_replay(
+        source,
+        &[
+            "Agreement",
+            "Agreement",
+            "OracleInconclusive",
+            "OracleInconclusive",
+            "Agreement",
+            "Agreement",
+        ],
+    );
+    assert_eq!(differential.matches("reason: OpaqueCallStores").count(), 2);
 }
 
 #[test]

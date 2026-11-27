@@ -7,15 +7,17 @@
 #[path = "call_results.rs"]
 mod call_results;
 
+use super::conflicts::{check_layer_conflict, check_mutable_access_with_targets};
 use super::layer::{
-    LayerValueContext, layer_store_values, resolve_place_allocs, transfer_layer_alias_write,
+    LayerValueContext, layer_mutation_targets, layer_store_values, resolve_place_allocs,
+    transfer_layer_alias_write,
 };
 use super::*;
-use crate::compiler_frontend::analysis::borrow_checker::metadata::CallResultFacts;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AllocId, AllocationRetirement, FieldKey, ResolvedPlace, RootSet, StoredValue,
 };
-use crate::compiler_frontend::analysis::borrow_checker::transfer::InvokeLayerOp;
+use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
+use crate::compiler_frontend::analysis::borrow_checker::transfer::{InvokeLane, InvokeLayerOp};
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::compiler_messages::BorrowAccessKind;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -24,9 +26,8 @@ use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
-use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
-use call_results::call_result_ops;
+use call_results::{CallActuals, CallLane, call_result_ops};
 
 pub(crate) fn transfer_statement(
     context: &BorrowTransferContext<'_>,
@@ -130,7 +131,7 @@ pub(crate) fn transfer_statement(
                 .expressions
                 .values(*args)
                 .iter()
-                .zip(semantics.arg_effects.iter().copied())
+                .zip(semantics.arg_effects)
                 .map(|(argument, effect)| CallArgumentTransfer {
                     argument: *argument,
                     effect,
@@ -157,9 +158,9 @@ pub(crate) fn transfer_statement(
                 },
                 &call_args,
                 results.iter().copied(),
-                semantics.return_alias,
+                semantics.returns,
                 result_transfer,
-                CallStorage::for_target(context, target),
+                CallStorage::for_target(target),
             )?;
         }
 
@@ -226,7 +227,7 @@ pub(crate) fn transfer_statement(
                     effect: ArgEffect::SharedBorrow,
                 }],
                 std::iter::once(*result),
-                FunctionReturnAliasSummary::Fresh,
+                CallReturns::Fresh,
                 CallResultTransfer::Immediate,
                 CallStorage::Builtin,
             )?;
@@ -259,7 +260,7 @@ pub(crate) fn transfer_statement(
                 },
                 &call_args,
                 std::iter::once(*result),
-                FunctionReturnAliasSummary::Fresh,
+                CallReturns::Fresh,
                 CallResultTransfer::Immediate,
                 CallStorage::Builtin,
             )?;
@@ -281,7 +282,7 @@ pub(crate) fn transfer_statement(
                 },
                 &[],
                 std::iter::once(*result),
-                FunctionReturnAliasSummary::Fresh,
+                CallReturns::Fresh,
                 CallResultTransfer::Immediate,
                 CallStorage::Builtin,
             )?;
@@ -334,7 +335,7 @@ pub(crate) fn transfer_statement(
                 Some(*candidate_result),
                 Some(&[]),
                 &[],
-                &[],
+                RootSet::empty(layout.local_count()),
                 CallResultTransfer::Immediate,
                 &[],
             )?;
@@ -343,7 +344,7 @@ pub(crate) fn transfer_statement(
                 Some(*in_range_result),
                 Some(&[]),
                 &[],
-                &[],
+                RootSet::empty(layout.local_count()),
                 CallResultTransfer::Immediate,
                 &[],
             )?;
@@ -473,6 +474,7 @@ pub(super) fn transfer_invoke(
     let HirTerminator::Invoke {
         operation,
         success_results,
+        error_result,
         ..
     } = terminator
     else {
@@ -503,9 +505,9 @@ pub(super) fn transfer_invoke(
                 input,
                 &arguments,
                 results,
-                semantics.return_alias,
-                CallResultTransfer::Edge,
-                CallStorage::for_target(context, target),
+                semantics.returns,
+                CallResultTransfer::Edge(*error_result),
+                CallStorage::for_target(target),
             )
         }
         HirFallibleOperation::MapOp { op, receiver, args } => {
@@ -529,7 +531,7 @@ pub(super) fn transfer_invoke(
                 &arguments,
                 results,
                 map_result_alias(*op),
-                CallResultTransfer::Edge,
+                CallResultTransfer::Edge(*error_result),
                 CallStorage::for_map_op(*op),
             )
         }
@@ -541,8 +543,8 @@ pub(super) fn transfer_invoke(
                     input,
                     &[],
                     results,
-                    FunctionReturnAliasSummary::Fresh,
-                    CallResultTransfer::Edge,
+                    CallReturns::Fresh,
+                    CallResultTransfer::Edge(*error_result),
                     CallStorage::Builtin,
                 );
             };
@@ -561,8 +563,8 @@ pub(super) fn transfer_invoke(
                         },
                     ],
                     results,
-                    FunctionReturnAliasSummary::Fresh,
-                    CallResultTransfer::Edge,
+                    CallReturns::Fresh,
+                    CallResultTransfer::Edge(*error_result),
                     CallStorage::Builtin,
                 )
             } else {
@@ -570,8 +572,8 @@ pub(super) fn transfer_invoke(
                     input,
                     &[first],
                     results,
-                    FunctionReturnAliasSummary::Fresh,
-                    CallResultTransfer::Edge,
+                    CallReturns::Fresh,
+                    CallResultTransfer::Edge(*error_result),
                     CallStorage::Builtin,
                 )
             }
@@ -601,9 +603,9 @@ pub(super) fn transfer_never_call(
         input,
         &arguments,
         std::iter::empty(),
-        FunctionReturnAliasSummary::Fresh,
-        CallResultTransfer::Immediate,
-        CallStorage::for_target(input.context, target),
+        CallReturns::Fresh,
+        CallResultTransfer::Diverges,
+        CallStorage::for_target(target),
     )
 }
 
@@ -614,27 +616,26 @@ pub(super) struct CallArgumentTransfer {
 
 /// How a call moves values between its arguments' allocations.
 #[derive(Clone, Copy)]
-enum CallStorage<'a> {
+enum CallStorage {
     /// A user function may write through any field a mutable argument reaches.
-    Opaque(&'a [Option<CallResultFacts>]),
+    User,
+    Native,
     /// A builtin edits only its receiver's own contents.
     Builtin,
     /// A builtin stores these argument positions into its receiver, argument 0.
     Store(&'static [(usize, FieldKey)]),
     /// A builtin takes one of its receiver's elements out as its result.
-    Remove { map: bool },
+    Remove {
+        map: bool,
+    },
     /// A builtin returns one of its receiver's elements.
     Get,
 }
 
-impl<'a> CallStorage<'a> {
-    fn for_target(context: &BorrowTransferContext<'a>, target: &CallTarget) -> Self {
+impl CallStorage {
+    fn for_target(target: &CallTarget) -> Self {
         let CallTarget::External(id) = target else {
-            let facts = match target {
-                CallTarget::Local(id) => context.typed_local_results.get(id).map(Vec::as_slice),
-                _ => None,
-            };
-            return Self::Opaque(facts.unwrap_or_default());
+            return Self::User;
         };
         match CollectionBuiltinOp::from_external_function_id(*id) {
             Some(CollectionBuiltinOp::PushGrowable | CollectionBuiltinOp::PushFixed) => {
@@ -643,7 +644,8 @@ impl<'a> CallStorage<'a> {
             Some(CollectionBuiltinOp::Set) => Self::Store(&[(2, FieldKey::Elem)]),
             Some(CollectionBuiltinOp::Remove) => Self::Remove { map: false },
             Some(CollectionBuiltinOp::Get) => Self::Get,
-            _ => Self::Builtin,
+            Some(_) => Self::Builtin,
+            None => Self::Native,
         }
     }
 
@@ -658,7 +660,7 @@ impl<'a> CallStorage<'a> {
     }
 
     fn reaches_children(self) -> bool {
-        matches!(self, Self::Opaque(_))
+        matches!(self, Self::User)
     }
 }
 
@@ -678,7 +680,8 @@ pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'fa
 enum CallResultTransfer {
     Immediate,
     FirstDefinition(usize),
-    Edge,
+    Edge(crate::compiler_frontend::hir::ids::LocalId),
+    Diverges,
 }
 
 impl CallResultTransfer {
@@ -701,9 +704,9 @@ fn transfer_call_arguments_and_result(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     args: &[CallArgumentTransfer],
     results: impl Iterator<Item = HirLocalDestination> + Clone,
-    return_alias: FunctionReturnAliasSummary,
+    returns: CallReturns<'_>,
     result_transfer: CallResultTransfer,
-    storage: CallStorage<'_>,
+    storage: CallStorage,
 ) -> Result<(), BorrowCheckError> {
     if args.iter().any(|arg| {
         matches!(
@@ -714,8 +717,19 @@ fn transfer_call_arguments_and_result(
         input.stats.mutable_call_sites += 1;
     }
 
-    let edge_local = matches!(result_transfer, CallResultTransfer::Edge);
-    let retains_result = results.clone().next().is_some();
+    let error = match result_transfer {
+        CallResultTransfer::Edge(local) => Some(HirLocalDestination::Define(local)),
+        _ => None,
+    };
+    let success_lane = CallLane::new(returns, InvokeLane::Success);
+    let error_returns = if matches!(storage, CallStorage::User | CallStorage::Native) {
+        returns
+    } else {
+        CallReturns::Fresh
+    };
+    let error_lane = CallLane::new(error_returns, InvokeLane::Error);
+    let retains_success = results.clone().next().is_some() && success_lane.retains_result();
+    let retains_error = error.is_some() && error_lane.retains_result();
     let mut arg_roots = vec![RootSet::empty(input.layout.local_count()); args.len()];
 
     for (arg_index, arg) in args.iter().enumerate() {
@@ -743,7 +757,7 @@ fn transfer_call_arguments_and_result(
     //      would walk every argument expression for no consumer.
     let mut arg_value_roots = Vec::new();
     let mut arg_derived_roots = Vec::new();
-    if retains_result && !matches!(&return_alias, FunctionReturnAliasSummary::Fresh) {
+    if retains_success || retains_error {
         arg_value_roots.reserve(args.len());
         arg_derived_roots.reserve(args.len());
         for arg in args {
@@ -778,9 +792,10 @@ fn transfer_call_arguments_and_result(
             arg.effect,
             arg_index,
             &arg_roots,
-            &arg_value_roots,
-            retains_result,
-            &return_alias,
+            (retains_success && success_lane.may_retain(arg_index, &arg_value_roots))
+                || (retains_error && error_lane.may_retain(arg_index, &arg_value_roots))
+                || success_lane.may_store(arg_index)
+                || (error.is_some() && error_lane.may_store(arg_index)),
         );
         if matches!(
             arg.effect,
@@ -838,103 +853,88 @@ fn transfer_call_arguments_and_result(
         input.state.invalidate_detachments();
     }
 
-    let (evidence, mut layer_ops) = match storage {
-        CallStorage::Opaque(evidence) => (
-            evidence,
-            call_result_ops(input, args, results.clone(), &return_alias, evidence)?,
-        ),
-        CallStorage::Builtin => (
-            &[][..],
-            call_result_ops(input, args, results.clone(), &return_alias, &[])?,
-        ),
-        CallStorage::Store(positions) => {
-            apply_builtin_store(input, args, positions, edge_local)?;
-            (&[][..], Vec::new())
-        }
-        CallStorage::Remove { .. } | CallStorage::Get => (
-            &[][..],
-            capture_builtin_element_result(input, args, results.clone().next(), storage),
-        ),
-    };
-
-    let aliases = match &return_alias {
-        FunctionReturnAliasSummary::Fresh => Some(&[][..]),
-        FunctionReturnAliasSummary::AliasParams(indices) => Some(indices.as_slice()),
-        FunctionReturnAliasSummary::Unknown => None,
-    };
-    for (slot, result) in results.clone().enumerate() {
-        let sources = match evidence.get(slot).and_then(Option::as_ref) {
-            Some(CallResultFacts::Fresh { .. }) => Some(&[][..]),
-            Some(CallResultFacts::Parameter { index, .. }) => Some(std::slice::from_ref(index)),
-            None => aliases,
-        };
-        if let Some(retirement) = transfer_call_result_alias(
-            input,
-            Some(result),
-            sources,
-            &arg_value_roots,
-            &arg_derived_roots,
-            result_transfer,
-            &layer_ops,
-        )? {
-            for op in &mut layer_ops {
-                op.remap(input.state, retirement);
-            }
-        }
+    if !matches!(
+        result_transfer,
+        CallResultTransfer::Edge(_) | CallResultTransfer::Diverges
+    ) && success_lane.unreachable()
+    {
+        input.stats.diverges = true;
     }
-    if edge_local {
-        input.stats.invoke_layer_ops.extend(layer_ops);
-    } else {
-        for op in layer_ops {
-            match op {
-                InvokeLayerOp::Bind {
-                    local,
-                    ids,
-                    readonly,
-                } => {
-                    if let Some(index) = input.layout.index_of(local) {
-                        bind_call_result_ids(input.state, index, &ids, readonly);
+    if !matches!(result_transfer, CallResultTransfer::Diverges) {
+        // Capture both lanes against entry storage. Neither lane may see the other's stores
+        // or a new binding for either outcome.
+        let mut actuals = CallActuals::new(args);
+        let mut success_ops = match storage {
+            CallStorage::User | CallStorage::Native | CallStorage::Builtin => call_result_ops(
+                input,
+                &mut actuals,
+                results.clone(),
+                success_lane,
+                InvokeLane::Success,
+                error.is_none(),
+            )?,
+            CallStorage::Store(positions) => capture_builtin_store(input, args, positions)?,
+            CallStorage::Remove { .. } | CallStorage::Get => {
+                capture_builtin_element_result(input, args, results.clone().next(), storage)
+            }
+        };
+        let error_ops = if error.is_some() {
+            call_result_ops(
+                input,
+                &mut actuals,
+                error.into_iter(),
+                error_lane,
+                InvokeLane::Error,
+                false,
+            )?
+        } else {
+            Vec::new()
+        };
+        let mut root_sources = Vec::new();
+        if !success_lane.unreachable() {
+            for (slot, result) in results.enumerate() {
+                let derived = success_lane.derive_result(
+                    slot,
+                    &arg_derived_roots,
+                    input.layout.local_count(),
+                );
+                if let Some(retirement) = transfer_call_result_alias(
+                    input,
+                    Some(result),
+                    success_lane.root_sources(slot, &mut root_sources),
+                    &arg_value_roots,
+                    derived,
+                    result_transfer,
+                    &success_ops,
+                )? {
+                    for op in &mut success_ops {
+                        op.remap(input.state, retirement);
                     }
                 }
-                InvokeLayerOp::Contribute { holder, key, value } => {
-                    input.state.add_alloc_edge(holder, key, value);
-                }
-                InvokeLayerOp::Remove {
-                    holders,
-                    map,
-                    result,
-                } => {
-                    input.state.remove_alloc_element(
-                        &holders,
-                        map,
-                        result.and_then(|local| input.layout.index_of(local)),
-                    );
-                }
-                InvokeLayerOp::Store { .. } => {
-                    unreachable!("builtin stores are handled separately")
-                }
             }
         }
-    }
-    if results.clone().nth(1).is_some() {
-        // Native positions are not proof of independent graphs, even for fresh results.
-        let mut result_roots = RootSet::empty(input.layout.local_count());
-        for result in results.clone() {
-            if let Some(index) = input.layout.index_of(result.local()) {
-                result_roots.insert(index);
+        if let Some(error) = error {
+            if !error_lane.unreachable() {
+                let state = call_result_local_state(
+                    input,
+                    error_lane.root_sources(0, &mut root_sources),
+                    &arg_value_roots,
+                    error_lane.derive_result(0, &arg_derived_roots, input.layout.local_count()),
+                )?;
+                input
+                    .stats
+                    .invoke
+                    .error
+                    .results
+                    .push((error.local(), state));
             }
-        }
-        if edge_local {
-            for (_, local) in &mut input.stats.invoke_results {
-                local.value_roots.union_with(&result_roots);
-            }
+            input.stats.invoke.success.unreachable = success_lane.unreachable();
+            input.stats.invoke.error.unreachable = error_lane.unreachable();
+            input.stats.invoke.success.operations = success_ops;
+            input.stats.invoke.error.operations = error_ops;
         } else {
-            for result in results {
-                if let Some(index) = input.layout.index_of(result.local()) {
-                    let mut local = input.state.local_state(index).clone();
-                    local.value_roots.union_with(&result_roots);
-                    input.state.update_local_state(index, local);
-                }
+            for op in success_ops {
+                op.apply(input.layout, input.state, None);
             }
         }
     }
@@ -1018,15 +1018,19 @@ fn transfer_call_arguments_and_result(
 ///
 /// WHY: a destination that is a mutable alias of a projected place stores the result into that
 ///      field, so the field must hold it too.
-pub(super) fn bind_call_result_ids(
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn bind_call_result_ids(
     state: &mut BorrowState,
     local_index: usize,
     ids: &[AllocId],
+    views: &[AllocId],
     readonly: bool,
 ) {
     let alias = state.local_state(local_index);
     if !alias.mode.contains(LocalMode::ALIAS) {
         state.bind_alloc_ids(local_index, ids, readonly);
+        if !views.is_empty() {
+            state.bind_alloc_views(local_index, views);
+        }
         return;
     }
     let cells = state.alias_cells(local_index);
@@ -1046,19 +1050,32 @@ pub(super) fn bind_call_result_ids(
             })
             .collect::<Vec<_>>();
         for (holder, key) in cells {
-            state.store_alloc_field(&[holder], key, &stored, exact_projected);
+            state.store_alloc_field_with_views(
+                &[holder],
+                key,
+                &stored,
+                views,
+                exact_projected,
+                true,
+            );
         }
     }
     if let Some(whole) = exact_whole {
         state.bind_alloc_ids(whole, ids, readonly);
+        if !views.is_empty() {
+            state.bind_alloc_views(whole, views);
+        }
     } else {
         for whole in possible_whole {
             if whole != local_index && state.local_state(whole).mode.contains(LocalMode::SLOT) {
-                state.extend_alloc_ids(whole, ids, readonly);
+                state.extend_alloc_ids(whole, ids, views, readonly);
             }
         }
     }
     state.bind_alloc_ids(local_index, ids, readonly);
+    if !views.is_empty() {
+        state.bind_alloc_views(local_index, views);
+    }
 }
 
 /// Allocations the receiver argument reaches, when the layer has anything to say about them.
@@ -1072,20 +1089,20 @@ fn call_receiver_allocs(
 }
 
 /// A fallible builtin stores nothing when it fails.
-fn apply_builtin_store(
+fn capture_builtin_store(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     args: &[CallArgumentTransfer],
     positions: &[(usize, FieldKey)],
-    edge_local: bool,
-) -> Result<(), BorrowCheckError> {
+) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
     let Some(holders) = call_receiver_allocs(input, args) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let values = LayerValueContext {
         context: input.context,
         layout: input.layout,
         block_id: input.block_id,
     };
+    let mut ops = Vec::new();
     for &(index, key) in positions {
         let Some(argument) = args.get(index) else {
             continue;
@@ -1095,19 +1112,15 @@ fn apply_builtin_store(
         else {
             continue;
         };
-        if edge_local {
-            input.stats.invoke_layer_ops.push(InvokeLayerOp::Store {
-                holders: holders.ids.clone(),
-                key,
-                values: stored,
-            });
-        } else {
-            input
-                .state
-                .store_alloc_field(&holders.ids, key, &stored, false);
-        }
+        ops.push(InvokeLayerOp::Store {
+            holders: holders.ids.clone(),
+            key,
+            values: stored.values,
+            views: stored.views,
+            distinct_occurrence: true,
+        });
     }
-    Ok(())
+    Ok(ops)
 }
 
 /// Capture the element before removal and before a result can rebind the receiver.
@@ -1115,7 +1128,7 @@ fn capture_builtin_element_result(
     input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
     args: &[CallArgumentTransfer],
     result: Option<HirLocalDestination>,
-    storage: CallStorage<'_>,
+    storage: CallStorage,
 ) -> Vec<InvokeLayerOp> {
     let heap_result = result
         .and_then(|result| input.layout.index_of(result.local()))
@@ -1140,6 +1153,7 @@ fn capture_builtin_element_result(
             ops.push(InvokeLayerOp::Bind {
                 local: result.local(),
                 ids: elements.ids,
+                views: elements.views,
                 readonly: elements.readonly || matches!(storage, CallStorage::Get),
             });
         }
@@ -1289,6 +1303,14 @@ fn call_argument_value_roots(
     }
 }
 
+#[derive(Clone, Copy)]
+struct CallArgumentAccess {
+    argument: HirValueId,
+    location: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+    reaches_children: bool,
+}
+
 fn transfer_call_argument_access(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     argument: HirValueId,
@@ -1297,6 +1319,12 @@ fn transfer_call_argument_access(
     reaches_children: bool,
 ) -> Result<(), BorrowCheckError> {
     let argument_span = input.context.expressions.expression(argument).span;
+    let access = CallArgumentAccess {
+        argument,
+        location: argument_location,
+        span: argument_span,
+        reaches_children,
+    };
     match effect {
         ArgEffect::SharedBorrow => Ok(()),
         ArgEffect::MutableBorrow => {
@@ -1309,14 +1337,7 @@ fn transfer_call_argument_access(
                 argument_span,
             )?;
             let actor_index_hint = call_argument_actor_index(input, argument);
-            check_call_mutable_borrow(
-                input,
-                &mutable_roots,
-                actor_index_hint,
-                argument_location,
-                argument_span,
-            )?;
-            check_call_layer_mutation(input, argument, argument_location, reaches_children)?;
+            check_call_mutable_borrow(input, access, &mutable_roots, actor_index_hint)?;
             input.value_fact_buffer.record(
                 argument,
                 ValueAccessClassification::MutableArgument,
@@ -1337,16 +1358,11 @@ fn transfer_call_argument_access(
             let actor_index_hint = call_argument_actor_index(input, argument);
             check_call_may_consume(
                 input,
-                argument,
+                access,
                 &mutable_roots,
                 actor_index_hint,
-                argument_location,
-                argument_span,
                 fallback_effect,
             )?;
-            if matches!(fallback_effect, ArgEffect::MutableBorrow) {
-                check_call_layer_mutation(input, argument, argument_location, reaches_children)?;
-            }
             input.value_fact_buffer.record(
                 argument,
                 if matches!(fallback_effect, ArgEffect::SharedBorrow) {
@@ -1390,9 +1406,7 @@ fn effective_call_argument_effect(
     effect: ArgEffect,
     argument_index: usize,
     argument_roots: &[RootSet],
-    argument_value_roots: &[RootSet],
-    retains_result: bool,
-    return_alias: &FunctionReturnAliasSummary,
+    result_may_alias_argument: bool,
 ) -> ArgEffect {
     let optional_transfer = matches!(
         effect,
@@ -1402,16 +1416,6 @@ fn effective_call_argument_effect(
         return effect;
     }
 
-    // A retained result must keep any root it may alias alive until the result is consumed.
-    // Downgrade only the affected optional arguments so unrelated final-use arguments can still
-    // receive inferred transfer responsibility. Return provenance describes the argument value,
-    // so a copied argument's source is not a possible alias target.
-    let result_may_alias_argument = retains_result
-        && match return_alias {
-            FunctionReturnAliasSummary::Fresh => false,
-            FunctionReturnAliasSummary::AliasParams(indices) => indices.contains(&argument_index),
-            FunctionReturnAliasSummary::Unknown => !argument_value_roots[argument_index].is_empty(),
-        };
     let has_same_statement_use =
         argument_roots
             .iter()
@@ -1437,15 +1441,16 @@ fn fallback_call_argument_effect(effect: ArgEffect) -> ArgEffect {
 
 fn check_call_mutable_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    access: CallArgumentAccess,
     mutable_roots: &RootSet,
     actor_index_hint: Option<usize>,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
-    if mutable_roots.is_empty() {
-        return Ok(());
-    }
-
+    let CallArgumentAccess {
+        argument,
+        location,
+        span,
+        reaches_children,
+    } = access;
     let mut check = AccessCheckContext {
         context: input.context,
         layout: input.layout,
@@ -1458,28 +1463,51 @@ fn check_call_mutable_borrow(
         actor_index_hint,
         current_order: input.current_order,
     };
-    check_mutable_access(
-        &mut check,
-        mutable_roots,
-        MutableAccessPolicy {
-            allow_prior_shared: false,
-            require_root_mutable: true,
-            strict_move_exclusivity: false,
-            alias_exclusivity: AliasExclusivity::All,
-        },
-    )
+    let place = direct_place_from_expression(input.context.expressions, argument);
+    let targets = match &place {
+        Some(place) => layer_mutation_targets(&check, place, reaches_children)?,
+        None => Vec::new(),
+    };
+    if !mutable_roots.is_empty() {
+        check_mutable_access_with_targets(
+            &mut check,
+            mutable_roots,
+            MutableAccessPolicy {
+                allow_prior_shared: false,
+                require_root_mutable: true,
+                strict_move_exclusivity: false,
+                alias_exclusivity: AliasExclusivity::All,
+            },
+            if place.is_some_and(|place| !place.projections.is_empty()) {
+                &targets
+            } else {
+                &[]
+            },
+        )?;
+    }
+    if let Some(actor) = actor_index_hint {
+        check_layer_conflict(&mut check, actor, &targets, true)?;
+    }
+    Ok(())
 }
 
 fn check_call_may_consume(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    argument: HirValueId,
+    access: CallArgumentAccess,
     mutable_roots: &RootSet,
     actor_index_hint: Option<usize>,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
+    let CallArgumentAccess {
+        argument,
+        location,
+        span,
+        reaches_children,
+    } = access;
     if mutable_roots.is_empty() {
+        if matches!(fallback_effect, ArgEffect::MutableBorrow) {
+            return check_call_layer_mutation(input, argument, location, reaches_children);
+        }
         return Ok(());
     }
 
@@ -1498,10 +1526,9 @@ fn check_call_may_consume(
             );
             check_call_borrow_fallback(
                 input,
+                access,
                 mutable_roots,
                 actor_index_hint,
-                location,
-                span,
                 fallback_effect,
             )
         }
@@ -1535,10 +1562,9 @@ fn check_call_may_consume(
                 );
                 return check_call_borrow_fallback(
                     input,
+                    access,
                     mutable_roots,
                     actor_index_hint,
-                    location,
-                    span,
                     fallback_effect,
                 );
             }
@@ -1549,6 +1575,9 @@ fn check_call_may_consume(
                 mutable_roots,
             );
             check_mutable_access(&mut check, mutable_roots, transfer_policy)?;
+            if matches!(fallback_effect, ArgEffect::MutableBorrow) {
+                check_call_layer_mutation(input, argument, location, reaches_children)?;
+            }
 
             Ok(())
         }
@@ -1557,16 +1586,15 @@ fn check_call_may_consume(
 
 fn check_call_borrow_fallback(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    access: CallArgumentAccess,
     roots: &RootSet,
     actor_index_hint: Option<usize>,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
     if matches!(fallback_effect, ArgEffect::SharedBorrow) {
-        check_call_shared_borrow(input, roots, actor_index_hint, location, span)
+        check_call_shared_borrow(input, roots, actor_index_hint, access.location, access.span)
     } else {
-        check_call_mutable_borrow(input, roots, actor_index_hint, location, span)
+        check_call_mutable_borrow(input, access, roots, actor_index_hint)
     }
 }
 
@@ -1610,7 +1638,7 @@ fn transfer_call_result_alias(
     result: Option<HirLocalDestination>,
     alias_arguments: Option<&[usize]>,
     arg_value_roots: &[RootSet],
-    arg_derived_roots: &[RootSet],
+    derived_roots: RootSet,
     result_transfer: CallResultTransfer,
     layer_ops: &[InvokeLayerOp],
 ) -> Result<Option<AllocationRetirement>, BorrowCheckError> {
@@ -1626,48 +1654,15 @@ fn transfer_call_result_alias(
         )));
     };
 
-    let local_count = input.layout.local_count();
-    let mut alias_roots = RootSet::empty(local_count);
-    let mut derived_roots = RootSet::empty(local_count);
-
-    // The result's value provenance and derivation ledger follow the same return-alias argument
-    // selection, so one pass fills both and validates each selected index once.
-    match alias_arguments {
-        Some(arg_indices) => {
-            for arg_index in arg_indices {
-                let Some((arg_value_root_set, arg_derivation)) = arg_value_roots
-                    .get(*arg_index)
-                    .zip(arg_derived_roots.get(*arg_index))
-                else {
-                    return Err(input.context.diagnostics.internal_error(format!(
-                        "Borrow checker found out-of-range return-alias index {arg_index} at call site"
-                    )));
-                };
-                alias_roots.union_with(arg_value_root_set);
-                derived_roots.union_with(arg_derivation);
-            }
-        }
-        None => {
-            for (arg_value_root_set, arg_derivation) in
-                arg_value_roots.iter().zip(arg_derived_roots)
-            {
-                alias_roots.union_with(arg_value_root_set);
-                derived_roots.union_with(arg_derivation);
-            }
-        }
-    }
-
-    let new_local_state = if alias_roots.is_empty() {
-        LocalState::slot(local_count)
-    } else {
-        let mut state = LocalState::slot_with_value_roots(alias_roots, RootSet::empty(local_count));
-        state.derived_from_roots = derived_roots.clone();
-        state
-    };
-    if matches!(result_transfer, CallResultTransfer::Edge) {
+    let new_local_state =
+        call_result_local_state(input, alias_arguments, arg_value_roots, derived_roots)?;
+    let derived_roots = &new_local_state.derived_from_roots;
+    if matches!(result_transfer, CallResultTransfer::Edge(_)) {
         input
             .stats
-            .invoke_results
+            .invoke
+            .success
+            .results
             .push((result_local, new_local_state));
         return Ok(None);
     }
@@ -1724,7 +1719,7 @@ fn transfer_call_result_alias(
             // A joined state holds the result on both alternatives. Keep the union of cells but
             // record the observed value, and update the cells the alias path writes through.
             let mut derived_from_roots = previous_state.derived_from_roots;
-            derived_from_roots.intersect_with(&derived_roots);
+            derived_from_roots.intersect_with(derived_roots);
             input.state.update_local_state(
                 local_index,
                 LocalState {
@@ -1759,6 +1754,34 @@ fn transfer_call_result_alias(
     }
 }
 
+fn call_result_local_state(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    alias_arguments: Option<&[usize]>,
+    arg_value_roots: &[RootSet],
+    derived_roots: RootSet,
+) -> Result<LocalState, BorrowCheckError> {
+    let local_count = input.layout.local_count();
+    let mut alias_roots = RootSet::empty(local_count);
+    // Coarse value roots are a may-set. The independently computed derivation stays a must-set.
+    if let Some(indices) = alias_arguments {
+        for &index in indices {
+            let Some(roots) = arg_value_roots.get(index) else {
+                return Err(input.context.diagnostics.internal_error(format!(
+                    "Borrow checker found out-of-range return-alias index {index} at call site"
+                )));
+            };
+            alias_roots.union_with(roots);
+        }
+    } else {
+        for roots in arg_value_roots {
+            alias_roots.union_with(roots);
+        }
+    }
+    let mut state = LocalState::slot_with_value_roots(alias_roots, RootSet::empty(local_count));
+    state.derived_from_roots = derived_roots;
+    Ok(state)
+}
+
 fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<HirValueId> {
     match operands {
         HirNumericOperands::Unary { operand } => vec![*operand],
@@ -1776,10 +1799,10 @@ fn map_argument_effect(op: HirMapOp, arg_index: usize) -> ArgEffect {
     }
 }
 
-fn map_result_alias(op: HirMapOp) -> FunctionReturnAliasSummary {
+fn map_result_alias(op: HirMapOp) -> CallReturns<'static> {
     if matches!(op, HirMapOp::Get) {
-        FunctionReturnAliasSummary::AliasParams(vec![0])
+        CallReturns::Get
     } else {
-        FunctionReturnAliasSummary::Fresh
+        CallReturns::Fresh
     }
 }

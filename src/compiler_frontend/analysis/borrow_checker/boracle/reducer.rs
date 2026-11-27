@@ -704,6 +704,7 @@ fn remap_parts(parts: BorrowProblemParts, keep: &KeepRows) -> Option<BorrowProbl
             Some(Call {
                 id: mapped(&call_map, index)?,
                 label: call.label.clone(),
+                opaque_stores: call.opaque_stores,
             })
         })
         .collect::<Option<Vec<_>>>()?;
@@ -2067,9 +2068,10 @@ fn render_use(use_row: &Use) -> String {
 
 fn render_call(call: &Call) -> String {
     format!(
-        "Call {{ id: {}, label: {:?}.to_string() }}",
+        "Call {{ id: {}, label: {:?}.to_string(), opaque_stores: {} }}",
         render_call_id(call.id),
-        call.label
+        call.label,
+        call.opaque_stores,
     )
 }
 

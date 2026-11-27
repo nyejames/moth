@@ -2,12 +2,11 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-BORROW-0007"]
-message_contains = ["Cannot mutably access `pair` because `pair.left` may alias the same value."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
 path = "input/@entry.moth"
-line = 16
-column = 49
+line = 15
+column = 6
 count = 1

@@ -47,6 +47,7 @@ pub(crate) fn run_borrow_checker_with_types(
         external_package_registry,
         path_fork,
         string_table,
+        None,
     )
 }
 

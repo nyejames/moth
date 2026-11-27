@@ -15,8 +15,10 @@
 //! or project code cannot assemble a semantic sequence of its own.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+#[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
+    BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::ast_nodes::AstFunctionIdentity;
@@ -43,6 +45,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module_with_owner;
+#[cfg(test)]
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::{
@@ -721,21 +724,15 @@ impl<'a> CompilerFrontend<'a> {
     // ------------------------------
     //  BORROW CHECKING AND ANALYSIS
     // ------------------------------
-    pub(in crate::compiler_frontend) fn check_borrows_premerge(
+    pub(in crate::compiler_frontend) fn prepare_borrow_check_result<T>(
         &mut self,
-        hir_module: &HirModule,
+        result: Result<T, BorrowCheckError>,
         type_environment: &TypeEnvironment,
         prior_diagnostics: &mut DiagnosticBag,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
-    ) -> Result<BorrowCheckReport, PreparedFailure> {
-        match run_borrow_checker(
-            hir_module,
-            type_environment,
-            self.external_package_registry.as_ref(),
-            &self.path_fork,
-            &self.string_table,
-        ) {
-            Ok(report) => Ok(report),
+    ) -> Result<T, PreparedFailure> {
+        match result {
+            Ok(result) => Ok(result),
             Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
                 if let Some(handle) = frozen_identity_handle {
                     diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
@@ -773,6 +770,7 @@ impl<'a> CompilerFrontend<'a> {
             self.external_package_registry.as_ref(),
             &self.path_fork,
             &self.string_table,
+            None,
         ) {
             Ok(report) => Ok(report),
             Err(error) => match error.into_draft_or_infrastructure() {

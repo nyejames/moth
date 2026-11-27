@@ -63,9 +63,8 @@ impl<'hir> JsEmitter<'hir> {
     ///
     /// WHAT: produces the raw JS value that the caller will receive in a fresh binding.
     /// WHY: ordinary returns preserve allocation identity by reading the raw value. Only
-    /// explicit `copy` requests an independent graph via `__moth_clone_value`. This name avoids
-    /// "fresh" to prevent confusion with the semantic `FunctionReturnAliasSummary::Fresh` lattice
-    /// value, which describes whether the returned root aliases a parameter root.
+    /// explicit `copy` requests an independent graph via `__moth_clone_value`. A fresh
+    /// destination binding is not proof of a fresh allocation.
     pub(crate) fn lower_moth_return_value(
         &mut self,
         expression_id: HirValueId,

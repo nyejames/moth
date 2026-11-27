@@ -4,7 +4,9 @@ use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BorrowCheckReport, check_borrows, summarize_call_allocations,
+};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -44,7 +46,10 @@ use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallSummary,
+    CallAllocationFacts, CallAllocationSource, CallField, CallLaneSummary, CallOutputPath,
+    CallParameterPath, CallPathSource, CallResultPath, CallSharing, CallSharingCondition,
+    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -53,6 +58,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
 use crate::projects::settings::Config;
@@ -98,15 +104,32 @@ fn origin(name: &str) -> OriginFunctionId {
     OriginFunctionId::new_free(module_origin(), name.to_owned())
 }
 
-fn summary(return_alias: FunctionReturnAliasSummary) -> PublicCallSummary {
+fn empty_summary(error_reachable: bool) -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+            success: CallLaneSummary {
+                reachable: true,
+                ..Default::default()
+            },
+            error: CallLaneSummary {
+                reachable: error_reachable,
+                ..Default::default()
+            },
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
         may_fail: false,
     }
+}
+
+fn summary() -> PublicCallSummary {
+    empty_summary(false)
+}
+
+fn summary_with_error_lane() -> PublicCallSummary {
+    empty_summary(true)
 }
 
 fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
@@ -389,16 +412,16 @@ fn convergence_base_changes_enqueue_only_callers_with_changed_direct_inputs() {
         &[private_a.clone(), private_b.clone()],
     );
     let previous = report([
-        (FunctionId(0), summary(FunctionReturnAliasSummary::Fresh)),
-        (FunctionId(1), summary(FunctionReturnAliasSummary::Fresh)),
-        (FunctionId(2), summary(FunctionReturnAliasSummary::Fresh)),
-        (FunctionId(3), summary(FunctionReturnAliasSummary::Fresh)),
+        (FunctionId(0), summary()),
+        (FunctionId(1), summary()),
+        (FunctionId(2), summary()),
+        (FunctionId(3), summary()),
     ]);
     let next = report([
-        (FunctionId(0), summary(FunctionReturnAliasSummary::Unknown)),
-        (FunctionId(1), summary(FunctionReturnAliasSummary::Fresh)),
-        (FunctionId(2), summary(FunctionReturnAliasSummary::Unknown)),
-        (FunctionId(3), summary(FunctionReturnAliasSummary::Fresh)),
+        (FunctionId(0), summary_with_error_lane()),
+        (FunctionId(1), summary()),
+        (FunctionId(2), summary_with_error_lane()),
+        (FunctionId(3), summary()),
     ]);
     let changes = base_summary_changes(
         &base_hir,
@@ -454,8 +477,8 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
     let active_private = private_identity("active_private");
     let provider_private = private_identity("provider_private");
     let generated = generated_identity("generated");
-    let stale = summary(FunctionReturnAliasSummary::Fresh);
-    let widened = summary(FunctionReturnAliasSummary::Unknown);
+    let stale = summary();
+    let widened = summary_with_error_lane();
     let mut hir = HirModule::new();
     hir.imported_call_summaries
         .insert(active_public.clone(), stale.clone());
@@ -464,8 +487,7 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
     hir.module_private_call_summaries
         .insert(provider_private.clone(), stale.clone());
 
-    // Each case installs a complete direct-summary set and expects the change result that
-    // decides whether the node's borrow report may be reused.
+    // Inputs outside the current dependency set stay installed until final link pruning.
     let generated_stale = [(generated.clone(), stale.clone())];
     let generated_widened = [(generated.clone(), widened.clone())];
     let public_widened = [(active_public.clone(), widened.clone())];
@@ -495,7 +517,13 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
             &[],
             true,
         ),
-        ("generated removal", &[], &public_widened, &[], true),
+        (
+            "latent generated retained",
+            &[],
+            &public_widened,
+            &[],
+            false,
+        ),
         (
             "private insertion",
             &[],
@@ -518,20 +546,19 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
             false,
         ),
     ];
-    for (case, generated_summaries, public_summaries, private_summaries, expected) in cases {
-        assert_eq!(
-            install_convergence_summaries(
-                &mut hir,
-                generated_summaries,
-                public_summaries,
-                private_summaries,
-            ),
-            expected,
-            "{case}"
+    for (case, generated_summaries, public_summaries, private_summaries, allocation_changes) in
+        cases
+    {
+        let changes = install_convergence_summaries(
+            &mut hir,
+            generated_summaries,
+            public_summaries,
+            private_summaries,
         );
+        assert_eq!(changes.allocations_changed(), allocation_changes, "{case}");
     }
 
-    assert!(hir.generated_call_summaries.is_empty());
+    assert_eq!(hir.generated_call_summaries.get(&generated), Some(&widened));
     assert_eq!(
         hir.imported_call_summaries.get(&active_public),
         Some(&widened)
@@ -553,6 +580,64 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
 }
 
 #[test]
+fn pending_and_proved_unreachable_have_the_same_allocation_transfer() {
+    let pending = FunctionReturnAliasSummary::Pending;
+    let unreachable = FunctionReturnAliasSummary::Known(Box::default());
+    assert!(pending.same_allocation_transfer_as(&unreachable));
+    assert!(unreachable.same_allocation_transfer_as(&pending));
+    assert!(!pending.same_allocation_transfer_as(&summary().return_alias));
+    let error_only = FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+        success: CallLaneSummary::default(),
+        error: CallLaneSummary {
+            reachable: true,
+            ..Default::default()
+        },
+    }));
+    assert!(!pending.same_allocation_transfer_as(&error_only));
+}
+
+#[test]
+fn failure_only_convergence_updates_use_inference_without_allocation_extraction() {
+    let mut hir = HirModule::new();
+    let generated = generated_identity("producer");
+    let private = private_identity("producer");
+    let public = origin("producer");
+    let stable = summary();
+    install_convergence_summaries(
+        &mut hir,
+        &[(generated.clone(), stable.clone())],
+        &[(public.clone(), stable.clone())],
+        &[(private.clone(), stable.clone())],
+    );
+    let mut escaping = stable;
+    escaping.escapes_builtin_failure = true;
+    let generated_change = [(generated.clone(), escaping.clone())];
+    let public_change = [(public.clone(), escaping.clone())];
+    let private_change = [(private.clone(), escaping.clone())];
+    let changes =
+        install_convergence_summaries(&mut hir, &generated_change, &public_change, &private_change);
+    assert_eq!(
+        changes,
+        CallInputChanges {
+            failure: true,
+            ..Default::default()
+        }
+    );
+    assert!(matches!(
+        BorrowVisit::select(
+            ConvergencePhase::Failure,
+            false,
+            &changes,
+            &HirModuleLinkFacts::default()
+        ),
+        Some((BorrowVisit::InferFailure, _))
+    ));
+    assert_eq!(hir.generated_call_summaries[&generated], escaping);
+    assert_eq!(hir.imported_call_summaries[&public], escaping);
+    assert_eq!(hir.module_private_call_summaries[&private], escaping);
+}
+
+#[test]
 fn convergence_direct_summaries_read_exact_active_base_report_facts() {
     let active_public = origin("active_public");
     let active_private = private_identity("active_private");
@@ -562,8 +647,8 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
         std::slice::from_ref(&active_private),
     );
     let base_report = report([
-        (FunctionId(0), summary(FunctionReturnAliasSummary::Unknown)),
-        (FunctionId(1), summary(FunctionReturnAliasSummary::Fresh)),
+        (FunctionId(0), summary_with_error_lane()),
+        (FunctionId(1), summary()),
     ]);
     let base_facts = link_facts_for_calls(Vec::new());
     let generated_facts = link_facts_for_calls(vec![
@@ -592,20 +677,17 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
     assert_eq!(direct.generated, Vec::new());
     assert_eq!(
         direct.active_public,
-        vec![(active_public, summary(FunctionReturnAliasSummary::Unknown))]
+        vec![(active_public, summary_with_error_lane())]
     );
-    assert_eq!(
-        direct.module_private,
-        vec![(active_private, summary(FunctionReturnAliasSummary::Fresh))]
-    );
+    assert_eq!(direct.module_private, vec![(active_private, summary())]);
 }
 
 #[test]
 fn convergence_base_changes_reject_a_narrowing_report() {
     let public_origin = origin("public");
     let hir = base_hir(&[public_origin], &[]);
-    let previous = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Unknown))]);
-    let next = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let previous = report([(FunctionId(0), summary_with_error_lane())]);
+    let next = report([(FunctionId(0), summary())]);
 
     let error = base_summary_changes(
         &hir,
@@ -624,7 +706,7 @@ fn builtin_failure_widening_uses_existing_base_change_lane() {
         std::slice::from_ref(&public),
         std::slice::from_ref(&private),
     );
-    let initial = summary(FunctionReturnAliasSummary::Fresh);
+    let initial = summary();
     let mut escaping = initial.clone();
     escaping.escapes_builtin_failure = true;
     let previous = report([(FunctionId(0), initial.clone()), (FunctionId(1), initial)]);
@@ -651,7 +733,7 @@ fn builtin_failure_widening_uses_existing_base_change_lane() {
 #[test]
 fn missing_base_summary_is_not_an_infallible_summary() {
     let hir = base_hir(&[origin("public")], &[]);
-    let complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let complete = report([(FunctionId(0), summary())]);
     let missing = BorrowCheckReport::default();
 
     assert_compiler_bug(
@@ -681,7 +763,7 @@ fn missing_base_summary_is_not_an_infallible_summary() {
 #[test]
 fn builtin_failure_inference_requires_semantic_facts_and_call_summary() {
     let hir = base_hir(&[origin("public")], &[]);
-    let mut complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let mut complete = report([(FunctionId(0), summary())]);
     let mut missing = BorrowCheckReport::default();
 
     assert_compiler_bug(
@@ -748,7 +830,7 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
         );
         facts.contributors[0].codes = codes;
         hir.function_failure_facts.insert(FunctionId(0), facts);
-        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+        let mut report = report([(FunctionId(0), summary())]);
         assert_compiler_bug(
             CompilerStage::ProjectBuildAssembly,
             "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
@@ -772,7 +854,7 @@ fn authored_cast_failure_contributor_accepts_cast_policy_codes_only() {
         );
         facts.contributors[0].codes = vec![code];
         hir.function_failure_facts.insert(FunctionId(0), facts);
-        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+        let mut report = report([(FunctionId(0), summary())]);
 
         if accepted {
             infer_builtin_failure_summaries(&hir, &mut report);
@@ -808,12 +890,7 @@ fn builtin_failure_inference_reaches_local_recursive_fixed_point() {
             failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources),
         );
     }
-    let mut report = report((0..3).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..3).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
     assert!(
         report
@@ -837,7 +914,7 @@ fn declared_error_and_export_boundaries_never_forward_builtin_failure_bit() {
             FunctionId(0),
             failure_facts(boundary, vec![HirBuiltinFailureSource::NumericOperation]),
         );
-        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+        let mut report = report([(FunctionId(0), summary())]);
         infer_builtin_failure_summaries(&hir, &mut report);
         assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
         assert_eq!(
@@ -981,17 +1058,12 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
         hir.function_failure_facts
             .insert(FunctionId(index as u32), facts);
     }
-    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = summary();
     escaping.escapes_builtin_failure = true;
     hir.module_private_call_summaries
         .insert(private, escaping.clone());
     hir.generated_call_summaries.insert(generated, escaping);
-    let mut report = report((0..4).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..4).map(|index| (FunctionId(index), summary())));
 
     infer_builtin_failure_summaries(&hir, &mut report);
 
@@ -1030,12 +1102,7 @@ fn builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops
         facts.contributors[0].span = Some(failure_witness_span(index + 6));
         hir.function_failure_facts.insert(FunctionId(index), facts);
     }
-    let mut report = report((0..6).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..6).map(|index| (FunctionId(index), summary())));
 
     infer_builtin_failure_summaries(&hir, &mut report);
 
@@ -1072,12 +1139,7 @@ fn builtin_failure_witness_skips_recursive_back_edge_to_reach_later_origin() {
     recursive.contributors[0].span = Some(failure_witness_span(3));
     recursive.contributors[1].span = Some(failure_witness_span(4));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
-    let mut report = report((0..2).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
 
     infer_builtin_failure_summaries(&hir, &mut report);
 
@@ -1123,12 +1185,7 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
     );
     second.contributors[0].span = Some(failure_witness_span(5));
     hir.function_failure_facts.insert(FunctionId(2), second);
-    let mut report = report((0..3).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..3).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
 
     // The mutual cycle (first -> second -> first) carries no origin of its own: the witness
@@ -1175,12 +1232,7 @@ fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin()
         }
         hir.function_failure_facts.insert(FunctionId(body), facts);
     }
-    let mut report = report((0..=BODY_COUNT).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..=BODY_COUNT).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
 
     let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
@@ -1225,15 +1277,12 @@ fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_l
     let mut helper = failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources);
     helper.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(1), helper);
-    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = summary();
     escaping.escapes_builtin_failure = true;
     hir.imported_call_summaries
         .insert(foreign, escaping.clone());
     // Inference would classify every helper contributor, so the escape bit is installed directly.
-    let report = report([
-        (FunctionId(0), summary(FunctionReturnAliasSummary::Fresh)),
-        (FunctionId(1), escaping),
-    ]);
+    let report = report([(FunctionId(0), summary()), (FunctionId(1), escaping)]);
 
     let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
     let mut entered = FxHashSet::from_iter([FunctionId(0)]);
@@ -1265,12 +1314,7 @@ fn builtin_failure_witness_keeps_origin_free_recursion_free_of_numeric_failure()
     );
     recursive.contributors[0].span = Some(failure_witness_span(3));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
-    let mut report = report((0..2).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
 
     // Skipping back-edges must not invent an origin: a purely recursive graph converges to
@@ -1292,11 +1336,11 @@ fn builtin_failure_witness_stops_at_cross_module_summary_and_requires_that_summa
     facts.span = Some(failure_witness_span(0));
     facts.contributors[0].span = Some(failure_witness_span(1));
     hir.function_failure_facts.insert(FunctionId(0), facts);
-    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = summary();
     escaping.escapes_builtin_failure = true;
     hir.imported_call_summaries
         .insert(foreign.clone(), escaping);
-    let report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let report = report([(FunctionId(0), summary())]);
 
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(witness.call_spans, vec![Some(failure_witness_span(1))]);
@@ -1340,15 +1384,10 @@ fn builtin_failure_witness_stops_at_unavailable_call_before_later_origin() {
     helper.contributors[0].span = Some(failure_witness_span(3));
     helper.contributors[1].span = Some(failure_witness_span(4));
     hir.function_failure_facts.insert(FunctionId(1), helper);
-    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = summary();
     escaping.escapes_builtin_failure = true;
     hir.imported_call_summaries.insert(foreign, escaping);
-    let mut report = report((0..2).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
@@ -1380,12 +1419,7 @@ fn assertion_message_candidates_validate_without_forwarding_failure() {
             vec![HirBuiltinFailureSource::NumericOperation],
         ),
     );
-    let mut report = report((0..2).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
     assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
     assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_some());
@@ -1407,7 +1441,7 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
 
     let identity = generated_identity("assertion");
     let private = private_identity("producer");
-    let initial = summary(FunctionReturnAliasSummary::Fresh);
+    let initial = summary();
     let mut sidecar = test_sidecar(identity.clone(), initial.clone());
     let mut facts = failure_facts(HirBuiltinFailureBoundary::InferPrivate, vec![]);
     facts
@@ -1434,15 +1468,10 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
     let base_links = link_facts_for_calls(vec![]);
     let private_identities = FxHashSet::from_iter([private.clone()]);
     let public_origins = FxHashSet::default();
-    let mut model = ConvergenceModel::from_link_facts_for_base_callees(
-        &base_links,
-        transaction.completed_link_facts(),
-        &public_origins,
-        &private_identities,
-    );
-    model.include_deferred_validation_dependencies(
+    let model = ConvergenceModel::for_active_transaction(
         &base,
-        &mut transaction,
+        &base_links,
+        &transaction,
         &public_origins,
         &private_identities,
     );
@@ -1481,7 +1510,7 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
 #[test]
 fn generated_constraint_bits_must_not_narrow() {
     let identity = generated_identity("trap");
-    let mut trapping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut trapping = summary();
     trapping.may_trap = true;
     let sidecar = test_sidecar(identity.clone(), trapping.clone());
     let published = PublishedBoundary::empty();
@@ -1494,7 +1523,7 @@ fn generated_constraint_bits_must_not_narrow() {
     transaction.enter(request);
     transaction.complete(request, trapping, sidecar, Default::default());
 
-    let narrowed = summary(FunctionReturnAliasSummary::Fresh);
+    let narrowed = summary();
     let error = update_generated_summary(&mut transaction, &identity, narrowed)
         .expect_err("a generated summary must not narrow its trap bit");
     assert!(
@@ -1505,11 +1534,67 @@ fn generated_constraint_bits_must_not_narrow() {
 }
 
 #[test]
+fn generated_error_store_widens_pending_and_cannot_be_removed() {
+    let identity = generated_identity("storing");
+    let mut pending = summary();
+    pending.parameters = vec![
+        PublicCallParameterSummary {
+            access: PublicCallParameterAccess::Mutable,
+            mutation: PublicCallMutationEffect::Writes,
+            transfer_effect: PublicCallTransferEffect::MayConsume,
+        },
+        PublicCallParameterSummary {
+            access: PublicCallParameterAccess::Shared,
+            mutation: PublicCallMutationEffect::NoWrite,
+            transfer_effect: PublicCallTransferEffect::MayConsume,
+        },
+    ];
+    pending.return_alias = FunctionReturnAliasSummary::Pending;
+    let sidecar = test_sidecar(identity.clone(), pending.clone());
+    let published = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
+    let request = transaction.register_requests([GeneratedRequestFacts {
+        identity: identity.clone(),
+        display_name: "storing".to_owned(),
+        call_span: None,
+    }])[0];
+    transaction.enter(request);
+
+    let without_store = PublicCallSummary {
+        parameters: pending.parameters.clone(),
+        ..summary_with_error_lane()
+    };
+    transaction.complete(request, pending, sidecar, Default::default());
+    assert!(update_generated_summary(&mut transaction, &identity, without_store.clone()).unwrap());
+
+    let mut with_store = without_store.clone();
+    let FunctionReturnAliasSummary::Known(facts) = &mut with_store.return_alias else {
+        panic!("the fixture establishes both lanes");
+    };
+    facts.error.stores.push(CallPathSource {
+        output: CallOutputPath::Store {
+            target: CallParameterPath {
+                index: 0,
+                path: vec![CallField::Elem],
+            },
+            path: Vec::new(),
+        },
+        source: CallAllocationSource::Parameter(CallParameterPath {
+            index: 1,
+            path: Vec::new(),
+        }),
+    });
+    assert!(update_generated_summary(&mut transaction, &identity, with_store.clone()).unwrap());
+    assert!(update_generated_summary(&mut transaction, &identity, without_store).is_err());
+    assert_eq!(transaction.summary(&identity), Some(&with_store));
+}
+
+#[test]
 fn builtin_failure_call_resolution_preserves_exact_summary_bits() {
     let private = private_identity("private");
     let generated = generated_identity("generated");
     let imported = origin("imported");
-    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = summary();
     escaping.escapes_builtin_failure = true;
     let mut hir = HirModule::new();
     install_convergence_summaries(
@@ -1630,7 +1715,7 @@ fn unchanged_generated_summary_counts_comparison_without_change() {
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let identity = generated_identity("stable");
-    let stable = summary(FunctionReturnAliasSummary::Fresh);
+    let stable = summary();
     let published = PublishedBoundary::with_sidecar(
         identity.clone(),
         stable.clone(),
@@ -1701,12 +1786,7 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
                     failure_facts(HirBuiltinFailureBoundary::InferPrivate, vec![]),
                 );
             }
-            let mut report = report((0..2).map(|index| {
-                (
-                    FunctionId(index),
-                    summary(FunctionReturnAliasSummary::Fresh),
-                )
-            }));
+            let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
             infer_builtin_failure_summaries(&hir, &mut report);
             let witness = exported_failure_witness(&hir, &report);
             assert_eq!(
@@ -1760,12 +1840,7 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
     recursive.contributors[1].span = arithmetic_span;
     recursive.contributors[2].span = Some(failure_witness_span(6));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
-    let mut report = report((0..2).map(|index| {
-        (
-            FunctionId(index),
-            summary(FunctionReturnAliasSummary::Fresh),
-        )
-    }));
+    let mut report = report((0..2).map(|index| (FunctionId(index), summary())));
     infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
@@ -1820,8 +1895,7 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
             transaction.enter(request_id),
             GeneratedRequestEntry::Materialise
         );
-        let mut sidecar =
-            test_sidecar(identity.clone(), summary(FunctionReturnAliasSummary::Fresh));
+        let mut sidecar = test_sidecar(identity.clone(), summary());
         sidecar.module.link_facts.functions = if identity == alpha {
             alpha_facts.clone()
         } else if identity == beta {
@@ -1830,12 +1904,7 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
             orphan_facts.clone()
         };
         sidecar.module.executable.hir.expressions.freeze();
-        transaction.complete(
-            request_id,
-            summary(FunctionReturnAliasSummary::Fresh),
-            sidecar,
-            Default::default(),
-        );
+        transaction.complete(request_id, summary(), sidecar, Default::default());
     }
 
     let reachable = reachable_generated_sidecars(&base_facts, &transaction);
@@ -1845,7 +1914,7 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
     );
 
     let mut hir = HirModule::new();
-    let expected_summary = summary(FunctionReturnAliasSummary::Fresh);
+    let expected_summary = summary();
     hir.generated_call_summaries
         .insert(alpha.clone(), expected_summary.clone());
     hir.generated_call_summaries
@@ -1911,6 +1980,211 @@ fn compile_owned_service_fixture(
     fs::write(&source_path, "no semantic source remains\n")
         .expect("the original source should be replaced");
     (frontend, warning_owner)
+}
+
+fn assert_final_allocation_facts_match_cold(
+    frontend: &ProjectFrontendCompilation,
+    strings: &StringTable,
+) {
+    let modules: Vec<_> = frontend.project.successful_module_views().collect();
+    let base = &modules[0].executable;
+    assert_eq!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .count(),
+        1,
+        "the cold oracle checks one base and its generated sidecars"
+    );
+    let table = &base.path_table;
+    // All the fixture's executable views share the published path domain.
+    let mut paths = PathInternerFork::empty();
+    for index in 1..table.len() {
+        let path = PathId::try_from_index(index).unwrap();
+        assert_eq!(
+            paths.try_intern_child(table.parent(path).unwrap(), table.component(path).unwrap()),
+            Some(path)
+        );
+    }
+
+    let mut hirs: Vec<_> = modules
+        .iter()
+        .map(|module| module.executable.hir.clone())
+        .collect();
+    let generated_roots: FxHashMap<_, _> = hirs
+        .iter()
+        .enumerate()
+        .flat_map(|(index, hir)| {
+            hir.function_ids_by_generated
+                .iter()
+                .map(move |(identity, &id)| (identity.clone(), (index, id)))
+        })
+        .collect();
+    let mut allocations: Vec<FxHashMap<_, _>> = hirs
+        .iter()
+        .map(|hir| {
+            hir.functions
+                .iter()
+                .map(|function| (function.id, FunctionReturnAliasSummary::Pending))
+                .collect()
+        })
+        .collect();
+    // Full rounds over final HIR, independent of the production dirty queue. Replace only
+    // active allocation inputs; declaration contracts and true provider leaves remain exact.
+    let mut converged = false;
+    for _ in 0..16 {
+        let next: Vec<_> = modules
+            .iter()
+            .zip(&mut hirs)
+            .map(|(module, hir)| {
+                for (identity, summary) in &mut hir.imported_call_summaries {
+                    if let Some(id) = base.hir.function_ids_by_origin.get(identity) {
+                        summary.return_alias.clone_from(&allocations[0][id]);
+                    }
+                }
+                for (identity, summary) in &mut hir.module_private_call_summaries {
+                    if let Some(id) = base.hir.function_ids_by_private_origin.get(identity) {
+                        summary.return_alias.clone_from(&allocations[0][id]);
+                    }
+                }
+                for (identity, summary) in &mut hir.generated_call_summaries {
+                    if let Some(&(index, id)) = generated_roots.get(identity) {
+                        summary.return_alias.clone_from(&allocations[index][&id]);
+                    }
+                }
+                summarize_call_allocations(
+                    hir,
+                    &module.executable.type_environment,
+                    &module.link_facts.external_package_registry,
+                    &paths,
+                    strings,
+                )
+                .expect("local allocation facts must converge from scratch on final HIR")
+                .analysis
+                .public_call_summaries
+                .into_iter()
+                .map(|(id, summary)| (id, summary.return_alias))
+                .collect()
+            })
+            .collect();
+        if next == allocations {
+            converged = true;
+            break;
+        }
+        allocations = next;
+    }
+    assert!(
+        converged,
+        "cold base and generated allocations did not stabilize"
+    );
+
+    for (module, cold) in modules.into_iter().zip(allocations) {
+        let executable = &module.executable;
+        let hir = &executable.hir;
+        // Mutation effects need validated transfer. Recompute with final exact nonlocal inputs
+        // rather than validating against the deliberately incomplete intermediate rounds above.
+        let exact = check_borrows(
+            hir,
+            &executable.type_environment,
+            &module.link_facts.external_package_registry,
+            &paths,
+            strings,
+            None,
+        )
+        .expect("published HIR must independently pass borrow validation");
+        let published = &executable.borrow_analysis.analysis.public_call_summaries;
+        assert_eq!(cold.len(), hir.functions.len());
+        assert_eq!(published.len(), hir.functions.len());
+        for function in &hir.functions {
+            let name = hir
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| paths.component(path))
+                .map(|name| strings.resolve(name));
+            let published = &published[&function.id];
+            assert_eq!(
+                published.return_alias, cold[&function.id],
+                "published allocation facts differ from a cold pass for {name:?}"
+            );
+            let exact = &exact.analysis.public_call_summaries[&function.id];
+            assert_eq!(
+                published.return_alias, exact.return_alias,
+                "published allocation facts differ with final installed inputs for {name:?}"
+            );
+            assert_eq!(published.parameters.len(), exact.parameters.len());
+            for (index, (published, exact)) in published
+                .parameters
+                .iter()
+                .zip(&exact.parameters)
+                .enumerate()
+            {
+                assert_eq!(
+                    published.mutation, exact.mutation,
+                    "published mutation differs from a cold pass for parameter {index} of {name:?}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn entry_and_routed_catch_metadata_do_not_requeue_allocation_extraction() {
+    use crate::compiler_frontend::instrumentation::{
+        capture_counters_for_test, frontend_counter_test_values, lock_counter_test,
+        reset_frontend_counters,
+    };
+
+    let _guard = lock_counter_test();
+    let _capture = capture_counters_for_test();
+    reset_frontend_counters();
+    const SOURCE: &str = r#"sample |ready Bool| -> I32, Error!:
+    if ready:
+        return 1
+    ;
+    return! Error("not ready")
+;
+result = sample(true) catch then 0
+~[:[result]]
+"#;
+    let (frontend, _) = compile_owned_service_fixture(SOURCE, true, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("infallible entry fixture should compile");
+    };
+    let (hir, entry) = frontend
+        .successful_module_views()
+        .find_map(|module| {
+            let hir = &module.executable.hir;
+            let start = hir.start_function?;
+            let entry = hir.functions.iter().find(|function| function.id == start)?;
+            Some((hir, entry))
+        })
+        .expect("the fixture must publish an entry");
+    assert!(entry.return_contract.ordinary().unwrap().error().is_none());
+    assert!(
+        hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call {
+                    target: CallTarget::Local(_),
+                    ..
+                },
+                ..
+            }
+        )),
+        "the typed catch keeps its already-routed call"
+    );
+    assert_eq!(
+        frontend_counter_test_values(&[
+            FrontendCounter::ConvergenceInitialBaseBorrowPasses,
+            FrontendCounter::ConvergenceBaseBorrowPasses,
+        ]),
+        vec![1, 0],
+        "narrowing entry metadata and draining routed catch records must not rerun extraction"
+    );
 }
 
 #[test]
@@ -1989,7 +2263,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
         let mut base_report = report(
             base.functions
                 .iter()
-                .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
+                .map(|function| (function.id, summary())),
         );
         infer_builtin_failure_summaries(base, &mut base_report);
         assert!(base_report.analysis.public_call_summaries[&helper].escapes_builtin_failure);
@@ -2232,7 +2506,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             generated
                 .functions
                 .iter()
-                .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
+                .map(|function| (function.id, summary())),
         );
         infer_builtin_failure_summaries(generated, &mut generated_report);
         assert!(generated_report.analysis.public_call_summaries[&root].escapes_builtin_failure);
@@ -2833,6 +3107,710 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
             );
         }
     }
+}
+
+#[test]
+fn rewritten_generated_handler_store_reaches_its_base_caller() {
+    const SOURCE: &str = "stash type T |marker T, rows ~{{I32}}, child {I32}| -> I32:\n\
+            ~rows.push(child)\n    return 3\n;\n\
+        forward type T |marker T, rows ~{{I32}}, child {I32}, value I32, again Bool| -> I32:\n\
+            if again:\n        return relay(~rows, child, value, false)\n    ;\n\
+            result = late(value) catch then stash(\"handler\", ~rows, child)\n\
+            return result\n;\n\
+        late |value I32| -> I32:\n    return value + 2147483647\n;\n\
+        relay |rows ~{{I32}}, child {I32}, value I32, again Bool| -> I32:\n\
+            return forward(\"caller\", ~rows, child, value, again)\n;\n\
+        rows ~{{I32}} = {{0}}\n\
+        result = relay(~rows, {1}, 2, true)\n~[:[result]]\n";
+    let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("the generated handler fixture should compile");
+    };
+    assert_final_allocation_facts_match_cold(&frontend, warning_owner.string_table());
+    let mut sidecars = frontend.project.generated.sidecars();
+    let forward = sidecars
+        .find(|sidecar| sidecar.identity.declaration().defining_name() == "forward")
+        .expect("forward sidecar must be published");
+    let hir = &forward.module.executable.hir;
+    assert!(
+        forward
+            .module
+            .link_facts
+            .functions
+            .direct_call_targets()
+            .any(
+                |target| matches!(target, CallTarget::ModulePrivate(identity)
+                if identity.defining_name() == "relay")
+            ),
+        "forward must close the recursive edge to the base caller"
+    );
+    assert!(
+        forward
+            .module
+            .link_facts
+            .functions
+            .direct_call_targets()
+            .any(|target| matches!(target, CallTarget::Generated(identity)
+                if identity.declaration().defining_name() == "stash")),
+        "the newly routed handler must retain its generated dependency"
+    );
+    let root = hir.function_ids_by_generated[&forward.identity];
+    let summary = &forward
+        .module
+        .executable
+        .borrow_analysis
+        .analysis
+        .public_call_summaries[&root];
+    let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
+        panic!("forward must publish allocation facts");
+    };
+    let rows_element = CallOutputPath::Store {
+        target: CallParameterPath {
+            index: 1,
+            path: vec![CallField::Elem],
+        },
+        path: Vec::new(),
+    };
+    let child = CallAllocationSource::Parameter(CallParameterPath {
+        index: 2,
+        path: Vec::new(),
+    });
+    assert!(facts.success.reachable);
+    assert!(!facts.error.reachable);
+    assert!(
+        facts
+            .success
+            .stores
+            .iter()
+            .any(|store| store.output == rows_element && store.source == child),
+        "the internally caught failure must publish its store on forward's success lane"
+    );
+    assert_eq!(
+        frontend.successful_module_views().find_map(|module| {
+            module
+                .executable
+                .hir
+                .generated_call_summaries
+                .get(&forward.identity)
+        }),
+        Some(summary),
+        "the base caller must install the refreshed generated root summary"
+    );
+    let relay_summary = frontend
+        .successful_module_views()
+        .find_map(|module| {
+            let executable = &module.executable;
+            let (_, function) = executable
+                .hir
+                .function_ids_by_private_origin
+                .iter()
+                .find(|(identity, _)| identity.defining_name() == "relay")?;
+            assert!(
+                module
+                    .link_facts
+                    .functions
+                    .callers_of(
+                        &FxHashSet::from_iter([&forward.identity]),
+                        &FxHashSet::default(),
+                        &FxHashSet::default(),
+                    )
+                    .contains(function),
+                "relay must call forward by its concrete generated identity"
+            );
+            executable
+                .borrow_analysis
+                .analysis
+                .public_call_summaries
+                .get(function)
+        })
+        .expect("relay must publish its summary");
+    assert_eq!(
+        relay_summary.parameters[0].mutation,
+        PublicCallMutationEffect::Writes
+    );
+    let FunctionReturnAliasSummary::Known(relay_facts) = &relay_summary.return_alias else {
+        panic!("relay must publish allocation facts");
+    };
+    assert!(relay_facts.success.reachable);
+    assert!(!relay_facts.error.reachable);
+    assert!(relay_facts.success.stores.iter().any(|store| {
+        store.output
+            == CallOutputPath::Store {
+                target: CallParameterPath {
+                    index: 0,
+                    path: vec![CallField::Elem],
+                },
+                path: Vec::new(),
+            }
+            && store.source
+                == CallAllocationSource::Parameter(CallParameterPath {
+                    index: 1,
+                    path: Vec::new(),
+                })
+    }));
+}
+
+#[test]
+fn routed_private_builtin_error_message_store_is_fresh() {
+    const SOURCE: &str = r#"risky_sum |value I32| -> I32:
+    return value + 2147483647
+;
+
+recover |messages ~{String}, value I32| -> I32:
+    return risky_sum(value) catch |problem|:
+        ~messages.push(problem.message)
+        then 0
+    ;
+;
+
+messages ~{String} = {}
+result = recover(~messages, 2)
+~[:[result]]
+"#;
+    let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("the routed builtin error message store should compile");
+    };
+    assert_final_allocation_facts_match_cold(&frontend, warning_owner.string_table());
+    let executable = &frontend
+        .successful_module_views()
+        .next()
+        .unwrap()
+        .executable;
+    let function_named = |name| {
+        executable
+            .hir
+            .function_ids_by_private_origin
+            .iter()
+            .find_map(|(identity, &id)| (identity.defining_name() == name).then_some(id))
+            .unwrap_or_else(|| panic!("missing private function {name}"))
+    };
+    let checked = function_named("risky_sum");
+    assert!(executable.hir.blocks.iter().any(|block| matches!(
+        &block.terminator,
+        HirTerminator::Invoke {
+            operation: HirFallibleOperation::Call {
+                target: CallTarget::Local(target),
+                ..
+            },
+            ..
+        } if *target == checked
+    )));
+    let recover = function_named("recover");
+    let summary = &executable.borrow_analysis.analysis.public_call_summaries[&recover];
+    let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
+        panic!("recover must publish its allocation facts");
+    };
+    assert!(facts.success.reachable);
+    assert!(!facts.error.reachable);
+    assert!(facts.success.stores.contains(&CallPathSource {
+        output: CallOutputPath::Store {
+            target: CallParameterPath {
+                index: 0,
+                path: vec![CallField::Elem],
+            },
+            path: Vec::new(),
+        },
+        source: CallAllocationSource::Fresh,
+    }));
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::Writes
+    );
+}
+
+#[test]
+fn no_success_private_call_does_not_publish_structural_suffix_writes() {
+    assert_no_success_private_call_skips_suffix("value + 2147483647", true);
+}
+
+#[test]
+fn ordinary_no_success_call_does_not_publish_structural_suffix_writes() {
+    assert_no_success_private_call_skips_suffix("value", false);
+}
+
+fn assert_no_success_private_call_skips_suffix(total: &str, has_error_lane: bool) {
+    const SOURCE: &str = "stop |value I32| -> I32:\n\
+            total = TOTAL_EXPRESSION\n\
+            assert(false, [:stop [total]])\n\
+            return total\n;\n\
+        probe |rows ~{I32}, value I32|:\n\
+            stop(value)\n    ~rows.push(1)\n;\n\
+        ~[:ok]\n";
+    let source = SOURCE.replace("TOTAL_EXPRESSION", total);
+    let (frontend, _) = compile_owned_service_fixture(&source, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("no-success private call fixture should compile");
+    };
+    let (module, probe) = frontend
+        .successful_module_views()
+        .find_map(|module| {
+            module
+                .executable
+                .hir
+                .function_ids_by_private_origin
+                .iter()
+                .find(|(identity, _)| identity.defining_name() == "probe")
+                .map(|(_, &function)| (module, function))
+        })
+        .expect("the private probe is analysed");
+    let executable = &module.executable;
+    let analysis = &executable.borrow_analysis.analysis;
+    let summary = &analysis.public_call_summaries[&probe];
+    let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
+        panic!("probe must publish its exact lane facts");
+    };
+    assert_eq!(facts.error.reachable, has_error_lane);
+    assert!(!facts.success.reachable);
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+
+    let entry = executable
+        .hir
+        .functions
+        .iter()
+        .find(|function| function.id == probe)
+        .unwrap()
+        .entry;
+    let entry = executable.hir.block(entry).unwrap();
+    let suffix = if has_error_lane {
+        let HirTerminator::Invoke {
+            operation:
+                HirFallibleOperation::Call {
+                    target: CallTarget::Local(_),
+                    ..
+                },
+            success,
+            ..
+        } = &entry.terminator
+        else {
+            panic!("the private stop call must install a failure lane");
+        };
+        executable.hir.block(*success).unwrap()
+    } else {
+        let call = entry
+            .statements
+            .iter()
+            .find(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Call {
+                        target: CallTarget::Local(_),
+                        ..
+                    }
+                )
+            })
+            .expect("the private stop call must remain an ordinary statement");
+        assert!(analysis.statement_facts.contains_key(&call.id));
+        entry
+    };
+    let write = suffix
+        .statements
+        .iter()
+        .find(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Call {
+                    target: CallTarget::External(ExternalFunctionId::CollectionPushGrowable),
+                    ..
+                }
+            )
+        })
+        .expect("the push must remain structurally present after the call");
+    assert!(!analysis.statement_facts.contains_key(&write.id));
+}
+
+#[test]
+fn private_lane_refresh_propagates_error_stores_around_local_recursion() {
+    const SOURCE: &str = r#"stop |value I32| -> I32:
+    total = value + 2147483647
+    assert(false, [:stop [total]])
+    return total
+;
+
+ping |rows ~{{I32}}, child {I32}, again Bool, value I32| -> I32:
+    if again:
+        return pong(~rows, child, true, value)
+    ;
+    return 7
+;
+
+pong |rows ~{{I32}}, child {I32}, fail Bool, value I32| -> I32:
+    if fail:
+        ~rows.push(child)
+        return stop(value)
+    ;
+    return ping(~rows, child, false, value)
+;
+
+pruned |rows ~{{I32}}, child {I32}, value I32| -> Bool:
+    result = calm(value) < calm(1) catch:
+        ~rows.push(child)
+        return true
+    ;
+    return result
+;
+
+calm |value I32| -> I32:
+    return value
+;
+
+~[:ok]
+"#;
+    use crate::compiler_frontend::hir::utils::for_each_terminator_target;
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+
+    let is_push = |statement: &HirStatement| {
+        matches!(
+            &statement.kind,
+            HirStatementKind::Call {
+                target: CallTarget::External(ExternalFunctionId::CollectionPushGrowable),
+                ..
+            }
+        )
+    };
+    {
+        let (ast, mut paths, mut strings) = parse_single_file_ast(SOURCE);
+        let registry = default_external_package_registry(&mut strings);
+        let hir = lower_hir(ast, &mut strings, &mut paths, &registry);
+        let handler = hir
+            .catch_handlers
+            .iter()
+            .find(|record| {
+                hir.side_table
+                    .function_name_path(record.owner)
+                    .and_then(|path| paths.component(path))
+                    .is_some_and(|name| strings.resolve(name) == "pruned")
+            })
+            .expect("the comparison must lower a handler before lane installation")
+            .handler
+            .block;
+        let block = hir.blocks.iter().find(|block| block.id == handler).unwrap();
+        assert!(block.statements.iter().any(is_push));
+        for block in &hir.blocks {
+            for_each_terminator_target(&block.terminator, |target| {
+                assert_ne!(target, handler, "the provisional handler must be unrouted");
+            });
+        }
+    }
+    let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("the mutually recursive private calls must compile");
+    };
+    assert_final_allocation_facts_match_cold(&frontend, warning_owner.string_table());
+    let module = frontend.successful_module_views().next().unwrap();
+    let executable = &module.executable;
+    let hir = &executable.hir;
+    let function_named = |name| {
+        hir.function_ids_by_private_origin
+            .iter()
+            .find_map(|(identity, &id)| (identity.defining_name() == name).then_some(id))
+            .unwrap_or_else(|| panic!("missing local function {name}"))
+    };
+    let ping = function_named("ping");
+    let pong = function_named("pong");
+    let stop = function_named("stop");
+    let edges = &module.link_facts.functions;
+    assert!(edges.local_call_edges().any(|edge| edge == (ping, pong)));
+    assert!(edges.local_call_edges().any(|edge| edge == (pong, ping)));
+    assert!(hir.blocks.iter().any(|block| matches!(
+        &block.terminator,
+        HirTerminator::Invoke {
+            operation: HirFallibleOperation::Call {
+                target: CallTarget::Local(target),
+                ..
+            },
+            ..
+        } if *target == stop
+    )));
+
+    let summary = |function| &executable.borrow_analysis.analysis.public_call_summaries[&function];
+    let store = CallPathSource {
+        output: CallOutputPath::Store {
+            target: CallParameterPath {
+                index: 0,
+                path: vec![CallField::Elem],
+            },
+            path: Vec::new(),
+        },
+        source: CallAllocationSource::Parameter(CallParameterPath {
+            index: 1,
+            path: Vec::new(),
+        }),
+    };
+    for function in [ping, pong] {
+        let FunctionReturnAliasSummary::Known(facts) = &summary(function).return_alias else {
+            panic!("the recursive calls must publish allocation facts");
+        };
+        assert!(facts.success.reachable);
+        assert!(facts.success.stores.is_empty());
+        assert!(facts.error.reachable);
+        assert!(facts.error.stores.contains(&store));
+    }
+
+    let pruned = summary(function_named("pruned"));
+    let FunctionReturnAliasSummary::Known(facts) = &pruned.return_alias else {
+        panic!("the ordinary comparison must publish allocation facts");
+    };
+    assert!(facts.success.reachable);
+    assert!(facts.success.stores.is_empty());
+    assert!(!facts.error.reachable);
+    assert_eq!(
+        pruned.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    let pushes = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| is_push(statement))
+        .count();
+    assert_eq!(
+        pushes, 1,
+        "only pong's push survives; the unrouted catch is pruned"
+    );
+}
+
+#[test]
+fn private_lane_handler_widens_result_topology_through_generated_caller() {
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+
+    const DECLARATIONS: &str = r#"Pair = |left {I32}, right {I32}|
+
+late |value I32| -> I32:
+    return value + 2147483647
+;
+
+select |flag Bool, a {I32}, b {I32}, value I32| -> Pair:
+    total = late(value) catch:
+        return Pair(a, a)
+    ;
+    if flag:
+        return Pair(a, b)
+    ;
+    return Pair(b, a)
+;
+"#;
+    let pair = CallSharing {
+        left: CallOutputPath::Result(CallResultPath {
+            slot: 0,
+            path: vec![CallField::Field(0)],
+        }),
+        right: CallOutputPath::Result(CallResultPath {
+            slot: 0,
+            path: vec![CallField::Field(1)],
+        }),
+        condition: CallSharingCondition::Always,
+    };
+    let (ast, mut paths, mut strings) = parse_single_file_ast(DECLARATIONS);
+    let registry = default_external_package_registry(&mut strings);
+    let initial_hir = lower_hir(ast, &mut strings, &mut paths, &registry);
+    let select = initial_hir
+        .functions
+        .iter()
+        .find(|function| {
+            initial_hir
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| paths.component(path))
+                .is_some_and(|name| strings.resolve(name) == "select")
+        })
+        .expect("select must lower before lane installation")
+        .id;
+    let initial = summarize_call_allocations(
+        &initial_hir,
+        &initial_hir.type_environment,
+        &registry,
+        &paths,
+        &strings,
+    )
+    .expect("initial allocation facts must converge");
+    let FunctionReturnAliasSummary::Known(before) =
+        &initial.analysis.public_call_summaries[&select].return_alias
+    else {
+        panic!("ordinary exits must publish their result sources");
+    };
+    assert!(before.success.reachable);
+    assert!(!before.success.sharing.contains(&pair));
+
+    let source = format!(
+        "{DECLARATIONS}\n\
+        relay type T |flag Bool, a {{I32}}, b {{I32}}, value I32, marker T| -> Pair:\n\
+            return select(flag, a, b, value)\n;\n\
+        chosen = relay(true, {{1}}, {{2}}, 2, \"generated\")\n\
+        ~[:[chosen.left.length()]]\n"
+    );
+    let (frontend, warning_owner) = compile_owned_service_fixture(&source, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("routed sharing witness must compile");
+    };
+    assert_final_allocation_facts_match_cold(&frontend, warning_owner.string_table());
+    let relay = frontend
+        .project
+        .generated
+        .sidecars()
+        .find(|sidecar| sidecar.identity.declaration().defining_name() == "relay")
+        .expect("the generated caller must be published");
+    let executable = &relay.module.executable;
+    let root = executable.hir.function_ids_by_generated[&relay.identity];
+    let FunctionReturnAliasSummary::Known(after) =
+        &executable.borrow_analysis.analysis.public_call_summaries[&root].return_alias
+    else {
+        panic!("the caller must publish its result topology");
+    };
+    assert_eq!(after.success.sources, before.success.sources);
+    assert!(after.success.sharing.contains(&pair));
+    assert!(
+        executable
+            .hir
+            .module_private_call_summaries
+            .iter()
+            .any(|(identity, summary)| identity.defining_name() == "select"
+                && matches!(
+                    &summary.return_alias,
+                    FunctionReturnAliasSummary::Known(facts)
+                        if facts.success.sources == before.success.sources
+                            && facts.success.sharing.contains(&pair)
+                ))
+    );
+}
+
+#[test]
+fn private_lane_refresh_handles_a_write_through_a_newly_reachable_holder() {
+    const SOURCE: &str = r#"Holder = |items {I32}|
+
+produce |value I32| -> Holder:
+    total = value + 2147483647
+    empty {Holder} = {}
+    item = empty.get(total) catch:
+        assert(false, "empty")
+    ;
+    return item
+;
+
+recover |holder ~Holder, value I32| -> Holder:
+    return produce(value) catch then holder
+;
+
+probe |holder ~Holder, value I32| -> {I32}:
+    selected ~= recover(~holder, value)
+    ~selected.items = {7}
+    return selected.items
+;
+~[:ok]
+"#;
+    {
+        use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+        use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+        use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+
+        // Before lane installation `recover` can only succeed with `produce`'s absent element, so
+        // `probe` writes through a holder with no allocation. That path must stay incomplete
+        // rather than publish a success lane whose write was silently dropped.
+        let (ast, mut paths, mut strings) = parse_single_file_ast(SOURCE);
+        let registry = default_external_package_registry(&mut strings);
+        let hir = lower_hir(ast, &mut strings, &mut paths, &registry);
+        let initial =
+            summarize_call_allocations(&hir, &hir.type_environment, &registry, &paths, &strings)
+                .expect("initial allocation facts must converge");
+        let facts = |name: &str| {
+            let function = hir
+                .functions
+                .iter()
+                .find(|function| {
+                    hir.side_table
+                        .function_name_path(function.id)
+                        .and_then(|path| paths.component(path))
+                        .is_some_and(|component| strings.resolve(component) == name)
+                })
+                .expect("the function lowers before lane installation");
+            let FunctionReturnAliasSummary::Known(facts) =
+                &initial.analysis.public_call_summaries[&function.id].return_alias
+            else {
+                panic!("{name} must publish known facts before installation");
+            };
+            facts.clone()
+        };
+        let recover = facts("recover");
+        assert!(recover.success.reachable);
+        assert!(recover.success.sources.is_empty());
+        assert!(!facts("probe").success.reachable);
+    }
+    let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("the write through the recovered holder is valid and must converge to acceptance");
+    };
+    assert_final_allocation_facts_match_cold(&frontend, warning_owner.string_table());
+    let probe = frontend
+        .successful_module_views()
+        .find_map(|module| {
+            let (_, id) = module
+                .executable
+                .hir
+                .function_ids_by_private_origin
+                .iter()
+                .find(|(identity, _)| identity.defining_name() == "probe")?;
+            module
+                .executable
+                .borrow_analysis
+                .analysis
+                .public_call_summaries
+                .get(id)
+        })
+        .expect("the private probe must retain its summary");
+    let FunctionReturnAliasSummary::Known(facts) = &probe.return_alias else {
+        panic!("probe must publish its exact lane facts");
+    };
+    assert!(facts.success.reachable);
+    // `selected` resolves to the holder alone, so the write is strong and the old items vanish.
+    assert!(
+        facts
+            .success
+            .sources
+            .iter()
+            .any(|row| row.source == CallAllocationSource::Fresh)
+    );
+    assert!(!facts.success.sources.iter().any(|row| {
+        row.source
+            == CallAllocationSource::Parameter(CallParameterPath {
+                index: 0,
+                path: vec![CallField::Field(0)],
+            })
+    }));
+    assert!(facts.success.stores.contains(&CallPathSource {
+        output: CallOutputPath::Store {
+            target: CallParameterPath {
+                index: 0,
+                path: vec![CallField::Field(0)],
+            },
+            path: vec![],
+        },
+        source: CallAllocationSource::Fresh,
+    }));
 }
 
 #[path = "constraint_summary_tests.rs"]

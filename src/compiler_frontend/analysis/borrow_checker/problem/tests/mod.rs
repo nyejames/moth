@@ -37,8 +37,10 @@ use crate::compiler_frontend::hir::terminators::{
     HirFallibleOperation, HirJumpArgument, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    CallAllocationFacts, CallAllocationSource, CallLaneSummary, CallOutputPath, CallParameterPath,
+    CallPathSource, CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -443,6 +445,7 @@ fn borrow_problem_rejects_call_result_origin_from_another_call() {
     parts.calls.push(Call {
         id: CallId::new(1),
         label: "other-call".to_owned(),
+        opaque_stores: false,
     });
     parts.origins.push(ValueOrigin::new(
         ValueOriginId::new(1),
@@ -474,8 +477,9 @@ fn borrow_problem_deterministic_debug_dump_is_stable_for_equal_problems() {
 #[test]
 fn borrow_problem_hir_extractor_preserves_ordered_events_and_scope_exit() {
     let (module, function) = hir_literal_fixture();
-    let first = from_hir(&module, &function, None, None).expect("HIR fixture should extract");
-    let second = from_hir(&module, &function, None, None).expect("HIR fixture should re-extract");
+    let first = from_hir(&module, &function, None, None, None).expect("HIR fixture should extract");
+    let second =
+        from_hir(&module, &function, None, None, None).expect("HIR fixture should re-extract");
 
     assert_eq!(first.debug_dump(), second.debug_dump());
     assert_eq!(first.bindings().len(), 1);
@@ -521,7 +525,8 @@ fn borrow_problem_hir_extractor_preserves_ordered_events_and_scope_exit() {
 #[test]
 fn borrow_problem_hir_extractor_keeps_direct_self_update_as_non_defining_access() {
     let (module, function) = hir_direct_self_update_fixture();
-    let problem = from_hir(&module, &function, None, None).expect("self-update HIR should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("self-update HIR should extract");
     let self_update_events = problem
         .events()
         .iter()
@@ -562,7 +567,7 @@ fn borrow_problem_hir_extractor_keeps_direct_self_update_as_non_defining_access(
 #[test]
 fn borrow_problem_hir_extractor_handles_constant_and_runtime_structural_strings() {
     let (module, function) = hir_structural_string_return_fixture(ValueKind::Const);
-    let constant = from_hir(&module, &function, None, None)
+    let constant = from_hir(&module, &function, None, None, None)
         .expect("constant structural string should extract");
     assert!(
         !constant
@@ -573,8 +578,8 @@ fn borrow_problem_hir_extractor_handles_constant_and_runtime_structural_strings(
     );
 
     let (module, function) = hir_structural_string_return_fixture(ValueKind::RValue);
-    let runtime =
-        from_hir(&module, &function, None, None).expect("runtime structural string should extract");
+    let runtime = from_hir(&module, &function, None, None, None)
+        .expect("runtime structural string should extract");
     assert!(
         runtime
             .events()
@@ -613,7 +618,8 @@ fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
             None,
         )),
     };
-    let problem = from_hir(&module, &function, None, None).expect("returning HIR should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("returning HIR should extract");
 
     let position = |predicate: &dyn Fn(&Event) -> bool| {
         problem
@@ -647,7 +653,7 @@ fn borrow_problem_hir_extractor_transfers_jump_argument_before_edge_scope_exit()
         destination: destination_local,
     }]);
     let problem =
-        from_hir(&module, &function, None, None).expect("jump argument HIR should extract");
+        from_hir(&module, &function, None, None, None).expect("jump argument HIR should extract");
 
     let place_for_local = |local| {
         let binding = if local == source_local {
@@ -716,7 +722,7 @@ fn borrow_problem_hir_extractor_records_jump_as_atomic_edge_definition() {
         destination: LocalId(1),
     }]);
     let problem =
-        from_hir(&module, &function, None, None).expect("jump argument HIR should extract");
+        from_hir(&module, &function, None, None, None).expect("jump argument HIR should extract");
 
     let source_place = problem
         .places()
@@ -793,7 +799,7 @@ fn borrow_problem_hir_extractor_rejects_duplicate_jump_destinations() {
         destination: LocalId(1),
     };
     let (module, function) = jump_argument_fixture(vec![duplicate, duplicate]);
-    let error = from_hir(&module, &function, None, None)
+    let error = from_hir(&module, &function, None, None, None)
         .expect_err("an edge cannot define one destination more than once");
 
     assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
@@ -803,8 +809,8 @@ fn borrow_problem_hir_extractor_rejects_duplicate_jump_destinations() {
 #[test]
 fn borrow_problem_hir_extractor_lowers_multiple_disjoint_jump_arguments() {
     let (module, function) = multi_jump_argument_fixture();
-    let problem =
-        from_hir(&module, &function, None, None).expect("multiple jump arguments should extract");
+    let problem = from_hir(&module, &function, None, None, None)
+        .expect("multiple jump arguments should extract");
 
     let place_for_local = |local| {
         let binding = problem
@@ -853,7 +859,8 @@ fn borrow_problem_hir_extractor_lowers_multiple_disjoint_jump_arguments() {
 #[test]
 fn borrow_problem_hir_extractor_defines_self_and_disjoint_jump_arguments() {
     let (module, function) = self_copy_and_disjoint_jump_argument_fixture();
-    let problem = from_hir(&module, &function, None, None).expect("jump arguments should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("jump arguments should extract");
 
     let place_for_local = |local| {
         let binding = problem
@@ -901,7 +908,7 @@ fn borrow_problem_hir_extractor_defines_self_and_disjoint_jump_arguments() {
 #[test]
 fn borrow_problem_hir_extractor_keeps_cross_pair_jump_swaps_atomic() {
     let (module, function) = overlapping_jump_argument_fixture();
-    let problem = from_hir(&module, &function, None, None)
+    let problem = from_hir(&module, &function, None, None, None)
         .expect("cross-pair source and destination reuse is a parallel swap");
     let place_for_local = |local| {
         let binding = problem
@@ -973,7 +980,8 @@ fn borrow_problem_hir_extractor_seeds_parameter_origins() {
             None,
         )),
     };
-    let problem = from_hir(&module, &function, None, None).expect("parameter HIR should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("parameter HIR should extract");
 
     assert!(
         problem
@@ -1045,7 +1053,8 @@ fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None).expect("edge scope HIR should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("edge scope HIR should extract");
 
     let scope_exit_blocks = problem
         .control_flow()
@@ -1181,7 +1190,7 @@ fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None)
+    let problem = from_hir(&module, &function, None, None, None)
         .expect("ancestor scope should survive through the intermediate block");
 
     let scope_exit_blocks = problem
@@ -1268,7 +1277,7 @@ fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None)
+    let problem = from_hir(&module, &function, None, None, None)
         .expect("repeated branch targets should share one edge block");
 
     let branch_targets = problem
@@ -1333,7 +1342,8 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None).expect("aggregate HIR should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("aggregate HIR should extract");
 
     let (destination, fields) = problem
         .events()
@@ -1397,7 +1407,8 @@ fn borrow_problem_hir_extractor_maps_oversized_index_to_dynamic_projection() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None).expect("indexed load should extract");
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("indexed load should extract");
 
     assert!(
         problem
@@ -1414,20 +1425,42 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
     let source_local = LocalId(0);
     let result_local = LocalId(1);
     let mut expressions = HirExpressionStore::default();
-    let initial_value = int_expression(&mut expressions, 1, region);
-    let call_argument = load_expression(&mut expressions, source_local, region);
+    let value_type = builtin_type_ids::STRING;
+    let pieces = expressions
+        .append_string_pieces(&[ConstStringPiece::SiteRoot], None)
+        .expect("string piece should fit the expression store");
+    let initial_value = hir_expression(
+        &mut expressions,
+        HirExpressionKind::StructuralString { pieces },
+        value_type,
+        ValueKind::RValue,
+        region,
+    );
+    let load = |expressions: &mut HirExpressionStore, local| {
+        hir_expression(
+            expressions,
+            HirExpressionKind::Load(HirPlace::local(local)),
+            value_type,
+            ValueKind::Place,
+            region,
+        )
+    };
+    let call_argument = load(&mut expressions, source_local);
     let call_arguments = expressions
         .append_values(&[call_argument], None)
         .expect("call argument should fit the expression store");
-    let returned = load_expression(&mut expressions, result_local, region);
+    let returned = load(&mut expressions, result_local);
     let module = module_with_block(
         HirBlock {
             id: HirBlockId(0),
             region,
-            locals: vec![
-                hir_local(source_local, region),
-                hir_local(result_local, region),
-            ],
+            locals: [source_local, result_local]
+                .into_iter()
+                .map(|local| HirLocal {
+                    ty: value_type,
+                    ..hir_local(local, region)
+                })
+                .collect(),
             statements: vec![
                 HirStatement {
                     id: HirNodeId(0),
@@ -1455,7 +1488,9 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
         },
         expressions,
     );
-    let function = function_for(HirBlockId(0));
+    let mut function = function_for(HirBlockId(0));
+    function.return_contract =
+        HirFunctionReturnContract::Returns(CallableReturnShape::from_slots([value_type], None));
     let mut summaries = rustc_hash::FxHashMap::default();
     summaries.insert(
         FunctionId(9),
@@ -1465,15 +1500,31 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
                 mutation: PublicCallMutationEffect::Writes,
                 transfer_effect: PublicCallTransferEffect::MayConsume,
             }],
-            return_alias: FunctionReturnAliasSummary::AliasParams(vec![0]),
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                success: CallLaneSummary {
+                    reachable: true,
+                    sources: vec![CallPathSource {
+                        output: CallOutputPath::Result(CallResultPath {
+                            slot: 0,
+                            path: vec![],
+                        }),
+                        source: CallAllocationSource::Parameter(CallParameterPath {
+                            index: 0,
+                            path: vec![],
+                        }),
+                    }],
+                    ..Default::default()
+                },
+                error: CallLaneSummary::default(),
+            })),
             escapes_builtin_failure: false,
             uses_fast_semantics: false,
             may_trap: false,
             may_fail: false,
         },
     );
-    let problem =
-        from_hir(&module, &function, Some(&summaries), None).expect("call HIR should extract");
+    let problem = from_hir(&module, &function, Some(&summaries), None, None)
+        .expect("call HIR should extract");
 
     let call = problem
         .events()
@@ -1491,6 +1542,22 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
             provenance: CallResultProvenance::AliasParams(indices),
             ..
         } if indices.as_ref() == [0]
+    )));
+
+    let FunctionReturnAliasSummary::Known(facts) =
+        &mut summaries.get_mut(&FunctionId(9)).unwrap().return_alias
+    else {
+        unreachable!("the fixture supplies a known call contract");
+    };
+    facts.success.sources[0].source = CallAllocationSource::Fresh;
+    let problem = from_hir(&module, &function, Some(&summaries), None, None)
+        .expect("the supported fresh-root contract should extract");
+    assert!(problem.origins().iter().any(|origin| matches!(
+        &origin.kind,
+        OriginKind::CallResult {
+            provenance: CallResultProvenance::Fresh,
+            ..
+        }
     )));
 }
 
@@ -1559,7 +1626,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let problem = from_hir(&module, &function, None, None)
+    let problem = from_hir(&module, &function, None, None, None)
         .expect("generated call without a summary should extract conservatively");
     let effect = problem
         .events()
@@ -1648,14 +1715,14 @@ fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
         expressions,
     );
     let function = function_for(HirBlockId(0));
-    let error = from_hir(&module, &function, None, None)
+    let error = from_hir(&module, &function, None, None, None)
         .expect_err("missing imported call summaries must fail extraction");
 
     assert!(format!("{error:?}").contains("provider call summary"));
 }
 
 #[test]
-fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provenance() {
+fn borrow_problem_hir_extractor_preserves_native_map_lane_effects() {
     let region = RegionId(0);
     let map_local = LocalId(0);
     let success_local = LocalId(1);
@@ -1707,6 +1774,8 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
     let args = expressions
         .append_values(&[key], None)
         .expect("map arguments should fit");
+    let set_args = expressions.append_values(&[key, key], None).unwrap();
+    let no_results = expressions.append_values(&[], None).unwrap();
     let success_value = load_expression(&mut expressions, success_local, region);
     let returned = expressions
         .append_values(&[success_value], None)
@@ -1722,7 +1791,7 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
     map_binding.ty = map_type;
     let mut error_binding = hir_local(error_local, region);
     error_binding.ty = error_type;
-    let module = module_with_blocks(
+    let mut module = module_with_blocks(
         vec![
             HirBlock {
                 id: HirBlockId(0),
@@ -1768,7 +1837,7 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
         .ordinary_mut()
         .expect("fixture function is ordinary")
         .set_error(Some(error_type));
-    let problem = from_hir(&module, &function, None, None)
+    let problem = from_hir(&module, &function, None, None, None)
         .expect("native map Get should normalize without a public call summary");
     let effects = problem
         .events()
@@ -1805,6 +1874,122 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
             ..
         }
     )));
+    assert!(problem.calls().iter().all(|call| !call.opaque_stores));
+
+    let HirTerminator::Invoke {
+        operation,
+        success_results,
+        ..
+    } = &mut module.blocks[0].terminator
+    else {
+        panic!("expected a map invoke");
+    };
+    *operation = HirFallibleOperation::MapOp {
+        op: HirMapOp::Set,
+        receiver,
+        args: set_args,
+    };
+    success_results.clear();
+    module.blocks[1].terminator = HirTerminator::Return(no_results);
+    function.return_contract =
+        HirFunctionReturnContract::Returns(CallableReturnShape::from_slots([], Some(error_type)));
+    let problem =
+        from_hir(&module, &function, None, None, None).expect("native map Set must normalize");
+    let mut lanes = problem
+        .events()
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::CallEffect(effect) => Some((
+                effect.results.len(),
+                problem.calls()[effect.call.index()].opaque_stores,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    lanes.sort_unstable();
+    assert_eq!(lanes, [(0, true), (1, false)]);
+}
+
+#[test]
+fn authored_call_store_reaches_only_the_normalized_failure_effect() {
+    use crate::compiler_frontend::analysis::borrow_checker::summarize_call_allocations;
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+    use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
+
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/cases/runtime_call_store_failure_lane_rejected/input/@entry.moth"
+    ));
+    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
+    let packages = default_external_package_registry(&mut strings);
+    let (module, types) =
+        lower_ast(ast, &mut strings, &mut paths, &packages).expect("fixture should lower");
+    let entry = paths
+        .try_intern_portable_path("@entry.moth", &mut strings)
+        .unwrap();
+    let mut function = |name: &str| {
+        let path = paths.try_intern_child(entry, strings.intern(name)).unwrap();
+        module
+            .functions
+            .iter()
+            .find(|function| module.side_table.function_name_path(function.id) == Some(path))
+            .expect("authored fixture function")
+    };
+    let store = function("store").id;
+    let probe = function("probe");
+    let (success, failure) = module
+        .blocks
+        .iter()
+        .find_map(|block| match &block.terminator {
+            HirTerminator::Invoke {
+                operation:
+                    HirFallibleOperation::Call {
+                        target: CallTarget::Local(callee),
+                        ..
+                    },
+                success_results,
+                error_result,
+                ..
+            } if *callee == store => {
+                let [value] = success_results.as_slice() else {
+                    panic!("one success result")
+                };
+                Some((*value, *error_result))
+            }
+            _ => None,
+        })
+        .expect("fixture should invoke its store helper");
+    let report = summarize_call_allocations(&module, &types, &packages, &paths, &strings)
+        .expect("summarize the fixture without validating its deliberately conflicting borrow");
+    let problem = from_hir(
+        &module,
+        probe,
+        Some(&report.analysis.public_call_summaries),
+        Some(&packages),
+        Some(&types),
+    )
+    .expect("fixture probe should normalize");
+    let label = format!("{:?}", CallTarget::Local(store));
+    let mut outcomes = Vec::new();
+    for event in problem.events() {
+        if let EventKind::CallEffect(effect) = &event.kind {
+            let call = &problem.calls()[effect.call.index()];
+            if call.label == label {
+                let [result] = effect.results.as_ref() else {
+                    panic!("one outcome per call edge")
+                };
+                let place = &problem.places()[result.destination.place().index()];
+                let local = problem.bindings()[place.root.index()]
+                    .hir_local
+                    .expect("HIR outcome");
+                outcomes.push((local, call.opaque_stores));
+            }
+        }
+    }
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes.contains(&(success, false)));
+    assert!(outcomes.contains(&(failure, true)));
 }
 
 #[test]
@@ -1890,14 +2075,30 @@ fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_cha
         FunctionId(9),
         PublicCallSummary {
             parameters: Vec::new(),
-            return_alias: FunctionReturnAliasSummary::Fresh,
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
+                success: CallLaneSummary {
+                    reachable: true,
+                    ..Default::default()
+                },
+                error: CallLaneSummary {
+                    reachable: true,
+                    sources: vec![CallPathSource {
+                        output: CallOutputPath::Result(CallResultPath {
+                            slot: 0,
+                            path: vec![],
+                        }),
+                        source: CallAllocationSource::Fresh,
+                    }],
+                    ..Default::default()
+                },
+            })),
             escapes_builtin_failure: false,
             uses_fast_semantics: false,
             may_trap: false,
             may_fail: false,
         },
     );
-    let problem = from_hir(&module, &function, Some(&summaries), None)
+    let problem = from_hir(&module, &function, Some(&summaries), None, None)
         .expect("native Invoke control-flow HIR should extract");
 
     let targets = problem
@@ -2433,7 +2634,7 @@ fn borrow_problem_hir_extractor_lowers_deep_binop_chain_on_a_small_stack() {
                 expressions,
             );
             let function = function_for(HirBlockId(0));
-            let problem = from_hir(&module, &function, None, None)
+            let problem = from_hir(&module, &function, None, None, None)
                 .expect("deep binop chain should extract without a depth limit");
             let fresh_events = problem
                 .events()
@@ -2592,6 +2793,7 @@ fn granular_call_parts() -> super::BorrowProblemParts {
         calls: vec![Call {
             id: super::CallId::new(0),
             label: "malformed-call".to_owned(),
+            opaque_stores: false,
         }],
         events: vec![
             Event::new(
@@ -2687,6 +2889,7 @@ fn two_argument_call_parts() -> super::BorrowProblemParts {
         calls: vec![Call {
             id: CallId::new(0),
             label: "two-argument-call".to_owned(),
+            opaque_stores: false,
         }],
         events: vec![
             Event::new(
@@ -2745,15 +2948,15 @@ fn borrow_problem_never_call_ends_argument_liveness_at_the_terminator() {
                 mutation: PublicCallMutationEffect::NoWrite,
                 transfer_effect: PublicCallTransferEffect::MayConsume,
             }],
-            return_alias: FunctionReturnAliasSummary::Fresh,
+            return_alias: FunctionReturnAliasSummary::Known(Box::default()),
             escapes_builtin_failure: false,
             uses_fast_semantics: false,
             may_trap: false,
             may_fail: false,
         },
     );
-    let problem =
-        from_hir(&module, &function, Some(&summaries), None).expect("NeverCall HIR should extract");
+    let problem = from_hir(&module, &function, Some(&summaries), None, None)
+        .expect("NeverCall HIR should extract");
 
     assert!(
         problem.control_flow().edges.is_empty(),
