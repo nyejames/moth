@@ -7,7 +7,18 @@ The accepted source language and memory semantics remain authoritative in `docs/
 ## Current handoff
 
 **Status:** B1 remains the accepted [BC-06 checkpoint](./production-borrow-checker-bc06-redesign.md#resume-point). B2 has not passed its caller-cell and mixed-exit correctness controls. Shared C4 runtime lowering stays disabled.
-**Next action:** Implement the approved B2 binding-transition and lane-completeness contract, then repeat the unchanged reviews and gates. The redesign companion records the reduced controls and current failure.
+
+The [Stage 5 architecture review](./production-borrow-checker-bc06-redesign.md#stage-5-architecture-review)
+separates the authored-order HIR fix from the typed transfer it needs.
+An isolated B1 build catches the overlapping projection cases, but
+unchanged B1 transfer cannot accept the scalar sibling and complete
+multi-target controls. The older numerical limits below do not apply
+to B2's required cap-free convergence.
+
+**Next action:** Review the proposed sequence. Prove the sparse typed-cell
+contract and converging lane postconditions before activating capture-dependent
+transfer. Keep the HIR shape tests independently reviewable. B2 is not
+checkpointed and the unchanged acceptance gates still apply.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -61,7 +72,7 @@ These constraints are already established by compiler/memory authorities and exi
 
 ### BC-06: Relational production provenance
 
-**Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. The slice 3 cutover was attempted and abandoned. The owner then chose the narrow route: keep the root-granular checker, land the Stage 5 capture and defer projection tracking to a later, more comprehensive design. That design is now under investigation in the [BC-06 redesign companion](./production-borrow-checker-bc06-redesign.md), which owns the witnesses, evidence and resume point.
+**Status:** B1 remains the accepted production checkpoint. The Stage 5 mutable projection draft proves authored capture order in isolation, but B1 transfer cannot validate the full explicit-sequence control set. The [BC-06 redesign companion](./production-borrow-checker-bc06-redesign.md#stage-5-architecture-review) owns the evidence and proposes proving sparse typed-cell transfer and summaries before integrating capture-dependent transfer. Implementation remains paused pending review.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
 
@@ -670,7 +681,7 @@ A confirmed problem accepts the **need to investigate and fix** it, not the firs
 | `BC-03` | Confirmed, implementation open | High | Avoid unnecessary whole-module `check_borrows` in changed private-failure-lane refreshes. First prove affected-function and caller-summary invalidation, side-table replacement and deterministic report publication. Preserve the existing `Unchanged` fast path and ensure generated sidecar convergence is not bypassed. |
 | `BC-04` | Confirmed, implementation open | High | Replace repeated recursive `reaches_function` searches with a single deterministic iterative SCC/recursion classification. Include long acyclic chains, self recursion and mutually recursive SCCs. Do not independently promote recursive result precision. |
 | `BC-05` | Investigate, unmeasured | Medium | Measure repeated function cloning in `finalize_public_call_summary_effects_to_fixed_point` (`self.module.functions[function_index].clone()` each iteration) and full-state equality cost. Prefer borrowing/reuse before extra caches. Avoid adding a parallel call-graph owner without evidence. |
-| `BC-06` | Baseline and finite witnesses recorded, rewrite gated | Blocks const C4 | Review the separate HIR capture prerequisite and prove a bounded HIR-shaped relational model before replacing coarse native provenance. No research activation or downstream lifetime work. |
+| `BC-06` | B1 accepted, capture and rewrite gated | Blocks const C4 | Review the revised typed-cell proof and capture integration sequence in the redesign companion. No research activation or downstream lifetime work. |
 | `BC-07` | Known capability gap, gated | Later | Complete solver-independent future/last-use and affine-transfer facts required by lifetime analysis, including loop final-iteration and detached stored-result cases. Missing optional transfer never becomes a rejection. Lifetime topology, retained-edge proofs and REC retain their own downstream ownership. |
 | `BC-08` | Evidence needed | Later | Investigate broad borrow-fact compaction only after measuring fact-table cost independently of lattice cloning. Keep immutable facts outside HIR and do not merge unrelated parser/statement layouts into this effort. |
 | `BC-09` | Untriaged | Later | Reassess use of folded private-constant HIR metadata in borrow analysis and temporary-local reduction after the typed-expression foundation and its reductions merge. It was a deferred compiler follow-up, not evidence of a current bug or an accepted optimiser. |
@@ -703,7 +714,7 @@ Keep reference-solver findings and downstream production relevance separate. Bor
 | `BR-05` | Deliberately deferred | The reference's `dead-exclusive-loan` experiment remains opt-in and not canonical acceptance. `MultiHolderLoan`, `RepeatedProjectionChild`, dynamic-index sibling precision and empty-union CFG joins have bounded or deferred treatment in the reference research handoff. Reopen only with an actual reduced case and named research owner. |
 | `BR-06` | Historical oracle inconclusive. Revalidate | The old progress matrix recorded checked numeric reassignment with `OracleInconclusive` / `UndecidableOverlap` on the existing result-carrier projection and no completed executions. It supplied no bounded safety evidence. Infallible Boolean reassignment had recorded real-source mutation replay coverage, which should be retained as a control. Revisit after native result-channel migration, with a reduced source replay and separate proof of any improvement. |
 | `BR-07` | Exploratory, inactive | [Group-aware place precision and stability effects](./boracle-next-research-plans/group-aware-place-and-stability-effects-research.md): investigate Zeta-style positive index-disjointness evidence, guards, narrow builtin access footprints and structural/iterator stability without weakening shared/exclusive access, data-race freedom or lifetime topology. Use Boracle's existing origin and conflict owners. Research activation requires a fresh checkpoint, relevant native-result prerequisites and resolution or isolation of `BR-01`. Any changed collection receiver contract, public effects or concurrency model needs separate semantic approval. |
-| `BR-08` | Confirmed source replay coverage gap | The [scalar escape control](./production-borrow-checker-bc06-redesign.md#retarget-and-mixed-exit-controls) changes which cell an actual names without mutating a heap allocation. Source extraction omits the effect, so the reference and oracle agree on incomplete input. Report the unknown independently before attempting scalar cell replay. Preserve the supported direct and distinct-cell controls. |
+| `BR-08` | False source-mode safety fixed; replay deferred | The [scalar escape and forwarding fixtures](./production-borrow-checker-bc06-redesign.md#retarget-and-mixed-exit-controls) used to omit binding effects from normalized input. Source mode now reports `Inconclusive(OpaqueCallStores)` for unsupported transitions. The direct conflict and proven scalar value-only calls still replay. The reference and oracle don't yet implement native cell-transition replay. |
 
 The [inactive post-BC-06 Boracle proposal](./boracle-next-research-plans/README.md#inactive-proposal-consolidate-packages-36-after-bc-06-and-const-publication)
 puts independent event extraction for evidenced cell, projection and

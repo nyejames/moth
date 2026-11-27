@@ -183,8 +183,8 @@ struct AliasCell {
     local: u32,
     holder: AllocId,
     key: FieldKey,
-    /// Every incoming path writes through this cell.
-    definite: bool,
+    /// The local's projected cells cover every incoming alternative. Not a singleton proof.
+    complete: bool,
 }
 
 impl AliasCell {
@@ -279,6 +279,8 @@ pub(in super::super) struct AllocationLayer {
     cells: Vec<AliasCell>,
     /// (Result binding, former holder) pairs whose reachable graphs are disjoint on every path.
     detached: Vec<(u32, AllocId)>,
+    /// (Lookup result, receiver) loans protect collection structure independently of values.
+    stability: Vec<(u32, AllocId)>,
     sharing: SharingLayer,
 }
 
@@ -288,6 +290,7 @@ impl PartialEq for AllocationLayer {
             && self.bound == other.bound
             && self.cells == other.cells
             && self.detached == other.detached
+            && self.stability == other.stability
             && self.sharing == other.sharing
     }
 }
@@ -302,6 +305,7 @@ impl AllocationLayer {
             bound: Vec::new(),
             cells: Vec::new(),
             detached: Vec::new(),
+            stability: Vec::new(),
             sharing: SharingLayer::default(),
         }
     }
@@ -311,6 +315,7 @@ impl AllocationLayer {
             && self.bound.is_empty()
             && self.cells.is_empty()
             && self.detached.is_empty()
+            && self.stability.is_empty()
             && self.sharing.is_empty()
     }
 
@@ -781,6 +786,7 @@ impl AllocationLayer {
             .any(|edge| mentions(edge.holder) || mentions(edge.held))
             || self.bound.iter().any(|(_, id, _)| mentions(*id))
             || self.cells.iter().any(|cell| mentions(cell.holder))
+            || self.stability.iter().any(|&(_, holder)| mentions(holder))
             || self
                 .sharing
                 .members
@@ -836,6 +842,11 @@ impl AllocationLayer {
         }
         self.cells.sort_unstable();
         self.cells.dedup_by_key(|cell| cell.sort_key());
+        for (_, holder) in &mut self.stability {
+            *holder = rename(*holder, &mut table);
+        }
+        self.stability.sort_unstable();
+        self.stability.dedup();
         for (view, id) in &mut self.sharing.members {
             *view = rename(*view, &mut table);
             *id = rename(*id, &mut table);
@@ -891,6 +902,8 @@ pub(in super::super) struct ResolvedPlace {
     pub readonly: bool,
     /// The binding that stored value came from, when the layer still names it.
     pub readonly_source: Option<usize>,
+    /// Every feasible location is represented, even if more than one allocation can occur.
+    pub complete: bool,
 }
 
 /// One allocation stored into a holder field.
@@ -1105,6 +1118,7 @@ impl BorrowState {
             layer_only,
             readonly: self.alloc_binding_readonly(local_index),
             readonly_source: None,
+            complete: !self.locals[local_index].mode.contains(LocalMode::UNINIT),
         }
     }
 
@@ -1159,6 +1173,7 @@ impl BorrowState {
                 continue;
             }
             resolved.layer_only = true;
+            resolved.complete &= group.iter().all(|edge| edge.held != AllocId::EMPTY);
             for edge in group {
                 if edge.held == AllocId::EMPTY {
                     continue;
@@ -1220,17 +1235,16 @@ impl BorrowState {
                 .iter_mut()
                 .filter(|cell| cell.local == local)
             {
-                cell.definite = false;
+                cell.complete = false;
             }
         }
-        let definite = strong && complete && cells.len() == 1;
         self.layer
             .cells
             .extend(cells.iter().map(|&(holder, key)| AliasCell {
                 local,
                 holder,
                 key,
-                definite,
+                complete: strong && complete,
             }));
         self.layer.cells.sort_unstable();
         self.layer.cells.dedup();
@@ -1242,6 +1256,31 @@ impl BorrowState {
             .collect()
     }
 
+    pub(in super::super) fn alias_cells_cover_place(&self, local_index: usize) -> bool {
+        let local = &self.locals[local_index];
+        local.is_alias_only()
+            && local.direct_alias_roots.is_empty()
+            && self.projected_cells_complete(local_index)
+    }
+
+    /// Complete projected cells can share one enclosing occurrence without identifying one field.
+    pub(in super::super) fn alias_cells_share_singular_holder(
+        &self,
+        local_index: usize,
+        holder: AllocId,
+    ) -> bool {
+        self.alloc_singular(holder)
+            && self
+                .alias_cell_facts(local_index)
+                .all(|cell| cell.holder == holder)
+    }
+
+    fn projected_cells_complete(&self, local_index: usize) -> bool {
+        self.alias_cell_facts(local_index)
+            .next()
+            .is_some_and(|cell| cell.complete)
+    }
+
     fn alias_cell_facts(&self, local_index: usize) -> impl Iterator<Item = &AliasCell> {
         let local = local_index as u32;
         let cells = &self.layer.cells;
@@ -1251,23 +1290,19 @@ impl BorrowState {
             .take_while(move |cell| cell.local == local)
     }
 
-    pub(in super::super) fn alias_cell_is_definite(
+    pub(in super::super) fn alias_cells_touch(
         &self,
         local: usize,
         cells: &[(AllocId, FieldKey)],
+        values: &[MutationTarget],
     ) -> bool {
-        let [(holder, key)] = cells else {
-            return false;
-        };
-        self.layer
-            .cells
-            .binary_search(&AliasCell {
-                local: local as u32,
-                holder: *holder,
-                key: *key,
-                definite: true,
-            })
-            .is_ok()
+        let table = self.layer.table.borrow();
+        self.alias_cell_facts(local).any(|cell| {
+            cells.contains(&(cell.holder, cell.key))
+                || values.iter().any(|value| {
+                    value.deep && self.layer.covers(&table, value.id, cell.holder)
+                })
+        })
     }
 
     pub(in super::super) fn has_layer_binding(&self, local: usize) -> bool {
@@ -1279,9 +1314,7 @@ impl BorrowState {
         local: usize,
         cells: &[(AllocId, FieldKey)],
     ) -> bool {
-        self.locals[local].is_alias_only()
-            && self.locals[local].direct_alias_roots.is_empty()
-            && self.alias_cell_is_definite(local, cells)
+        self.alias_cells_cover_place(local)
             && matches!(cells, [(holder, FieldKey::Field(_))] if self.alloc_singular(*holder))
     }
 
@@ -1292,6 +1325,41 @@ impl BorrowState {
             .sharing
             .bindings
             .retain(|&(owner, _)| owner != local);
+    }
+
+    pub(in super::super) fn stability_holders(&self, local: usize) -> impl Iterator<Item = AllocId> + '_ {
+        let local = local as u32;
+        let start = self.layer.stability.partition_point(|&(owner, _)| owner < local);
+        self.layer.stability[start..]
+            .iter()
+            .take_while(move |&&(owner, _)| owner == local)
+            .map(|&(_, holder)| holder)
+    }
+
+    pub(in super::super) fn add_stability_loans(
+        &mut self,
+        local: usize,
+        holders: impl IntoIterator<Item = AllocId>,
+    ) {
+        for holder in holders {
+            insert_fact(&mut self.layer.stability, (local as u32, holder));
+        }
+    }
+
+    pub(in super::super) fn stability_overlaps(
+        &self,
+        local: usize,
+        targets: &[MutationTarget],
+    ) -> bool {
+        if self.layer.stability.is_empty() || targets.is_empty() {
+            return false;
+        }
+        let table = self.layer.table.borrow();
+        self.stability_holders(local).any(|holder| {
+            targets.iter().any(|target| {
+                target.id == holder || (target.deep && self.layer.covers(&table, target.id, holder))
+            })
+        })
     }
 
     pub(in super::super) fn detached_holders(
@@ -1474,6 +1542,7 @@ impl BorrowState {
         self.clear_alloc_binding(local_index);
         self.layer.detached.retain(|(owner, _)| *owner != local);
         self.layer.cells.retain(|cell| cell.local != local);
+        self.layer.stability.retain(|(owner, _)| *owner != local);
         AllocationRetirement {
             local: local_index,
             order,
@@ -2088,14 +2157,18 @@ impl BorrowState {
         let mut cells = self.layer.cells.clone();
         cells.extend(other.layer.cells.iter().copied());
         for cell in &mut cells {
-            cell.definite = cell.definite
-                && self.layer.cells.binary_search(cell).is_ok()
-                && other.layer.cells.binary_search(cell).is_ok();
+            cell.complete = self.projected_cells_complete(cell.local as usize)
+                && other.projected_cells_complete(cell.local as usize);
         }
         cells.sort_unstable();
         cells.dedup();
         changed |= cells != self.layer.cells;
         self.layer.cells = cells;
+        let stability_len = self.layer.stability.len();
+        for &loan in &other.layer.stability {
+            insert_fact(&mut self.layer.stability, loan);
+        }
+        changed |= stability_len != self.layer.stability.len();
         changed
     }
 
@@ -2192,6 +2265,7 @@ impl BorrowState {
                             .cells
                             .iter()
                             .any(|cell| table.base(cell.holder) == base)
+                        || self.layer.stability.iter().any(|&(_, holder)| table.base(holder) == base)
                         || self.layer.sharing.members.iter().any(|&(view, id)| {
                             [view, id].into_iter().any(|id| table.base(id) == base)
                         })
@@ -2231,6 +2305,7 @@ impl BorrowState {
         self.layer
             .cells
             .retain(|cell| !departing_set.contains(&cell.local));
+        self.layer.stability.retain(|&(owner, _)| visible.contains(owner as usize));
         self.layer
             .detached
             .retain(|(owner, _)| visible.contains(*owner as usize));
@@ -2251,6 +2326,7 @@ impl BorrowState {
             live.extend(self.local_alloc_ids(local).0);
         }
         live.extend(self.layer.cells.iter().map(|cell| cell.holder));
+        live.extend(self.layer.stability.iter().map(|&(_, holder)| holder));
         let table = self.layer.table.borrow();
         let mut reached: FxHashSet<AllocId> = live.iter().copied().collect();
         let mut stack = live;

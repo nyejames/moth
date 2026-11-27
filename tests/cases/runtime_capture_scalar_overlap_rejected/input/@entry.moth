@@ -1,0 +1,13 @@
+Pair = |left I32, right I32|
+
+peek |value I32| -> I32:
+    return value
+;
+
+put |value ~I32, number I32|:
+    ~value = number + 0
+;
+
+pair ~= Pair(1, 2)
+put(~pair.left, peek(pair.left))
+~[:[pair.left],[pair.right]]

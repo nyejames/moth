@@ -46,6 +46,12 @@ see the old value:
     inspect(copy holder.items, replace(~holder))
 ]
 
+A mutable projection, such as `~holder.inner.item` or `~holder.inner.update(...)`,
+designates its storage before the later operands run. A later operand cannot
+replace the containing aggregate while the call still needs that place. The
+callee writes through to the captured location. Capturing a place does not
+copy its value.
+
 Host functions and compiler-owned builtin member calls are positional-only.
 
 ### Implicit failure at calls

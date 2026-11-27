@@ -33,6 +33,7 @@ impl<'a> ExpressionView<'a> {
             CandidateCall {
                 target: c.target,
                 evaluation: c.evaluation,
+                receiver_access: c.receiver_access,
                 arguments: arguments(c.arguments),
                 handling: c.handling.map(|id| owner.handling[id.index()].clone()),
                 requires_external_float_validation: c.requires_external_float_validation,

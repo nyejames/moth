@@ -74,6 +74,7 @@ mod runtime;
 mod templates;
 mod types;
 
+use self::calls::{CallReceiver, method_receiver, receiver_access};
 use self::fallible::EmittedFallibleResults;
 pub(crate) use self::fallible::FallibleBranchingContext;
 
@@ -151,7 +152,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_bound_call_results(expr, call, None)?
             }
             ExpressionOperationView::MethodCall { receiver, call } => {
-                self.lower_bound_call_results(expr, call, Some(receiver))?
+                self.lower_bound_call_results(expr, call, Some(method_receiver(receiver, call)?))?
             }
             ExpressionOperationView::CollectionBuiltin {
                 receiver,
@@ -198,7 +199,10 @@ impl<'a> HirBuilder<'a> {
         self.lower_call_results(
             CallTarget::External(facts.operation.external_function_id()),
             arguments,
-            Some(receiver),
+            Some((
+                receiver,
+                receiver_access(facts.operation.requires_mutable_receiver()),
+            )),
             types,
             span,
         )
@@ -279,7 +283,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expression: ExpressionView<'_>,
         call: CallView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let metadata = call.metadata();
         let span = &expression.span();
@@ -1517,23 +1521,29 @@ impl<'a> HirBuilder<'a> {
             ty,
             source_info,
             HirLocalOriginKind::CompilerTemp,
+            true,
             None,
             None,
         )
     }
 
-    // WHAT: allocates the immutable binding that pins a shared call operand's place.
-    // WHY: the capture desugars the authored read `name = place` that the operand already
-    //      performs, so it carries a user origin and gets exactly the borrow rules of that
-    //      explicit binding. Diagnostics name it after the place through `display`.
+    // Pin a place at its authored operand, with the same access as the call. Retain a user
+    // origin so ordinary alias checks apply; diagnostics name the authored place.
     pub(crate) fn allocate_operand_capture_local(
         &mut self,
         ty: TypeId,
         source_info: Option<SourceSpan>,
         display: PathId,
+        mutable: bool,
     ) -> Result<LocalId, HirConstructionFailure> {
-        let local_id =
-            self.allocate_compiler_local(ty, source_info, HirLocalOriginKind::User, None, None)?;
+        let local_id = self.allocate_compiler_local(
+            ty,
+            source_info,
+            HirLocalOriginKind::User,
+            mutable,
+            None,
+            None,
+        )?;
         self.side_table
             .bind_operand_capture_display(local_id, display);
         Ok(local_id)
@@ -1550,6 +1560,7 @@ impl<'a> HirBuilder<'a> {
             ty,
             source_info,
             HirLocalOriginKind::CompilerFreshMutableArg,
+            true,
             call_span,
             Some(argument_index),
         )
@@ -1560,6 +1571,7 @@ impl<'a> HirBuilder<'a> {
         ty: TypeId,
         source_info: Option<SourceSpan>,
         origin: HirLocalOriginKind,
+        mutable: bool,
         call_span: Option<SourceSpan>,
         argument_index: Option<usize>,
     ) -> Result<LocalId, HirConstructionFailure> {
@@ -1570,8 +1582,7 @@ impl<'a> HirBuilder<'a> {
         let local = HirLocal {
             id: local_id,
             ty,
-            // Only operand captures are immutable: they stand in for an authored shared read.
-            mutable: origin != HirLocalOriginKind::User,
+            mutable,
             region,
             span: source_info,
         };

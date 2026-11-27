@@ -1,0 +1,19 @@
+Pair = |left I32, right I32|
+
+peek |value I32| -> I32:
+    return value
+;
+
+put |value ~I32, number I32|:
+    ~value = number + 0
+;
+
+captured_pair ~= Pair(1, 2)
+put(~captured_pair.left, peek(captured_pair.right))
+
+pair ~= Pair(1, 2)
+pinned ~= pair.left
+next = peek(pair.right)
+put(~pinned, next)
+
+~[:captured=[captured_pair.left],[captured_pair.right] explicit=[pair.left],[pair.right]]

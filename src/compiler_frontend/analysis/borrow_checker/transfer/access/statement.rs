@@ -7,10 +7,8 @@
 #[path = "call_results.rs"]
 mod call_results;
 
-use super::conflicts::{check_layer_conflict, check_mutable_access_with_targets};
 use super::layer::{
-    LayerValueContext, layer_mutation_targets, layer_store_values, resolve_place_allocs,
-    transfer_layer_alias_write,
+    LayerValueContext, layer_store_values, resolve_place_allocs, transfer_layer_alias_write,
 };
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
@@ -1133,7 +1131,7 @@ fn capture_builtin_element_result(
     let heap_result = result
         .and_then(|result| input.layout.index_of(result.local()))
         .is_some_and(|index| input.layout.local_has_in_place_mutation_surface[index]);
-    if !heap_result && input.state.layer_is_empty() {
+    if !heap_result && input.state.layer_is_empty() && !matches!(storage, CallStorage::Get) {
         return Vec::new();
     }
     let Some(mut elements) = call_receiver_allocs(input, args) else {
@@ -1145,6 +1143,15 @@ fn capture_builtin_element_result(
         Vec::new()
     };
     let mut ops = Vec::new();
+    if matches!(storage, CallStorage::Get)
+        && let Some(result) = result
+        && !elements.ids.is_empty()
+    {
+        ops.push(InvokeLayerOp::KeepReceiverStable {
+            result: result.local(),
+            holders: elements.ids.clone(),
+        });
+    }
     if let Some(result) = result.filter(|_| heap_result) {
         input
             .state
@@ -1183,23 +1190,6 @@ fn record_call_argument_reads(
     let direct_place = direct_place_from_expression(input.context.expressions, argument);
     let direct_root_index = direct_place.and_then(|place| input.layout.index_of(place.root));
     let cell_roots = direct_root_index.map(|root_index| input.state.designated_cells(root_index));
-    if let Some(cell_roots) = &cell_roots
-        && matches!(effect, ArgEffect::SharedBorrow)
-    {
-        let mut check = AccessCheckContext {
-            context: input.context,
-            layout: input.layout,
-            state: input.state,
-            block_id: input.block_id,
-            tracker: input.tracker,
-            location: *argument_location,
-            span: input.context.expressions.expression(argument).span,
-            stats: input.stats,
-            actor_index_hint: direct_root_index,
-            current_order: input.current_order,
-        };
-        check_shared_access(&mut check, cell_roots)?;
-    }
 
     if matches!(
         effect,
@@ -1464,31 +1454,18 @@ fn check_call_mutable_borrow(
         current_order: input.current_order,
     };
     let place = direct_place_from_expression(input.context.expressions, argument);
-    let targets = match &place {
-        Some(place) => layer_mutation_targets(&check, place, reaches_children)?,
-        None => Vec::new(),
-    };
-    if !mutable_roots.is_empty() {
-        check_mutable_access_with_targets(
-            &mut check,
-            mutable_roots,
-            MutableAccessPolicy {
-                allow_prior_shared: false,
-                require_root_mutable: true,
-                strict_move_exclusivity: false,
-                alias_exclusivity: AliasExclusivity::All,
-            },
-            if place.is_some_and(|place| !place.projections.is_empty()) {
-                &targets
-            } else {
-                &[]
-            },
-        )?;
-    }
-    if let Some(actor) = actor_index_hint {
-        check_layer_conflict(&mut check, actor, &targets, true)?;
-    }
-    Ok(())
+    check_mutable_place_access(
+        &mut check,
+        place.as_ref(),
+        mutable_roots,
+        MutableAccessPolicy {
+            allow_prior_shared: false,
+            require_root_mutable: true,
+            strict_move_exclusivity: false,
+            alias_exclusivity: AliasExclusivity::All,
+        },
+        reaches_children,
+    )
 }
 
 fn check_call_may_consume(
@@ -1592,7 +1569,7 @@ fn check_call_borrow_fallback(
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
     if matches!(fallback_effect, ArgEffect::SharedBorrow) {
-        check_call_shared_borrow(input, roots, actor_index_hint, access.location, access.span)
+        check_call_shared_borrow(input, access, roots, actor_index_hint)
     } else {
         check_call_mutable_borrow(input, access, roots, actor_index_hint)
     }
@@ -1609,10 +1586,9 @@ fn call_argument_actor_index(
 
 fn check_call_shared_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    access: CallArgumentAccess,
     roots: &RootSet,
     actor_index_hint: Option<usize>,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     if roots.is_empty() {
         return Ok(());
@@ -1624,13 +1600,17 @@ fn check_call_shared_borrow(
         state: input.state,
         block_id: input.block_id,
         tracker: input.tracker,
-        location,
-        span,
+        location: access.location,
+        span: access.span,
         stats: input.stats,
         actor_index_hint,
         current_order: input.current_order,
     };
-    check_shared_access(&mut check, roots)
+    if let Some(place) = direct_place_from_expression(input.context.expressions, access.argument) {
+        check_shared_place_access(&mut check, &place, roots)
+    } else {
+        check_shared_access(&mut check, roots)
+    }
 }
 
 fn transfer_call_result_alias(

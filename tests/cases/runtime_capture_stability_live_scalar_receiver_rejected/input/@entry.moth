@@ -1,0 +1,10 @@
+Bucket = |scores {String = I32}|
+
+key || -> String:
+    return "k"
+;
+
+bucket ~= Bucket({"k" = 1})
+score = bucket.scores.get("k")!
+~bucket.scores.set(key(), 2)!
+~[:[score]]

@@ -10,7 +10,7 @@
 //! validated them. Receiver methods retain the receiver separately from declared arguments.
 //! HIR lowers this payload into the terminating call statement.
 
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::parse_expression::validate_completed_typed_errors;
@@ -40,12 +40,12 @@ pub(crate) enum NeverCallTarget {
 pub(crate) struct NeverCall {
     /// Stable function or receiver-method path the call dispatches to, or the external binding.
     pub(crate) target: NeverCallTarget,
-    /// The resolved receiver of a receiver-method call, absent for a free call.
+    /// The resolved receiver and callee access of a receiver-method call, absent for a free call.
     ///
     /// WHAT: keeps the receiver separate from the routed declared-parameter arguments.
     /// WHY: the hidden receiver is not an authored argument slot, and HIR owns the ordinary
     ///      receiver-to-slot-zero projection when it lowers the call.
-    pub(crate) receiver: Option<ExprId>,
+    pub(crate) receiver: Option<(ExprId, CallAccessMode)>,
     /// Declared-parameter arguments in declaration order.
     pub(crate) arguments: Vec<CallArgument<ExprId>>,
     /// Visible callee name for placement diagnostics.
@@ -94,7 +94,7 @@ impl NeverCall {
         &self,
         expression_builder: &AstExpressionBuilder,
     ) -> Result<(), ExpressionParseError> {
-        if let Some(receiver) = self.receiver {
+        if let Some((receiver, _)) = self.receiver {
             validate_completed_typed_errors(expression_builder.view(receiver)?)?;
         }
         for argument in &self.arguments {

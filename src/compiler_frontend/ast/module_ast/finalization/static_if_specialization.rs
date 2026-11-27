@@ -381,7 +381,7 @@ impl StaticIfSpecializer<'_> {
                 None
             }
             NodeKind::NeverCall(call) => {
-                if let Some(receiver) = &mut call.receiver {
+                if let Some((receiver, _)) = &mut call.receiver {
                     self.specialize_expression(receiver, environment)?;
                 }
                 for argument in &mut call.arguments {

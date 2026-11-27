@@ -2891,7 +2891,7 @@ fn boracle_source_loop_copy_keeps_independent_roots() {
 
 #[test]
 fn boracle_source_resultless_scalar_mutation_is_representable() {
-    assert_source_differential_replay(
+    let differential = assert_source_differential_replay(
         r#"
 put |value ~I32|:
     ~value = 2
@@ -2902,6 +2902,49 @@ put(~value)
 result = value
 "#,
         &["Agreement", "Agreement", "Agreement", "Agreement"],
+    );
+    assert_eq!(
+        differential
+            .matches("oracle-outcome = CompleteSafe")
+            .count(),
+        4
+    );
+}
+
+#[test]
+fn boracle_source_unsupported_scalar_call_binding_effects_are_inconclusive() {
+    let escape = assert_source_differential_replay(
+        include_str!("../../../tests/cases/runtime_call_binding_escape_rejected/input/@entry.moth"),
+        &[
+            "Agreement",
+            "Agreement",
+            "OracleInconclusive",
+            "OracleInconclusive",
+        ],
+    );
+    assert_eq!(escape.matches("reason: OpaqueCallStores").count(), 2);
+
+    let forwarded = run_source_dump(
+        include_str!(
+            "../../../tests/cases/runtime_call_binding_forward_rejected/input/@entry.moth"
+        ),
+        BoracleDump::Differential,
+    );
+    let (_, caller) = forwarded
+        .rsplit_once("\nfunction ")
+        .expect("caller comparison");
+    assert_eq!(caller.matches("reason: OpaqueCallStores").count(), 2);
+    assert!(!caller.contains("oracle-outcome = CompleteSafe"));
+
+    let direct = assert_source_differential_replay(
+        include_str!(
+            "../../../tests/cases/runtime_binding_escape_inlined_rejected/input/@entry.moth"
+        ),
+        &["Agreement", "Agreement"],
+    );
+    assert_eq!(
+        direct.matches("oracle-outcome = RuntimeConflict").count(),
+        2
     );
 }
 

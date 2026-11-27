@@ -1,0 +1,19 @@
+Leaf = |item I32|
+Holder = |inner Leaf|
+
+replace |holder ~Holder| -> I32, Error!:
+    ~holder = Holder(Leaf(9))
+    return 0
+;
+
+observe |item ~I32, number I32| -> I32, Error!:
+    return item + number
+;
+
+probe || -> I32, Error!:
+    holder ~= Holder(Leaf(2))
+    alias ~= holder
+    return observe(~alias.inner.item, replace(~alias)!)!
+;
+result = probe() catch then 42
+~[:[result]]

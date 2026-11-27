@@ -255,6 +255,8 @@ pub(crate) struct ResolvedCall {
     /// WHY: const evaluation must recognise a required call without re-resolving the callee
     ///      through a scope that may no longer be available.
     pub evaluation: CallableEvaluation,
+    /// Callee access for a separate method receiver; slot-zero receivers use argument metadata.
+    pub receiver_access: Option<CallAccessMode>,
     pub arguments: ArgumentRange,
     pub handling: Option<HandlingId>,
     pub requires_external_float_validation: bool,

@@ -42,7 +42,7 @@ mod tests;
 use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access};
 use layer::{
     LayerValueContext, capture_layer_alias_write, capture_local_value, check_layer_place_mutation,
-    check_layer_place_read, transfer_layer_alias_write,
+    check_mutable_place_access, check_shared_place_access, transfer_layer_alias_write,
 };
 use move_decision::{MoveDecision, classify_move_decision};
 pub(in super::super) use statement::bind_call_result_ids;
@@ -395,6 +395,14 @@ fn transfer_assign_target(
                         //      produced a false AliasedValueRequiresExclusiveAccess at the producing
                         //      get and stopped the alias before it could reach the user binding.
                         if target_is_mutable && rhs_is_place && !target_is_compiler_owned_scratch {
+                            // A projected reborrow uses the source's existing access path.
+                            // The destination has not been defined, so it cannot yet identify
+                            // the alias through which this access reaches its referent.
+                            let place =
+                                direct_place_from_expression(transfer_context.expressions, value);
+                            let actor = place
+                                .filter(|place| !place.projections.is_empty())
+                                .and_then(|place| place_root_local_index(layout, &place));
                             let mut check = AccessCheckContext {
                                 context: transfer_context,
                                 layout,
@@ -404,13 +412,14 @@ fn transfer_assign_target(
                                 location,
                                 span: value_expression.span,
                                 stats,
-                                actor_index_hint: Some(local_index),
+                                actor_index_hint: actor.or(Some(local_index)),
                                 current_order,
                             };
                             let require_root_mutable =
                                 check_mutable_alias_source(&check, &value_expression.kind)?;
-                            check_mutable_access(
+                            check_mutable_place_access(
                                 &mut check,
+                                place.as_ref(),
                                 &rhs_roots,
                                 MutableAccessPolicy {
                                     allow_prior_shared: true,
@@ -418,10 +427,8 @@ fn transfer_assign_target(
                                     strict_move_exclusivity: false,
                                     alias_exclusivity: AliasExclusivity::All,
                                 },
+                                false,
                             )?;
-                            if let HirExpressionKind::Load(place) = &value_expression.kind {
-                                check_layer_place_mutation(&mut check, place, false)?;
-                            }
                         }
 
                         let direct_roots = rhs_direct_alias_roots
@@ -1346,8 +1353,7 @@ fn check_shared_place_read(
         actor_index_hint,
         current_order: env.current_order,
     };
-    check_shared_access(&mut check, &access_roots)?;
-    check_layer_place_read(&check, place)?;
+    check_shared_place_access(&mut check, place, &access_roots)?;
     Ok(value_roots)
 }
 

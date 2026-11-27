@@ -16,8 +16,8 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
 | Last established result | B1 (`f2390602e`) remains the accepted checkpoint. The B2 draft handles the focused fresh-value replacements but still misses caller-visible alias acquisition and stores on mixed complete/unresolved exits. |
-| Next task | Implement the approved retargeting contract with distinct cell and allocation identity. Preserve both C4 fixture expectations and keep shared C4 runtime HIR lowering disabled. |
-| Latest evidence | [Retarget and mixed-exit controls](#retarget-and-mixed-exit-controls) pin the scalar escape, ordered forwarding and mixed-lane store failures. |
+| Next task | Review the [revised capture sequence](#proposed-sequence) before resuming production implementation. No Stage 5 or B2 checkpoint, no release guard and no shared C4 runtime HIR lowering. Preserve both C4 fixture expectations. |
+| Latest evidence | [Retarget and mixed-exit controls](#retarget-and-mixed-exit-controls) pin summary failures. The [Stage 5 architecture review](#stage-5-architecture-review) compares frozen B1, pre-capture B2 and explicit sequencing. |
 
 ### Retarget and mixed-exit controls
 
@@ -166,22 +166,750 @@ The independent design review identified three implementation constraints:
    require different access. Reuse the existing direct transfer rules instead
    of teaching an unrelated call-only checker.
 
-Independent Boracle replay finds the direct escaping-cell conflict and reports
-`CompleteSafe` for its called counterpart because scalar binding effects are
-missing from normalized input. The mixed `guard` yields `OpaqueCallStores`
-after one completed execution. These outcomes share the underlying input
-coverage issue, not a solver or runtime contract. See the
-[inactive research proposal](./boracle-next-research-plans/README.md#inactive-proposal-consolidate-packages-36-after-bc-06-and-const-publication).
+Independent Boracle replay still finds the direct escaping-cell conflict.
+The called escape and forwarding controls formerly reported `CompleteSafe`
+because scalar binding effects were missing from normalized input. Both now
+report `Inconclusive(OpaqueCallStores)` without consulting production acceptance.
+The mixed `guard` still yields `OpaqueCallStores` after one completed execution.
+The [inactive research proposal](./boracle-next-research-plans/README.md#inactive-proposal-consolidate-packages-36-after-bc-06-and-const-publication)
+records the future replay work.
 
-For replay, save each example as `@entry.moth` under a project name with
-underscores: `moth check <project> --terse`, then `moth build <project>` for
-the accepted control. Run `moth boracle <project>/@entry.moth --dump differential`
-with a Boracle-enabled binary. The observations above came from the B1 release
-comparator and the current B2 debug build. Runtime observations execute the
-emitted scripts with Node 24.21.0 and collect the inserted fragment text.
+### Typed binding-transition model
 
-The current B2 draft fails these correctness controls. No B2 checkpoint, final
-release guard or C4 cutover follows from these runs.
+**Status:** Both independent reviews found required changes. The revised
+reference model responds to their counterexamples. The sparse implementation
+contract and HIR operand capture still need evidence before production cutover.
+
+#### Storage and access
+
+| Concept | Identity and contents |
+| --- | --- |
+| Name | A HIR local denotes a current binding wrapper. A definition creates a new dynamic occurrence. A write doesn't. |
+| Binding wrapper | A typed handle with a slot or alias role. `Slot(Cell)` names its independent storage. `Alias(Place, access)` follows a whole wrapper or a captured projected location. It doesn't cache the terminal cell. |
+| Storage cell | Either a slot cell, owned by one wrapper, or an edge `(Allocation, selector)`. Holds a value, not another binding wrapper. An exact field selector names one edge of one exact allocation. An element/key family isn't a singleton. |
+| Value | Scalar with no allocation, or a reference to an allocation and its retained access. Capturing or returning a value doesn't transport its wrapper. Equal scalar or aggregate values don't identify storage. |
+| Access | The permission to use a place, the retained permission on a stored allocation and the derivation of a live loan are separate. Resolve by restricting permissions along the chain. Don't derive allocation mutation authority from writable storage, or a loan exemption from target equality. |
+
+A slot and its owned cell have a one-to-one identity. Reuse the wrapper key for the
+slot cell in storage, but don't equate operations on the wrapper with operations
+on the cell. Keep the existing sparse identities for heap allocations and
+projections. A root load can follow a live wrapper, while a projected load
+captures a position in the allocation evaluated at that point. Replacing a
+separate slot doesn't mutate an old allocation retained by another value.
+Replacing an edge changes that edge, not the detached allocation. A live
+projection still overlaps a replacement of the location it observes.
+
+Share the write plan: capture operands, resolve roles and locations, specify
+the required accesses and describe the state change. Mandatory validation
+checks those accesses before accepting the change. Extraction evaluates the
+state change without using the borrow verdict. Applying a summary installs a
+postcondition, not a reclassified HIR assignment. Host calls and compiler
+builtins keep their own access and value contracts. They don't retarget source
+wrappers merely because the same code replays their stores.
+
+| Destination and operand | Access and state change |
+| --- | --- |
+| Independent slot, producing a value | Check replacement of the slot; store the captured value. Leave the role and detached allocation alone. Result receiving uses this operation or defines a new wrapper. |
+| Independent slot, assigning a place | Check the slot and the incoming place's exclusive authority under the direct assignment rules. Install a link to the incoming place, not a copy of its current allocation. |
+| Existing alias, assigning a place or value | Read the operand as a value and check the resolved destination for writing. Keep the immediate link and store in the terminal cell. |
+| Projected destination, assigning a place or value | Evaluate the containing allocation and selector before storing the captured value. Same resolved-location overlap as a projected argument. Don't rebind the base wrapper. |
+| Direct self-update | Use the HIR self-update operation's read/write checks and write-back. A plain store from a place that resolves to the same slot does not add an alias cycle. Check the alias/write branch normally. |
+| Definition or local rebinding at a definition site | Install a new wrapper. Don't change the wrapper retained by earlier observers. A definition from a place keeps the permissions and direct checks of its declared alias role. |
+| Compiler-owned transport | Use the HIR destination origin to preserve carried value, loan and permission facts without issuing a source-level exclusive alias. Catch scratch definitions and jump plumbing don't implement authored place assignment. |
+
+Capture whole mutable actuals as their existing wrappers, projections as fixed
+locations passed via an alias wrapper, and produced values as independent
+temporary slots. A projected or temporary wrapper can itself escape through
+another actual. A projected wrapper already acts as an alias. A temporary
+wrapper has no pre-existing caller name to update. Evaluate arguments once in
+authored order and maintain an earlier access across later argument evaluation.
+For `use(~holder.inner.item, replace(~holder))`, the earlier mutable projection
+must designate the original location and participate in the later access check.
+In the baseline, `hir_expression/calls.rs::capture_earlier_operands` stages
+copies and shared places but leaves this mutable projection unevaluated.
+Capturing a whole wrapper doesn't pin its current allocation.
+
+The baseline B2 draft accepts the following and renders `9`, not the value
+`2` at the originally designated place. Capturing that place earlier must
+also expose the overlapping second mutable access to the checker.
+
+```moth
+Leaf = |item I32|
+Holder = |inner Leaf|
+
+replace |holder ~Holder| -> I32:
+    ~holder = Holder(Leaf(9))
+    return 0
+;
+
+observe |item ~I32, number I32| -> I32:
+    return item + number
+;
+
+holder ~= Holder(Leaf(2))
+result = observe(~holder.inner.item, replace(~holder))
+~[:[result]]
+```
+
+The Stage 5 candidate extends the existing operand prelude with an ordinary
+mutable alias definition and a place-valued reload. An rvalue reload would
+pass the value in a fresh slot, losing write-through and caller destination
+identity. Builtins and the AST supply receiver access modes. The existing
+projection overlap query applies both at acquisition and when a captured
+alias reaches the call. The ordinary alias rules let a child exercise its
+parent access, but not the reverse.
+
+The `language.functions.call_mutable_projections_keep_authored_places` contract
+checks named routing, mutable receivers, alias chains, two independent
+allocations, shared children and both fallible paths. The isolated B1
+compiler with the capture correction agrees on the scalar, receiver and
+fallible controls. Frozen B1 already rejects the independent-sibling receiver
+case. The Stage 5 candidate preserves the existing B2 acceptance there and
+rejects its shared-child control.
+
+An untimed counter replay with frozen B1 and the isolated B1 capture build
+found identical HIR statement, block and function counts across all 18
+fixed workloads and the separate int64 case. The dedicated capture control
+adds six statements (`72` to `78`), one alias definition per pinned
+projection, with blocks (`40`) and functions (`8`) unchanged. This does
+not change the formal release guard or explain the int64 timing regression.
+
+**Separate whole-binding access gap.** Frozen B1 and the capture candidate
+accept `observe(~slot, replace(~slot))` with `slot ~= 2`, where both callees
+take a mutable `I32` place and `replace` writes `9`. The earlier exclusive
+access should cover the later call. An explicit alias pin demonstrates the
+overlap, but lowering a whole argument to that alias would change a slot
+entry into write-through. Keep the original wrapper role and track access
+timing separately from location capture.
+
+#### Stage 5 capture gate
+
+```moth
+Pair = |left I32, right I32|
+
+peek |value I32| -> I32:
+    return value
+;
+
+put |value ~I32, number I32|:
+    ~value = number + 0
+;
+
+pair ~= Pair(1, 2)
+put(~pair.left, peek(pair.right))
+~[:[pair.left],[pair.right]]
+```
+
+**Scalar sibling read.** The later read is disjoint from the captured scalar place. Pre-capture
+B2 accepts and renders `2,2`. The Stage 5 candidate instead emits
+`MOTH-BORROW-0003` at `peek(pair.right)`, treating the live capture as
+exclusive access to the whole `pair`. Replacing `peek(pair.right)` with
+`peek(pair.left)` creates overlapping access. Pre-capture B2 also accepts that
+twin, but the capture candidate correctly rejects it. Frozen B1 rejects
+both twins with `MOTH-BORROW-0007` at the mutable call argument. It cannot
+serve as the precision oracle for this pair.
+
+The storage layer omits scalar alias cell identity in `capture_local_value`.
+Shared call and expression checks see the capture's coarse enclosing root,
+not which scalar field the capture protects. Do not restore acceptance by
+skipping the capture or suppressing the conflict for scalar reads. The next
+candidate must distinguish the two locations and continue to reject reads
+of the whole aggregate. This prerequisite has not passed and does not
+authorise integration of the call summary correction.
+
+**Multiple possible holders.** `choose` returns one of two independent
+objects. The observer and capture project different fields in every feasible
+case:
+
+```moth
+Pair = |left {I32}, right {I32}|
+
+choose |flag Bool, first ~Pair, second ~Pair| -> Pair:
+    if flag:
+        return first
+    ;
+    return second
+;
+
+next || -> I32:
+    return 7
+;
+
+probe |flag Bool| -> I32:
+    first ~= Pair({1}, {2})
+    second ~= Pair({3}, {4})
+    pair ~= choose(flag, ~first, ~second)
+    observed = pair.left
+    ~pair.right.push(next())
+    return observed.length()
+;
+
+~[:[probe(true)],[probe(false)]]
+```
+
+Pre-capture B2 accepts. The candidate rejects `pair.right` with
+`MOTH-BORROW-0007` because the captured reload loses projection overlap
+evidence without a singleton cell. Overlap can use a complete set of possible
+locations. Only a strong update requires a definite singleton. Retain
+coverage separately from cardinality; a missing case still prevents proving
+disjointness.
+
+**Collection stability.** A lookup borrows the collection's entry even
+when the value stored there has its own allocation:
+
+```moth
+Bucket = |scores {String = {I32}}|
+
+bucket ~= Bucket({"k" = {1}})
+score = bucket.scores.get("k")!
+scores ~= bucket.scores
+~scores.set("k", {2, 3})!
+~[:[score.length()]]
+```
+
+Frozen B1 and pre-capture B2 reject the explicit alias with
+`MOTH-BORROW-0007`. The candidate accepts it. The refined allocation
+query drops the live `get` result because an element does not reach its
+containing map. The projected call `~bucket.scores.set(key(), {2, 3})!`
+with `key()` returning `"k"` already slipped past pre-capture B2 and
+still passes the candidate. Do not treat the element's value as detached:
+the const storage model and ordinary builtin contract distinguish a
+borrowed `get` location from the value that `remove` detaches. Test
+collection stability, replacement of the destination cell and mutation
+through its value as separate access footprints.
+
+**Access evidence for the isolated correction.** The controls in
+`tests/cases/runtime_capture_*` compare authored captures with explicit
+projected aliases and separately evaluated operands. Judge three independent
+facts:
+
+| Fact | What it proves | What it does not prove |
+| --- | --- | --- |
+| Exact destination | Every path designates the same singular cell. | That the previous value's allocation is also mutated. |
+| Complete target coverage | The possible destinations include every feasible target. Disjointness requires every pair to be disjoint. | A strong update when more than one target remains, or disjointness when a target may be missing. |
+| Receiver stability | A live lookup result protects the map's entry structure, including when the returned value is scalar or stored in a separate allocation. | That the result points to the map allocation, or that a detached `remove` result holds the same loan. |
+
+Scalar capture needs the projected cell address, not an allocation for the
+scalar. A whole-aggregate read still overlaps it. The const interpreter's
+`EdgeLocation` keeps the owning allocation, selector and structural generation
+separate from the value. This helps explain why a region or allocation proof
+cannot replace a check for observable entry stability. Const invalidation
+and runtime exclusivity still use different validation rules.
+
+The next candidate passed all 15 sequenced controls and the original mutable
+and shared capture contracts. It still failed independent correctness review
+and `mutable_projected_alias_conservatively_blocks_rebound_holder_read`
+(`263/264` borrow checker unit tests). The latter pins conservative holder-cell
+overlap when an alias survives a rebinding. Do not change its expectation in
+the capture correction. Restore the conservative check where the refinement
+cannot justify changing that accepted behaviour.
+
+The following reductions use the declarations from the controls above. For
+the scalar-store case add `tag {I32}` to `Pair` and construct it from an
+existing collection so the allocation layer records an edge. For the named
+sibling case use collection fields and a `peek` that returns their length.
+
+| Reduction before the final use | Canonical verdict | Candidate |
+| --- | --- | --- |
+| `~pair.right = 4` then `put(~pair.left, peek(pair.right))` | Accept. A scalar write does not remove the field's cell. | Rejects the `right` read with `0003`. |
+| `right = pair.right` then `put(~pair.left, peek(right))` | Accept. Naming the independent child does not widen its read. | Rejects `right` with `0003`. |
+| `raw = bucket.scores.get("k")!` then `score = identity(raw)`, `~bucket.scores.set(key(), {2, 3})!` then use `score` | Reject. An identity return still observes the lookup. | Accepts. |
+| `row = bucket.scores.get("k")!` then `item = row.get(0)!`, `~bucket.scores.clear()` then use `item` | Reject. With `scores {String = {{I32}}}`, the second lookup protects both receivers. | Accepts. |
+| `dest ~= {0}`, `writer ~= dest`, `score = bucket.scores.get("k")!`, `~writer = score`, `~bucket.scores.clear()` then use `writer` | Reject. The writer observes the result stored through its cell. | Accepts. |
+| `score ~= bucket.scores.get("k")!`, `~bucket.scores.clear()`, `~score = {0}` then use `score` | Accept. The definite replacement does not use the old lookup result. | Rejects `clear` with `0007`. |
+
+The pre-capture B2 binary accepts all six. Frozen B1 rejects all six, including
+three legal cases. Those coarse B1 verdicts do not establish that B1 transports
+lookup dependencies precisely. The architecture review below adds explicit twins
+and tests the two findings that had only been inferred from code.
+
+The candidate and the isolated B1 backport both match all 29 archived B1
+witness receipts. The candidate also matches the pre-capture B2 verdicts
+and outputs for the eight archived `w7` and `w8` controls. The isolated B1
+backport matches all six lookup controls and the four conflicting scalar
+controls. It still rejects the scalar sibling positive at the outer call
+because its result carrier has coarse overlap roots. It still rejects both
+ambiguous-holder positives. These are validation limits, not evidence that
+the prerequisite passed. Leave the unchanged performance guard unrun until
+the correctness findings are resolved.
+
+#### Stage 5 architecture review
+
+Treat authored order and conflict precision as separate questions. The Stage 5
+lowering correctly stages an ordinary mutable projected alias before a later
+prelude and passes a `Place` reload. This fixes an observable timing defect, not
+just a diagnostic difference. Frozen B1 and pre-capture B2 accept the delayed
+projection in the `observe` reduction above but reject its explicitly pinned
+twin. The isolated B1 capture build and the draft reject both at the later
+overlapping operand. Named arguments, receivers, alias-backed projections and
+both fallible directions agree on that point. The reversed-order and
+independent-write controls remain legal. A source `NeverCall` receiver probe
+fails `MOTH-RULE-0054` on every compared binary, so it does not validate borrow
+transfer. Keep the Stage 5 HIR checks for that path.
+
+The table lists `authored / explicitly sequenced` verdicts where there are
+two forms. The sequence binds the same projected place before evaluating the
+later operand, without `copy`. For lookup edits without a later prelude, the
+explicit form names the receiver alias before editing. `Accept` means `moth
+check --terse` passed, not that the program was executed. Draft verdicts refer
+to the snapshot that failed the independent review, before restoring the
+rebound-holder check. The comparators are the archived B1 release
+`b1-define-local-a08f2d820e3e/moth` and the frozen pre-capture B2
+`target-strict/debug/moth` from `960cc17ed`.
+
+| Control | Required | B1 | Pre-capture B2 | Capture draft | Classification |
+| --- | --- | --- | --- | --- | --- |
+| Scalar sibling, no preceding store | Accept both | Reject / Reject | Accept / Reject | Accept / Accept | B1 coarse precision limit. The draft fixes one pair but not the next two. |
+| Scalar sibling after `~pair.right = 4` | Accept both | Reject / Reject | Accept / Reject | Reject / Reject | New rejection of the authored spelling against B2. Existing explicit-alias limit. All accept the sequenced read and direct field store without the pin. |
+| Shared read of named heap sibling | Accept both | Reject / Reject | Accept / Reject | Reject / Reject | New rejection of the authored spelling against B2. Existing explicit-alias limit. B2 and the draft accept the read followed by direct `push` without the pin. |
+| Same scalar field or whole aggregate read | Reject both | Reject / Reject | Accept / Reject | Reject / Reject | Authored capture fixes an existing B2 soundness defect. |
+| Ambiguous, all holder alternatives disjoint | Accept both | Reject / Reject | Accept / Reject | Accept / Accept | Existing B1 and explicit B2 precision limits. The B1 port still rejects both. |
+| Ambiguous, one arm shares a child | Reject both | Reject / Reject | Reject / Reject | Reject / Reject | Soundness control. Complete possible targets do not establish disjointness here. |
+| Live `get`, then edit same receiver | Reject both | Reject / Reject | Accept / Reject | Reject / Reject | Draft repairs the B2 authored gap. Scalar `get` also rejects on all snapshots. |
+| `identity(raw)` or `row.get(0)!`, then edit | Reject both | Reject / Reject | Accept / Reject | Accept / Accept | Existing B2 authored defect and new losses of explicit rejection. The identity result and nested lookup must both preserve the outer loan. |
+| `~writer = score`, then edit | Reject both | Reject / Reject | Accept / Reject | Accept / Reject | Existing B2 authored defect. The explicit twin rejects *at alias acquisition*, which does not prove that write-through transported the loan. |
+| Edit then definitely overwrite unused `score` | Accept both | Reject / Reject | Accept / Reject | Reject / Reject | New authored false positive against B2. All accept the direct edit when moved after the overwrite. |
+| `writer ~= items`, then `value = writer.get(0)!`, then use `value` and `writer` | Accept | Accept | Reject | Reject | Existing B2 precision regression against B1. Treat a known lookup as receiver-derived, not as an opaque result that might be fresh. |
+| Store `score` in `Saved(score)`, then edit and use `saved.item` | Reject both | Accept / Accept | Accept / Accept | Accept / Accept | Soundness defect already present in B1. Remains when `~score = {0}` retires its original name. Omitting the field use or definitely overwriting the field first stays legal. |
+| Use captured `score` only in a CFG jump | Reject both | Reject / Reject | Reject / Reject | Reject / Reject | Not a reproduced defect. `metadata.rs` records the jump read and its in-block order. Dropping the jump use permits the edit. |
+| Whole `observe(~slot, replace(~slot))` | Reject overlapping authored accesses | Accept / Reject | Accept / Reject | Accept / Reject | Existing timing defect. A manual alias exposes the conflict but is not a general rewrite for whole slots because it changes the entry role. |
+| Live projected alias after holder rebinding | Reject under the accepted B1 rule | Reject | Reject | Accept | New loss of an accepted conservative check. The alias still observes the old field, not the replacement. |
+
+`score` in the aggregate control means `bucket.scores.get("k")!` and
+`Saved` has `item {I32}`. The other-holder variant declares `score` mutable
+and overwrites it after construction. For the positive unused-field control
+give `Saved` a `count I32` field and read only `saved.count`. The jump
+reduction uses a `String = I32` map in a function returning `I32, Error!`.
+One arm yields `then score, change(~bucket.scores)`, where `change` clears
+the map and returns `0`. The explicit arm binds `saved = score` before
+calling `change` and yields `then saved, other_value`. Inlining `clear`
+also rejects. `then 0, other_value` accepts.
+
+Direct assignment through a named scalar sibling alias (`left ~= pair.left`,
+`right ~= pair.right`, `~right = 7`, then observe both) still rejects.
+B1 and pre-capture B2 reject the second alias acquisition. The draft permits
+that step, then its root-only local update check rejects the write. The
+draft accepts `~pair.right = 7` with only `left` live. This exposes an
+existing transfer precision limit, not a need for a second capture rule.
+The direct field store's singular-ID check does not also check holder
+coverage. That remains an encoding proof obligation, not a reproduced
+source defect.
+
+For the accepted rebound-holder contract, keep the `write_target_roots`
+fallback on shared reads unless the draft can prove disjoint fields in one
+common singular holder occurrence. Comparing an old field with a new
+allocation cannot discharge that check. This restriction adds no state,
+does not test whether a local came from the compiler and does not demand
+a singleton for the ordinary multi-target mutation overlap query.
+
+After restoring the fallback, 264/264 borrow checker unit tests,
+both rebound-holder fixtures, all six mutable capture fixtures and all
+15 footprint and stability controls pass. The six original review
+reductions and their sequenced twins retain the verdicts in the table.
+
+##### Lookup dependency lifecycle
+
+The canonical access reference says `get` borrows stored data and prevents
+mutation of the receiver while the result remains live. The collection and
+map contracts identify the receiver and success channel. Const storage's
+`EdgeLocation { owner, index, structure }` explains why neither the
+element's allocation nor a local name identifies what the borrow protects.
+Const generations validate later concrete reads. They do not replace static
+runtime exclusivity or prove that an abstract target set covers all paths.
+
+| Step | Current owner and gap | Consolidation |
+| --- | --- | --- |
+| Acquire | `CallStorage` and `capture_builtin_element_result` know `Get` and `Remove`. The draft emits `KeepReceiverStable` beside a heap-only `Bind`. `CallLane::derive_result` loses known `Get` derivation when it uses `Opaque(Args([0]))`. | Produce one value snapshot for successful lookup, including receiver-entry dependency, inherited dependencies and the correct permission and derivation. Failure does not acquire it. `Remove` does not acquire a new receiver loan, but preserves dependencies already carried by its payload. |
+| Read, alias and project | `resolve_path`/`step_resolved` resolve allocations and permissions. `capture_local_value` copies loans keyed by the spelling's root. A nested lookup sees only its immediate receiver. | Follow the resolved cell and selected value occurrence. A projection inherits dependencies needed to reach that occurrence and retains its own. An explicit `copy` uses the source before creating independent storage. |
+| Store, construct and return | `CapturedValue`, `StoredValue`, construction edges and lane results carry allocations and views. `LayerAliasWrite::Whole` and `::Cells` separately mirror only some facts. `return_alias` paths and scalar result transfer can omit an entire loan. | Carry the same snapshot through direct and builtin stores, aggregate edges, call actuals and success/error results. Return a value or retained edge, not a callee wrapper. A write through a cell leaves the wrapper relationship intact. An independent holder of the old value retains the old dependency. |
+| Join and transport | Jump transfer already snapshots all incoming values before simultaneously redefining destinations. `join_layer` unions the draft loan rows, independently of value and role alternatives. | Union possible dependencies on the corresponding value alternatives, retain must derivation only where proved and keep a distinct unresolved alternative. Do not use co-occurrence invented by merging to prove disjointness or detachment. |
+| Retire | `retire_binding_allocation`, `rename_base` and `narrow_layer` remove or re-key rows by local index. The inclusive `future_use_kind` counts writes and reads of replacement values. `BlockLiveness` already has definition kills and outgoing jump reads. | Reuse CFG liveness and ordered access/definition facts to ask whether this old value can still be observed before a definite kill. Cover reads through another holder, aliases, retained projections, results and pending jumps. A weak update or a write that reads the old value is not a kill. Storage retirement for escape and physical planning stays separate from borrow activity. |
+
+Entry stability, projection cells and heap reachability are different
+footprints. Keep one ordinary overlap query with the access surface supplied
+by HIR and builtin contracts: cell access or replacement, referent access,
+and exclusive receiver or entry-structure access. Replacing a separate
+slot that held a map does not by itself mutate that map. An entry edit
+through any alias still conflicts with a live lookup. Target equality
+alone cannot supply either derivation or mutation authority.
+
+##### Proposed sequence
+
+1. **Keep the HIR evidence, not a transfer checkpoint.** Keep the existing
+   `lower_operand_sequence` and the authored-order HIR tests as an isolated
+   candidate. Use B1 to compare actual operand order, write-through and
+   intentional conflicts. Do not change its conflict model to make the
+   isolated build accept additional programs. Do not claim that unchanged
+   B1 can implement the scalar and multiple-holder positive controls.
+2. **Prove the sparse typed representation without new capture transfer.**
+   Use existing sparse allocation identities and selectors. Resolve wrappers,
+   typed slot and projected cells, and their value and permission
+   alternatives separately. Make the same resolution and write plan serve
+   ordinary access and summary extraction, without depending on the legality
+   verdict. Reuse the existing materialisation and liveness owners. A
+   non-escaping scalar with no observable alias, capture or retained lookup
+   keeps the cheap path. Test the representation used by production, not
+   just a separate prototype.
+3. **Replace summary and transfer together before enabling capture.** Let
+   one contract represent lane-specific binding transitions and stored value
+   postconditions. Use captured entry actuals, observable escaped cells with
+   canonical per-call identities, and a preserve alternative whenever
+   replacement is not definite. Keep proven unreachable, pending convergence
+   and executable unresolved exits distinct. Compare order permutations and
+   independent recomputation for recursion, forwarding, generated functions
+   and mixed lanes. Finite port and occurrence identities, may-union,
+   must-intersection and validated monotone transfer must imply equal least
+   fixed points without iteration limits or history-dependent fallbacks.
+   Reuse the metadata dependency queue and invalidate HIR-dependent evidence
+   when private failure lanes change the graph. Keep transition validation
+   and compare incremental refresh with full reconstruction over the final HIR.
+4. **Integrate authored capture with ordinary access.** A projected actual
+   fixes its cell and preserves permissions, while a whole mutable actual
+   preserves its wrapper role. Validate its exclusive access at the authored
+   point without wrapping an independent slot as an alias. Exercise the
+   same overlap query for direct source, explicit pins and compiler pins.
+   Validate the capture, assignment, escape and effect witnesses on both
+   outcome lanes. Keep the conservative rebound-holder witness unless an
+   independently reviewed model change explicitly supersedes it.
+5. **Run the unchanged gates.** Independent correctness, architecture,
+   redundancy, performance and coverage reviews first. Preserve the original
+   corpus and B1/B2 witnesses, including assigned-alias store and all nine
+   retarget controls. Require Boracle, integrated validation and 18/18 on
+   the unchanged release guard. Use the original comparators in one
+   measurement session, account for capture HIR counters and report the
+   separate int64 comparison against B1. Keep shared C4 runtime HIR lowering
+   disabled and its two fixture expectations unchanged until B2 passes.
+
+Delete, rather than keep in sync, the following machinery when its
+replacement passes the semantic controls:
+
+- Replace `AliasCell` and the duplicated `LocalState` destination identity
+  (`direct_alias_roots`, `write_target_roots`, `designated_cells` and
+  `write_storage_cells`) with the sparse wrapper/cell relation. Keep a
+  scalar fast-path root bitset if it is a projection of the same facts, not
+  another source of destination identity.
+- Replace `resolve_place_cell`, `place_cells`, ad hoc coarse root waivers
+  and same-call root pairs with one resolved footprint. Keep actual
+  must-derivation, not the `reborrow_uses_parent` shortcut from coarse
+  write roots. Remove `ResolvedPlace.complete` as a shared certificate
+  for both addresses and allocation contents.
+- Replace `AllocationLayer::stability`, `KeepReceiverStable`, per-local
+  stability copying in `LocalLayerValue::Bound` and the jump side payload
+  with the ordinary value snapshot. Retain existing sparse allocation
+  edges and correlated sharing evidence where needed. Receiver stability
+  is not an ordinary allocation edge or a substitute for the removal
+  detachment proof.
+- Replace split `LayerAliasWrite` publication and `InvokeLayerOp::StoreCells`
+  plus `refresh_alias_referents` with the same typed-cell update. Extend
+  `CallOutputPath` and lane facts rather than adding a second effect
+  contract. Remove empty-path role inference and lane-wide fallback once
+  complete and unresolved alternatives have an explicit representation.
+
+The [Boracle reference solver](../../developer-docs/memory-management/boracle/boracle-reference-solver.mtf)
+and [operational oracle](../../developer-docs/memory-management/boracle/boracle-operational-oracle.mtf)
+retain these reductions as research evidence. Neither should consume
+production legality decisions. Keep the corrected `OpaqueCallStores`
+refusal and leave the broader Boracle plan inactive.
+
+#### Entry roles and permissions
+
+Ordinary function signatures don't restrict a mutable formal to one entry
+role. Validate the body for every role its signature admits: a slot, a root
+alias or a projected alias, including combinations admitted by the exclusivity
+and permission checks. Use the same rule for public, private and generated
+ordinary functions. A compiler-internal restricted carrier would need a
+producer-validated HIR restriction, not inference from the calls seen so far.
+For `put |dest ~I32, source I32|: ~dest = source`, an alias entry could write
+through with a shared read of `source`. Its existence doesn't excuse the
+invalid exclusive acquisition on the admitted slot entry. Invalid access
+is a diagnostic, not an unreachable row.
+
+Different parameter indices don't themselves prove disjoint storage.
+Exclusive argument checks rule out admitted conflicting presentations, not
+all shared values under disjoint wrappers. Check the argument's documented
+access footprint and the body operation separately. Cell/edge replacement
+checks authority on the containing location. Traversing the old stored
+reference to mutate its allocation needs that reference's permission too.
+Reuse one resolved place and overlap query, not one interchangeable policy
+for every kind of access.
+
+Actual substitution identifies storage but doesn't grant callee authority.
+Record the access on each returned or stored path, and intersect a retained
+edge's restriction with the actual path's authority. Keep scope-local
+binding permissions distinct from permissions which an edge retains.
+Respect the accepted raw `return value` contract: the result transports the
+input value without the temporary shared formal's wrapper restriction.
+Its captured actual authority and any pre-existing retained path
+restrictions still apply. The receiving declaration supplies the new
+wrapper's permission, not authority to mutate an immutable actual.
+`projected_write_through_call_returned_holder_publishes_parameter_mutation`
+pins raw transport of a writable actual; `runtime_call_callee_local_binding_mutable`
+pins fresh owned output, not permission recovered from a shared input.
+
+In contrast, a new aggregate edge installed from a shared formal keeps the
+retained read-only restriction. `wrap |items {I32}| -> Box: return Box(items)`
+followed by `actual ~= {1}; wrapped ~= wrap(actual); ~wrapped.items.push(2)`
+currently accepts in the draft. Even though the actual is writable, the
+edge's read-only provenance must not be promoted on replay. Keep this
+paired with both an explicit copy and raw identity return.
+
+#### One postcondition per feasible alternative
+
+The summary is a relation from a typed entry interface to lane postconditions.
+Entry observations distinguish wrapper role, immediate place, permission,
+terminal location and value provenance as needed by the function. Compute rows
+under a consistent equality partition of the observed input places and
+allocations, or use an equivalent guarded relation. Specialise a row to its
+guard *before* executing its writes. For a mutable `pair` with `pair.left` and
+`pair.right` holding a shared child, two writes to `.items` have one location
+in the equal-child row and two locations in the disjoint row. The equal-child
+row already contains the second write's value. Applying two unordered updates
+to equal targets cannot recover it. Unknown equality permits both outcomes,
+subject to known inequalities and permission constraints.
+
+Each alternative has a sparse final delta over the projected interface:
+changed wrapper links, changed cell contents or erasures, returned **values**
+and the reachable internal identities that these facts retain. An exact map
+clear explicitly erases both key and element families. Erasing one possible
+element from a collapsed family isn't a whole-family erase. Compare changes
+against entry facts, not against the state of another exit. Omit a location
+only when that row proves `Preserve`. Two possible members of the same family
+have the same abstract class but needn't be identical. An omitted location
+in an unresolved footprint isn't evidence of `Preserve`. Record uncertainty
+with affected typed locations or a conservative permission-bounded footprint.
+Keep known changes outside that footprint. A complete empty row denotes a
+real return, unlike a lane with no rows.
+
+Compose by substituting a callee's entry observations against the **current**
+state and taking its post-state before the next operation. Instantiate each exit
+against the same captured predecessor. Apply links, cell values and retained
+edges as one postcondition, without evaluating the reads again or imposing order
+on the delta's keys. Install receiving destinations afterwards. For example,
+two `set_from` operations on a slot can output one new link and a write to its
+terminal location. They can't output two independent new links. A write to a
+cell and a rewrite of one wrapper can both survive if subsequent operations
+observe them through different paths. Result values may retain the allocation
+read before a later store even though they don't carry its wrapper.
+For an invoke, retire both prior outcome names without deleting their
+retained storage. Install only the selected destinations. An unresolved
+alternative starts from its own prefix post-state, not from call entry;
+suffix uncertainty can weaken that state's facts only within its footprint.
+Test that independently on the success and error lanes.
+
+Replay and observation are separate. Keep success `get` stability loans and
+keeping uses, including when the result is scalar, across catch and forwarding
+where they are retained. `map_get_alias_blocks_set_when_used_after_mutation`
+needs this evidence despite the lack of a returned allocation. A failed
+lookup doesn't issue the success loan. A successful `remove` instead carries
+detached value provenance under its existing contract.
+
+For ordinary value transport, derive the receiving view from the selected
+source snapshot and live holder occurrence, not from allocation equality.
+Keep that relation through forwarding, receiving writes and re-keying.
+Award the exemption only when every feasible source proves derivation.
+An opaque alternative can't borrow another row's proof.
+`mutable_alias_ancestor_view_read_accepted` reads a result of `identity(child)`
+while `child` remains live. Reading via `parent` instead is a foreign access
+despite reaching the same allocation.
+
+An executed write that restores the entry state leaves an empty final delta.
+A write before a terminal call might not appear on any exit. Preserve
+mutation attribution from executed accesses independently of replay, including
+the existing terminating-call witness. Retention for optional argument
+transfer follows binding links and loans as well as returned allocation
+references. Neither equal final contents nor no return implies no write or
+no retention.
+
+For a definite replacement, every compatible feasible alternative must cover the
+same singleton target with replacement and no unresolved alternative can
+preserve it. A row may strongly update a singleton *inside that row*. Joining
+complete and incomplete alternatives never retroactively changes how one row
+was computed. A weak update retains possible old values of a nonsingleton
+target. A sparse encoding can factor alternatives if it preserves their
+meaning. In particular, a may-write list without an identity/preserve
+alternative is not a complete representation.
+
+#### Escape and recurrence
+
+Export no callee locals by spelling or raw HIR index. Project the reachable
+graph from changed caller links and cells and returned allocation values. An
+unexposed alias wrapper that can't be addressed and no longer changes role may
+be contracted into its immediate target, retaining restrictions and proof of
+derivation, if no access or caller entry observation distinguishes it. Never
+flatten a link past a slot that can later acquire a different place. A local
+name dying removes its name and loans as dictated by liveness, not a wrapper,
+cell or allocation that another live handle retains. Keep scalar captured
+cells when reached in this graph, even though they have no allocation.
+
+Use a typed, canonical fresh-component identity inside an exit. A canonical
+component may correspond to several output occurrences if they designate the
+same object. Distinct live exact components of the same type are distinct
+identities even with equal contents. Instantiate each component once per
+invocation. For separate static call or definition sites keep separate keys.
+For repeated dynamic occurrence at a site, age the previous recent component
+into a nonsingleton family and re-key all surviving references together before
+installing a new recent component. A family can imply possible overlap, not
+definite equality or a strong update. Exact current-call sharing survives this
+ageing. Never form a key by appending the call stack or an alias path.
+
+Derive a fixed identity vocabulary for each HIR snapshot, before iteration:
+
+- Entry keys are parameter wrappers, selected input terminals and canonical
+  type-layout selectors (including one `Elem`/`MapKey` per collection level).
+  A boundary link to an input key remains a reference to that actual storage
+  on import. Never age or freshen an entry-owned family.
+- Allocate exact exported identities only for named output ports that can
+  designate a singleton: observable caller wrapper targets, result slots and
+  noncollapsed typed paths/locations selected at the boundary. Each port has
+  one identity per guarded row. Identical ports share the first canonical port
+  in their equality class. Include the private terminal wrapper reachable from
+  a caller wrapper port. There can be at most one such terminal per caller
+  wrapper after stable internal links contract. The count of exact fresh
+  components depends on these ports, not callee summary size.
+- Below a collapsed selector, unnamed exported fresh objects use
+  nonsingleton invocation-owned families keyed by storage kind and type.
+  If the same exact component is also reachable under a collapsed selector,
+  record that possible edge alongside the family. Don't export a new exact
+  component per member or per recursive return. A recursive function adding
+  a fresh collection under `Elem` on each return can add family edges, not
+  component keys. A whole-family key alone never proves identity equality.
+- Import exact components as recent instances indexed by the current
+  operation site and canonical output port. Import fresh families under that
+  operation site and their fixed kind/type key, without promotion to recent.
+  Export by applying the same port and family quotient to the reachable graph.
+  Inside a function use fixed definition and operation sites, both recency
+  classes and known layout selectors. Recurrence of a wrapper link to an old
+  class forms an edge, not a path segment.
+
+This quotient bounds identities even when the number of reachable concrete
+objects exceeds the number of live names. Transfer keeps may-edges of class
+members on folding and doesn't let class equality grant a strong update or
+an access exemption. No call-depth, operation-count or state-count limit
+defines completion. To avoid
+allocating graph state for plain scalar code, a HIR index can exclude
+functions or operations which cannot introduce an observable link or mutate a
+tracked location. Absence of a heap result or heap argument isn't that proof.
+An observable escape fact says what can outlive its spelling and requires
+semantic lifetime validation under the separate [lifetime topology contract](
+../../developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf).
+It neither validates a borrow nor decides stack, heap, region or collection.
+
+#### Convergence contract
+
+Use inclusion of feasible lane alternatives and monotone transfer between them.
+For a fixed HIR snapshot, the reference state is the collecting powerset of a
+finite typed graph domain. Each direct transfer maps each input alternative to
+zero or more outputs independently. An impossible pattern case, terminal
+operation or stable proof of no call return contributes no output. During
+convergence an unsolved dependency contributes provisional bottom, not that
+proof. A reachable operation with missing provenance maps to one or more
+conservative alternatives, not zero outputs. Stable unresolved alternatives
+come from missing contracts or unmodelled operations. Don't convert transient
+recursive bottom into an irreversible opaque atom. If a required producer
+cannot prove coverage, carry the conservative alternative across the call
+and validate it, or reject the incomplete contract. Never skip a check. Known and unresolved
+alternatives can coexist on either outcome lane.
+
+Join by union, prune states only by proven semantic containment and use the
+same projection and re-keying for a given input graph regardless of the
+worklist order. All destructive updates and recency ageing happen within an
+alternative before join. These conditions give monotone transfer on the
+powerset, finite height and the same least fixed point on any fair queue.
+Extraction and validation share operation classification, not diagnostic
+control flow. Extraction evaluates the conservative storage transfer
+and retains reachability even if mandatory validation will reject an
+operation. Validation checks every admitted entry with final contracts
+and rejects publication on failure. An invalid exclusive acquisition
+cannot make its lane look non-returning.
+
+For independent effects, the sparse representation should avoid the Cartesian
+product of exit deltas. A candidate uses a fixed footprint partition within
+each lane and guard: correlate locations in one component when a dependency
+or compatible alias can affect target selection, access, a result or coverage.
+Treat unknown overlap as a dependency. Partition from the HIR and entry
+contract, not from the order in which summary rows arrive. Keep shared guard
+facts where independent components use them and join each component by set
+union. Avoid generating full worlds for disjoint components. This factoring
+doesn't make the worst case of a single correlated component disappear.
+
+Let `C` denote the join normalisation after projecting to this representation.
+Require exact factored union or `C(C(A) ∪ B) = C(A ∪ B)` for all batches,
+plus monotone transfer on the resulting domain. Monotonicity and sound
+coverage by themselves don't justify incremental sparse join: a rule which
+adds a may-share row only when it sees two choices arrive in different batches
+changes the eventual diagnostic when the caller first sees those choices
+together. For fixed product projections, re-expanding their nonempty
+components and projecting again adds no component values, proving this
+closure law. That proof requires guard compatibility to factor at the chosen
+boundary. Show that in the candidate implementation and test incremental vs
+batched delivery as well as recursive queue order. Don't use a row limit.
+Production access diagnostics check all reachable alternatives using final
+contracts. They are not an input to summary convergence or to Boracle.
+
+The reduced collecting prototype used three mutable wrappers, one captured
+field, four scalar payload symbols and mutually recursive summary equations.
+Both function orders reached the same 69,456 success rows in six visits
+and no error rows in two visits. Inclusion held at every replacement. It
+also replayed two ordered assignments to a captured field, a complete
+identity return alongside a known-effect/incomplete return and shared vs
+distinct fresh components before and after ageing. These are checks of the
+reference equations, not bounds or measurements for the production
+representation. A separate reduction checked that adding up to 999 objects
+under a collapsed selector adds no identity keys after entering the family
+and that the shared-child guard preserves the last writer. The independent
+product reduction checked all 256 ordered batch pairs for two binary
+components. Twenty-four independent binary choices needed 48 component
+rows, not 16,777,216 worlds. No reduction establishes a production
+partition for alias-sensitive writes and transported permissions.
+
+Reuse the metadata queue after private lane installation. Keep signature and
+layout contracts that survive the rewrite. Re-index rewritten bodies and reset
+graph-dependent postconditions for the rewritten functions and their transitive
+callers; keep the unaffected dependencies as seeds. Use the same dependency
+edges for invalidation and propagation, including generated functions.
+Transition validation applies between facts about the same graph, not across
+invalidation. Compare the result against a cold fixed point on the final HIR.
+
+#### Consolidation boundary
+
+- Replace cell identity encoded in `direct_alias_roots`, `write_target_roots`
+  and projected `alias_cells` with the resolution of one typed place. Derive the
+  slot/alias distinction from its wrapper state rather than maintaining a
+  parallel mode. Keep independent facts for initialisation and guaranteed loan
+  derivation. Keep old report fields only as projections of the canonical
+  state if a consumer still uses them.
+- Allocation children still belong to the sparse allocation graph. Replace the
+  special empty-path `Store` interpretation, `InvokeLayerOp::StoreCells` and
+  caller refresh from root guesses with the same location/value representation
+  for immediate calls and invoke edges. Root and projected cells differ in
+  identity but don't need separate store effect machinery. Keep existing result
+  sharing facts only where they express a correlation the postcondition can't
+  derive directly.
+- Replace `structural_only`'s whole-lane fallback and the post-graph
+  reachability scan with per-alternative coverage and typed unknown locations.
+  Scalar calls with no observable transition, and known scalar value-only
+  writes where all observable storage facts stay unchanged, keep their cheap
+  structural path. Never infer that contract from the result type.
+- Reuse the public summary validation boundary for types, selectors, permissions,
+  stable IDs, lane coverage and substitution. Boracle may consume an explicit
+  semantic fact, not a production borrow acceptance decision. Its current
+normalised form cannot represent caller-visible wrapper transitions, the
+associated store footprints or their uncertainties. An alias to a caller
+field needs a refusal just as an escaped scalar cell does. Dispatch on the
+selected outcome's contract rather than payload type or fresh escape.
+
+The fixtures are registered under `language.borrows.call_binding_effects_preserve_escaped_cell_identity`,
+`language.borrows.call_binding_effects_compose_in_execution_order` and
+`language.borrows.call_binding_effects_preserve_mixed_exit_stores`.
+Each has a called rejection, an inlined rejection and a called positive
+control. The scalar positive also checks distinct invocations of one helper
+with the same local initialiser. The mixed-lane positive passes an explicit
+copy, so the old caller collection stays independent. Use `moth tests
+--contract <id>` for each trio, or `moth boracle
+tests/cases/<id>/input/@entry.moth --dump differential` with the feature
+enabled. The baseline B2 draft passes the six controls and accepts the
+three negative calls. No B2 checkpoint, final release guard or C4 cutover
+follows from these runs.
 
 ### Caller-cell stop
 

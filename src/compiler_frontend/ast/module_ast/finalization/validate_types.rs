@@ -323,7 +323,7 @@ fn expand_node<'a>(
         | NodeKind::ExpressionStatement(value) => push_expression(*value, context, out),
 
         NodeKind::NeverCall(call) => {
-            if let Some(receiver) = call.receiver {
+            if let Some((receiver, _)) = call.receiver {
                 push_expression(receiver, context, out);
             }
             for argument in &call.arguments {

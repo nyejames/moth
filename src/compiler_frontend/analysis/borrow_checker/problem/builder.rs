@@ -2297,21 +2297,13 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn local_parameter_accesses(
         &self,
-        function_id: FunctionId,
+        function: &HirFunction,
         argument_count: usize,
-    ) -> Result<Option<Vec<AccessKind>>, InfrastructureFailure> {
-        let Some(function) = self
-            .module
-            .functions
-            .iter()
-            .find(|function| function.id == function_id)
-        else {
-            return Ok(None);
-        };
+    ) -> Result<Vec<AccessKind>, InfrastructureFailure> {
         if function.params.len() != argument_count {
             return Err(internal_failure(format!(
                 "Boracle local call {:?} has {} arguments but its HIR function has {} parameters",
-                function_id,
+                function.id,
                 argument_count,
                 function.params.len()
             )));
@@ -2328,7 +2320,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .ok_or_else(|| {
                     internal_failure(format!(
                         "Boracle local call {:?} cannot resolve parameter local {:?}",
-                        function_id, parameter
+                        function.id, parameter
                     ))
                 })?;
             accesses.push(if local.mutable {
@@ -2337,7 +2329,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 AccessKind::Shared
             });
         }
-        Ok(Some(accesses))
+        Ok(accesses)
     }
 
     fn new_fresh_origin(&mut self) -> ValueOriginId {

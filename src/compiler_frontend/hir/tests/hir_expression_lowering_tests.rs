@@ -1802,7 +1802,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
     let seven = int_expr(&mut expressions, &mut builder.module_const_values, 7, span);
     let method_expression = expressions
         .method_call_with_typed_arguments(
-            expressions.own(receiver),
+            (expressions.own(receiver), CallAccessMode::Mutable),
             method_path,
             vec![CallArgument::positional(
                 expressions.own(seven),
@@ -1872,7 +1872,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     );
     let method_expression = expressions
         .method_call_with_typed_arguments(
-            expressions.own(receiver),
+            (expressions.own(receiver), CallAccessMode::Shared),
             method_path,
             vec![],
             vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],

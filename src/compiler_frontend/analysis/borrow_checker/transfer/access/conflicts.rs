@@ -5,7 +5,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, FutureUseKind, MutationTarget, RootSet,
+    AllocId, BorrowState, FieldKey, FunctionLayout, FutureUseKind, MutationTarget, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
 use crate::compiler_frontend::compiler_messages::{
@@ -19,13 +19,69 @@ use super::{
     MutableAccessPolicy,
 };
 
+/// A projected location and the values the operation can observe or change through it.
+/// Callers may use this to refine coarse root overlap only with complete target coverage.
+#[derive(Clone, Copy, Default)]
+pub(super) struct PlaceAccess<'a> {
+    pub cells: &'a [(AllocId, FieldKey)],
+    pub values: &'a [MutationTarget],
+}
+
+impl PlaceAccess<'_> {
+    fn is_disjoint_from(
+        self,
+        check: &AccessCheckContext<'_, '_>,
+        local: usize,
+        root: usize,
+    ) -> bool {
+        let projected = !self.cells.is_empty() && check.state.alias_cells_cover_place(local);
+        let binding = check.state.local_state(local);
+        if !projected
+            && (binding.direct_alias_roots.contains(root) || binding.write_target_roots.contains(root))
+        {
+            return false;
+        }
+        if projected && check.state.alias_cells_touch(local, self.cells, self.values) {
+            return false;
+        }
+        if projected && !check.layout.local_has_in_place_mutation_surface[local] {
+            return true;
+        }
+        let (ids, layer_only) = check.state.local_alloc_ids(local);
+        !self.values.is_empty() && (projected || layer_only)
+            && !ids.is_empty()
+            && !check.state.alloc_reaches(&ids, true, self.values)
+    }
+
+    fn overlaps(
+        self,
+        check: &AccessCheckContext<'_, '_>,
+        local: usize,
+        held: &[AllocId],
+        layer_only: bool,
+    ) -> bool {
+        check.state.alias_cells_touch(local, self.cells, self.values)
+            || ((!check.state.alias_cells_cover_place(local)
+                || check.layout.local_has_in_place_mutation_surface[local])
+                && check.state.alloc_reaches(held, layer_only, self.values))
+    }
+}
+
+pub(super) fn check_shared_access(
+    check: &mut AccessCheckContext<'_, '_>,
+    roots: &RootSet,
+) -> Result<(), BorrowCheckError> {
+    check_shared_access_with_place(check, roots, None)
+}
+
 // WHAT: Validates shared-root reads against statement-local and active mutable conflicts.
 // WHY: Shared reads must be blocked when a root they access is mutably active. A read through a
 //      binding that provably derives from the exclusive alias is not a foreign access, so
 //      `active_mutable_alias_for_root` exempts those candidates.
-pub(super) fn check_shared_access(
+pub(super) fn check_shared_access_with_place(
     check: &mut AccessCheckContext<'_, '_>,
     roots: &RootSet,
+    place: Option<PlaceAccess<'_>>,
 ) -> Result<(), BorrowCheckError> {
     let preserve_cfg_future_use_activity =
         preserves_cfg_future_use_activity(check.context, check.layout, check.actor_index_hint);
@@ -56,9 +112,27 @@ pub(super) fn check_shared_access(
             ));
         }
 
-        if let Some(conflicting_index) =
-            active_mutable_alias_for_root(&alias_activity, root_index, check.actor_index_hint)
-        {
+        if let Some(conflicting_index) = active_mutable_alias_for_root(
+            &alias_activity,
+            root_index,
+            check.actor_index_hint,
+            &|candidate| {
+                check.state.alias_cells_cover_place(candidate)
+                    && place.is_some_and(|place| {
+                        // Different allocations after a rebind do not discharge the
+                        // conservative holder-cell rule. Refine it only within one holder.
+                        let uses_holder = check
+                            .state
+                            .local_state(candidate)
+                            .write_target_roots
+                            .contains(root_index);
+                        (!uses_holder
+                            || matches!(place.cells, [(holder, _)]
+                                if check.state.alias_cells_share_singular_holder(candidate, *holder)))
+                            && place.is_disjoint_from(check, candidate, root_index)
+                    })
+            },
+        ) {
             let place = check
                 .context
                 .diagnostics
@@ -92,14 +166,14 @@ pub(super) fn check_mutable_access(
     roots: &RootSet,
     policy: MutableAccessPolicy,
 ) -> Result<(), BorrowCheckError> {
-    check_mutable_access_with_targets(check, roots, policy, &[])
+    check_mutable_access_with_targets(check, roots, policy, None)
 }
 
 pub(super) fn check_mutable_access_with_targets(
     check: &mut AccessCheckContext<'_, '_>,
     roots: &RootSet,
     policy: MutableAccessPolicy,
-    projected_targets: &[MutationTarget],
+    projected: Option<PlaceAccess<'_>>,
 ) -> Result<(), BorrowCheckError> {
     let preserve_cfg_future_use_activity =
         preserves_cfg_future_use_activity(check.context, check.layout, check.actor_index_hint);
@@ -159,21 +233,8 @@ pub(super) fn check_mutable_access_with_targets(
         let direct_alias_only = policy.alias_exclusivity == AliasExclusivity::Direct;
         let actor_index = check.actor_index_hint.unwrap_or(root_index);
         let disjoint = |candidate| {
-            if projected_targets.is_empty() || candidate == root_index {
-                return false;
-            }
-            let state = check.state.local_state(candidate);
-            if state.direct_alias_roots.contains(root_index)
-                || state.write_target_roots.contains(root_index)
-            {
-                return false;
-            }
-            // Coarse provenance still names the containing slot. A binding with explicit
-            // allocations can observe a sibling instead of the projected value being changed.
-            let (ids, layer_only) = check.state.local_alloc_ids(candidate);
-            layer_only
-                && !ids.is_empty()
-                && !check.state.alloc_reaches(&ids, true, projected_targets)
+            candidate != root_index
+                && projected.is_some_and(|place| place.is_disjoint_from(check, candidate, root_index))
         };
         let alias_count = active_alias_count_for_root(
             &alias_activity,
@@ -297,10 +358,10 @@ pub(super) fn probe_mutable_access(
 pub(super) fn check_layer_conflict(
     check: &mut AccessCheckContext<'_, '_>,
     actor_index: usize,
-    targets: &[MutationTarget],
+    place: PlaceAccess<'_>,
     through_observed_value: bool,
 ) -> Result<(), BorrowCheckError> {
-    if targets.is_empty() {
+    if place.values.is_empty() && place.cells.is_empty() {
         return Ok(());
     }
     let activity = AliasActivityContext {
@@ -324,22 +385,24 @@ pub(super) fn check_layer_conflict(
         if !candidate.mode.contains(LocalMode::SLOT) && !candidate.mode.contains(LocalMode::ALIAS) {
             continue;
         }
-        if actor_state.direct_alias_roots.contains(candidate_index)
-            || actor_state.write_target_roots.contains(candidate_index)
-            || actor_state.derived_from_roots.contains(candidate_index)
-            || candidate.derived_from_roots.contains(actor_index)
-        {
-            continue;
-        }
-        if !is_local_active_for_alias_conflict(&activity, candidate_index, candidate_index, false) {
-            continue;
-        }
-        let (held, layer_only) = check.state.local_alloc_ids(candidate_index);
-        if through_observed_value && check.state.detached_from(actor_index, &held) {
-            continue;
-        }
-        if !check.state.alloc_reaches(&held, layer_only, targets) {
-            continue;
+        let keeps_receiver_stable = check.state.stability_overlaps(candidate_index, place.values)
+            && check.layout.future_use_kind(check.block_id, candidate_index, check.current_order - 1)
+                != FutureUseKind::None;
+        if !keeps_receiver_stable {
+            if actor_state.direct_alias_roots.contains(candidate_index)
+                || actor_state.write_target_roots.contains(candidate_index)
+                || actor_state.derived_from_roots.contains(candidate_index)
+                || candidate.derived_from_roots.contains(actor_index)
+                || !is_local_active_for_alias_conflict(&activity, candidate_index, candidate_index, false)
+            {
+                continue;
+            }
+            let (held, layer_only) = check.state.local_alloc_ids(candidate_index);
+            if (through_observed_value && check.state.detached_from(actor_index, &held))
+                || !place.overlaps(check, candidate_index, &held, layer_only)
+            {
+                continue;
+            }
         }
         let diagnostics = &check.context.diagnostics;
         let candidate_id = check.layout.local_ids[candidate_index];
@@ -358,7 +421,7 @@ pub(super) fn check_layer_conflict(
 pub(super) fn check_layer_shared_access(
     check: &AccessCheckContext<'_, '_>,
     actor_index: usize,
-    targets: &[MutationTarget],
+    place: PlaceAccess<'_>,
 ) -> Result<(), BorrowCheckError> {
     let activity = AliasActivityContext {
         context: check.context,
@@ -392,7 +455,7 @@ pub(super) fn check_layer_shared_access(
             continue;
         }
         let (held, layer_only) = check.state.local_alloc_ids(candidate);
-        if check.state.alloc_reaches(&held, layer_only, targets) {
+        if place.overlaps(check, candidate, &held, layer_only) {
             let diagnostics = &check.context.diagnostics;
             return Err(diagnostics.shared_mutable_conflict(
                 diagnostics.local_place(check.layout.local_ids[actor_index]),
@@ -439,6 +502,20 @@ fn actor_aliases_root(
             || actor_state.write_target_roots.contains(root_index))
 }
 
+/// A reborrow can exercise the exclusive access it derives from. The reverse is not true:
+/// acting through a parent cannot bypass a live child. The derivation ledger is a must fact.
+fn reborrow_uses_parent(
+    activity: &AliasActivityContext<'_>,
+    actor_index: usize,
+    candidate_index: usize,
+) -> bool {
+    let actor = activity.state.local_state(actor_index);
+    actor.derived_from_roots.contains(candidate_index)
+        || (activity.state.alias_cells_cover_place(actor_index)
+            && actor.write_target_roots.contains(candidate_index)
+            && activity.state.local_state(candidate_index).mode == LocalMode::SLOT)
+}
+
 fn active_alias_count_for_root(
     activity: &AliasActivityContext<'_>,
     root_index: usize,
@@ -451,7 +528,11 @@ fn active_alias_count_for_root(
     let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
-        if actor_is_alias_for_root && candidate_index == root_index {
+        if actor_is_alias_for_root
+            && (candidate_index == root_index
+                || (!strict_move_exclusivity
+                    && reborrow_uses_parent(activity, actor_index, candidate_index)))
+        {
             continue;
         }
 
@@ -496,6 +577,7 @@ fn active_mutable_alias_for_root(
     activity: &AliasActivityContext<'_>,
     root_index: usize,
     actor_index_hint: Option<usize>,
+    disjoint: &impl Fn(usize) -> bool,
 ) -> Option<usize> {
     for candidate_index in 0..activity.layout.local_count() {
         if Some(candidate_index) == actor_index_hint {
@@ -545,6 +627,9 @@ fn active_mutable_alias_for_root(
         {
             continue;
         }
+        if disjoint(candidate_index) {
+            continue;
+        }
 
         return Some(candidate_index);
     }
@@ -563,7 +648,11 @@ fn conflicting_active_local_for_root(
     let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
-        if actor_is_alias_for_root && candidate_index == root_index {
+        if actor_is_alias_for_root
+            && (candidate_index == root_index
+                || (!strict_move_exclusivity
+                    && reborrow_uses_parent(activity, actor_index, candidate_index)))
+        {
             continue;
         }
 

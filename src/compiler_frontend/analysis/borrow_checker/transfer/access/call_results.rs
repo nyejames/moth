@@ -912,6 +912,7 @@ fn step(
         views: values.views,
         layer_only: false,
         readonly_source: None,
+        complete: true,
     };
     input
         .state

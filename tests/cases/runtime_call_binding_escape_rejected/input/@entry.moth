@@ -1,0 +1,12 @@
+seed |first ~I32, second ~I32|:
+    local ~= 2
+    ~first = local
+    ~second = first
+;
+
+first ~= 0
+second ~= 1
+seed(~first, ~second)
+observed = second
+~first = 9
+~[:seen=[observed] first=[first]]

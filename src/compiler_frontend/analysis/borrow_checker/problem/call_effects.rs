@@ -13,9 +13,15 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAccessKind, ExternalReturnAlias,
 };
+use crate::compiler_frontend::hir::expressions::ValueKind;
+use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::HirValueId;
-use crate::compiler_frontend::hir::statements::HirLocalDestination;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::utils::collect_structural_blocks;
 use crate::compiler_frontend::public_call_summary::{
     CallAllocationSource, CallField, CallLaneSummary, CallOutputPath, FunctionReturnAliasSummary,
     PublicCallParameterAccess,
@@ -73,11 +79,19 @@ impl<'a> FunctionProblemBuilder<'a> {
             };
             let opaque_stores = match CollectionBuiltinOp::from_external_function_id(*id) {
                 Some(operation) => success && operation.requires_mutable_receiver(),
-                None => self.may_have_opaque_stores(args, &accesses)?,
+                None => accesses.contains(&AccessKind::Exclusive),
             };
             return Ok((accesses, provenance, opaque_stores));
         }
 
+        let local = match target {
+            CallTarget::Local(id) => self
+                .module
+                .functions
+                .iter()
+                .find(|function| function.id == *id),
+            _ => None,
+        };
         let summary = match target {
             CallTarget::Local(id) => self.local_summaries.and_then(|summaries| summaries.get(id)),
             CallTarget::CrossModule(id) => self.module.imported_call_summaries.get(id),
@@ -91,11 +105,9 @@ impl<'a> FunctionProblemBuilder<'a> {
                     "Boracle problem extraction is missing the provider call summary for imported function {id:?}"
                 )));
             }
-            if let CallTarget::Local(function_id) = target
-                && let Some(accesses) =
-                    self.local_parameter_accesses(*function_id, argument_count)?
-            {
-                let opaque_stores = self.may_have_opaque_stores(args, &accesses)?;
+            if let Some(function) = local {
+                let accesses = self.local_parameter_accesses(function, argument_count)?;
+                let opaque_stores = self.may_have_opaque_stores(args, &accesses, local, false)?;
                 return Ok((
                     accesses,
                     CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
@@ -150,11 +162,13 @@ impl<'a> FunctionProblemBuilder<'a> {
                 {
                     provenance = CallResultProvenance::Fresh;
                 }
-                (provenance, !lane.stores.is_empty())
+                let opaque_stores = !lane.stores.is_empty()
+                    || self.may_have_opaque_stores(args, &accesses, local, lane.reachable)?;
+                (provenance, opaque_stores)
             }
             FunctionReturnAliasSummary::Pending => (
                 CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
-                self.may_have_opaque_stores(args, &accesses)?,
+                self.may_have_opaque_stores(args, &accesses, local, false)?,
             ),
         };
         Ok((accesses, provenance, opaque_stores))
@@ -164,7 +178,10 @@ impl<'a> FunctionProblemBuilder<'a> {
         &self,
         args: &[HirValueId],
         accesses: &[AccessKind],
+        local: Option<&HirFunction>,
+        has_allocation_store_facts: bool,
     ) -> Result<bool, InfrastructureFailure> {
+        let mut needs_cell_contract = false;
         for (&value, &access) in args.iter().zip(accesses) {
             if access != AccessKind::Exclusive {
                 continue;
@@ -174,10 +191,51 @@ impl<'a> FunctionProblemBuilder<'a> {
             };
             let ty = self.module.expressions.expression(value).ty;
             if classify_hir_type(ty, types)?.has_in_place_mutation_surface() {
-                return Ok(true);
+                if !has_allocation_store_facts {
+                    return Ok(true);
+                }
+            } else {
+                needs_cell_contract = true;
             }
         }
-        Ok(false)
+        Ok(needs_cell_contract
+            && !local.is_some_and(|function| self.proves_no_cell_transition(function)))
+    }
+
+    /// The scalar payload can change without changing the storage graph. A whole-place
+    /// acquisition or an unmodelled delegated call doesn't have that guarantee.
+    fn proves_no_cell_transition(&self, function: &HirFunction) -> bool {
+        collect_structural_blocks(self.module, function.entry)
+            .into_iter()
+            .all(|id| {
+                let Some(block) = self.module.block(id) else {
+                    return false;
+                };
+                if matches!(
+                    block.terminator,
+                    HirTerminator::Invoke {
+                        operation: HirFallibleOperation::Call { .. },
+                        ..
+                    } | HirTerminator::NeverCall { .. }
+                ) {
+                    return false;
+                }
+                block
+                    .statements
+                    .iter()
+                    .all(|statement| match statement.kind {
+                        HirStatementKind::Call { .. } => false,
+                        HirStatementKind::Write {
+                            target: target @ HirWriteTarget::AssignPlace(place),
+                            value,
+                        } if place.projections.is_empty() => {
+                            let value = self.module.expressions.expression(value);
+                            value.value_kind != ValueKind::Place
+                                || target.is_direct_self_update_of(value)
+                        }
+                        _ => true,
+                    })
+            })
     }
 }
 

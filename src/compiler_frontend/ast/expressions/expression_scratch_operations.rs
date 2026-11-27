@@ -150,6 +150,7 @@ impl<E: Copy> CompletedOperation<E> {
             CandidateCall {
                 target: c.target,
                 evaluation: c.evaluation,
+                receiver_access: c.receiver_access,
                 arguments: args(c.arguments, map),
                 handling: c.handling,
                 requires_external_float_validation: c.requires_external_float_validation,
@@ -353,6 +354,7 @@ impl CompletedOperation<OwnedExpr> {
                 ResolvedCall {
                     target: c.target,
                     evaluation: c.evaluation,
+                    receiver_access: c.receiver_access,
                     arguments,
                     handling,
                     requires_external_float_validation: c.requires_external_float_validation,

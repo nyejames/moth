@@ -1,0 +1,22 @@
+Cell = |value I32|
+
+set_from |dest ~I32, source ~I32|:
+    ~dest = source
+;
+
+forward |dest ~I32, source ~I32|:
+    set_from(~dest, ~source)
+;
+
+twice |dest ~I32, first ~I32, second ~I32|:
+    forward(~dest, ~first)
+    forward(~dest, ~second)
+;
+
+slot ~= 1
+incoming ~= Cell(2)
+later ~= 3
+twice(~slot, ~incoming.value, ~later)
+observed = slot
+~incoming.value = 9
+~[:[observed]]

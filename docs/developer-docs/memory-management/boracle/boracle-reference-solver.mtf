@@ -910,6 +910,35 @@ Builtin collections and maps have compiler-known effects, but the initial borrow
 
 Boracle must not add per-entry uniqueness scans or runtime alias registries.
 
+### Place coverage and stability
+
+Keep three proofs separate when reducing the BC-06 capture controls:
+
+- An exact destination identifies one concrete storage cell on every feasible path. Only that proof can justify discarding a previous value on update.
+- A complete set of possible destinations can prove disjointness without identifying one destination. One overlapping alternative, or a missing alternative that could overlap, defeats that proof.
+- A live `get` result protects the receiver's entry structure. The result's allocation may differ from the receiver's or may not exist for a scalar. End the protection at the last potential use, not when allocation origins stop overlapping. A detached `remove` result does not issue this protection.
+
+Compare the same source operation with a compiler capture and with an ordinary projected alias
+followed by a separate operand evaluation. The BC-06 capture controls exercise scalar siblings,
+ambiguous holders and lookup stability. The const interpreter gives a concrete comparison model:
+it keeps the edge owner and selector separate from the value and uses the collection's structural
+generation to validate element places. Use that model to clarify overlap, not to import const
+execution's mutation rules or production verdicts into the reference solver.
+
+Keep lookup dependencies on value occurrences, including retained aggregate
+edges and scalar values. `score = map.get(key)!; saved = Saved(score)` still
+protects `map` when `saved.item` is read after an edit, even if the original
+`score` was overwritten. Reading an unrelated field or definitely overwriting
+the dependent field before it can be used does not keep the old lookup live.
+An identity return and a nested lookup must also preserve inherited receiver
+dependencies. Joins retain possible dependencies and don't promote possible
+derivation or overwrites to definite facts. A jump that carries an old value
+is a use of that occurrence.
+
+The production roadmap's Stage 5 architecture review records the source
+reductions and verdicts across B1, pre-capture B2 and the capture draft.
+Use those as research comparisons, not as input to the reference solver.
+
 ## Calls and summaries
 
 Borrow solving is intraprocedural over one normalized function, with stable call summaries at boundaries.
@@ -1606,7 +1635,7 @@ The accepted B1 checker and the stopped B2 caller-cell draft both accept and ren
 - **Assignment-acquired alias.** In `runtime_call_assigned_alias_store_rejected`, `~writer = box.items` makes a plain local slot a projected alias. `~writer = incoming` then stores `incoming` at that field. B1 accepted. The B2 drafts reject the later `~incoming.push(4)` at `14:6` with `MOTH-BORROW-0007` because the caller still observes the field. The callee's temporary name need not survive for its store to matter.
 - **Stored value versus old projection.** W3 stores `root.inner` in another aggregate, replaces `root.inner` and mutates the retained collection independently. The required result is acceptance with `22`. W4's replacement still contains the same collection and must reject its later mutation. On the historical source replay, the reference reported conflicts at the replacement for both and the oracle reported `RuntimeConflict` for both. A stored value retains the old allocation, not a loan of the source field that follows later replacement. L4 tests the related retirement case: replacing a holder's contents through a mutable alias leaves its former child independent. The required result is `12`, but the historical reference reported three conflicts and the oracle reported `RuntimeConflict`.
 - **Projection precision.** The resumed production draft accepted a disjoint sibling replacement with a live sibling projection and accepted replacing one of two edges to a child when the observer held the child independently. It rejected mutation through the other edge to a shared child, replacement with a live projection through the shared sibling and replacement with a live whole-aggregate observer. Those are recorded checks, not Boracle verdicts. The shared-sibling replacement rejection does not establish that every such replacement must conflict.
-- **Scalar cells crossing calls.** The Retarget and mixed-exit controls in `docs/roadmap/plans/production-borrow-checker-bc06-redesign.md` include `seed` retargeting two mutable `I32` parameters to one callee-local cell, and a forwarding chain in which only the first call may retarget the destination. At entry the caller cannot see either relationship. B1 and B2 accept both conflict cases. Boracle's static reference also accepts the callers and the oracle returns `CompleteSafe { executions: 1 }` for each normalized caller. Inline the escaping-cell case and both independent analyses report a conflict. Two separate local cells holding equal `I32` values give a genuinely safe control. The resultless scalar source shortcut excludes these calls from opaque stores because the type has no in-place allocation mutation surface. That condition can't rule out binding transitions.
+- **Scalar cells crossing calls.** The Retarget and mixed-exit controls in `docs/roadmap/plans/production-borrow-checker-bc06-redesign.md` retarget two mutable `I32` parameters to one callee-local cell. The forwarding control instead points to a caller field and only the first call may retarget the destination. B1 and the B2 draft accept both conflicts. Boracle formerly omitted the scalar cell effects, so its reference accepted and its oracle reported `CompleteSafe { executions: 1 }` for each normalized caller. They now report `Inconclusive(OpaqueCallStores)` in differential replay. The inlined scalar escape still reports a conflict and the value-only scalar call still completes. Two separate local cells with equal `I32` values and two separate invocations of one helper give genuinely safe production controls. Boracle hasn't learned to replay their cell transitions.
 - **Mixed exit effects.** The `guard` reduction in the same record has one success without a store and another that stores `incoming` before the exit. The missing projected write in `seed` stalls extraction of the latter exit. B2 accepts the caller and renders `12` even though the known complete exit proves nothing about the other one's stores. The direct write-through version rejects in production. Boracle reports `OpaqueCallStores` in `guard` for both variants and has one completed execution, not a complete traversal. Preserving a scalar return or reporting the call as reachable doesn't restore the missing storage effect.
 
 ### What the evidence supports

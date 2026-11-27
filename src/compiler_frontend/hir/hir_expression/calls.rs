@@ -12,9 +12,11 @@
 
 use std::num::NonZeroU32;
 
-use crate::compiler_frontend::ast::expressions::call_argument::{CallArgument, CallPassingMode};
+use crate::compiler_frontend::ast::expressions::call_argument::{
+    CallAccessMode, CallArgument, CallPassingMode,
+};
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ArgumentListView, ArgumentView, ExpressionStore, ExpressionView,
+    ArgumentListView, ArgumentView, CallView, ExpressionStore, ExpressionView,
 };
 use crate::compiler_frontend::ast::statements::never_call::NeverCall;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
@@ -42,6 +44,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use super::{LoweredExpression, LoweredResults};
+
+pub(super) type CallReceiver<'a> = (ExpressionView<'a>, CallAccessMode);
 
 #[derive(Clone, Copy)]
 enum CallOperand<'a> {
@@ -107,7 +111,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         id: ExternalFunctionId,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
@@ -172,7 +176,11 @@ impl<'a> HirBuilder<'a> {
         let LoweredResults {
             mut prelude,
             values,
-        } = self.lower_call_operands(args, Some(receiver), span)?;
+        } = self.lower_call_operands(
+            args,
+            Some((receiver, receiver_access(receiver_requires_mutable))),
+            span,
+        )?;
         let (&lowered_receiver, lowered_args) = values.split_first().ok_or_else(|| {
             InfrastructureFailure::hir_transformation("Map call lost its receiver")
         })?;
@@ -218,7 +226,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         target: CallTarget,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
@@ -299,7 +307,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_call_operands(
         &mut self,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         self.lower_operands_in_authored_order(args.iter().map(CallOperand::Stored), receiver, span)
@@ -311,7 +319,10 @@ impl<'a> HirBuilder<'a> {
         call: &NeverCall,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        let receiver = call.receiver.map(|id| expressions.view(id)).transpose()?;
+        let receiver = call
+            .receiver
+            .map(|(id, access)| expressions.view(id).map(|view| (view, access)))
+            .transpose()?;
         let args = call
             .arguments
             .iter()
@@ -322,7 +333,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_operands_in_authored_order<'source>(
         &mut self,
         args: impl ExactSizeIterator<Item = CallOperand<'source>> + Clone,
-        receiver: Option<ExpressionView<'source>>,
+        receiver: Option<CallReceiver<'source>>,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         if args
@@ -363,18 +374,19 @@ impl<'a> HirBuilder<'a> {
     fn lower_operand_sequence<'source>(
         &mut self,
         args: impl ExactSizeIterator<Item = (usize, CallOperand<'source>)>,
-        receiver: Option<ExpressionView<'source>>,
+        receiver: Option<CallReceiver<'source>>,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::with_capacity(args.len() + offset);
-        // Receivers stay uncaptured: their access mode belongs to the resolved method, which
-        // this sequence doesn't know.
-        let mut shared = Vec::with_capacity(args.len() + offset);
+        let mut modes = Vec::with_capacity(args.len() + offset);
         let mut prelude = Vec::new();
-        if let Some(receiver) = receiver {
+        if let Some((receiver, access)) = receiver {
             values.push(self.lower_child_expression_for_parent(&mut prelude, receiver)?);
-            shared.push(false);
+            modes.push(match access {
+                CallAccessMode::Shared => CallPassingMode::Shared,
+                CallAccessMode::Mutable => CallPassingMode::MutablePlace,
+            });
         }
 
         let mut pending = 0;
@@ -383,7 +395,7 @@ impl<'a> HirBuilder<'a> {
             let mut value = if self.expression_needs_current_block_lowering(expression) {
                 self.capture_earlier_operands(
                     &mut values[pending..],
-                    &shared[pending..],
+                    &modes[pending..],
                     &mut prelude,
                 )?;
                 pending = values.len();
@@ -394,7 +406,7 @@ impl<'a> HirBuilder<'a> {
                 if !lowered.prelude.is_empty() || mode == CallPassingMode::FreshMutableValue {
                     self.capture_earlier_operands(
                         &mut values[pending..],
-                        &shared[pending..],
+                        &modes[pending..],
                         &mut prelude,
                     )?;
                     pending = values.len();
@@ -407,10 +419,17 @@ impl<'a> HirBuilder<'a> {
                 let ty = self.module.expressions.expression(value).ty;
                 let local =
                     self.allocate_fresh_mutable_call_arg_local(ty, None, *span, slot + offset)?;
-                value = self.define_call_operand(&mut prelude, value, local, None, source_span)?;
+                value = self.define_call_operand(
+                    &mut prelude,
+                    value,
+                    local,
+                    None,
+                    source_span,
+                    ValueKind::RValue,
+                )?;
             }
             values.push(value);
-            shared.push(mode == CallPassingMode::Shared);
+            modes.push(mode);
         }
         Ok(LoweredResults { prelude, values })
     }
@@ -420,51 +439,72 @@ impl<'a> HirBuilder<'a> {
     fn capture_earlier_operands(
         &mut self,
         operands: &mut [HirValueId],
-        shared: &[bool],
+        modes: &[CallPassingMode],
         prelude: &mut Vec<HirStatement>,
     ) -> Result<(), HirConstructionFailure> {
-        for (operand, &shared) in operands.iter_mut().zip(shared) {
+        for (operand, &mode) in operands.iter_mut().zip(modes) {
             // A copy reads source storage now and produces independent data. Don't introduce a
             // live borrow by materialising a plain place.
             if self.is_copy_operand(*operand) {
                 let value = self.module.expressions.expression(*operand);
                 let (ty, span) = (value.ty, value.span);
                 let local = self.allocate_temp_local(ty, span)?;
-                *operand = self.define_call_operand(prelude, *operand, local, span, span)?;
-            } else if let Some((load, place)) = self.authored_shared_place(*operand, shared) {
-                // Otherwise the call would read the place only after the later prelude ran.
-                // Binding it here leaves a later write to the same root visible to the borrow
-                // checker as a conflict with this still-needed alias. Only the load is bound,
-                // as in the explicit form, because the checker doesn't trace aliases through a
-                // bound `some` wrapper.
+                *operand = self.define_call_operand(
+                    prelude,
+                    *operand,
+                    local,
+                    span,
+                    span,
+                    ValueKind::RValue,
+                )?;
+            } else if let Some((load, place)) = self.place_needing_capture(*operand, mode) {
+                // Define an ordinary alias before the later prelude. This keeps the captured
+                // location and leaves conflicting accesses visible to borrow validation.
+                // For shared `some`, bind only the load so the alias remains visible.
                 let value = self.module.expressions.expression(load);
                 let (ty, span) = (value.ty, value.span);
                 let display = self.place_display_path(place)?;
-                let local = self.allocate_operand_capture_local(ty, span, display)?;
-                let captured = self.define_call_operand(prelude, load, local, span, span)?;
+                let mutable = mode == CallPassingMode::MutablePlace;
+                let local = self.allocate_operand_capture_local(ty, span, display, mutable)?;
+                // Passing an RValue load would read through the capture and give the callee
+                // a fresh slot. Pass the alias itself for mutable write-through.
+                let kind = if mutable {
+                    ValueKind::Place
+                } else {
+                    ValueKind::RValue
+                };
+                let captured = self.define_call_operand(prelude, load, local, span, span, kind)?;
                 *operand = self.rewrap_option_some(*operand, load, captured)?;
             }
         }
         Ok(())
     }
 
-    /// The load and place of a shared operand that reads authored storage, under any implicit
-    /// `some`. Compiler temporaries already hold evaluated operands; parameters carry no origin
-    /// entry.
-    fn authored_shared_place(
+    fn place_needing_capture(
         &self,
         operand: HirValueId,
-        shared: bool,
+        mode: CallPassingMode,
     ) -> Option<(HirValueId, HirPlace)> {
-        let load = self.unwrap_option_some(operand);
+        let load = if mode == CallPassingMode::Shared {
+            self.unwrap_option_some(operand)
+        } else {
+            operand
+        };
         let HirExpressionKind::Load(place) = self.module.expressions.expression(load).kind else {
             return None;
         };
-        let authored = self
-            .side_table
-            .local_origin_kind(place.root)
-            .is_none_or(|kind| kind == HirLocalOriginKind::User);
-        (shared && authored).then_some((load, place))
+        let needs_capture = match mode {
+            CallPassingMode::Shared => self
+                .side_table
+                .local_origin_kind(place.root)
+                .is_none_or(|kind| kind == HirLocalOriginKind::User),
+            // Projected references already enter a mutable parameter as aliases. A whole
+            // local names a stable binding: wrapping it would change slot acquisition to
+            // write-through in the callee.
+            CallPassingMode::MutablePlace => !place.projections.is_empty(),
+            CallPassingMode::FreshMutableValue => false,
+        };
+        needs_capture.then_some((load, place))
     }
 
     /// Rebuilds `operand` around `captured` when `payload` sat under an implicit `some`.
@@ -567,6 +607,7 @@ impl<'a> HirBuilder<'a> {
         local: LocalId,
         span: Option<SourceSpan>,
         ast_span: Option<SourceSpan>,
+        value_kind: ValueKind,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let definition = HirStatement {
             id: self.allocate_node_id(),
@@ -579,8 +620,13 @@ impl<'a> HirBuilder<'a> {
         self.side_table.map_statement(ast_span, &definition);
         prelude.push(definition);
 
-        let ty = self.module.expressions.expression(value).ty;
-        self.make_local_load_expression(local, ty, &span, self.current_region_or_error()?)
+        self.make_expression(
+            &span,
+            HirExpressionKind::Load(HirPlace::local(local)),
+            self.module.expressions.expression(value).ty,
+            value_kind,
+            self.current_region_or_error()?,
+        )
     }
 
     pub(crate) fn flush_pending_call_prelude(
@@ -592,6 +638,24 @@ impl<'a> HirBuilder<'a> {
         }
 
         Ok(())
+    }
+}
+
+pub(super) fn method_receiver<'a>(
+    receiver: ExpressionView<'a>,
+    call: CallView<'a>,
+) -> Result<CallReceiver<'a>, HirConstructionFailure> {
+    let access = call.metadata().receiver_access.ok_or_else(|| {
+        InfrastructureFailure::hir_transformation("Method receiver has no resolved access mode")
+    })?;
+    Ok((receiver, access))
+}
+
+pub(super) fn receiver_access(requires_mutable: bool) -> CallAccessMode {
+    if requires_mutable {
+        CallAccessMode::Mutable
+    } else {
+        CallAccessMode::Shared
     }
 }
 

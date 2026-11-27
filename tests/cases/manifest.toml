@@ -18184,6 +18184,69 @@ contract = "language.borrows.call_store_effects_replace_mutable_actual_cells"
 role = "boundary"
 
 [[case]]
+id = "runtime_call_binding_escape_rejected"
+path = "runtime_call_binding_escape_rejected"
+tags = ["integration", "borrows", "functions", "diagnostics"]
+contract = "language.borrows.call_binding_effects_preserve_escaped_cell_identity"
+role = "primary"
+
+[[case]]
+id = "runtime_binding_escape_inlined_rejected"
+path = "runtime_binding_escape_inlined_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.borrows.call_binding_effects_preserve_escaped_cell_identity"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_binding_escape_disjoint"
+path = "runtime_call_binding_escape_disjoint"
+tags = ["integration", "borrows", "functions", "runtime"]
+contract = "language.borrows.call_binding_effects_preserve_escaped_cell_identity"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_binding_forward_rejected"
+path = "runtime_call_binding_forward_rejected"
+tags = ["integration", "borrows", "functions", "diagnostics"]
+contract = "language.borrows.call_binding_effects_compose_in_execution_order"
+role = "primary"
+
+[[case]]
+id = "runtime_binding_forward_inlined_rejected"
+path = "runtime_binding_forward_inlined_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.borrows.call_binding_effects_compose_in_execution_order"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_binding_forward_disjoint"
+path = "runtime_call_binding_forward_disjoint"
+tags = ["integration", "borrows", "functions", "runtime"]
+contract = "language.borrows.call_binding_effects_compose_in_execution_order"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_binding_mixed_exit_rejected"
+path = "runtime_call_binding_mixed_exit_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_binding_effects_preserve_mixed_exit_stores"
+role = "primary"
+
+[[case]]
+id = "runtime_binding_mixed_exit_inlined_rejected"
+path = "runtime_binding_mixed_exit_inlined_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_binding_effects_preserve_mixed_exit_stores"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_binding_mixed_exit_disjoint"
+path = "runtime_call_binding_mixed_exit_disjoint"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_binding_effects_preserve_mixed_exit_stores"
+role = "boundary"
+
+[[case]]
 id = "runtime_call_callee_local_binding_mutable"
 path = "runtime_call_callee_local_binding_mutable"
 tags = ["integration", "borrows", "functions", "runtime"]
@@ -23405,6 +23468,153 @@ id = "runtime_call_shared_scalar_operand_rejected"
 path = "runtime_call_shared_scalar_operand_rejected"
 tags = ["integration", "functions", "borrows", "diagnostics"]
 contract = "language.functions.call_shared_place_operands_read_where_written"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutable_place_operands"
+path = "runtime_call_mutable_place_operands"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "primary"
+
+[[case]]
+id = "runtime_call_mutable_named_projection_rejected"
+path = "runtime_call_mutable_named_projection_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutable_receiver_capture_rejected"
+path = "runtime_call_mutable_receiver_capture_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutable_alias_fallible_capture_rejected"
+path = "runtime_call_mutable_alias_fallible_capture_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutable_capture_disjoint_sibling"
+path = "runtime_call_mutable_capture_disjoint_sibling"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "boundary"
+
+[[case]]
+id = "runtime_call_mutable_capture_shared_sibling_rejected"
+path = "runtime_call_mutable_capture_shared_sibling_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.call_mutable_projections_keep_authored_places"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_scalar_sibling"
+path = "runtime_capture_scalar_sibling"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_respects_direct_place_access"
+role = "primary"
+
+[[case]]
+id = "runtime_capture_scalar_overlap_rejected"
+path = "runtime_capture_scalar_overlap_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_respects_direct_place_access"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_scalar_overlap_explicit_rejected"
+path = "runtime_capture_scalar_overlap_explicit_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_respects_direct_place_access"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_scalar_ancestor_rejected"
+path = "runtime_capture_scalar_ancestor_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_respects_direct_place_access"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_scalar_ancestor_explicit_rejected"
+path = "runtime_capture_scalar_ancestor_explicit_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_respects_direct_place_access"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_ambiguous_disjoint_receiver"
+path = "runtime_capture_ambiguous_disjoint_receiver"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_checks_all_possible_targets"
+role = "primary"
+
+[[case]]
+id = "runtime_capture_ambiguous_disjoint_explicit"
+path = "runtime_capture_ambiguous_disjoint_explicit"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_checks_all_possible_targets"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_ambiguous_shared_receiver_rejected"
+path = "runtime_capture_ambiguous_shared_receiver_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_checks_all_possible_targets"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_ambiguous_shared_explicit_rejected"
+path = "runtime_capture_ambiguous_shared_explicit_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_checks_all_possible_targets"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_stability_ended_receiver"
+path = "runtime_capture_stability_ended_receiver"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_preserves_lookup_stability"
+role = "primary"
+
+[[case]]
+id = "runtime_capture_stability_ended_explicit"
+path = "runtime_capture_stability_ended_explicit"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_preserves_lookup_stability"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_stability_disjoint_map_receiver"
+path = "runtime_capture_stability_disjoint_map_receiver"
+tags = ["integration", "functions", "borrows", "runtime"]
+contract = "language.functions.capture_preserves_lookup_stability"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_stability_live_receiver_rejected"
+path = "runtime_capture_stability_live_receiver_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_preserves_lookup_stability"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_stability_live_explicit_rejected"
+path = "runtime_capture_stability_live_explicit_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_preserves_lookup_stability"
+role = "boundary"
+
+[[case]]
+id = "runtime_capture_stability_live_scalar_receiver_rejected"
+path = "runtime_capture_stability_live_scalar_receiver_rejected"
+tags = ["integration", "functions", "borrows", "diagnostics"]
+contract = "language.functions.capture_preserves_lookup_stability"
 role = "boundary"
 
 [[case]]

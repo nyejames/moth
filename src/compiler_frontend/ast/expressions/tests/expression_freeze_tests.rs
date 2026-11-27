@@ -3,6 +3,7 @@ use super::*;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallPassingMode};
+use crate::compiler_frontend::ast::expressions::expression_rewrite::promote_replacement;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ConstructorField, ExprId, ExpressionOp, HandlingId, HandlingRecord,
     MapEntry, OwnedExpr, PlaceId, PlaceProjection, PlaceRecord, ResolvedArgument, ResolvedCall,
@@ -530,6 +531,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
     let make_call = |arguments| ResolvedCall {
         target: ResolvedCallableTarget::Function(PathId::ROOT),
         evaluation: CallableEvaluation::Runtime,
+        receiver_access: Some(CallAccessMode::Mutable),
         arguments,
         handling: Some(handling),
         requires_external_float_validation: true,
@@ -549,6 +551,12 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
             call,
         },
     );
+    let snapshot = builder
+        .view_owned(call_root)
+        .expect("method call view")
+        .to_owned_completed_input(&builder)
+        .expect("method call snapshot");
+    let call_root = promote_replacement(&mut builder, snapshot).expect("reassembled method call");
     builder
         .append_constructor_fields(
             vec![ConstructorField {
@@ -581,6 +589,10 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
     assert_eq!(store.arguments[0].value, ExprId::at(0));
     assert_eq!(store.arguments[0].parameter_slot, None);
     assert_eq!(store.calls.len(), 1);
+    assert_eq!(
+        store.calls[0].receiver_access,
+        Some(CallAccessMode::Mutable)
+    );
     assert_eq!(store.calls[0].arguments.start, 0);
     assert_eq!(store.calls[0].handling, Some(HandlingId::at(0)));
     assert!(store.calls[0].requires_external_float_validation);

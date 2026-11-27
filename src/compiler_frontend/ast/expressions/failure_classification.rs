@@ -1881,7 +1881,7 @@ fn classify_nodes(
             // arguments can still contribute failures or exits.
             NodeKind::NeverCall(call) => {
                 let mut effect = match call.receiver {
-                    Some(receiver) => classify_expression(
+                    Some((receiver, _)) => classify_expression(
                         state.expression_builder.view(receiver)?,
                         template_ir_store,
                         state,

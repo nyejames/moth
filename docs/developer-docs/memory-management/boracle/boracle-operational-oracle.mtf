@@ -641,6 +641,29 @@ An access to the argument place after the effect is legal and does not exercise 
 
 Two arguments of one call with incompatible kinds on overlapping targets therefore conflict at the later of the two granular argument events, where the earlier argument's still-open interval meets the later argument's access. Extending the interval to the `CallEffect` event keeps the capability open across the call itself. That is the call argument interval under current semantics and it yields one truthful witness per call.
 
+The BC-06 capture controls distinguish a location from the value read through it. A scalar
+projection still designates a cell, and one concrete execution picks a single target even when a
+static solver must cover several. Compare the captured operand and the explicitly sequenced
+projected alias in the same execution. Testing one concrete target does not prove that a static
+target set covers the other feasible paths.
+
+For lookup research, model the receiver entry's stability interval separately from the returned
+value's node. A structural write to the same receiver overlaps while the `get` result remains
+live, even when the element has a distinct node or no allocation. Mutation after last use and
+mutation of an independent receiver are positive controls. `remove` detaches its result and
+must not be treated as another lookup. If the operational input cannot represent a needed
+location or stability interval, report `Inconclusive` rather than safety. These are handoff
+requirements, not a claim that the current operational oracle implements them.
+
+For future operational coverage, compare a receiver edit followed by use of a
+saved aggregate field, an identity return or a nested lookup with the same
+edit after the last dependent observation. Retiring one local name must not
+retire another reachable holder. A definite overwrite retires the old value
+of its actual cell, not the independent value carried elsewhere. Model that
+distinction with concrete cell and edge storage, not production diagnostics
+or a table keyed by source-local name. These controls do not activate the
+broader Boracle research plan.
+
 Two rules keep the exercise records of sibling arguments and repeated invocations apart, and neither reopens an ended interval. While an invocation is still open, it withholds its own argument capabilities from its sibling argument accesses, so no sibling access consumes a capability that belongs to its sibling. Withholding is bookkeeping separation, not a legality carve-out: because the later argument does not exercise the earlier argument's withheld capability, the completed interval scan still compares that pair and reports the conflict of the preceding paragraph at the later granular argument event. Once that invocation records its `CallEffect`, its argument capabilities are closed for good, and a later invocation of the same static call is a distinct dynamic instance with capabilities of its own. An access between two invocations therefore exercises neither: the earlier instance ended at its effect and the later instance has not been issued yet. A conflict at that point must come from another capability that is genuinely live across the call, such as a loan the caller holds, which is what makes the ceiling safe rather than merely convenient.
 
 `CallEffect` completion binds the result place from `CallResult` and `CallResultProvenance`:
@@ -1066,7 +1089,7 @@ See the Reduction workflow section for generator and reducer behaviour.
 
 The reference solver's BC-06 evidence section records the reduced caller-cell retarget and the production outcomes. Independent source replay reports a `RuntimeConflict` for the inlined retarget and `Inconclusive(OpaqueCallStores)` at the mutable heap call. The mixed `guard` control reaches one complete execution and refuses the other path with `OpaqueCallStores`. One completed path doesn't make the search complete. Earlier source runs recorded `MissingSummary`, rather than guessed `Fresh`, for a generated call and `OpaqueCallStores` for mutating collection builtins.
 
-A separate scalar reduction makes two caller slots refer to the same callee-local `I32` cell. The caller's normalized events omit this effect and the oracle returns `CompleteSafe { executions: 1 }`. The inlined control represents the relation and reports `RuntimeConflict`. `problem/call_effects.rs::may_have_opaque_stores` currently checks for an in-place allocation mutation surface, which can exclude a scalar place that changes binding identity. This result describes the normalized input, not the safety of the source. The post-BC-06 proposal prioritises making such missing effects explicit before adding a more detailed storage model.
+A scalar reduction makes two caller slots refer to the same callee-local `I32` cell. Before the source adapter fix, its normalized events omitted that effect and the oracle returned `CompleteSafe { executions: 1 }`. Now both that caller and the scalar forwarding caller report `Inconclusive(OpaqueCallStores)`. The inlined escape still reports `RuntimeConflict`. A local scalar value-only write whose HIR rules out cell acquisition and delegated calls keeps a complete execution. The adapter doesn't use production acceptance and the oracle hasn't added a new storage model.
 
 The historical W3 and W4 source replays did report `RuntimeConflict`. Both analyses treated a value stored in an aggregate as a loan of the source projection. They could agree on a conflict at its replacement even when the stored value reached a separate old allocation, as in W3. L4 also reported `RuntimeConflict` despite its expected acceptance after a write through an alias retired the old child edge. A W4 rejection at the replacement does not show that the model detects the intended later mutation conflict. See the BC-06 Witness set and Boracle results in `docs/roadmap/plans/production-borrow-checker-bc06-redesign.md`.
 

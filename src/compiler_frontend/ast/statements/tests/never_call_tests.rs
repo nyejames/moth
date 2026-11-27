@@ -7,6 +7,7 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
 use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
@@ -276,8 +277,36 @@ fn free_never_call_is_accepted_as_a_standalone_statement() {
 fn receiver_method_never_call_is_accepted_as_a_standalone_statement() {
     let source = "Box = | value I32 |\n\
                   abort |this Box| -> !:\n    assert(false, \"abort\")\n;\n\n\
-                  stop |box Box| -> !:\n    box.abort()\n;\n";
-    assert_single_never_statement(source, "stop", "a receiver method Never call");
+                  stop |box ~Box| -> !:\n    box.abort()\n;\n";
+    let (ast, paths, strings) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &paths, &strings, "stop");
+    let [
+        AstNode {
+            kind: NodeKind::NeverCall(call),
+            ..
+        },
+    ] = body
+    else {
+        panic!("expected a standalone receiver method Never call");
+    };
+    assert!(matches!(call.receiver, Some((_, CallAccessMode::Shared))));
+}
+
+#[test]
+fn retained_never_method_call_keeps_mutable_receiver_access() {
+    let source = "Box = | value I32 |\n\
+                  abort |this ~Box, code I32| -> !:\n    assert(false, \"abort\")\n;\n\n\
+                  stop |box ~Box| -> !:\n    count = 1\n    ~box.abort(count)\n;\n";
+    let (ast, paths, strings) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &paths, &strings, "stop");
+    let Some(AstNode {
+        kind: NodeKind::NeverCall(call),
+        ..
+    }) = body.last()
+    else {
+        panic!("expected a retained receiver method Never call");
+    };
+    assert!(matches!(call.receiver, Some((_, CallAccessMode::Mutable))));
 }
 
 #[test]

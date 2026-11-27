@@ -54,11 +54,12 @@ recoverable from Git.
 
 ### Inactive proposal: consolidate packages 3–6 after BC-06 and const publication
 
-**Decision requested:** Retain the individual plans as design notes. At a future review, consider
-replacing their fixed sequence with the evidence-led order below. This proposal opens no package,
-changes no reference verdict and sets no production acceptance requirement. Revisit it only after
-BC-06 closes and the const shared-graph publication foundation lands. Re-anchor the cases against
-the merged HIR and normalized event owners before opening a new owning plan.
+**Decision:** The owner approved this sequence as the direction for a future
+dedicated plan. Retain the individual plans as evidence. This decision opens no
+package, changes no reference verdict and sets no production acceptance
+requirement. After BC-06 and the const shared-graph publication foundation
+stabilise, re-anchor the cases against merged HIR and the normalized event owners.
+Use that evidence to write the new owning plan before activation.
 
 **Evidence:** The [BC-06 reference record](../../../developer-docs/memory-management/boracle/boracle-reference-solver.mtf#bc-06-evidence-cells-referents-and-call-outcomes)
 distinguishes slot replacement, place retargeting and write-through. The [oracle replay record](../../../developer-docs/memory-management/boracle/boracle-operational-oracle.mtf#bc-06-replay-evidence-and-limits)
@@ -77,10 +78,10 @@ shows why equal values, independent result cells and shared allocations need sep
    `Inconclusive(OpaqueCallStores)` for opaque stores in the oracle. Neither implies a no-op
    or an unreachable edge. The oracle still executes normalized events independently of static
    solving.
-   The current scalar escape replay returns `CompleteSafe` on events that omit the shared
-   callee-local cell. Check this refusal boundary before adding effect replay: lack of heap
-   mutation does not prove lack of scalar cell effects. Pair any refusal with supported direct
-   and normalized controls that still execute the intended operation.
+   Historical scalar escape replay returned `CompleteSafe` on events that omitted
+   the shared callee-local cell. Source mode now refuses unsupported scalar
+   transitions independently. Preserve that rejection of incomplete input,
+   the explicit scalar value-only control and supported direct replay.
 2. **Apply package 3 only to conflicts that survive correct representation.** First replay the
    retarget and direct controls, the whole-replacement continuation, the assigned-alias store,
    W3/W4 and L4, and the disjoint and shared sibling controls. Use W7's disjoint/shared outcome

@@ -1,0 +1,26 @@
+Pair = |left {I32}, right {I32}|
+
+choose |flag Bool, first ~Pair, second ~Pair| -> Pair:
+    if flag:
+        return first
+    ;
+    return second
+;
+
+next || -> I32:
+    return 7
+;
+
+probe |flag Bool| -> String:
+    first ~= Pair({1}, {2})
+    items ~= {3, 4}
+    second ~= Pair(items, items)
+    pair ~= choose(flag, ~first, ~second)
+    observed = pair.left
+    pinned ~= pair.right
+    value = next()
+    ~pinned.push(value)
+    return [:[observed.length()],[pair.right.length()]]
+;
+
+~[:[probe(true)];[probe(false)]]

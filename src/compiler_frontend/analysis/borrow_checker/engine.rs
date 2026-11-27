@@ -608,6 +608,7 @@ impl<'a> BorrowChecker<'a> {
                     )
                 });
                 let detached = successor_input.detached_holders(source_index).collect::<Vec<_>>();
+                let stability = successor_input.stability_holders(source_index).collect::<Vec<_>>();
                 let destination_state = if source_state.mode.is_definitely_uninit() {
                     LocalState::uninit(layout.local_count())
                 } else {
@@ -629,7 +630,7 @@ impl<'a> BorrowChecker<'a> {
                     destination
                 };
 
-                Ok((source_index, destination_state, layer_ids, detached))
+                Ok((source_index, destination_state, layer_ids, detached, stability))
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
@@ -664,7 +665,7 @@ impl<'a> BorrowChecker<'a> {
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
         let retires = |local| destination_indices.contains(&local);
-        for (source, destination_state, layer_ids, _) in &mut destination_states {
+        for (source, destination_state, layer_ids, _, _) in &mut destination_states {
             if layer_ids.is_none() && destination_state.value_roots.iter_ones().any(retires) {
                 // A root-only source also needs an override when the edge overwrites its root.
                 *layer_ids = Some((
@@ -678,7 +679,7 @@ impl<'a> BorrowChecker<'a> {
         if !successor_input.layer_is_empty()
             || destination_states
                 .iter()
-                .any(|(_, _, ids, detached)| ids.is_some() || !detached.is_empty())
+                .any(|(_, _, ids, detached, stability)| ids.is_some() || !detached.is_empty() || !stability.is_empty())
         {
             for &index in &destination_indices {
                 successor_input.retire_binding_allocation(index, order);
@@ -688,12 +689,12 @@ impl<'a> BorrowChecker<'a> {
 
         // No destination is installed until all sources and their detachments have been captured
         // and every old destination has been retired.
-        for ((_, destination_state, layer_ids, mut detached), &destination_index) in
+        for ((_, destination_state, layer_ids, mut detached, mut stability), &destination_index) in
             destination_states.into_iter().zip(&destination_indices)
         {
             successor_input.update_local_state(destination_index, destination_state);
             let remap = |id| successor_input.remap_retired_alloc_id(id, order, retires);
-            for holder in &mut detached {
+            for holder in detached.iter_mut().chain(&mut stability) {
                 *holder = remap(*holder);
             }
             if let Some((mut ids, readonly, mut views)) = layer_ids {
@@ -708,6 +709,7 @@ impl<'a> BorrowChecker<'a> {
             if !detached.is_empty() {
                 successor_input.bind_detached_holders(destination_index, detached);
             }
+            successor_input.add_stability_loans(destination_index, stability);
         }
 
         Ok(())
@@ -854,6 +856,12 @@ impl InvokeLayerOp {
                     super::transfer::bind_call_result_ids(state, index, &ids, &views, *readonly);
                 }
             }
+            Self::KeepReceiverStable { result, holders } => {
+                if let Some(index) = layout.index_of(*result) {
+                    let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
+                    state.add_stability_loans(index, holders.iter().copied());
+                }
+            }
             Self::ViewMember { view, id } => {
                 state.add_view_member(remap_id(state, *view), remap_id(state, *id));
             }
@@ -923,7 +931,7 @@ impl InvokeLayerOp {
                     retirement.remap_id(state, view);
                 }
             }
-            Self::Remove { holders, .. } => {
+            Self::Remove { holders, .. } | Self::KeepReceiverStable { holders, .. } => {
                 for holder in holders {
                     retirement.remap_id(state, holder);
                 }

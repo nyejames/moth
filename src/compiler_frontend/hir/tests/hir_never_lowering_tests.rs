@@ -711,7 +711,7 @@ fn never_receiver_method_lowers_the_receiver_to_argument_slot_zero() {
         vec![super::node(
             NodeKind::NeverCall(Box::new(NeverCall {
                 target: NeverCallTarget::Source(halt_name),
-                receiver: Some(receiver),
+                receiver: Some((receiver, CallAccessMode::Shared)),
                 arguments: vec![
                     CallArgument::positional(argument, CallAccessMode::Mutable, argument_span)
                         .with_passing_mode(CallPassingMode::FreshMutableValue),

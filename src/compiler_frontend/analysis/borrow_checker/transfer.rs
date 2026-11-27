@@ -102,6 +102,10 @@ pub(super) enum InvokeLayerOp {
         views: Vec<AllocId>,
         readonly: bool,
     },
+    KeepReceiverStable {
+        result: LocalId,
+        holders: Vec<AllocId>,
+    },
     ViewMember {
         view: AllocId,
         id: AllocId,

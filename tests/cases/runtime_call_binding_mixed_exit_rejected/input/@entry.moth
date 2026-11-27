@@ -1,0 +1,35 @@
+Box = |items {I32}|
+Holder = |boxes {Box}|
+
+seed |dest ~{Box}, source ~{Box}|:
+    ~dest = source
+;
+
+guard |dest ~Box, incoming {I32}, skip Bool| -> I32, Error!:
+    if skip:
+        return 0
+    ;
+    empty ~{Box} = {}
+    holder ~= Holder(empty)
+    source ~= {Box({10})}
+    seed(~holder.boxes, ~source)
+    removed ~= ~holder.boxes.remove(0) catch |err|:
+        return! err
+    ;
+    ~dest.items = incoming
+    ~removed.items = {2}
+    return 1
+;
+
+probe |skip Bool| -> I32:
+    incoming ~= {1}
+    dest ~= Box({0})
+    status = guard(~dest, incoming, skip) catch:
+        return 9
+    ;
+    ~incoming.push(3)
+    return status * 10 + dest.items.length()
+;
+
+result = probe(false)
+~[:[result]]

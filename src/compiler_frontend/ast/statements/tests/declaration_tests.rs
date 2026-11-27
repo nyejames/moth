@@ -7,6 +7,7 @@ use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::const_values::ConstValuePayload;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
@@ -172,7 +173,20 @@ fn prefixed_receiver_calls_keep_nested_named_arguments_out_of_write_dispatch() {
         ~point.x = 3\n";
     let (ast, _, _) = parse_single_file_ast(source);
     let body = start_function_body(&ast);
-    assert!(matches!(body[1].kind, NodeKind::ExpressionStatement(_)));
+    let NodeKind::ExpressionStatement(call_id) = body[1].kind else {
+        panic!("expected receiver call statement");
+    };
+    let call = ast
+        .expressions
+        .view(call_id)
+        .expect("receiver call expression");
+    let ExpressionOperationView::MethodCall { call, .. } = call.operation() else {
+        panic!("expected separate method receiver");
+    };
+    assert_eq!(
+        call.metadata().receiver_access,
+        Some(CallAccessMode::Mutable)
+    );
     assert!(matches!(body[2].kind, NodeKind::Assignment { .. }));
 }
 
