@@ -202,8 +202,38 @@ stream. It is legal only while it remains a constant that compilation can
 resolve into that routing. An insert with no matching immediate parent remains
 invalid.
 
-Imported wrappers, re-exports and constant-record projections preserve their
-slot defaults and routing.
+Function-local constants can hold stored inserts under the same rules as module
+constants. Imported wrappers, re-exports, namespace references and constant-record
+projections preserve their slot defaults and routing.
+
+A stored insert can be used as a direct contribution to the receiving wrapper.
+An ordinary operand or function argument is a value position even inside a
+bracket construction. Complete the composition before using its result there.
+
+### Storage of structural helpers
+
+Named constants and constant-record fields may retain open wrappers and stored
+inserts for direct composition. Ordinary collection elements and map keys and
+values must be completed values. This also applies to constant collections and
+does not make const maps legal.
+
+For example:
+
+[codeblock, $code "moth":
+    styles #= (primary = [$in style:red], secondary = [$in style:blue])
+    card #= [:<article style="[$slot style]">[$slot]</article>]
+    page #= [card: [styles.primary] Body]
+    colours #[String] = ["red", "blue"]
+
+    -- Error: an unresolved insert is not a collection element
+    inserts #[String] = [styles.primary, styles.secondary]
+]
+
+The compiler diagnoses the invalid contribution when constructing the collection,
+even if the collection is never read. A type annotation cannot turn an unresolved
+helper into a completed value. Applying a typed wrapper to produce a completed
+sequence remains valid. Its direct inserts are routed by the wrapper rather than
+stored as elements.
 
 ### Runtime contributions
 

@@ -8,6 +8,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Function-local constant inserts are rejected before composition
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Validate function-local helpers and retain them for direct composition without runtime lowering. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix review, 2026-11. Confirmed by a source probe. Reported as pre-existing.
 - Where: final-value validation of function-body constant bindings.
 - Observed: inside an ordinary function, `insert #= [$in title:Priya]` is rejected with `MOTH-SYNTAX-0022` at `$in`, even when the only use composes it into `[card:[insert]]` and `card` defines `[$slot title]`. The equivalent stored insert at module scope is accepted for composition.
@@ -15,6 +16,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Stored inserts read through namespaces or constant records do not compose
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Preserve static helper identity and routing through all supported references and projections. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix verification and final integration audit, 2026-11. Confirmed by source probes. The integration audit reproduced the namespace forms on base `84cc4c945` and checkpoint `df60b63ac`.
 - Where: template heads route a bare identifier helper, including a directly imported one, through `declaration_reference_expression` and `rebuild_const_template_reference`. A qualified namespace leaf such as `h.insert` stays a plain reference, and `resolve_field_member` in `src/compiler_frontend/ast/field_access/field_member.rs` returns a const-record field read without rebuilding the helper as a template.
 - Observed: `[card: [h.insert] body]` in a runtime function or a module binding fails with `MOTH-INFRA-0001` at HIR lowering. In a `~[...]` fragment it failed with `MOTH-INFRA-0001` on base and now reports a misleading `MOTH-SYNTAX-0022` "cannot escape as a standalone runtime value", because statement-root templates keep the enclosing `Module` context kind. With `pattern #= (slot_value = [$in style: red])`, the constant `stored #= [card: [pattern.slot_value] body]` is rejected with `MOTH-SYNTAX-0022` as not fully foldable, and `[card: [pattern.slot_value] [n]]` in a runtime function fails with `MOTH-INFRA-0001`. `template-slots.mtf` says imported wrappers and constant-record projections preserve slot routing. Runtime value reads of these spellings outside templates are rejected with `MOTH-SYNTAX-0022`.
@@ -22,6 +24,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Stored insert reads are gated by context kind rather than position
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Resolve the direct contribution position rather than admitting ordinary operands through inherited template context. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix final review verification, 2026-11. Confirmed by source probes on base `84cc4c945` and the candidate.
 - Where: `ContextKind::admits_structural_helpers` in `src/compiler_frontend/ast/module_ast/scope_context.rs`, used by `reject_runtime_slot_insert_helper` in `src/compiler_frontend/ast/field_access/parse_chain.rs`. Template heads and call arguments inside them inherit the template parsing context, while `parse_statement_template` in `src/compiler_frontend/ast/statements/body_dispatch.rs` keeps the enclosing kind.
 - Observed: with `local #= [$in style: [: red]]` and `show |text String| -> String`, the expression template `x = [: [show(local)]]` fails with `MOTH-INFRA-0001` "non-renderable template constant", because the call argument is admitted as if it were a composition position. The statement root `~[: [show(local)]]` correctly rejects the read with `MOTH-SYNTAX-0022` (`MOTH-RULE-0052` on base). Parsing statement roots in the template context would fix the `~[...]` namespace diagnostic above but turn this correct rejection into `MOTH-INFRA-0001` and change catch eligibility in `~[...]` heads.
@@ -29,10 +32,11 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Constant collections of stored inserts reach HIR
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Reject unresolved structural helpers at ordinary collection or map storage, including const collection construction. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix final integration audit, 2026-11. Confirmed by a source probe on the candidate and reported identical on checkpoint `df60b63ac`.
 - Where: runtime reads of constant collection elements, outside the stored-helper checks in `src/compiler_frontend/ast/field_access/`.
 - Observed: `items #= {[$in style: red], [$in style: blue]}` with `loop items |item|: ~out = item` in a runtime function fails with `MOTH-INFRA-0001` "Template constant reached HIR constant expression lowering before AST materialized it".
-- Investigate: classify a collection whose elements are stored `$in` helpers when it is read as a runtime value and report `MOTH-SYNTAX-0022` at the read.
+- Investigate: reject the unresolved helper at its storage position during ordinary construction rather than waiting for a runtime read. Exercise both direct helpers and references to stored helpers, including nested elements. Preserve completed values produced by valid slot composition. Const map eligibility remains a separate design decision.
 
 ### Borrow diagnostic names an internal HIR temporary
 
@@ -50,10 +54,11 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Nested match ending without `else` fails to parse in a non-final arm
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Replace the old delimiter heuristic with the new case/brace grammar. Keep open until verified on the migrated compiler.
 - Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
 - Where: match arm body parsing in `src/compiler_frontend/ast/statements/branching.rs`.
 - Observed: an arm `0 =>` whose body is an option match ending in `|x| => return x`, followed by `else => return 3`, reports MOTH-SYNTAX-0028. The same nested match parses when it ends with `else =>` or sits in the last arm.
-- Investigate: `parse_match_block` assumes that an arm header after `;` belongs to the match it just closed. Dropping that check for all nested matches fixes the valid outer-arm case but loses the dedicated diagnostic for a stray `;` between `none =>` and `|x| =>` in an inner option match. Decide how to detect a misplaced delimiter without treating indentation as syntax or trial-parsing the next arm against multiple subjects.
+- Cause on the old grammar: `parse_match_block` assumes that an arm header after `;` belongs to the match it just closed. The new `case` markers and brace depth should remove that assumption. Verify the migrated nested match and malformed boundary diagnostics rather than repairing the retired semicolon grammar.
 
 ### Repeated work in single-file namespace validation
 
@@ -134,6 +139,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Unused generic function bodies accept standalone `$in` helpers
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Validate authored structural escapes even in unused generic bodies. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix review, 2026-11. Confirmed by probes on this branch and pre-dates the fix.
 - Where: generic function body validation. A generic function's body is finalized only when an instance is materialised, so an unused generic body never reaches the final-value helper rejection in `normalize_expression_template_node`.
 - Observed: `render type T |value T| -> String: return [$in style: [: red]];` with no call is accepted, while `result = render("x"); ~[:[result]]` reports MOTH-SYNTAX-0022 at the helper. The same split occurs for a runtime-dependent helper: `render type T |value T, x String| -> String: return [$in style: [x]];` is accepted while unused and rejected once instantiated.
@@ -148,6 +154,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ### Imported const template helper defaults lack a donor `$in` label
 
+- Resolution: deferred to the [syntax migration bug closure gate](./roadmap/plans/moth-new-syntax-implementation-plan.md#known-bug-report-closure). Preserve the donor directive's diagnostic provenance. Keep open until verified on the migrated compiler.
 - Found: runtime template helper escape fix verification, 2026-11. Confirmed by a two-module probe and pre-dates this branch.
 - Where: `fold_signature_default` in `src/compiler_frontend/ast/statements/functions.rs` validates the rebuilt default template, and `PublicConstTemplate` in `src/compiler_frontend/folded_value.rs` carries no donor `$in` site. The primary diagnostic correctly points at the importing reference because the stored const insert is legal in its donor, but there is no related label at the authored directive.
 - Observed: `helpers/utils.moth` declares `insert #= [$in style: [: red]]`, `helpers/@mod.moth` exports `@utils insert` and `@entry.moth` uses `@helpers insert` as `render |value String = insert| -> String`. The compiler reports one MOTH-SYNTAX-0022 on the `insert` reference in the default at `@entry.moth:3:24`. It does not point to the authored `$in` at `helpers/utils.moth:2:5`.
