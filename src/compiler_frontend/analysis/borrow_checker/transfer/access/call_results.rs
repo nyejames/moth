@@ -8,13 +8,13 @@ use super::super::place_load_source;
 use super::{CallArgumentTransfer, CallTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, FieldKey, ResolvedPlace, RootSet, StoredValue,
+    AddressSet, AllocId, CellId, Coverage, FieldKey, ResolvedPlace, RootSet, StoredValue,
+    TypedStore,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BorrowTransferContext, InvokeLane, InvokeLayerOp,
 };
-use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{ExternalReturnAlias, ExternalReturnSlot};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -301,8 +301,7 @@ fn direct_result_ops(
     if allow_plain_roots
         && !input
             .state
-            .local_state(index)
-            .mode
+            .binding_mode(index)
             .contains(super::LocalMode::ALIAS)
         && preserves_plain_roots(input, index, arg)
     {
@@ -441,35 +440,36 @@ impl<'a> CallActuals<'a> {
             input.context.expressions,
             self.args[index].argument,
         )?;
-        let mut slots = Vec::new();
-        let mut fields = Vec::new();
         let projections = input.context.expressions.projections(place.projections);
-        if let Some((last, prefix)) = projections.split_last() {
+        let addresses = if let Some((last, prefix)) = projections.split_last() {
             let holders = input.state.resolve_alloc_path(
                 local,
                 &input.layout.local_mutable,
                 prefix.iter().map(projection_key),
             );
             let key = projection_key(last);
-            fields.extend(holders.ids.into_iter().map(|holder| (holder, key)));
+            AddressSet::from_cells(
+                holders
+                    .ids
+                    .into_iter()
+                    .map(|holder| CellId::Projected(holder, key)),
+                if holders.complete {
+                    Coverage::Complete
+                } else {
+                    Coverage::Partial
+                },
+            )
         } else {
-            let binding = input.state.local_state(local);
-            if binding.mode.contains(LocalMode::SLOT) {
-                slots.push(local);
-            }
-            if binding.mode.contains(LocalMode::ALIAS) {
-                // These are the original cells, not the allocations the alias reads now.
-                fields = input.state.alias_cells(local);
-                slots.extend(binding.direct_alias_roots.iter_ones().filter(|&slot| {
-                    slot != local && input.state.local_state(slot).mode.contains(LocalMode::SLOT)
-                }));
-            }
-        }
-        (!slots.is_empty() || !fields.is_empty()).then(|| InvokeLayerOp::StoreCells {
-            slots,
-            fields,
-            values: node.values.clone(),
-            views: output_views(node),
+            input.state.resolve_cells(local)
+        };
+        (!addresses.cells().is_empty()).then(|| {
+            InvokeLayerOp::Store(TypedStore::write_cells(
+                addresses,
+                CapturedValue {
+                    values: node.values.clone(),
+                    views: output_views(node),
+                },
+            ))
         })
     }
 
@@ -799,13 +799,16 @@ fn instantiate_lane(
                     let ty = typed_path(input.context, ty, holders)?;
                     let (key, _) = typed_child(input.context, ty, key)?;
                     let holders = captures.get(input, actuals, target.index, holders)?;
-                    ops.push(InvokeLayerOp::Store {
-                        holders: holders.values.iter().map(|holder| holder.id).collect(),
+                    ops.push(InvokeLayerOp::Store(TypedStore::write_projected(
+                        holders.values.iter().map(|holder| holder.id),
                         key,
-                        values: node.values.clone(),
-                        views: output_views(node),
-                        distinct_occurrence: false,
-                    });
+                        Coverage::Partial,
+                        CapturedValue {
+                            values: node.values.clone(),
+                            views: output_views(node),
+                        },
+                        false,
+                    )));
                     continue;
                 };
                 (

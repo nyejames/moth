@@ -1,0 +1,10 @@
+product |left I32, right I32| -> I32, Error!:
+    return left * right
+;
+
+code ~U32 = 0
+recovered = product(50000, 50000) catch |err|:
+    ~code = err.code
+    then 0
+;
+~[: code=[code] recovered=[recovered]]

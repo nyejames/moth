@@ -1,11 +1,10 @@
 //! Source and state regressions for writes through the sparse allocation layer.
 
-use super::layer::{LayerAliasWrite, LocalLayerValue};
-use super::refresh_alias_referents;
-use super::statement::bind_call_result_ids;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, BorrowState, FieldKey, LocalState, MutationTarget, RootSet, StoredValue,
+    AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, FieldKey,
+    LocalState, MutationTarget, Replacement, RootSet, StoredValue, TypedStore, UNKNOWN_ORDER_KEY,
+    WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -58,6 +57,34 @@ fn check_rejection_at(
                 (line_start..line_end).contains(&(range.start() as usize))
             })
     ));
+}
+
+#[test]
+fn readonly_scalar_projection_can_supply_a_value_but_not_a_writable_link() {
+    let acquire = "\
+Pair = |left I32, right I32|\n\
+probe || -> I32:\n\
+    pair = Pair(1, 2)\n\
+    code ~= 0\n\
+    ~code = pair.left\n\
+    return code\n\
+;\n";
+    check_rejection(
+        acquire,
+        "~code = pair.left",
+        InvalidMutableAccessReason::ImmutablePlace,
+    );
+
+    let write_through = "\
+Pair = |left I32, right I32|\n\
+probe || -> I32:\n\
+    pair = Pair(1, 2)\n\
+    slot ~= 0\n\
+    writer ~= slot\n\
+    ~writer = pair.left\n\
+    return writer\n\
+;\n";
+    check_source(write_through).expect("a write through an existing alias only reads its RHS");
 }
 
 #[test]
@@ -163,6 +190,119 @@ probe || -> I32:\n\
 }
 
 #[test]
+fn retained_projection_write_conflicts_with_a_live_reborrow() {
+    let source = r"Pair = |first I32, second I32|
+holder ~= Pair(1, 0)
+writer ~= holder.first
+~holder = Pair(2, 3)
+view = writer
+~writer = 4
+~[:[view]]
+";
+    check_rejection(
+        source,
+        "~writer = 4",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+#[test]
+fn retained_projection_reborrow_can_write_through_its_live_parent() {
+    let source = r"Pair = |first I32, second I32|
+probe || -> I32:
+    holder ~= Pair(1, 0)
+    writer ~= holder.first
+    ~holder = Pair(2, 3)
+    child ~= writer
+    ~child = 4
+    result = child + 1
+    return writer + result
+;
+";
+    check_source(source).expect("a writable reborrow can exercise its parent loan");
+}
+
+#[test]
+fn retained_slot_write_conflicts_with_a_live_reborrow_after_join() {
+    let source = r"probe |flag Bool| -> I32:
+    writer ~= 0
+    if flag:
+        left ~= 1
+        ~writer = left
+    else
+        right ~= 2
+        ~writer = right
+    ;
+    view = writer
+    ~writer = 9
+    return view
+;
+~[:[probe(true)]]
+";
+    check_rejection(
+        source,
+        "~writer = 9",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+#[test]
+fn partial_slot_write_does_not_pollute_an_unrelated_field() {
+    let source = r"Box = |items {Bool}|
+identity |value {I32}| -> {I32}:
+    return value
+;
+probe |flag Bool, input {I32}| -> I32:
+    raw ~= {true}
+    unrelated ~= Box(raw)
+    a ~= {1}
+    b ~= {2}
+    if flag:
+        ~a = b
+    else
+        ~b = a
+    ;
+    ~a = identity(input)
+    ~unrelated.items.push(false)
+    return unrelated.items.length()
+;
+~[:[probe(true, {3})]]
+";
+    check_source(source).expect("a partial slot write cannot reach the unrelated field");
+}
+
+fn roots(count: usize, members: &[usize]) -> RootSet {
+    let mut roots = RootSet::empty(count);
+    for &member in members {
+        roots.insert(member);
+    }
+    roots
+}
+
+fn slot(local: usize) -> CellId {
+    CellId::Slot(WrapperId::current(local))
+}
+
+fn set_link(state: &mut BorrowState, count: usize, local: usize, source: usize, writable: bool) {
+    state.set_binding(
+        local,
+        BindingSpec::Link {
+            source: WrapperId::current(source),
+            writable,
+        },
+        RootSet::empty(count),
+        RootSet::empty(count),
+    );
+}
+
+fn writable_value(id: AllocId) -> CapturedValue {
+    CapturedValue {
+        values: vec![StoredValue { id, writable: true }],
+        views: Vec::new(),
+    }
+}
+
+#[test]
 fn call_result_preserves_sharing_at_a_possible_whole_referent() {
     const WHOLE: usize = 0;
     const HOLDER: usize = 1;
@@ -182,35 +322,37 @@ fn call_result_preserves_sharing_at_a_possible_whole_referent() {
     let result_parent = state.local_alloc_ids(RESULT).0[0];
     let result = state.alloc_child(result_parent, field);
 
-    // Seed a join whose only legacy write root is WHOLE but whose sparse layer also
-    // records a projected alternative. The legacy roots alone cannot prove exactness.
-    let mut whole_root = RootSet::empty(LOCAL_COUNT);
-    whole_root.insert(WHOLE);
-    state.update_local_state(
+    let mut projected_path = state.clone();
+    set_link(&mut state, LOCAL_COUNT, WRITER, WHOLE, true);
+    projected_path.set_binding(
         WRITER,
-        LocalState::alias_with_direct(whole_root.clone(), whole_root),
+        BindingSpec::Projected {
+            addresses: AddressSet::from_cells(
+                [CellId::Projected(holder, field)],
+                Coverage::Complete,
+            ),
+            origin: WrapperId::current(HOLDER),
+            writable: true,
+            isolated: false,
+            route_roots: roots(LOCAL_COUNT, &[HOLDER]),
+        },
+        RootSet::empty(LOCAL_COUNT),
+        RootSet::empty(LOCAL_COUNT),
     );
-    state.bind_alloc_ids(WRITER, &[old_whole, old_field], false);
-    state.bind_alias_cells(WRITER, &[(holder, field)], false, false);
+    assert!(state.join_in_place(&projected_path));
 
-    // Ordinary call-result transfer refreshes the root facts before publishing sparse IDs.
-    // The whole slot has no override: its pre-write allocation is only an implicit self root.
+    // The implicit whole-slot value must survive a possible receiving store.
     assert!(!state.has_layer_binding(WHOLE));
-    let mut result_roots = RootSet::empty(LOCAL_COUNT);
-    result_roots.insert(RESULT);
-    let alias = state.local_state(WRITER).clone();
-    let (_, retirement) = refresh_alias_referents(
-        &mut state,
-        WRITER,
-        &alias,
-        Some(&result_roots),
-        0,
-        true,
-        true,
+    let addresses = state.resolve_cells(WRITER);
+    assert_eq!(
+        addresses.cells(),
+        &[slot(WHOLE), CellId::Projected(holder, field)]
     );
-    assert!(retirement.is_none());
-
-    bind_call_result_ids(&mut state, WRITER, &[result], &[], false);
+    assert_eq!(addresses.coverage, Coverage::Complete);
+    assert_eq!(addresses.definite(), None);
+    let store = TypedStore::receive_result(addresses, writable_value(result), WRITER, false)
+        .with_slot_roots(roots(LOCAL_COUNT, &[RESULT]));
+    state.publish_store(&store, UNKNOWN_ORDER_KEY, None);
 
     assert_eq!(state.local_alloc_ids(WRITER).0, [result]);
     let (whole_ids, _) = state.local_alloc_ids(WHOLE);
@@ -243,6 +385,11 @@ fn call_result_preserves_sharing_at_a_possible_whole_referent() {
 
 #[test]
 fn write_through_joined_alias_replaces_its_readonly_observation() {
+    assert_joined_projected_write([(0, FieldKey::Field(0)), (1, FieldKey::Field(0))]);
+    assert_joined_projected_write([(0, FieldKey::Field(0)), (0, FieldKey::Field(1))]);
+}
+
+fn assert_joined_projected_write(routes: [(usize, FieldKey); 2]) {
     const LEFT: usize = 0;
     const RIGHT: usize = 1;
     const OLD: usize = 2;
@@ -253,40 +400,57 @@ fn write_through_joined_alias_replaces_its_readonly_observation() {
     for slot in [LEFT, RIGHT, OLD, NEW] {
         state.initialize_parameter(slot);
     }
-    let field = FieldKey::Field(0);
     let old = state.local_alloc_ids(OLD).0[0];
     let new = state.local_alloc_ids(NEW).0[0];
-    let cells = [LEFT, RIGHT].map(|slot| (state.local_alloc_ids(slot).0[0], field));
-    for &(holder, key) in &cells {
-        state.store_alloc_field(
-            &[holder],
-            key,
-            &[StoredValue {
+    let cells = routes.map(|(local, field)| (state.local_alloc_ids(local).0[0], field));
+    for (holder, field) in cells {
+        state.add_alloc_edge(
+            holder,
+            field,
+            StoredValue {
                 id: old,
                 writable: false,
-            }],
-            true,
+            },
         );
     }
-    let mut holders = RootSet::empty(LOCAL_COUNT);
-    holders.insert(LEFT);
-    holders.insert(RIGHT);
-    let alias = LocalState::alias_with_cells(holders.clone(), RootSet::empty(LOCAL_COUNT), holders);
-    state.update_local_state(WRITER, alias.clone());
-    state.bind_alloc_ids(WRITER, &[old], true);
-    state.bind_alias_cells(WRITER, &cells, false, false);
-
-    LayerAliasWrite::Cells {
-        cells: cells.to_vec(),
-        exact: false,
-        stored: vec![StoredValue {
-            id: new,
-            writable: true,
-        }],
-        incoming_alias: LocalLayerValue::None,
-        views: Vec::new(),
+    let mut alternate = state.clone();
+    for ((branch, (origin, _)), (holder, field)) in
+        [(&mut state, routes[0]), (&mut alternate, routes[1])]
+            .into_iter()
+            .zip(cells)
+    {
+        branch.set_binding(
+            WRITER,
+            BindingSpec::Projected {
+                addresses: AddressSet::from_cells(
+                    [CellId::Projected(holder, field)],
+                    Coverage::Complete,
+                ),
+                origin: WrapperId::current(origin),
+                writable: true,
+                isolated: false,
+                route_roots: roots(LOCAL_COUNT, &[origin]),
+            },
+            RootSet::empty(LOCAL_COUNT),
+            RootSet::empty(LOCAL_COUNT),
+        );
     }
-    .apply(&mut state, WRITER, &alias, None);
+    assert!(state.join_in_place(&alternate));
+
+    let addresses = state.resolve_cells(WRITER);
+    assert_eq!(addresses.coverage, Coverage::Complete);
+    assert_eq!(addresses.cells().len(), cells.len());
+    for (holder, field) in cells {
+        assert!(
+            addresses
+                .cells()
+                .contains(&CellId::Projected(holder, field))
+        );
+    }
+    assert_eq!(addresses.definite(), None);
+    let store =
+        TypedStore::write_through(addresses, writable_value(new), Replacement::Must, WRITER);
+    state.publish_store(&store, UNKNOWN_ORDER_KEY, None);
 
     let writer = state.resolve_local_allocs(WRITER);
     assert_eq!(writer.ids, [new]);
@@ -294,8 +458,8 @@ fn write_through_joined_alias_replaces_its_readonly_observation() {
         !writer.readonly,
         "the old immutable allocation is no longer observed"
     );
-    for holder in [LEFT, RIGHT] {
-        let possible = state.resolve_alloc_path(holder, &[true; LOCAL_COUNT], [field]);
+    for (local, field) in routes {
+        let possible = state.resolve_alloc_path(local, &[true; LOCAL_COUNT], [field]);
         assert!(possible.ids.contains(&old));
         assert!(possible.ids.contains(&new));
         assert!(
@@ -303,6 +467,166 @@ fn write_through_joined_alias_replaces_its_readonly_observation() {
             "each possible referent may still contain the old value"
         );
     }
+}
+
+#[test]
+fn diamond_keeps_a_readonly_restriction_on_a_shared_suffix() {
+    let mut left = BorrowState::new_uninitialized(5);
+    left.initialize_parameter(0);
+    set_link(&mut left, 5, 1, 0, true);
+    set_link(&mut left, 5, 2, 1, true);
+    set_link(&mut left, 5, 3, 1, false);
+    let mut right = left.clone();
+    set_link(&mut left, 5, 4, 2, true);
+    set_link(&mut right, 5, 4, 3, true);
+    let mutable = [true; 5];
+    assert!(
+        left.resolve_cells_with_permission(4, false, &mutable)
+            .1
+            .is_none()
+    );
+    assert_eq!(
+        right.resolve_cells_with_permission(4, false, &mutable).1,
+        Some(3)
+    );
+    let readonly_middle = [true, false, true, true, true];
+    assert_eq!(
+        left.resolve_cells_with_permission(4, false, &readonly_middle)
+            .1,
+        Some(1)
+    );
+
+    for (mut state, other) in [(left.clone(), &right), (right.clone(), &left)] {
+        assert!(state.join_in_place(other));
+        let (addresses, readonly_source) = state.resolve_cells_with_permission(4, false, &mutable);
+        assert_eq!(addresses.cells(), &[slot(0)]);
+        assert_eq!(addresses.definite(), Some(slot(0)));
+        assert_eq!(readonly_source, Some(3));
+        let route = state.binding(4).route_roots();
+        assert!(route.contains(2) && route.contains(3));
+    }
+}
+
+#[test]
+fn cyclic_arm_leaves_a_known_slot_possible_but_not_definite() {
+    let mut state = BorrowState::new_uninitialized(3);
+    state.initialize_parameter(0);
+    set_link(&mut state, 3, 1, 0, true);
+    set_link(&mut state, 3, 2, 1, true);
+    let mut cyclic = state.clone();
+    set_link(&mut cyclic, 3, 1, 2, true);
+    assert!(state.join_in_place(&cyclic));
+
+    for local in [1, 2] {
+        let addresses = state.resolve_cells(local);
+        assert_eq!(addresses.cells(), &[slot(0)]);
+        assert_eq!(addresses.coverage, Coverage::Partial);
+        assert_eq!(addresses.definite(), None);
+    }
+}
+
+#[test]
+fn escaped_slot_retains_prior_address_but_pristine_definition_does_not_retire() {
+    let mut state = BorrowState::new_uninitialized(3);
+    state.initialize_parameter(0);
+    set_link(&mut state, 3, 1, 0, true);
+    let fresh_slot = || LocalState::slot_from_value_roots(RootSet::empty(3));
+    state.rebind_local(0, fresh_slot(), 0);
+    let addresses = state.resolve_cells(1);
+    assert_eq!(
+        addresses.cells(),
+        &[CellId::Slot(WrapperId {
+            local: 0,
+            age: WrapperAge::Prior
+        })],
+    );
+    assert_eq!(addresses.coverage, Coverage::Complete);
+    assert_eq!(addresses.definite(), None);
+    assert_eq!(state.resolve_cells(0).definite(), Some(slot(0)));
+
+    assert!(state.has_pristine_alloc_binding(2));
+    assert!(
+        state
+            .rebind_local_after_capture(2, fresh_slot(), 1, Some(2), true)
+            .is_none(),
+    );
+    assert_eq!(state.resolve_cells(2).definite(), Some(slot(2)));
+}
+
+#[test]
+fn projected_destination_stays_on_the_old_holder_after_slot_replacement() {
+    const HOLDER: usize = 0;
+    const REPLACEMENT: usize = 1;
+    const OLD: usize = 2;
+    const NEW: usize = 3;
+    const WRITER: usize = 4;
+    const COUNT: usize = 5;
+    let mut state = BorrowState::new_uninitialized(COUNT);
+    for slot in [HOLDER, REPLACEMENT, OLD, NEW] {
+        state.initialize_parameter(slot);
+    }
+    let holder = state.local_alloc_ids(HOLDER).0[0];
+    let replacement = state.local_alloc_ids(REPLACEMENT).0[0];
+    let old = state.local_alloc_ids(OLD).0[0];
+    let new = state.local_alloc_ids(NEW).0[0];
+    let field = FieldKey::Field(0);
+    state.add_alloc_edge(
+        holder,
+        field,
+        StoredValue {
+            id: old,
+            writable: true,
+        },
+    );
+    state.add_alloc_edge(
+        replacement,
+        field,
+        StoredValue {
+            id: old,
+            writable: true,
+        },
+    );
+    let cell = CellId::Projected(holder, field);
+    state.set_binding(
+        WRITER,
+        BindingSpec::Projected {
+            addresses: AddressSet::from_cells([cell], Coverage::Complete),
+            origin: WrapperId::current(HOLDER),
+            writable: true,
+            isolated: false,
+            route_roots: roots(COUNT, &[HOLDER]),
+        },
+        roots(COUNT, &[HOLDER]),
+        RootSet::empty(COUNT),
+    );
+    assert_eq!(state.resolve_cells(WRITER).definite(), Some(cell));
+    let retirement = state.retire_slot_value(HOLDER, 0);
+    let mut retired_holder = holder;
+    retirement.remap_id(&state, &mut retired_holder);
+    state.publish_store(
+        &TypedStore::replace_cells(state.resolve_cells(HOLDER), writable_value(replacement)),
+        0,
+        None,
+    );
+
+    let addresses = state.resolve_cells(WRITER);
+    assert_ne!(retired_holder, holder);
+    assert_ne!(retired_holder, replacement);
+    assert_eq!(
+        addresses.cells(),
+        &[CellId::Projected(retired_holder, field)]
+    );
+    assert_eq!(state.local_alloc_ids(WRITER).0, [old]);
+    let store =
+        TypedStore::write_through(addresses, writable_value(new), Replacement::Must, WRITER);
+    state.publish_store(&store, 1, None);
+    assert_eq!(state.local_alloc_ids(WRITER).0, [new]);
+    assert_eq!(
+        state
+            .resolve_alloc_path(HOLDER, &[true; COUNT], [field])
+            .ids,
+        [old]
+    );
 }
 
 fn test_copy(state: &mut BorrowState, from: usize, to: usize, site: u32) {
@@ -363,7 +687,7 @@ fn copied_nested_sharing_is_pairwise_not_transitive() {
 }
 
 #[test]
-fn exact_store_replaces_view_but_old_capture_and_weak_store_keep_it() {
+fn exact_store_replaces_view_but_weak_store_preserves_old_value_and_siblings() {
     let mut state = BorrowState::new_uninitialized(6);
     for slot in 0..6 {
         state.initialize_parameter(slot);
@@ -392,15 +716,26 @@ fn exact_store_replaces_view_but_old_capture_and_weak_store_keep_it() {
 
     let old_value = state.resolve_alloc_path(0, &[true; 6], [left]);
     let right_value = state.resolve_alloc_path(0, &[true; 6], [right]);
-    let assigned = [StoredValue {
-        id: new,
-        writable: true,
-    }];
+    let cell = CellId::Projected(root, left);
+    let partial = AddressSet::from_cells([cell], Coverage::Partial).with_singleton_proof();
+    assert_eq!(partial.definite(), None);
+    assert!(state.alloc_singular(root));
+    let exact = AddressSet::from_cells([cell], Coverage::Complete).with_singleton_proof();
     let mut weak = state.clone();
-    weak.store_alloc_field(&[root], left, &assigned, false);
-    state.store_alloc_field(&[root], left, &assigned, true);
+    weak.publish_store(
+        &TypedStore::replace_cells(partial, writable_value(new)),
+        UNKNOWN_ORDER_KEY,
+        None,
+    );
+    state.publish_store(
+        &TypedStore::replace_cells(exact, writable_value(new)),
+        UNKNOWN_ORDER_KEY,
+        None,
+    );
     let left_now = state.resolve_alloc_path(0, &[true; 6], [left]);
     let left_weak = weak.resolve_alloc_path(0, &[true; 6], [left]);
+    assert!(left_weak.ids.contains(&old) && left_weak.ids.contains(&new));
+    assert_eq!(weak.resolve_alloc_path(0, &[true; 6], [right]).ids, [old]);
     let shares_right = |state: &BorrowState, capture: &_| {
         let capture: &super::super::super::state::ResolvedPlace = capture;
         state.alloc_paths_may_share(

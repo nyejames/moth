@@ -7,7 +7,8 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FieldKey, FunctionLayout, LocalState, RootSet,
+    AddressSet, BindingSpec, BorrowState, CellId, Coverage, FieldKey, FunctionLayout, RootSet,
+    WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, transfer_block,
@@ -113,19 +114,14 @@ sentinel = 0\n\
         .index_of(target)
         .expect("the update target should be in the function layout");
 
-    for mode in [LocalMode::UNINIT, LocalMode::UNINIT.union(LocalMode::SLOT)] {
+    for possibly_initialized in [false, true] {
         let local_count = layout.local_count();
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(
-            target_index,
-            LocalState {
-                mode,
-                value_roots: RootSet::empty(local_count),
-                direct_alias_roots: RootSet::empty(local_count),
-                write_target_roots: RootSet::empty(local_count),
-                derived_from_roots: RootSet::empty(local_count),
-            },
-        );
+        if possibly_initialized {
+            let mut initialized = state.clone();
+            initialized.initialize_parameter(target_index);
+            assert!(state.join_in_place(&initialized));
+        }
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("an update must not initialize any possibly uninitialized path");
         assert_borrow_error_view::<UseOfUninitializedLocalView>(error);
@@ -232,20 +228,15 @@ sentinel = 0\n\
         .expect("the updated call should retain its block");
     assert_ne!(call_result, target);
 
-    for mode in [LocalMode::UNINIT, LocalMode::UNINIT.union(LocalMode::SLOT)] {
+    for possibly_initialized in [false, true] {
         let local_count = layout.local_count();
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(argument_index, LocalState::slot(local_count));
-        state.update_local_state(
-            target_index,
-            LocalState {
-                mode,
-                value_roots: RootSet::empty(local_count),
-                direct_alias_roots: RootSet::empty(local_count),
-                write_target_roots: RootSet::empty(local_count),
-                derived_from_roots: RootSet::empty(local_count),
-            },
-        );
+        state.initialize_parameter(argument_index);
+        if possibly_initialized {
+            let mut initialized = state.clone();
+            initialized.initialize_parameter(target_index);
+            assert!(state.join_in_place(&initialized));
+        }
         let error =
             transfer_isolated_statement(&checker, &layout, call_block, call_statement, &mut state)
                 .expect_err(
@@ -359,16 +350,14 @@ sentinel = 0\n\
     let local_count = layout.local_count();
     for alias_only in [false, true] {
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(argument_index, LocalState::slot(local_count));
-        state.update_local_state(mutable_root_index, LocalState::slot(local_count));
-        let target_state = if alias_only {
-            let mut roots = RootSet::empty(local_count);
-            roots.insert(mutable_root_index);
-            LocalState::alias_with_direct(roots.clone(), roots)
+        state.initialize_parameter(argument_index);
+        state.initialize_parameter(mutable_root_index);
+        if alias_only {
+            let roots = state.effective_roots(mutable_root_index);
+            seed_whole_alias(&mut state, target_index, mutable_root_index, roots);
         } else {
-            LocalState::slot(local_count)
-        };
-        state.update_local_state(target_index, target_state);
+            state.initialize_parameter(target_index);
+        }
 
         let error =
             transfer_isolated_statement(&checker, &layout, call_block, call_statement, &mut state)
@@ -389,16 +378,18 @@ sentinel = 0\n\
         let local_count = layout.local_count();
         let mut state = BorrowState::new_uninitialized(local_count);
         state.initialize_parameter(source);
-        let mut source_roots = RootSet::empty(local_count);
-        source_roots.insert(source);
-        state.update_local_state(
-            target,
-            LocalState::alias_with_direct(source_roots.clone(), source_roots),
-        );
+        let source_roots = state.effective_roots(source);
+        seed_whole_alias(&mut state, target, source, source_roots);
 
         transfer_isolated_statement(checker, &layout, block, definition, &mut state)
             .expect("a reentered definition should establish the new binding");
-        assert_eq!(state.local_state(target), &LocalState::slot(local_count));
+        assert_eq!(state.binding_mode(target), LocalMode::SLOT);
+        assert_eq!(
+            state.resolve_cells(target).cells(),
+            &[CellId::Slot(WrapperId::current(target))]
+        );
+        assert!(state.binding(target).value_roots().is_empty());
+        assert!(state.binding(target).derivation().is_empty());
     });
 }
 
@@ -498,13 +489,9 @@ probe |prior Box, flag Bool|:
         let mut state = BorrowState::new_uninitialized(count);
         // Seed the previous dynamic binding and its carried provenance at the statement
         // frontier, without the CFG driver's lexical-scope kills.
-        state.update_local_state(target, LocalState::slot(count));
-        let mut roots = RootSet::empty(count);
-        roots.insert(target);
-        state.update_local_state(
-            prior,
-            LocalState::slot_with_value_roots(roots, RootSet::empty(count)),
-        );
+        state.initialize_parameter(target);
+        let roots = state.effective_roots(target);
+        state.set_binding(prior, BindingSpec::Slot, roots, RootSet::empty(count));
         transfer_isolated_statement(checker, &layout, alias_block, alias_definition, &mut state)
             .expect("the previous iteration should retain the old projected value");
         let old = state.resolve_local_allocs(retained);
@@ -546,10 +533,7 @@ fn entry_definition_rebases_a_root_first_interned_by_capture() {
         // just that coarse provenance to exercise the guard when RHS capture interns the root.
         let mut roots = RootSet::empty(count);
         roots.insert(target);
-        state.update_local_state(
-            prior,
-            LocalState::slot_with_value_roots(roots, RootSet::empty(count)),
-        );
+        state.set_binding(prior, BindingSpec::Slot, roots, RootSet::empty(count));
         assert_eq!(layout.acyclic_entry_block, Some(block.id));
         assert!(state.layer_is_empty());
         assert!(state.has_pristine_alloc_binding(target));
@@ -659,15 +643,13 @@ sentinel = 0\n\
     let local_count = layout.local_count();
     for alias_only in [false, true] {
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(mutable_root_index, LocalState::slot(local_count));
-        let immutable_state = if alias_only {
-            let mut roots = RootSet::empty(local_count);
-            roots.insert(mutable_root_index);
-            LocalState::alias_with_direct(roots.clone(), roots)
+        state.initialize_parameter(mutable_root_index);
+        if alias_only {
+            let roots = state.effective_roots(mutable_root_index);
+            seed_whole_alias(&mut state, immutable_index, mutable_root_index, roots);
         } else {
-            LocalState::slot(local_count)
-        };
-        state.update_local_state(immutable_index, immutable_state);
+            state.initialize_parameter(immutable_index);
+        }
 
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("ordinary assignment to an immutable binding must fail");
@@ -1245,23 +1227,20 @@ after = observer.length()
         .expect("observer should be in the layout");
     assert!(layout.local_mutable[target_index]);
     let local_count = layout.local_count();
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    state.update_local_state(
+    state.initialize_parameter(source_index);
+    let source_roots = state.effective_roots(source_index);
+    state.set_binding(
         target_index,
-        LocalState::alias_with_cells(
-            source_roots.clone(),
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-        ),
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([], Coverage::Partial),
+            route_roots: RootSet::empty(local_count),
+        },
+        source_roots.clone(),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(
-        observer_index,
-        LocalState::alias_with_direct(source_roots.clone(), source_roots.clone()),
-    );
+    let mut unheld = state.clone();
+    seed_whole_alias(&mut state, observer_index, source_index, source_roots);
     let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
         .expect_err("a cell-free alias write must check its provenance roots");
     assert_invalid_mutable_access_reason(
@@ -1270,18 +1249,8 @@ after = observer.length()
     );
 
     // Positive control: the same seeded alias is writable while nothing observes its provenance.
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    state.update_local_state(
-        target_index,
-        LocalState::alias_with_cells(
-            source_roots,
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-        ),
-    );
-    state.update_local_state(observer_index, LocalState::slot(local_count));
-    transfer_isolated_statement(&checker, &layout, block, update, &mut state)
+    unheld.initialize_parameter(observer_index);
+    transfer_isolated_statement(&checker, &layout, block, update, &mut unheld)
         .expect("a dead provenance observer must not block the alias write");
 }
 
@@ -1596,44 +1565,47 @@ return observed.length()
         .expect("the joined fresh write should lower");
 
     let local_count = layout.local_count();
-    let mut original_roots = RootSet::empty(local_count);
-    original_roots.insert(original_index);
-    let mut referent_cells = RootSet::empty(local_count);
-    referent_cells.insert(slot_index);
-    referent_cells.insert(spare_index);
-    let mut joined_value_roots = original_roots.clone();
-    joined_value_roots.insert(spare_index);
-
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(original_index, LocalState::slot(local_count));
-    state.update_local_state(
+    state.initialize_parameter(original_index);
+    let original_roots = state.effective_roots(original_index);
+    state.set_binding(
         slot_index,
-        LocalState::slot_with_value_roots(original_roots.clone(), RootSet::empty(local_count)),
+        BindingSpec::Slot,
+        original_roots.clone(),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(spare_index, LocalState::slot(local_count));
-    state.update_local_state(
-        writer_index,
-        LocalState::alias_with_cells(joined_value_roots, referent_cells.clone(), referent_cells),
+    state.initialize_parameter(spare_index);
+    let mut spare_path = state.clone();
+    let spare_roots = spare_path.effective_roots(spare_index);
+    seed_whole_alias(&mut state, writer_index, slot_index, original_roots);
+    seed_whole_alias(&mut spare_path, writer_index, spare_index, spare_roots);
+    assert!(state.join_in_place(&spare_path));
+    assert_eq!(
+        state.resolve_cells(writer_index).cells(),
+        &[
+            CellId::Slot(WrapperId::current(slot_index)),
+            CellId::Slot(WrapperId::current(spare_index)),
+        ]
     );
 
     transfer_isolated_statement(&checker, &layout, block, write, &mut state)
         .expect("a fresh write through a joined alias is legal");
 
     let writer_roots = state
-        .local_state(writer_index)
-        .value_roots
+        .binding(writer_index)
+        .value_roots()
         .iter_ones()
         .collect::<Vec<_>>();
     assert_eq!(writer_roots, vec![slot_index, spare_index]);
     assert!(
         state
-            .local_state(slot_index)
-            .value_roots
+            .binding(slot_index)
+            .value_roots()
             .contains(original_index),
         "a possible referent must keep its old value provenance"
     );
     assert!(
-        state.local_state(spare_index).value_roots.is_empty(),
+        state.binding(spare_index).value_roots().is_empty(),
         "a referent that did not hold the old value gains no provenance"
     );
 }
@@ -1927,6 +1899,21 @@ fn is_local_update(module: &HirModule, statement: &HirStatement, target: LocalId
     )
 }
 
+fn seed_whole_alias(state: &mut BorrowState, alias: usize, source: usize, value_roots: RootSet) {
+    let local_count = value_roots.bit_len();
+    let mut route_roots = RootSet::empty(local_count);
+    route_roots.insert(source);
+    state.set_binding(
+        alias,
+        BindingSpec::Alias {
+            addresses: state.resolve_cells(source),
+            route_roots,
+        },
+        value_roots,
+        RootSet::empty(local_count),
+    );
+}
+
 fn seed_mixed_target_with_observer(
     layout: &FunctionLayout,
     target: LocalId,
@@ -1946,32 +1933,29 @@ fn seed_mixed_target_with_observer(
         .index_of(observer)
         .expect("observer should be in the layout");
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
+    state.initialize_parameter(source_index);
     for local in additional_slots {
         let index = layout
             .index_of(*local)
             .expect("slot local should be in the layout");
-        state.update_local_state(index, LocalState::slot(local_count));
+        state.initialize_parameter(index);
     }
 
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-    state.update_local_state(
+    state.initialize_parameter(target_index);
+    state.initialize_parameter(observer_index);
+    let mut alias_path = state.clone();
+    let source_roots = state.effective_roots(source_index);
+    seed_whole_alias(
+        &mut alias_path,
         target_index,
-        LocalState {
-            mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-            value_roots: source_roots.clone(),
-            direct_alias_roots: source_roots.clone(),
-            write_target_roots: source_roots.clone(),
-            derived_from_roots: RootSet::empty(local_count),
-        },
+        source_index,
+        source_roots.clone(),
     );
-    let observer_state = if observer_holds_source {
-        LocalState::alias_with_direct(source_roots.clone(), source_roots)
-    } else {
-        LocalState::slot(local_count)
-    };
-    state.update_local_state(observer_index, observer_state);
+    if observer_holds_source {
+        // Only one path acquires the mutable alias, and only the other acquires the observer.
+        seed_whole_alias(&mut state, observer_index, source_index, source_roots);
+    }
+    assert!(state.join_in_place(&alias_path));
     state
 }
 
@@ -1987,10 +1971,14 @@ fn assert_seeded_shared_holder(
     let observer_index = layout
         .index_of(observer)
         .expect("observer should be in the layout");
-    let observer_state = state.local_state(observer_index);
+    let observer_state = state.binding(observer_index);
     assert!(!layout.local_mutable[observer_index]);
-    assert!(observer_state.mode.contains(LocalMode::ALIAS));
-    assert!(observer_state.value_roots.contains(source_index));
+    assert!(
+        state
+            .binding_mode(observer_index)
+            .contains(LocalMode::ALIAS)
+    );
+    assert!(observer_state.value_roots().contains(source_index));
 }
 
 fn transfer_isolated_statement(

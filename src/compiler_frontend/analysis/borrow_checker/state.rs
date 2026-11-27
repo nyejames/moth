@@ -10,6 +10,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 };
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::rc::Rc;
 
 mod allocation_layer;
@@ -18,6 +19,573 @@ use allocation_layer::AllocationLayer;
 pub(super) use allocation_layer::{
     AllocId, AllocationRetirement, FieldKey, MutationTarget, ResolvedPlace, StoredValue,
 };
+
+/// An occurrence of a local binding, whether it owns a slot or links to another place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) struct WrapperId {
+    pub local: usize,
+    pub age: WrapperAge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) enum WrapperAge {
+    Current,
+    Prior,
+}
+
+impl WrapperId {
+    pub(super) fn current(local: usize) -> Self {
+        Self {
+            local,
+            age: WrapperAge::Current,
+        }
+    }
+
+    fn retired(self, retires: impl FnOnce(usize) -> bool) -> Self {
+        if self.age == WrapperAge::Current && retires(self.local) {
+            Self {
+                age: WrapperAge::Prior,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum CellId {
+    Slot(WrapperId),
+    Projected(AllocId, FieldKey),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Coverage {
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SmallSet<T> {
+    Empty,
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T: Copy + Ord> SmallSet<T> {
+    fn from_iter(items: impl IntoIterator<Item = T>) -> Self {
+        let mut items = items.into_iter();
+        let Some(first) = items.next() else {
+            return Self::Empty;
+        };
+        let Some(second) = items.by_ref().find(|&item| item != first) else {
+            return Self::One(first);
+        };
+        let mut known = vec![first, second];
+        known.extend(items);
+        known.sort_unstable();
+        known.dedup();
+        Self::Many(known)
+    }
+
+    fn insert(&mut self, item: T) {
+        match self {
+            Self::Empty => *self = Self::One(item),
+            Self::One(old) if item != *old => {
+                *self = if item < *old {
+                    Self::Many(vec![item, *old])
+                } else {
+                    Self::Many(vec![*old, item])
+                };
+            }
+            Self::One(_) => {}
+            Self::Many(items) => {
+                if let Err(index) = items.binary_search(&item) {
+                    items.insert(index, item);
+                }
+            }
+        }
+    }
+
+    fn remap(&mut self, mut remap: impl FnMut(T) -> T) {
+        match self {
+            Self::Empty => {}
+            Self::One(item) => *item = remap(*item),
+            Self::Many(items) => {
+                let mut changed = false;
+                for item in items.iter_mut() {
+                    let next = remap(*item);
+                    changed |= next != *item;
+                    *item = next;
+                }
+                if changed {
+                    items.sort_unstable();
+                    items.dedup();
+                    if let [only] = items.as_slice() {
+                        *self = Self::One(*only);
+                    }
+                }
+            }
+        }
+    }
+
+    fn as_slice(&self) -> &[T] {
+        match self {
+            Self::Empty => &[],
+            Self::One(item) => std::slice::from_ref(item),
+            Self::Many(items) => items,
+        }
+    }
+}
+
+/// An operand capture, with address evidence independent of its value provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AddressSet {
+    cells: SmallSet<CellId>,
+    pub coverage: Coverage,
+    definite: Option<CellId>,
+}
+
+impl AddressSet {
+    pub(super) fn from_cells(cells: impl IntoIterator<Item = CellId>, coverage: Coverage) -> Self {
+        Self {
+            cells: SmallSet::from_iter(cells),
+            coverage,
+            definite: None,
+        }
+    }
+
+    pub(super) fn cells(&self) -> &[CellId] {
+        self.cells.as_slice()
+    }
+
+    pub(super) fn definite(&self) -> Option<CellId> {
+        self.definite
+    }
+
+    pub(super) fn with_singleton_proof(mut self) -> Self {
+        if self.coverage == Coverage::Complete
+            && let [
+                cell @ (CellId::Slot(WrapperId {
+                    age: WrapperAge::Current,
+                    ..
+                })
+                | CellId::Projected(_, FieldKey::Field(_) | FieldKey::Payload { .. })),
+            ] = self.cells()
+        {
+            self.definite = Some(*cell);
+        }
+        self
+    }
+
+    pub(super) fn remap_allocations(
+        &mut self,
+        state: &BorrowState,
+        retirement: AllocationRetirement,
+    ) {
+        self.cells.remap(|cell| match cell {
+            CellId::Slot(wrapper) => CellId::Slot(retirement.remap_wrapper(wrapper)),
+            CellId::Projected(mut holder, key) => {
+                retirement.remap_id(state, &mut holder);
+                CellId::Projected(holder, key)
+            }
+        });
+        // A definite destination was already a singleton; a prior slot is never exact.
+        if self.definite.is_some() {
+            self.definite = match self.cells() {
+                [
+                    CellId::Slot(WrapperId {
+                        age: WrapperAge::Prior,
+                        ..
+                    }),
+                ] => None,
+                [cell] => Some(*cell),
+                _ => unreachable!("remapping cannot add a destination to a singleton"),
+            };
+        }
+    }
+}
+
+/// A slot or a captured alias supplied by a definition or an entry fixture.
+pub(super) enum BindingSpec {
+    Slot,
+    Link {
+        source: WrapperId,
+        writable: bool,
+    },
+    Projected {
+        addresses: AddressSet,
+        origin: WrapperId,
+        writable: bool,
+        isolated: bool,
+        route_roots: RootSet,
+    },
+    #[cfg(test)]
+    Alias {
+        addresses: AddressSet,
+        route_roots: RootSet,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BindingTarget {
+    OwnSlot,
+    Link(WrapperId),
+    Projected(AllocId, FieldKey),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Origin {
+    wrapper: WrapperId,
+    isolated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BindingAlt {
+    target: BindingTarget,
+    origin: Option<Origin>,
+    writable: bool,
+}
+
+const OWN_SLOT: BindingAlt = BindingAlt {
+    target: BindingTarget::OwnSlot,
+    writable: true,
+    origin: None,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BindingRow {
+    wrapper: WrapperId,
+    alts: SmallSet<BindingAlt>,
+    coverage: Coverage,
+    /// Coarse provenance for overlap checks; typed alternatives determine destinations.
+    route_roots: RootSet,
+    /// Slot provenance when the local's may-set cannot describe the owned cell on its own.
+    slot_roots: Option<RootSet>,
+}
+
+impl BindingRow {
+    fn union_alts(&mut self, incoming: &[BindingAlt]) {
+        if incoming
+            .iter()
+            .all(|alt| self.alts.as_slice().contains(alt))
+        {
+            return;
+        }
+        let mut alts = SmallSet::from_iter(self.alts.as_slice().iter().chain(incoming).copied());
+        if let SmallSet::Many(items) = &mut alts {
+            items.dedup_by(|later, earlier| {
+                if later.target != earlier.target || later.origin != earlier.origin {
+                    return false;
+                }
+                earlier.writable &= later.writable;
+                true
+            });
+            if let [only] = items.as_slice() {
+                alts = SmallSet::One(*only);
+            }
+        }
+        self.alts = alts;
+    }
+
+    fn has_slot(&self) -> bool {
+        self.alts.as_slice().contains(&OWN_SLOT)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Init {
+    No,
+    Yes,
+    Maybe,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct CapturedValue {
+    pub values: Vec<StoredValue>,
+    pub views: Vec<AllocId>,
+}
+
+impl CapturedValue {
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        for value in &mut self.values {
+            retirement.remap_value(state, value);
+        }
+        for view in &mut self.views {
+            retirement.remap_id(state, view);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Replacement {
+    May,
+    Must,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum TypedStore {
+    Write(TypedWrite),
+    EraseFamily {
+        receivers: Vec<AllocId>,
+        coverage: Coverage,
+        keys: EntryFamilies,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TypedWrite {
+    addresses: AddressSet,
+    value: CapturedValue,
+    replace: Replacement,
+    distinct_occurrence: bool,
+    observer: Option<(usize, bool)>,
+    slot_roots: Option<RootSet>,
+    batch_receiver: bool,
+    explicit_slot_payload: bool,
+}
+
+impl TypedStore {
+    pub(super) fn write_projected(
+        holders: impl IntoIterator<Item = AllocId>,
+        key: FieldKey,
+        coverage: Coverage,
+        value: CapturedValue,
+        distinct_occurrence: bool,
+    ) -> Self {
+        Self::Write(TypedWrite {
+            addresses: AddressSet::from_cells(
+                holders
+                    .into_iter()
+                    .map(|holder| CellId::Projected(holder, key)),
+                coverage,
+            ),
+            value,
+            replace: Replacement::May,
+            distinct_occurrence,
+            observer: None,
+            slot_roots: None,
+            batch_receiver: true,
+            explicit_slot_payload: false,
+        })
+    }
+
+    pub(super) fn write_cells(addresses: AddressSet, value: CapturedValue) -> Self {
+        Self::Write(TypedWrite {
+            addresses,
+            value,
+            replace: Replacement::May,
+            distinct_occurrence: false,
+            observer: None,
+            slot_roots: None,
+            batch_receiver: false,
+            explicit_slot_payload: false,
+        })
+    }
+
+    pub(super) fn write_through(
+        addresses: AddressSet,
+        value: CapturedValue,
+        replace: Replacement,
+        actor: usize,
+    ) -> Self {
+        Self::Write(TypedWrite {
+            addresses,
+            value,
+            replace,
+            distinct_occurrence: true,
+            observer: (replace == Replacement::Must).then_some((actor, false)),
+            slot_roots: None,
+            batch_receiver: false,
+            explicit_slot_payload: false,
+        })
+    }
+
+    pub(super) fn receive_result(
+        addresses: AddressSet,
+        value: CapturedValue,
+        actor: usize,
+        readonly: bool,
+    ) -> Self {
+        Self::Write(TypedWrite {
+            addresses,
+            value,
+            replace: Replacement::Must,
+            distinct_occurrence: true,
+            observer: Some((actor, readonly)),
+            slot_roots: None,
+            batch_receiver: false,
+            explicit_slot_payload: false,
+        })
+    }
+
+    pub(super) fn replace_cells(addresses: AddressSet, value: CapturedValue) -> Self {
+        let Self::Write(mut write) = Self::write_cells(addresses, value) else {
+            unreachable!()
+        };
+        write.replace = Replacement::Must;
+        write.distinct_occurrence = true;
+        Self::Write(write)
+    }
+
+    pub(super) fn with_slot_roots(mut self, roots: RootSet) -> Self {
+        if let Self::Write(write) = &mut self {
+            write.slot_roots = Some(roots);
+        }
+        self
+    }
+
+    pub(super) fn with_explicit_slot_payload(mut self) -> Self {
+        if let Self::Write(write) = &mut self {
+            write.explicit_slot_payload = true;
+        }
+        self
+    }
+
+    pub(super) fn with_actor_observation(mut self, actor: usize) -> Self {
+        if let Self::Write(write) = &mut self {
+            write.observer = Some((actor, false));
+        }
+        self
+    }
+
+    pub(super) fn captures_slot(&self, local: usize) -> bool {
+        matches!(self, Self::Write(write)
+            if write.addresses.cells().contains(&CellId::Slot(WrapperId::current(local))))
+    }
+
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        match self {
+            Self::Write(TypedWrite {
+                addresses, value, ..
+            }) => {
+                addresses.remap_allocations(state, retirement);
+                if let Some(CellId::Projected(holder, _)) = addresses.definite()
+                    && !state.alloc_singular(holder)
+                {
+                    addresses.definite = None;
+                }
+                value.remap(state, retirement);
+            }
+            Self::EraseFamily { receivers, .. } => {
+                for receiver in receivers {
+                    retirement.remap_id(state, receiver);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EntryFamilies {
+    Elements,
+    MapEntries,
+}
+
+/// Keep captures borrowed unless retirement changes at least one identity.
+pub(super) fn remap_invoke_capture<T: Copy + PartialEq>(
+    capture: &[T],
+    remap: impl Fn(T) -> T,
+) -> Cow<'_, [T]> {
+    for (index, &original) in capture.iter().enumerate() {
+        let rebased = remap(original);
+        if rebased != original {
+            let mut result = Vec::with_capacity(capture.len());
+            result.extend_from_slice(&capture[..index]);
+            result.push(rebased);
+            result.extend(capture[index + 1..].iter().copied().map(remap));
+            return Cow::Owned(result);
+        }
+    }
+    Cow::Borrowed(capture)
+}
+
+/// Read-only access to binding role, route evidence and projected addresses.
+#[derive(Clone, Copy)]
+pub(super) struct BindingView<'a> {
+    state: &'a BorrowState,
+    local: usize,
+}
+
+impl<'a> BindingView<'a> {
+    fn local_state(self) -> &'a LocalState {
+        &self.state.locals[self.local]
+    }
+
+    pub(super) fn mode(self) -> LocalMode {
+        let init = self.local_state().init;
+        if init == Init::No {
+            return LocalMode::UNINIT;
+        }
+        let mut mode = match self.state.binding_row(WrapperId::current(self.local)) {
+            None => LocalMode::SLOT,
+            Some(row) if !row.has_slot() => LocalMode::ALIAS,
+            Some(row) if row.coverage == Coverage::Partial || row.alts.as_slice().len() > 1 => {
+                LocalMode::SLOT.union(LocalMode::ALIAS)
+            }
+            Some(_) => LocalMode::SLOT,
+        };
+        if init == Init::Maybe {
+            mode = mode.union(LocalMode::UNINIT);
+        }
+        mode
+    }
+
+    pub(super) fn is_alias_only(self) -> bool {
+        let mode = self.mode();
+        mode.contains(LocalMode::ALIAS) && !mode.contains(LocalMode::SLOT)
+    }
+
+    pub(super) fn value_roots(self) -> &'a RootSet {
+        &self.local_state().value_roots
+    }
+
+    pub(super) fn derivation(self) -> &'a RootSet {
+        &self.local_state().derived_from_roots
+    }
+
+    pub(super) fn direct_slots(self) -> RootSet {
+        let mut roots = RootSet::empty(self.state.locals.len());
+        if self.mode().contains(LocalMode::ALIAS) {
+            for &cell in self.state.resolve_cells(self.local).cells() {
+                if let CellId::Slot(wrapper) = cell
+                    && wrapper.age == WrapperAge::Current
+                    && wrapper.local != self.local
+                {
+                    roots.insert(wrapper.local);
+                }
+            }
+        }
+        roots
+    }
+
+    pub(super) fn route_roots(self) -> RootSet {
+        self.state.binding_route_roots(self.local)
+    }
+
+    pub(super) fn aliases_root(self, root: usize) -> bool {
+        self.direct_slots().contains(root) || self.route_roots().contains(root)
+    }
+
+    pub(super) fn has_observed_roots(self) -> bool {
+        self.mode().contains(LocalMode::ALIAS) || !self.value_roots().is_empty()
+    }
+
+    /// Coarse access roots include the route through a projected holder, not just its address.
+    pub(super) fn include_overlap_roots(self, roots: &mut RootSet) {
+        if self.mode().contains(LocalMode::SLOT) {
+            roots.insert(self.local);
+        }
+        roots.union_with(&self.direct_slots());
+        roots.union_with(&self.route_roots());
+    }
+
+    pub(super) fn overlap_roots(self) -> RootSet {
+        let mut roots = RootSet::empty(self.state.locals.len());
+        self.include_overlap_roots(&mut roots);
+        roots
+    }
+}
 
 // WHAT: Stable intra-function position key used by move/borrow decisions.
 // WHY: Source line numbers are not precise enough when several accesses share a line.
@@ -299,30 +867,42 @@ impl BorrowState {
     }
 
     pub(super) fn initialize_parameter(&mut self, local_index: usize) {
-        let local_count = self.locals.len();
-        self.update_local_state(local_index, LocalState::slot(local_count));
+        self.set_binding(
+            local_index,
+            BindingSpec::Slot,
+            RootSet::empty(self.locals.len()),
+            RootSet::empty(self.locals.len()),
+        );
     }
 
-    pub(super) fn local_state(&self, local_index: usize) -> &LocalState {
-        &self.locals[local_index]
+    pub(super) fn binding(&self, local: usize) -> BindingView<'_> {
+        BindingView { state: self, local }
     }
 
-    /// Mutable access for transfer rules that rewrite a binding's observed value.
-    ///
-    /// WHY: a write through an alias replaces the value stored in the referent cell, so both the
-    /// alias and the cell must observe the same new value provenance.
-    pub(super) fn local_state_mut(&mut self, local_index: usize) -> &mut LocalState {
-        &mut self.locals[local_index]
+    pub(super) fn binding_mode(&self, local: usize) -> LocalMode {
+        self.binding(local).mode()
+    }
+
+    pub(super) fn set_binding(
+        &mut self,
+        local: usize,
+        spec: BindingSpec,
+        value_roots: RootSet,
+        derived_from_roots: RootSet,
+    ) {
+        self.update_local_state(
+            local,
+            LocalState {
+                derived_from_roots,
+                ..LocalState::slot_from_value_roots(value_roots)
+            },
+        );
+        self.install_binding_spec(local, spec);
     }
 
     /// The value-provenance roots a local's current binding keeps alive.
     ///
-    /// A definite slot stores the current value in its own binding cell. If that value aliases an
-    /// older allocation, the older roots replace the slot's own allocation root. A SLOT | ALIAS
-    /// join remains conservative because either binding representation may have reached the join.
-    /// These roots describe allocation provenance for value and lifetime reasoning. Binding-cell
-    /// overlap and write targets are separate facts in `direct_alias_roots` and
-    /// `write_target_roots`, and are not reported here.
+    /// Allocation provenance is separate from the cells that access designates.
     pub(super) fn effective_roots(&self, local_index: usize) -> RootSet {
         let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
         let mut roots = RootSet::empty(self.locals.len());
@@ -355,7 +935,10 @@ impl BorrowState {
     pub(super) fn derived_roots_from_source(&self, source_index: usize) -> RootSet {
         let source_state = &self.locals[source_index];
         let mut roots = source_state.derived_from_roots.clone();
-        if source_state.is_alias_only() {
+        if self.binding(source_index).is_alias_only()
+            && source_state.init == Init::Yes
+            && self.resolve_cells(source_index).coverage == Coverage::Complete
+        {
             roots.insert(source_index);
         }
         roots
@@ -365,68 +948,51 @@ impl BorrowState {
     /// value roots. The set builder and the membership test both read this one rule.
     fn effective_root_sources(&self, local_index: usize) -> (bool, bool) {
         let state = &self.locals[local_index];
-        let has_slot_binding = state.mode.contains(LocalMode::SLOT);
-        let has_alias_binding = state.mode.contains(LocalMode::ALIAS);
+        let mode = self.binding_mode(local_index);
+        let has_slot_binding = mode.contains(LocalMode::SLOT);
+        let has_alias_binding = mode.contains(LocalMode::ALIAS);
         let has_value_roots = !state.value_roots.is_empty();
         (
-            has_slot_binding && (has_alias_binding || !has_value_roots),
+            has_slot_binding && self.implicit_slot_provenance(local_index),
             has_alias_binding || (has_slot_binding && has_value_roots),
         )
     }
 
-    /// Cells a place rooted at `local_index` designates for access.
-    ///
-    /// WHAT: the binding's own cell when it owns storage, plus the cells it aliases and the
-    ///       storage its writes target.
-    /// WHY: a definite slot designates its own cell, a whole-binding alias designates its
-    ///      referents, and a mutable alias of a projection designates the containing allocation
-    ///      observed when it was formed.
-    pub(super) fn designated_cells(&self, local_index: usize) -> RootSet {
-        let state = &self.locals[local_index];
-        let mut cells = RootSet::empty(self.locals.len());
-        if state.mode.contains(LocalMode::SLOT) {
-            cells.insert(local_index);
+    fn implicit_slot_provenance(&self, local: usize) -> bool {
+        match self.binding_row(WrapperId::current(local)) {
+            None => {
+                self.locals[local].init != Init::No && self.locals[local].value_roots.is_empty()
+            }
+            Some(row) => row.slot_roots.as_ref().is_some_and(RootSet::is_empty),
         }
-        cells.union_with(&state.direct_alias_roots);
-        cells.union_with(&state.write_target_roots);
-        cells
-    }
-
-    /// Cells a write through `local_index` treats as its storage.
-    ///
-    /// WHY: a produced alias has no recorded referent cell, so its value provenance names the
-    /// storage it would write. Both the update check and write-through state refresh need this
-    /// one fallback.
-    pub(super) fn write_storage_cells(&self, local_index: usize) -> RootSet {
-        let mut cells = self.designated_cells(local_index);
-        if cells.is_empty() {
-            cells.union_with(&self.locals[local_index].value_roots);
-        }
-        cells
     }
 
     pub(super) fn update_local_state(&mut self, local_index: usize, new_state: LocalState) {
+        self.remove_current_row(local_index);
         self.locals[local_index] = new_state;
     }
 
-    /// Join `other` into this state, reporting whether this state grew.
-    ///
-    /// WHY: the dataflow engine joins at every CFG edge. Joining in place avoids allocating a
-    /// whole O(locals²) state per edge only to compare it with the existing one.
-    pub(super) fn join_in_place(&mut self, other: &Self) -> bool {
-        // The layer reads both sides' roots, so it joins before the locals do.
-        let mut changed = self.join_layer(other);
-        for (left, right) in self.locals.iter_mut().zip(&other.locals) {
-            let mode = left.mode.union(right.mode);
-            changed |= mode != left.mode;
-            left.mode = mode;
+    fn join_local_facts(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+        for index in 0..self.locals.len() {
+            let implicit = !other.locals[index].value_roots.is_empty()
+                && self.implicit_slot_provenance(index)
+                || !self.locals[index].value_roots.is_empty()
+                    && other.implicit_slot_provenance(index);
+            let left = &mut self.locals[index];
+            let right = &other.locals[index];
+            let init = if left.init == right.init {
+                left.init
+            } else {
+                Init::Maybe
+            };
+            changed |= init != left.init;
+            left.init = init;
             changed |= left.value_roots.union_with(&right.value_roots);
-            changed |= left
-                .direct_alias_roots
-                .union_with(&right.direct_alias_roots);
-            changed |= left
-                .write_target_roots
-                .union_with(&right.write_target_roots);
+            if implicit && !left.value_roots.contains(index) {
+                left.value_roots.insert(index);
+                changed = true;
+            }
             // Derivation is a must fact: every incoming path must have derived from the alias.
             changed |= left
                 .derived_from_roots
@@ -435,16 +1001,7 @@ impl BorrowState {
         changed
     }
 
-    /// Reset locals outside the lexical visibility mask and drop their roots from visible locals.
-    ///
-    /// WHY: runs on every CFG edge, so it rewrites each local in place rather than cloning and
-    /// comparing every local's root sets. Value provenance, direct alias cells, write targets and
-    /// the derivation ledger are independent facts: a projected value keeps provenance from a
-    /// rebindable cell without observing that cell, and an alias of a scalar cell can name an
-    /// immutable origin. A root from any set that left visibility must go, and a binding with no
-    /// observable root has nothing left to observe even if its ledger names a visible binding.
-    /// Joining two states already narrowed to one mask stays narrowed because no set regains a
-    /// pruned bit.
+    /// Hide names outside the lexical mask, without invalidating retained storage.
     pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
         // WHY: the sweep is O(locals) and runs on every CFG edge. A mask that covers every local
         // (a function whose blocks all sit in one lexical region) hides none and keeps every root,
@@ -455,32 +1012,12 @@ impl BorrowState {
         self.narrow_layer(visible_mask);
 
         for local_index in 0..self.locals.len() {
-            let has_layer_binding = self.has_layer_binding(local_index);
             let local = &mut self.locals[local_index];
             if !visible_mask.contains(local_index) {
-                local.reset(LocalMode::UNINIT);
-                continue;
-            }
-
-            // A local with no root in any set has nothing to prune, so keep its recorded binding
-            // modes: a reset here would drop the rootless SLOT | ALIAS alternative the merge
-            // established, and no root evidence rules it out.
-            if !local.has_alias_roots() && local.derived_from_roots.is_empty() {
-                continue;
-            }
-
-            local.value_roots.intersect_with(visible_mask);
-            local.direct_alias_roots.intersect_with(visible_mask);
-            local.write_target_roots.intersect_with(visible_mask);
-            local.derived_from_roots.intersect_with(visible_mask);
-
-            if !local.has_alias_roots() && !has_layer_binding {
-                let mode = if local.mode.contains(LocalMode::SLOT) {
-                    LocalMode::SLOT
-                } else {
-                    LocalMode::UNINIT
-                };
-                local.reset(mode);
+                local.reset();
+            } else {
+                local.value_roots.intersect_with(visible_mask);
+                local.derived_from_roots.intersect_with(visible_mask);
             }
         }
     }
@@ -495,15 +1032,16 @@ impl BorrowState {
                 .iter_ones()
                 .map(|root_index| local_ids[root_index])
                 .collect::<Vec<_>>();
-            let write_targets = local_state
-                .write_target_roots
+            let write_targets = self
+                .binding(index)
+                .route_roots()
                 .iter_ones()
                 .map(|root_index| local_ids[root_index])
                 .collect::<Vec<_>>();
 
             locals.push(LocalBorrowSnapshot {
                 local: local_ids[index],
-                mode: local_state.mode,
+                mode: self.binding_mode(index),
                 alias_roots,
                 write_targets,
             });
@@ -515,25 +1053,9 @@ impl BorrowState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LocalState {
-    // Binding storage mode and value provenance are deliberately separate. A call result has a
-    // SLOT binding even when its current value aliases roots owned by an argument.
-    pub mode: LocalMode,
-    // Allocation provenance: the older allocations this binding's value observes. Lifetime and
-    // value analysis follow these roots.
+    init: Init,
+    // Allocation provenance, never a destination.
     pub value_roots: RootSet,
-    // Binding-cell overlap: the definite slots this binding aliases as a whole binding. These
-    // cells decide whole-binding exclusivity and need not be contained in `value_roots`.
-    pub direct_alias_roots: RootSet,
-    // Storage a write through this binding targets, plus targets an immutable alias inherits
-    // from a projection-free alias chain as overlap identity. A whole-binding alias target is the
-    // source binding cell. A projected alias target is the union of the source binding cell and
-    // the containing allocations the source value observed when the alias formed: the cell keeps
-    // the pre-correction conservative identity (a fresh allocation is represented by its owning
-    // cell or by empty provenance, and that identity does not survive every join or transport),
-    // while the allocation roots publish and overlap the containing allocation family. Immutable
-    // bindings cannot write through, but inherited targets still identify the storage they
-    // overlap when a mutable alias of the chain replaces it.
-    pub write_target_roots: RootSet,
     // Must-set of alias bindings this binding was created through, with the full transitive
     // chain. Reads through a derived binding are not foreign accesses to a mutably active alias
     // in that chain. Joins intersect this set: a path that did not derive from the alias loses
@@ -542,85 +1064,34 @@ pub(super) struct LocalState {
 }
 
 impl LocalState {
-    /// A binding of `mode` with no roots over `local_count` locals.
-    fn root_free(mode: LocalMode, local_count: usize) -> Self {
+    fn root_free(init: Init, local_count: usize) -> Self {
         Self {
-            mode,
+            init,
             value_roots: RootSet::empty(local_count),
-            direct_alias_roots: RootSet::empty(local_count),
-            write_target_roots: RootSet::empty(local_count),
             derived_from_roots: RootSet::empty(local_count),
         }
     }
 
     pub(super) fn uninit(local_count: usize) -> Self {
-        Self::root_free(LocalMode::UNINIT, local_count)
+        Self::root_free(Init::No, local_count)
     }
 
     pub(super) fn slot(local_count: usize) -> Self {
-        Self::root_free(LocalMode::SLOT, local_count)
+        Self::root_free(Init::Yes, local_count)
     }
 
-    pub(super) fn slot_with_value_roots(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
-        let local_count = value_roots.bit_len();
+    pub(super) fn slot_from_value_roots(value_roots: RootSet) -> Self {
+        let count = value_roots.bit_len();
         Self {
             value_roots,
-            direct_alias_roots,
-            ..Self::root_free(LocalMode::SLOT, local_count)
+            ..Self::slot(count)
         }
     }
 
-    /// A projection-free alias: it observes the source binding cell, so its write target is that
-    /// same cell. Test fixtures seed joins with this shape.
-    #[cfg(test)]
-    pub(super) fn alias_with_direct(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
-        let local_count = value_roots.bit_len();
-        Self {
-            value_roots,
-            direct_alias_roots: direct_alias_roots.clone(),
-            write_target_roots: direct_alias_roots,
-            ..Self::root_free(LocalMode::ALIAS, local_count)
-        }
-    }
-
-    /// An alias whose write target differs from its whole-binding overlap identity.
-    ///
-    /// WHY: a whole-binding alias writes through the source binding cells, while an alias created
-    /// from a projected place writes into the containing allocation it observed at binding time.
-    pub(super) fn alias_with_cells(
-        value_roots: RootSet,
-        direct_alias_roots: RootSet,
-        write_target_roots: RootSet,
-    ) -> Self {
-        let local_count = value_roots.bit_len();
-        Self {
-            value_roots,
-            direct_alias_roots,
-            write_target_roots,
-            ..Self::root_free(LocalMode::ALIAS, local_count)
-        }
-    }
-
-    /// Reset to a root-free binding of `mode` in place.
-    fn reset(&mut self, mode: LocalMode) {
-        self.mode = mode;
+    fn reset(&mut self) {
+        self.init = Init::No;
         self.value_roots.clear();
-        self.direct_alias_roots.clear();
-        self.write_target_roots.clear();
         self.derived_from_roots.clear();
-    }
-
-    /// Whether this binding observes any allocation root: value provenance, a whole-binding cell
-    /// or a write target. Cell-only aliases still take part in access and liveness checks. The
-    /// derivation ledger is not an observed allocation, so it does not keep a binding alive.
-    pub(super) fn has_alias_roots(&self) -> bool {
-        !self.value_roots.is_empty()
-            || !self.direct_alias_roots.is_empty()
-            || !self.write_target_roots.is_empty()
-    }
-
-    pub(super) fn is_alias_only(&self) -> bool {
-        self.mode.contains(LocalMode::ALIAS) && !self.mode.contains(LocalMode::SLOT)
     }
 }
 

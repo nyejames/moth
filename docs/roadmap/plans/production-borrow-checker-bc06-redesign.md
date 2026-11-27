@@ -19,6 +19,36 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Next task | Review the [revised capture sequence](#proposed-sequence) before resuming production implementation. No Stage 5 or B2 checkpoint, no release guard and no shared C4 runtime HIR lowering. Preserve both C4 fixture expectations. |
 | Latest evidence | [Retarget and mixed-exit controls](#retarget-and-mixed-exit-controls) pin summary failures. The [Stage 5 architecture review](#stage-5-architecture-review) compares frozen B1, pre-capture B2 and explicit sequencing. |
 
+### Approved B1 correctness differential: canonical permission meet
+
+When `~slot = place` retargets an independent mutable slot, it acquires an
+alias to the operand's place. Follow the canonical
+[access rules](../../developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf):
+the resolved place permits mutation only if every binding, alias link and
+projection restriction along the path permits it. An existing write-through
+alias or projected destination only reads the operand's value, so it doesn't
+need mutation permission on that operand.
+
+`catch |err|:` introduces an immutable binding. Mutable compiler scratch
+doesn't grant authority through `err` or through an alias such as
+`saved Failure = err`. B1 accepted those catch retargets because it checked
+the scratch's mutability. The owner approved rejecting `~code = err.code`
+and `~msg = saved.message` with `MOTH-BORROW-0007`, as for retargeting to
+`pair.left` through an immutable `pair`. This corrects B1 rather than
+relaxing the source rules.
+
+Correct affected corpus fixtures case by case with explicit `copy` where
+they intend independent value replacement, as in `~code = copy err.code`.
+80 existing runtime fixtures needed this. Each edit only adds `copy` to
+the retargeting operand and leaves expectations and rendered output
+unchanged. The fixture commit keeps the original inputs in history. The
+recorded pre-change verdict snapshot and the archived comparator evidence
+attribute each changed verdict to the permission correction or to the
+fixture edit. Seven new fixtures pin the rule for ordinary bindings,
+builtin and custom catch bindings, saved error aliases, explicit copies,
+write-through from read-only operands and compiler transport. The
+benchmark thresholds don't change.
+
 ### Retarget and mixed-exit controls
 
 C1 and the canonical [access reference](../../developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf)

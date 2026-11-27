@@ -5,7 +5,8 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, BorrowState, FieldKey, FunctionLayout, FutureUseKind, MutationTarget, RootSet,
+    AddressSet, AllocId, BorrowState, CellId, Coverage, FieldKey, FunctionLayout, FutureUseKind,
+    MutationTarget, RootSet, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
 use crate::compiler_frontend::compiler_messages::{
@@ -34,21 +35,21 @@ impl PlaceAccess<'_> {
         local: usize,
         root: usize,
     ) -> bool {
-        let projected = !self.cells.is_empty() && check.state.alias_cells_cover_place(local);
-        let binding = check.state.local_state(local);
-        if !projected
-            && (binding.direct_alias_roots.contains(root) || binding.write_target_roots.contains(root))
-        {
+        let binding = check.state.binding(local);
+        let projected =
+            !self.cells.is_empty() && binding.projected_coverage() == Coverage::Complete;
+        if !projected && binding.aliases_root(root) {
             return false;
         }
-        if projected && check.state.alias_cells_touch(local, self.cells, self.values) {
+        if projected && binding.projected_cells_touch(self.cells, self.values) {
             return false;
         }
         if projected && !check.layout.local_has_in_place_mutation_surface[local] {
             return true;
         }
         let (ids, layer_only) = check.state.local_alloc_ids(local);
-        !self.values.is_empty() && (projected || layer_only)
+        !self.values.is_empty()
+            && (projected || layer_only)
             && !ids.is_empty()
             && !check.state.alloc_reaches(&ids, true, self.values)
     }
@@ -60,9 +61,11 @@ impl PlaceAccess<'_> {
         held: &[AllocId],
         layer_only: bool,
     ) -> bool {
-        check.state.alias_cells_touch(local, self.cells, self.values)
-            || ((!check.state.alias_cells_cover_place(local)
-                || check.layout.local_has_in_place_mutation_surface[local])
+        let binding = check.state.binding(local);
+        ((!self.cells.is_empty() || self.values.iter().any(|value| value.deep))
+            && binding.projected_cells_touch(self.cells, self.values))
+            || ((check.layout.local_has_in_place_mutation_surface[local]
+                || binding.projected_coverage() != Coverage::Complete)
                 && check.state.alloc_reaches(held, layer_only, self.values))
     }
 }
@@ -117,18 +120,15 @@ pub(super) fn check_shared_access_with_place(
             root_index,
             check.actor_index_hint,
             &|candidate| {
-                check.state.alias_cells_cover_place(candidate)
+                let binding = check.state.binding(candidate);
+                binding.projected_coverage() == Coverage::Complete
                     && place.is_some_and(|place| {
                         // Different allocations after a rebind do not discharge the
                         // conservative holder-cell rule. Refine it only within one holder.
-                        let uses_holder = check
-                            .state
-                            .local_state(candidate)
-                            .write_target_roots
-                            .contains(root_index);
+                        let uses_holder = binding.route_roots().contains(root_index);
                         (!uses_holder
                             || matches!(place.cells, [(holder, _)]
-                                if check.state.alias_cells_share_singular_holder(candidate, *holder)))
+                                if binding.projected_cells_share_singular_holder(*holder)))
                             && place.is_disjoint_from(check, candidate, root_index)
                     })
             },
@@ -234,7 +234,8 @@ pub(super) fn check_mutable_access_with_targets(
         let actor_index = check.actor_index_hint.unwrap_or(root_index);
         let disjoint = |candidate| {
             candidate != root_index
-                && projected.is_some_and(|place| place.is_disjoint_from(check, candidate, root_index))
+                && projected
+                    .is_some_and(|place| place.is_disjoint_from(check, candidate, root_index))
         };
         let alias_count = active_alias_count_for_root(
             &alias_activity,
@@ -349,19 +350,29 @@ pub(super) fn probe_mutable_access(
     }
 }
 
-/// Reject a mutation of `targets` while another active binding reaches one through the layer.
-///
-/// WHAT: candidates follow the root rule's exemptions: the bindings the actor aliases, the
-///       derivation ledger in both directions, and inactive bindings.
-/// WHY: root provenance already rejects overlaps it can name. This check only adds overlaps
-///      that need an explicit holder edge or a binding override to see.
+#[derive(Clone, Copy)]
+pub(super) enum LayerConflictAccess<'a> {
+    ObservedValue,
+    CapturedBinding(&'a AddressSet),
+    CapturedProjection(&'a AddressSet),
+}
+
+/// Reject a mutation while another active binding observes the captured cell or reaches a
+/// mutated allocation through the layer. Coarse allocation overlap retains the route and
+/// derivation exemptions; an exact captured-cell overlap only exempts use through a parent.
 pub(super) fn check_layer_conflict(
     check: &mut AccessCheckContext<'_, '_>,
     actor_index: usize,
     place: PlaceAccess<'_>,
-    through_observed_value: bool,
+    access: LayerConflictAccess<'_>,
 ) -> Result<(), BorrowCheckError> {
-    if place.values.is_empty() && place.cells.is_empty() {
+    let captured_write = match access {
+        LayerConflictAccess::ObservedValue => None,
+        LayerConflictAccess::CapturedBinding(cells)
+        | LayerConflictAccess::CapturedProjection(cells) => Some(cells),
+    };
+    let has_layer_targets = !place.values.is_empty() || !place.cells.is_empty();
+    if !has_layer_targets && captured_write.is_none() {
         return Ok(());
     }
     let activity = AliasActivityContext {
@@ -376,32 +387,86 @@ pub(super) fn check_layer_conflict(
             Some(actor_index),
         ),
     };
-    let actor_state = check.state.local_state(actor_index);
+    let actor = check.state.binding(actor_index);
+    let mut actor_roots = None;
     for candidate_index in 0..check.layout.local_count() {
         if candidate_index == actor_index {
             continue;
         }
-        let candidate = check.state.local_state(candidate_index);
-        if !candidate.mode.contains(LocalMode::SLOT) && !candidate.mode.contains(LocalMode::ALIAS) {
+        let candidate = check.state.binding(candidate_index);
+        let mode = candidate.mode();
+        if !mode.contains(LocalMode::SLOT) && !mode.contains(LocalMode::ALIAS) {
             continue;
         }
-        let keeps_receiver_stable = check.state.stability_overlaps(candidate_index, place.values)
-            && check.layout.future_use_kind(check.block_id, candidate_index, check.current_order - 1)
-                != FutureUseKind::None;
+        let keeps_receiver_stable = check
+            .state
+            .stability_overlaps(candidate_index, place.values)
+            && check.layout.future_use_kind(
+                check.block_id,
+                candidate_index,
+                check.current_order - 1,
+            ) != FutureUseKind::None;
         if !keeps_receiver_stable {
-            if actor_state.direct_alias_roots.contains(candidate_index)
-                || actor_state.write_target_roots.contains(candidate_index)
-                || actor_state.derived_from_roots.contains(candidate_index)
-                || candidate.derived_from_roots.contains(actor_index)
-                || !is_local_active_for_alias_conflict(&activity, candidate_index, candidate_index, false)
+            if actor.derivation().contains(candidate_index)
+                || !is_local_active_for_alias_conflict(
+                    &activity,
+                    candidate_index,
+                    candidate_index,
+                    false,
+                )
             {
                 continue;
             }
-            let (held, layer_only) = check.state.local_alloc_ids(candidate_index);
-            if (through_observed_value && check.state.detached_from(actor_index, &held))
-                || !place.overlaps(check, candidate_index, &held, layer_only)
-            {
-                continue;
+            let observes_captured_cell = mode.contains(LocalMode::ALIAS)
+                && captured_write.is_some_and(|written| {
+                    check
+                        .state
+                        .resolve_cells(candidate_index)
+                        .cells()
+                        .iter()
+                        .any(|cell| {
+                            // Current slots already participate in the root check. Compare Prior
+                            // slots as distinct occurrences, not by the name of the current slot.
+                            !matches!(
+                                cell,
+                                CellId::Slot(WrapperId {
+                                    age: WrapperAge::Current,
+                                    ..
+                                })
+                            ) && written.cells().binary_search(cell).is_ok()
+                        })
+                });
+            if !observes_captured_cell {
+                if !has_layer_targets
+                    || actor_roots
+                        .get_or_insert_with(|| {
+                            let mut roots = actor.route_roots();
+                            if let LayerConflictAccess::CapturedBinding(written) = access {
+                                // This local store already resolved the actor's terminal cells.
+                                for &cell in written.cells() {
+                                    if let CellId::Slot(wrapper) = cell
+                                        && wrapper.age == WrapperAge::Current
+                                    {
+                                        roots.insert(wrapper.local);
+                                    }
+                                }
+                            } else {
+                                roots.union_with(&actor.direct_slots());
+                            }
+                            roots
+                        })
+                        .contains(candidate_index)
+                    || candidate.derivation().contains(actor_index)
+                {
+                    continue;
+                }
+                let (held, layer_only) = check.state.local_alloc_ids(candidate_index);
+                if (!matches!(access, LayerConflictAccess::CapturedBinding(_))
+                    && check.state.detached_from(actor_index, &held))
+                    || !place.overlaps(check, candidate_index, &held, layer_only)
+                {
+                    continue;
+                }
             }
         }
         let diagnostics = &check.context.diagnostics;
@@ -435,16 +500,15 @@ pub(super) fn check_layer_shared_access(
             Some(actor_index),
         ),
     };
-    let actor = check.state.local_state(actor_index);
+    let actor = check.state.binding(actor_index);
     for candidate in 0..check.layout.local_count() {
         if candidate == actor_index
             || !check.layout.local_mutable[candidate]
             || !check
                 .state
-                .local_state(candidate)
-                .mode
+                .binding_mode(candidate)
                 .contains(LocalMode::ALIAS)
-            || actor.derived_from_roots.contains(candidate)
+            || actor.derivation().contains(candidate)
             || matches!(
                 check.context.diagnostics.local_origin_kind(check.layout.local_ids[candidate]),
                 Some(kind) if kind != HirLocalOriginKind::User
@@ -495,11 +559,8 @@ fn actor_aliases_root(
     actor_index: usize,
     root_index: usize,
 ) -> bool {
-    let actor_state = activity.state.local_state(actor_index);
-    actor_index != root_index
-        && actor_state.is_alias_only()
-        && (actor_state.direct_alias_roots.contains(root_index)
-            || actor_state.write_target_roots.contains(root_index))
+    let actor = activity.state.binding(actor_index);
+    actor_index != root_index && actor.is_alias_only() && actor.aliases_root(root_index)
 }
 
 /// A reborrow can exercise the exclusive access it derives from. The reverse is not true:
@@ -509,11 +570,11 @@ fn reborrow_uses_parent(
     actor_index: usize,
     candidate_index: usize,
 ) -> bool {
-    let actor = activity.state.local_state(actor_index);
-    actor.derived_from_roots.contains(candidate_index)
-        || (activity.state.alias_cells_cover_place(actor_index)
-            && actor.write_target_roots.contains(candidate_index)
-            && activity.state.local_state(candidate_index).mode == LocalMode::SLOT)
+    let actor = activity.state.binding(actor_index);
+    actor.derivation().contains(candidate_index)
+        || (actor.projected_coverage() == Coverage::Complete
+            && actor.route_roots().contains(candidate_index)
+            && activity.state.binding_mode(candidate_index) == LocalMode::SLOT)
 }
 
 fn active_alias_count_for_root(
@@ -591,8 +652,8 @@ fn active_mutable_alias_for_root(
         // Pure filters, so their order does not change which candidate is found. The bit tests
         // run first: the diagnostics lookup and the liveness check cost more, and this scan
         // visits every local on every mutable access.
-        let candidate_state = activity.state.local_state(candidate_index);
-        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_alias_roots() {
+        let candidate = activity.state.binding(candidate_index);
+        if !candidate.mode().contains(LocalMode::ALIAS) || !candidate.has_observed_roots() {
             continue;
         }
 
@@ -606,8 +667,8 @@ fn active_mutable_alias_for_root(
         if actor_index_hint.is_some_and(|reader| {
             activity
                 .state
-                .local_state(reader)
-                .derived_from_roots
+                .binding(reader)
+                .derivation()
                 .contains(candidate_index)
         }) {
             continue;
@@ -688,20 +749,20 @@ fn conflicting_active_local_for_root(
 }
 
 // WHAT: Whether a candidate observes or writes the root's cell or allocation, for alias scans.
-// WHY: direct aliases of a value-backed slot keep the cell in `direct_alias_roots` while their
-//      value provenance names only older allocation roots; an alias of a projection keeps only a
-//      write target. Every form participates.
+// WHY: a whole-binding alias can observe a value-backed slot's cell even when its value
+//      provenance names only older allocations. A projected alias can also overlap by its route.
 fn candidate_contains_root(
     activity: &AliasActivityContext<'_>,
     candidate_index: usize,
     root_index: usize,
 ) -> bool {
-    let candidate = activity.state.local_state(candidate_index);
     activity
         .state
         .effective_root_contains(candidate_index, root_index)
-        || candidate.direct_alias_roots.contains(root_index)
-        || candidate.write_target_roots.contains(root_index)
+        || activity
+            .state
+            .binding(candidate_index)
+            .aliases_root(root_index)
 }
 
 // WHAT: Decides whether a candidate alias observes a write to the root of this binding cell.
@@ -718,8 +779,8 @@ fn alias_observes_cell_write(
     !direct_alias_only
         || activity
             .state
-            .local_state(candidate_index)
-            .direct_alias_roots
+            .binding(candidate_index)
+            .direct_slots()
             .contains(root_index)
 }
 
@@ -731,13 +792,13 @@ fn is_local_active_for_alias_conflict(
     local_index: usize,
     strict_move_exclusivity: bool,
 ) -> bool {
-    let local_state = activity.state.local_state(local_index);
+    let binding = activity.state.binding(local_index);
 
     // Slot-backed holders, including a root-only transport slot with no value_roots, do not
     // write through their own binding cell. Their linear last-use can include a mutually
     // exclusive handler, so decide activity from this CFG point even when a compiler-temp actor
     // uses linear expiry for source-binding aliases.
-    if !strict_move_exclusivity && !local_state.mode.contains(LocalMode::ALIAS) {
+    if !strict_move_exclusivity && !binding.mode().contains(LocalMode::ALIAS) {
         return activity.layout.future_use_kind(
             activity.block_id,
             local_index,
@@ -754,7 +815,7 @@ fn is_local_active_for_alias_conflict(
             .layout
             .local_is_expired(local_index, activity.current_order)
         {
-            if !local_state.has_alias_roots() || !activity.preserve_cfg_future_use_activity {
+            if !binding.has_observed_roots() || !activity.preserve_cfg_future_use_activity {
                 return true;
             }
 
@@ -768,7 +829,7 @@ fn is_local_active_for_alias_conflict(
             }
         }
 
-        if !local_state.has_alias_roots() {
+        if !binding.has_observed_roots() {
             return false;
         }
 
@@ -776,7 +837,7 @@ fn is_local_active_for_alias_conflict(
         // liveness treats a local assignment as a slot kill, so consult reachable
         // assignments separately without weakening slot rebinding or optional transfers.
         let source_mutable_alias = activity.layout.local_mutable[local_index]
-            && local_state.mode.contains(LocalMode::ALIAS)
+            && binding.mode().contains(LocalMode::ALIAS)
             && !matches!(
                 activity
                     .context
@@ -805,19 +866,19 @@ fn is_local_active_for_alias_conflict(
         }
 
         if strict_move_exclusivity {
-            return local_state.direct_alias_roots.contains(root_index)
+            return binding.direct_slots().contains(root_index)
                 || activity.layout.local_mutable[local_index];
         }
 
         return false;
     }
 
-    if !local_state.has_alias_roots() {
+    if !binding.has_observed_roots() {
         return false;
     }
 
     if strict_move_exclusivity {
-        return local_state.direct_alias_roots.contains(root_index)
+        return binding.direct_slots().contains(root_index)
             || activity.layout.local_mutable[local_index];
     }
 
@@ -875,8 +936,7 @@ fn local_alias_never_read(
     state: &BorrowState,
     local_index: usize,
 ) -> bool {
-    let local_state = state.local_state(local_index);
-    if !local_state.has_alias_roots() {
+    if !state.binding(local_index).has_observed_roots() {
         return false;
     }
 

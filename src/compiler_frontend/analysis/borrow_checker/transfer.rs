@@ -13,7 +13,7 @@ mod facts;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, BorrowState, FieldKey, FunctionLayout, LocalState, StoredValue,
+    AllocId, BorrowState, FieldKey, FunctionLayout, LocalState, StoredValue, TypedStore,
 };
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
@@ -35,7 +35,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use rustc_hash::FxHashMap;
 
-pub(super) use access::bind_call_result_ids;
 use access::{
     AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
     transfer_terminator,
@@ -66,20 +65,7 @@ pub(super) struct BorrowTransferContext<'a> {
 /// An allocation-layer effect captured before retiring a call's result bindings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InvokeLayerOp {
-    Store {
-        holders: Vec<AllocId>,
-        key: FieldKey,
-        values: Vec<StoredValue>,
-        views: Vec<AllocId>,
-        distinct_occurrence: bool,
-    },
-    /// Replace the mutable actual's caller cells on some paths of this outcome.
-    StoreCells {
-        slots: Vec<usize>,
-        fields: Vec<(AllocId, FieldKey)>,
-        values: Vec<StoredValue>,
-        views: Vec<AllocId>,
-    },
+    Store(TypedStore),
     Contribute {
         holder: AllocId,
         key: FieldKey,

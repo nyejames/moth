@@ -1,0 +1,20 @@
+Pair = | left I32, right I32 |
+Holder = | value ~I32 |
+Failure = | value I32 |
+
+load || -> I32, Failure!:
+    return! Failure(11)
+;
+
+pair = Pair(7, 2)
+slot ~= 0
+writer ~= slot
+~writer = pair.left
+
+holder ~= Holder(0)
+recovered = load() catch |err|:
+    ~holder.value = err.value
+    then 0
+;
+
+~[: source=[pair.left] alias=[slot] field=[holder.value]]

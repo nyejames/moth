@@ -2,7 +2,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FieldKey, LocalState, RootSet, StoredValue,
+    BindingSpec, BorrowState, CellId, FieldKey, RootSet, StoredValue, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
@@ -143,50 +143,48 @@ return source_a
         .expect("slot destination is in the layout");
 
     let mut state = BorrowState::new_uninitialized(layout.local_count());
-    let mut source_a_roots = RootSet::empty(layout.local_count());
-    source_a_roots.insert(root_a_index);
-    state.update_local_state(
-        source_a_index,
-        LocalState::alias_with_direct(source_a_roots.clone(), source_a_roots),
-    );
-    let mut source_b_roots = RootSet::empty(layout.local_count());
-    source_b_roots.insert(root_b_index);
-    state.update_local_state(
-        source_b_index,
-        LocalState::alias_with_direct(source_b_roots.clone(), source_b_roots),
-    );
-    state.update_local_state(slot_source_index, LocalState::slot(layout.local_count()));
-    let mut stale_destination_roots = RootSet::empty(layout.local_count());
-    stale_destination_roots.insert(root_a_index);
-    state.update_local_state(
-        slot_destination_index,
-        LocalState::alias_with_direct(stale_destination_roots.clone(), stale_destination_roots),
-    );
+    let count = layout.local_count();
+    state.initialize_parameter(root_a_index);
+    state.initialize_parameter(root_b_index);
+    for (alias, source) in [
+        (source_a_index, root_a_index),
+        (source_b_index, root_b_index),
+        (slot_destination_index, root_a_index),
+    ] {
+        let roots = state.effective_roots(source);
+        state.set_binding(
+            alias,
+            BindingSpec::Alias {
+                addresses: state.resolve_cells(source),
+                route_roots: roots.clone(),
+            },
+            roots,
+            RootSet::empty(count),
+        );
+    }
+    state.initialize_parameter(slot_source_index);
 
     let jump = module.blocks[entry.0 as usize].terminator.clone();
     checker
         .apply_jump_argument_transfer(function_id, &layout, &jump, entry, 0, &mut state)
         .expect("explicit local destinations should transfer");
 
-    let destination_a_state = state.local_state(source_a_index);
-    assert!(destination_a_state.mode.contains(LocalMode::SLOT));
-    assert!(!destination_a_state.mode.contains(LocalMode::ALIAS));
-    assert!(destination_a_state.value_roots.contains(root_b_index));
-    assert!(destination_a_state.direct_alias_roots.is_empty());
-    assert!(!destination_a_state.value_roots.contains(source_a_index));
-
-    let destination_b_state = state.local_state(source_b_index);
-    assert!(destination_b_state.mode.contains(LocalMode::SLOT));
-    assert!(!destination_b_state.mode.contains(LocalMode::ALIAS));
-    assert!(destination_b_state.value_roots.contains(root_a_index));
-    assert!(destination_b_state.direct_alias_roots.is_empty());
-    assert!(!destination_b_state.value_roots.contains(source_b_index));
-
-    let slot_result = state.local_state(slot_destination_index);
-    assert!(slot_result.mode.contains(LocalMode::SLOT));
-    assert!(!slot_result.mode.contains(LocalMode::ALIAS));
-    assert!(slot_result.value_roots.contains(slot_source_index));
-    assert!(!slot_result.value_roots.contains(root_a_index));
+    for (destination, expected_root, excluded_root) in [
+        (source_a_index, root_b_index, source_a_index),
+        (source_b_index, root_a_index, source_b_index),
+        (slot_destination_index, slot_source_index, root_a_index),
+    ] {
+        let mode = state.binding_mode(destination);
+        let value_roots = state.binding(destination).value_roots();
+        assert!(mode.contains(LocalMode::SLOT));
+        assert!(!mode.contains(LocalMode::ALIAS));
+        assert!(value_roots.contains(expected_root));
+        assert!(!value_roots.contains(excluded_root));
+        assert_eq!(
+            state.resolve_cells(destination).cells(),
+            &[CellId::Slot(WrapperId::current(destination))]
+        );
+    }
 
     // Exercise the same parallel jump when both destinations own live, observed graphs.
     // Each source transports a projection whose root is retired by the opposite argument.
@@ -197,15 +195,17 @@ return source_a
         (root_a_index, source_a_index),
         (root_b_index, source_b_index),
     ] {
-        let mut roots = RootSet::empty(layout.local_count());
-        roots.insert(source);
-        state.update_local_state(
-            observer,
-            LocalState::slot_with_value_roots(roots, RootSet::empty(layout.local_count())),
-        );
+        let roots = state.effective_roots(source);
+        state.set_binding(observer, BindingSpec::Slot, roots, RootSet::empty(count));
     }
     // The third argument carries the same old root as observer A, without an override.
-    state.update_local_state(slot_source_index, state.local_state(root_a_index).clone());
+    let roots = state.binding(root_a_index).value_roots().clone();
+    state.set_binding(
+        slot_source_index,
+        BindingSpec::Slot,
+        roots,
+        RootSet::empty(count),
+    );
     let old_a = state.local_alloc_ids(source_a_index).0[0];
     let old_b = state.local_alloc_ids(source_b_index).0[0];
     let field = FieldKey::Field(0);

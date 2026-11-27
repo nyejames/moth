@@ -8,7 +8,8 @@ use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, BorrowState, FunctionLayout, LocalState, OrderKey, RootSet,
+    AllocationRetirement, BorrowState, CapturedValue, FunctionLayout, LocalState, OrderKey,
+    StoredValue, TypedStore, UNKNOWN_ORDER_KEY, remap_invoke_capture,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, InvokeLayerOp, InvokeTransfer, transfer_block,
@@ -29,7 +30,6 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::borrow::Cow;
 use std::collections::{VecDeque, hash_map::Entry};
 
 #[cfg(test)]
@@ -503,8 +503,7 @@ impl<'a> BorrowChecker<'a> {
         let mut locals = Vec::new();
 
         for (index, local_id) in layout.local_ids.iter().enumerate() {
-            let local_state = state.local_state(index);
-            if local_state.mode.contains(LocalMode::SLOT) {
+            if state.binding_mode(index).contains(LocalMode::SLOT) {
                 locals.push(*local_id);
             }
         }
@@ -599,31 +598,24 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                let source_state = successor_input.local_state(source_index);
                 let layer_ids = successor_input.has_layer_binding(source_index).then(|| {
-                    (
-                        successor_input.local_alloc_ids(source_index).0,
-                        successor_input.alloc_binding_readonly(source_index),
-                        successor_input.alloc_binding_views(source_index).collect::<Vec<_>>(),
-                    )
+                    let resolved = successor_input.resolve_local_allocs(source_index);
+                    (resolved.ids, resolved.readonly, resolved.views)
                 });
                 let detached = successor_input.detached_holders(source_index).collect::<Vec<_>>();
                 let stability = successor_input.stability_holders(source_index).collect::<Vec<_>>();
-                let destination_state = if source_state.mode.is_definitely_uninit() {
+                let destination_state = if successor_input
+                    .binding_mode(source_index)
+                    .is_definitely_uninit()
+                {
                     LocalState::uninit(layout.local_count())
                 } else {
-                    // Jump arguments enter the destination's binding slot. Preserve the source
-                    // value's effective allocation provenance, including a plain source slot's
-                    // own root, without turning the destination into a write-through alias view.
-                    // Cell identity belongs to the source binding; a fresh jump destination is a
-                    // new binding, so it must not inherit the source's direct alias cells or write
-                    // targets. The derivation ledger travels with the transported value: a read
-                    // through the joined destination still derives from the exclusive alias the
-                    // branch produced it from. The join intersects it, so a path that did not
-                    // derive loses the exemption.
-                    let mut destination = LocalState::slot_with_value_roots(
+                    // A jump transports the selected value into an independent slot, not the
+                    // source's cell or route. Preserve its provenance and must derivation so a
+                    // read through the destination still derives from the loan on every path
+                    // that supplied that proof.
+                    let mut destination = LocalState::slot_from_value_roots(
                         successor_input.effective_roots(source_index),
-                        RootSet::empty(layout.local_count()),
                     );
                     destination.derived_from_roots =
                         successor_input.derived_roots_from_source(source_index);
@@ -666,6 +658,9 @@ impl<'a> BorrowChecker<'a> {
 
         let retires = |local| destination_indices.contains(&local);
         for (source, destination_state, layer_ids, _, _) in &mut destination_states {
+            for &retired in &destination_indices {
+                destination_state.derived_from_roots.remove(retired);
+            }
             if layer_ids.is_none() && destination_state.value_roots.iter_ones().any(retires) {
                 // A root-only source also needs an override when the edge overwrites its root.
                 *layer_ids = Some((
@@ -679,7 +674,9 @@ impl<'a> BorrowChecker<'a> {
         if !successor_input.layer_is_empty()
             || destination_states
                 .iter()
-                .any(|(_, _, ids, detached, stability)| ids.is_some() || !detached.is_empty() || !stability.is_empty())
+                .any(|(_, _, ids, detached, stability)| {
+                    ids.is_some() || !detached.is_empty() || !stability.is_empty()
+                })
         {
             for &index in &destination_indices {
                 successor_input.retire_binding_allocation(index, order);
@@ -701,16 +698,30 @@ impl<'a> BorrowChecker<'a> {
                 for id in ids.iter_mut().chain(&mut views) {
                     *id = remap(*id);
                 }
-                successor_input.bind_alloc_ids(destination_index, &ids, readonly);
-                if !views.is_empty() {
-                    successor_input.bind_alloc_views(destination_index, &views);
-                }
+                let store = TypedStore::receive_result(
+                    successor_input.resolve_cells(destination_index),
+                    CapturedValue {
+                        values: ids
+                            .into_iter()
+                            .map(|id| StoredValue {
+                                id,
+                                writable: !readonly,
+                            })
+                            .collect(),
+                        views,
+                    },
+                    destination_index,
+                    readonly,
+                )
+                .with_explicit_slot_payload();
+                successor_input.publish_store(&store, order, None);
             }
             if !detached.is_empty() {
                 successor_input.bind_detached_holders(destination_index, detached);
             }
             successor_input.add_stability_loans(destination_index, stability);
         }
+        successor_input.prune_retired_wrappers();
 
         Ok(())
     }
@@ -736,6 +747,11 @@ fn apply_invoke_edge_transfer(
     for local in success_results.iter().chain(std::iter::once(error_result)) {
         if let Some(index) = layout.index_of(*local) {
             if apply_layer_effects {
+                if lane.operations.iter().any(
+                    |op| matches!(op, InvokeLayerOp::Store(store) if store.captures_slot(index)),
+                ) {
+                    edge_state.retain_captured_wrapper(index);
+                }
                 // Captures can create the first sparse facts on this edge. Still snapshot any
                 // existing root-only observers before changing the result binding.
                 edge_state.retire_binding_allocation(index, order);
@@ -747,7 +763,13 @@ fn apply_invoke_edge_transfer(
     }
     for (local, result) in &lane.results {
         if let Some(index) = layout.index_of(*local) {
-            edge_state.update_local_state(index, result.clone());
+            let mut result = result.clone();
+            for retired in success_results.iter().chain(std::iter::once(error_result)) {
+                if let Some(retired) = layout.index_of(*retired) {
+                    result.derived_from_roots.remove(retired);
+                }
+            }
+            edge_state.update_local_state(index, result);
         }
     }
     let retires = |index| {
@@ -757,6 +779,7 @@ fn apply_invoke_edge_transfer(
     for op in &lane.operations {
         op.apply(layout, edge_state, Some((order, &retires)));
     }
+    edge_state.prune_retired_wrappers();
 }
 
 impl InvokeLayerOp {
@@ -771,46 +794,12 @@ impl InvokeLayerOp {
             None => id,
         };
         match self {
-            Self::Store {
-                holders,
-                key,
-                values,
-                views,
-                distinct_occurrence,
-            } => {
-                let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
-                let values = remap_invoke_capture(values, |mut value| {
-                    value.id = remap_id(state, value.id);
-                    value
-                });
-                let views = remap_invoke_capture(views, |id| remap_id(state, id));
-                state.store_alloc_field_with_views(
-                    &holders,
-                    *key,
-                    &values,
-                    &views,
-                    false,
-                    *distinct_occurrence,
-                );
-            }
-            Self::StoreCells {
-                slots,
-                fields,
-                values,
-                views,
-            } => {
-                let fields =
-                    remap_invoke_capture(fields, |(holder, key)| (remap_id(state, holder), key));
-                let values = remap_invoke_capture(values, |mut value| {
-                    value.id = remap_id(state, value.id);
-                    value
-                });
-                let views = remap_invoke_capture(views, |id| remap_id(state, id));
-                // A result overwrites a captured slot, but not fields in the old value
-                // that occupied it; those holders have been rebased above.
-                state.store_call_cells(slots, &fields, &values, &views, |local| {
-                    rebase.is_some_and(|(_, retires)| retires(local))
-                });
+            Self::Store(store) => {
+                let (order, retires) = rebase
+                    .map_or((UNKNOWN_ORDER_KEY, None), |(order, retires)| {
+                        (order, Some(retires))
+                    });
+                state.publish_store(store, order, retires);
             }
             Self::Contribute { holder, key, value } => {
                 let holder = remap_id(state, *holder);
@@ -851,9 +840,24 @@ impl InvokeLayerOp {
                 readonly,
             } => {
                 if let Some(index) = layout.index_of(*local) {
-                    let ids = remap_invoke_capture(ids, |id| remap_id(state, id));
-                    let views = remap_invoke_capture(views, |id| remap_id(state, id));
-                    super::transfer::bind_call_result_ids(state, index, &ids, &views, *readonly);
+                    // Bind resolves the receiving place after retirement, unlike a store
+                    // captured on entry. Only the value uses entry allocation coordinates.
+                    let store = TypedStore::receive_result(
+                        state.resolve_cells(index),
+                        CapturedValue {
+                            values: ids
+                                .iter()
+                                .map(|&id| StoredValue {
+                                    id: remap_id(state, id),
+                                    writable: !*readonly,
+                                })
+                                .collect(),
+                            views: views.iter().map(|&id| remap_id(state, id)).collect(),
+                        },
+                        index,
+                        *readonly,
+                    );
+                    state.publish_store(&store, UNKNOWN_ORDER_KEY, None);
                 }
             }
             Self::KeepReceiverStable { result, holders } => {
@@ -883,36 +887,7 @@ impl InvokeLayerOp {
     /// Carry owned captures across one result rebind before publishing any of their effects.
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
         match self {
-            Self::Store {
-                holders,
-                values,
-                views,
-                ..
-            } => {
-                for holder in holders.iter_mut().chain(views) {
-                    retirement.remap_id(state, holder);
-                }
-                for value in values {
-                    retirement.remap_value(state, value);
-                }
-            }
-            Self::StoreCells {
-                slots,
-                fields,
-                values,
-                views,
-            } => {
-                slots.retain(|&slot| !retirement.retires_local(slot));
-                for (holder, _) in fields {
-                    retirement.remap_id(state, holder);
-                }
-                for value in values {
-                    retirement.remap_value(state, value);
-                }
-                for view in views {
-                    retirement.remap_id(state, view);
-                }
-            }
+            Self::Store(store) => store.remap(state, retirement),
             Self::Contribute { holder, value, .. } => {
                 retirement.remap_id(state, holder);
                 retirement.remap_value(state, value);
@@ -955,22 +930,4 @@ impl InvokeLayerOp {
             }
         }
     }
-}
-
-/// Keep captures borrowed unless a reused outcome changes at least one of their identities.
-fn remap_invoke_capture<T: Copy + PartialEq>(
-    capture: &[T],
-    remap: impl Fn(T) -> T,
-) -> Cow<'_, [T]> {
-    for (index, &original) in capture.iter().enumerate() {
-        let rebased = remap(original);
-        if rebased != original {
-            let mut result = Vec::with_capacity(capture.len());
-            result.extend_from_slice(&capture[..index]);
-            result.push(rebased);
-            result.extend(capture[index + 1..].iter().copied().map(remap));
-            return Cow::Owned(result);
-        }
-    }
-    Cow::Borrowed(capture)
 }

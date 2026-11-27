@@ -14261,6 +14261,55 @@ contract = "language.results.single_custom_error_catch_recovery"
 role = "primary"
 
 [[case]]
+id = "mutable_slot_read_only_field_rejected"
+path = "mutable_slot_read_only_field_rejected"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.bindings.slot_place_assignment_requires_writable_place"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_builtin_catch_field_mutable_slot_rejected"
+path = "implicit_failure_builtin_catch_field_mutable_slot_rejected"
+tags = ["integration", "language", "borrows", "numeric", "results", "diagnostics", "js-backend"]
+contract = "language.results.builtin_catch_field_is_read_only"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_field_mutable_slot_rejected"
+path = "implicit_failure_custom_catch_field_mutable_slot_rejected"
+tags = ["integration", "language", "borrows", "results", "diagnostics", "js-backend"]
+contract = "language.results.custom_catch_field_is_read_only"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_saved_catch_field_mutable_slot_rejected"
+path = "implicit_failure_saved_catch_field_mutable_slot_rejected"
+tags = ["integration", "language", "borrows", "results", "diagnostics", "js-backend"]
+contract = "language.results.saved_catch_alias_preserves_read_only_permission"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_field_copy_replacement"
+path = "implicit_failure_catch_field_copy_replacement"
+tags = ["integration", "language", "borrows", "results", "runtime", "js-backend"]
+contract = "language.bindings.catch_field_copy_allows_slot_replacement"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_read_only_operand_write_through"
+path = "implicit_failure_read_only_operand_write_through"
+tags = ["integration", "language", "borrows", "results", "runtime", "js-backend"]
+contract = "language.bindings.write_through_accepts_read_only_operand"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_read_only_result_transport"
+path = "implicit_failure_catch_read_only_result_transport"
+tags = ["integration", "language", "borrows", "results", "runtime", "js-backend"]
+contract = "language.results.catch_transport_preserves_then_results"
+role = "primary"
+
+[[case]]
 id = "implicit_failure_custom_mixed_rejected"
 path = "implicit_failure_custom_mixed_rejected"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend"]

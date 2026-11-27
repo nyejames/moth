@@ -10,10 +10,11 @@ use super::facts::{StatementAccessTracker, ValueFactBuffer, roots_to_local_ids};
 use super::{BlockTransferStats, BorrowTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, BorrowState, FunctionLayout, LocalState, OrderKey, RootSet,
+    AddressSet, AllocationRetirement, BindingSpec, BorrowState, CellId, Coverage, FunctionLayout,
+    LocalState, OrderKey, Replacement, RootSet, TypedStore, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
+    AccessKind, LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
     ValueAccessClassification,
 };
 use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
@@ -25,7 +26,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirValueId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+    HirLocalDestination, HirStatement, HirStatementKind,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
@@ -41,11 +42,11 @@ mod tests;
 
 use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access};
 use layer::{
-    LayerValueContext, capture_layer_alias_write, capture_local_value, check_layer_place_mutation,
-    check_mutable_place_access, check_shared_place_access, transfer_layer_alias_write,
+    CapturedLocalFacts, LayerValueContext, capture_projected_binding, capture_slot_value,
+    check_captured_cell_write, check_layer_place_mutation, check_mutable_place_access,
+    check_shared_place_access, stored_values,
 };
 use move_decision::{MoveDecision, classify_move_decision};
-pub(in super::super) use statement::bind_call_result_ids;
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
 
@@ -60,11 +61,7 @@ fn require_initialized_update_target(
     // `is_definitely_uninit`. Replacing a binding that some path never created has no valid
     // interpretation. This guard also keeps an `UNINIT | SLOT` join away from the slot predicates
     // on both update paths.
-    if state
-        .local_state(local_index)
-        .mode
-        .contains(LocalMode::UNINIT)
-    {
+    if state.binding_mode(local_index).contains(LocalMode::UNINIT) {
         return Err(diagnostics.use_of_uninitialized_local(
             diagnostics.local_place(layout.local_ids[local_index]),
             span,
@@ -93,38 +90,62 @@ fn require_mutable_local(
     Ok(())
 }
 
+fn immutable_cell_error(check: &AccessCheckContext<'_, '_>, origin: usize) -> BorrowCheckError {
+    check.context.diagnostics.invalid_mutable_access(
+        check
+            .context
+            .diagnostics
+            .local_place(check.layout.local_ids[origin]),
+        InvalidMutableAccessReason::ImmutablePlace,
+        None,
+        None,
+        check.span.or(check.location),
+    )
+}
+
 fn check_local_update_access(
     check: &mut AccessCheckContext<'_, '_>,
-    local_index: usize,
-    local_state: &LocalState,
-    rhs_is_fresh: bool,
+    addresses: &AddressSet,
+    direct_slot: bool,
+    readonly_source: Option<usize>,
 ) -> Result<RootSet, BorrowCheckError> {
-    // Slot writes rebind the binding cell, alias writes target the storage recorded for writes
-    // (a whole-binding cell, or a projection's cell and containing allocation), and a joined
-    // state must check both possibilities. Replacing a value does not mutate the value it
-    // replaces, so old provenance never participates in this check. Both source assignments and
-    // dedicated call results use this rule so neither operation can bypass update mutability
-    // checks.
-    //
-    // WHY: `contains(SLOT) && !contains(ALIAS)` differs from exact `mode == SLOT` only on an
-    // `UNINIT | SLOT` join, which `require_initialized_update_target` rejects first on both
-    // update paths. The question here is whether the fresh value replaces the binding cell
-    // itself, so only direct aliases of that cell can conflict, not whether the slot is
-    // definitely initialized.
-    let replaces_definite_slot = rhs_is_fresh
-        && local_state.mode.contains(LocalMode::SLOT)
-        && !local_state.mode.contains(LocalMode::ALIAS);
-    let storage_roots = check.state.write_storage_cells(local_index);
-
-    if !storage_roots.is_empty() {
+    let actor = check
+        .actor_index_hint
+        .expect("a local update has a named actor");
+    if let Some(origin) = readonly_source {
+        return Err(immutable_cell_error(check, origin));
+    }
+    let mut roots = RootSet::empty(check.layout.local_count());
+    let mut projects = false;
+    let mut retained_slot = false;
+    for &cell in addresses.cells() {
+        match cell {
+            CellId::Slot(wrapper) if wrapper.age == WrapperAge::Current => {
+                roots.insert(wrapper.local)
+            }
+            CellId::Slot(_) => retained_slot = true,
+            CellId::Projected(_, _) => projects = true,
+        }
+    }
+    if projects || addresses.coverage == Coverage::Partial {
+        // Only the transitional overlap check uses coarse route and provenance evidence.
+        let binding = check.state.binding(actor);
+        roots.union_with(&binding.route_roots());
+        if roots.is_empty() && addresses.coverage == Coverage::Partial {
+            roots.union_with(binding.value_roots());
+        }
+    }
+    if !roots.is_empty() {
         check_mutable_access(
             check,
-            &storage_roots,
+            &roots,
             MutableAccessPolicy {
                 allow_prior_shared: true,
-                require_root_mutable: true,
+                require_root_mutable: false,
                 strict_move_exclusivity: false,
-                alias_exclusivity: if replaces_definite_slot {
+                alias_exclusivity: if direct_slot
+                    || (!projects && addresses.coverage == Coverage::Complete)
+                {
                     AliasExclusivity::Direct
                 } else {
                     AliasExclusivity::All
@@ -132,8 +153,21 @@ fn check_local_update_access(
             },
         )?;
     }
-
-    Ok(storage_roots)
+    if projects || retained_slot {
+        check_captured_cell_write(check, actor, addresses)?;
+    }
+    if projects {
+        // Attribution keeps the old holder's origin even when its current name no
+        // longer overlaps the captured field.
+        for &cell in addresses.cells() {
+            if let CellId::Projected(holder, _) = cell
+                && let Some(origin) = check.state.alloc_origin_local(holder)
+            {
+                roots.insert(origin);
+            }
+        }
+    }
+    Ok(roots)
 }
 
 // WHAT: These helper contexts split statement transfer into two concerns:
@@ -265,17 +299,7 @@ fn first_heap_definition_index(
     }
 }
 
-/// WHAT: updates borrow state for a single assignment target, checking exclusivity invariants
-/// before committing the new state.
-///
-/// WHY: assignments are the primary write site in the borrow model. Before writing, this function
-/// must verify:
-/// - no conflicting shared borrow of the target place exists (shared/mutable conflict)
-/// - no conflicting mutable borrow exists (multiple-mutable-borrows conflict)
-/// - for field/index places: the base object's borrow state is valid for the narrower access
-///
-/// After verification, it records the assignment fact and transitions the local's state to
-/// reflect the new ownership/borrow status of the written value.
+/// Check and capture an assignment in the pre-state, then publish its cell stores and role change.
 fn transfer_assign_target(
     context: &mut AssignTransferContext<'_, '_>,
     target: &HirPlace,
@@ -284,431 +308,380 @@ fn transfer_assign_target(
     local_index: Option<usize>,
     pristine_definition: Option<usize>,
 ) -> Result<(), BorrowCheckError> {
-    let transfer_context = context.context;
+    let transfer = context.context;
     let layout = context.layout;
     let state = &mut *context.state;
-    let block_id = context.block_id;
-    let current_order = context.current_order;
-    let tracker = &mut *context.tracker;
-    let location = context.location;
-    let span = context.span;
-    let stats = &mut *context.stats;
-
-    let value_expression = transfer_context.expressions.expression(value);
-    // Binding role belongs to the incoming value, including native call-result loads.
-    let rhs_is_place = value_expression.value_kind == ValueKind::Place;
-    let is_direct_self_update = !is_definition
-        && HirWriteTarget::AssignPlace(*target).is_direct_self_update_of(value_expression);
-    let layer_values = LayerValueContext {
-        context: transfer_context,
-        layout,
-        block_id,
-    };
-
-    let Some(local_index) = local_index else {
-        return Err(transfer_context.diagnostics.internal_error(format!(
+    let Some(local) = local_index else {
+        return Err(transfer.diagnostics.internal_error(format!(
             "Assignment target local '{}' is not in the active function layout",
-            transfer_context.diagnostics.local_name(target.root)
+            transfer.diagnostics.local_name(target.root)
         )));
     };
     if !is_definition {
         require_initialized_update_target(
             layout,
             state,
-            local_index,
-            &transfer_context.diagnostics,
-            span.or(location),
+            local,
+            &transfer.diagnostics,
+            context.span.or(context.location),
         )?;
     }
 
-    match target.projections.is_empty() {
-        true => {
-            let local_state = state.local_state(local_index).clone();
-            // A mutable binding receiving a place becomes a mutable alias of it.
-            let mutable_alias = rhs_is_place
-                && layout.local_mutable[local_index]
-                && !is_compiler_owned_scratch_local(transfer_context, layout, local_index);
-            let rhs_roots = direct_value_roots_from_expression(
-                layout,
-                state,
-                transfer_context.expressions,
-                value,
-                location,
-                value_expression.span,
-                &transfer_context.diagnostics,
-            )?;
-            let rhs_direct_alias_roots = rhs_roots.as_ref().map(|_| {
-                direct_root_aliases_from_expression(
-                    layout,
-                    state,
-                    transfer_context.expressions,
-                    value,
-                )
-            });
-            let rhs_write_target_roots = rhs_roots.as_ref().map(|_| {
-                mutable_alias_write_targets_from_expression(
-                    layout,
-                    state,
-                    transfer_context.expressions,
-                    value,
-                )
-            });
+    let values = LayerValueContext {
+        context: transfer,
+        layout,
+        block_id: context.block_id,
+    };
+    let mut check = AccessCheckContext {
+        context: transfer,
+        layout,
+        state,
+        block_id: context.block_id,
+        tracker: context.tracker,
+        location: context.location,
+        span: context.span,
+        stats: context.stats,
+        actor_index_hint: Some(local),
+        current_order: context.current_order,
+    };
 
-            if let Some(rhs_roots) = rhs_roots.as_ref().filter(|roots| !roots.is_empty()) {
-                let can_attempt_move = local_state.mode.is_definitely_uninit()
-                    && layout.local_mutable[local_index]
-                    && rhs_roots
-                        .iter_ones()
-                        .all(|root_index| layout.local_mutable[root_index]);
-
-                if can_attempt_move {
-                    // WHAT: assignments can receive optional transfer responsibility when the target
-                    //      takes a fresh slot.
-                    // WHY: this records an optional transfer candidate while keeping source-visible
-                    //      initialization and alias state available for conservative validation.
-                    match classify_move_decision(layout, block_id, rhs_roots, current_order) {
-                        MoveDecision::Borrow => context.value_fact_buffer.record_optional_transfer(
-                            value,
-                            OptionalTransferStatus::Borrow,
-                            rhs_roots,
-                        ),
-                        MoveDecision::Move => context.value_fact_buffer.record_optional_transfer(
-                            value,
-                            OptionalTransferStatus::Transfer,
-                            rhs_roots,
-                        ),
-                    }
-                }
-            }
-
-            if is_definition {
-                let new_state = match rhs_roots {
-                    Some(rhs_roots) => {
-                        let target_is_mutable = layout.local_mutable[local_index];
-                        let target_is_compiler_owned_scratch =
-                            is_compiler_owned_scratch_local(transfer_context, layout, local_index);
-                        // WHAT: a fresh compiler-owned scratch/result local carries a shared alias
-                        // through compiler-introduced control flow (notably fallible catch joins)
-                        // without requesting source-exclusive access. Ordinary user mutable bindings
-                        // keep their exclusive-access rules.
-                        // WHY: treating scratch-to-scratch alias transfer as a source mutation
-                        //      produced a false AliasedValueRequiresExclusiveAccess at the producing
-                        //      get and stopped the alias before it could reach the user binding.
-                        if target_is_mutable && rhs_is_place && !target_is_compiler_owned_scratch {
-                            // A projected reborrow uses the source's existing access path.
-                            // The destination has not been defined, so it cannot yet identify
-                            // the alias through which this access reaches its referent.
-                            let place =
-                                direct_place_from_expression(transfer_context.expressions, value);
-                            let actor = place
-                                .filter(|place| !place.projections.is_empty())
-                                .and_then(|place| place_root_local_index(layout, &place));
-                            let mut check = AccessCheckContext {
-                                context: transfer_context,
-                                layout,
-                                state: &*state,
-                                block_id,
-                                tracker,
-                                location,
-                                span: value_expression.span,
-                                stats,
-                                actor_index_hint: actor.or(Some(local_index)),
-                                current_order,
-                            };
-                            let require_root_mutable =
-                                check_mutable_alias_source(&check, &value_expression.kind)?;
-                            check_mutable_place_access(
-                                &mut check,
-                                place.as_ref(),
-                                &rhs_roots,
-                                MutableAccessPolicy {
-                                    allow_prior_shared: true,
-                                    require_root_mutable,
-                                    strict_move_exclusivity: false,
-                                    alias_exclusivity: AliasExclusivity::All,
-                                },
-                                false,
-                            )?;
-                        }
-
-                        let direct_roots = rhs_direct_alias_roots
-                            .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        let write_target_roots = if rhs_is_place {
-                            if target_is_mutable {
-                                rhs_write_target_roots
-                                    .unwrap_or_else(|| RootSet::empty(layout.local_count()))
-                            } else {
-                                // An immutable alias cannot write through, but a projection-free
-                                // alias of another alias must keep the same write targets as
-                                // overlap identity. A projected load is different: it observes its
-                                // containing allocation through value provenance, not the base
-                                // binding cell.
-                                inherited_alias_targets_from_expression(
-                                    layout,
-                                    state,
-                                    transfer_context.expressions,
-                                    value,
-                                )
-                            }
-                        } else {
-                            RootSet::empty(layout.local_count())
-                        };
-                        let mut new_state = if rhs_is_place {
-                            LocalState::alias_with_cells(
-                                rhs_roots,
-                                direct_roots,
-                                write_target_roots,
-                            )
-                        } else {
-                            LocalState::slot_with_value_roots(rhs_roots, direct_roots)
-                        };
-                        new_state.derived_from_roots = alias_derivation_roots_from_expression(
-                            layout,
-                            state,
-                            transfer_context.expressions,
-                            value,
-                        );
-                        new_state
-                    }
-                    None => LocalState::slot(layout.local_count()),
-                };
-                let mut captured = capture_local_value(
-                    &layer_values,
-                    state,
-                    value,
-                    mutable_alias,
-                    value_expression.span.or(location),
-                )?;
-                if let Some(retirement) = state.rebind_local_after_capture(
-                    local_index,
-                    new_state,
-                    current_order,
-                    pristine_definition,
-                    false,
-                ) {
-                    captured.remap(state, retirement);
-                }
-                captured.apply(state, local_index);
-                return Ok(());
-            }
-
-            let rhs_is_fresh = rhs_roots.as_ref().is_none_or(RootSet::is_empty);
-            let mut check = AccessCheckContext {
-                context: transfer_context,
-                layout,
-                state: &*state,
-                block_id,
-                tracker,
-                location,
-                span,
-                stats,
-                actor_index_hint: Some(local_index),
-                current_order,
-            };
-            let write_roots =
-                check_local_update_access(&mut check, local_index, &local_state, rhs_is_fresh)?;
-            tracker.record_write(&write_roots);
-
-            if is_direct_self_update {
-                // The ordinary write check above covers this place. Rebinding it to itself adds
-                // no new alias relationship, so preserve the binding mode and value provenance.
-                return Ok(());
-            }
-
-            let target_can_acquire_mutable_alias = layout.local_mutable[local_index]
-                && !is_compiler_owned_scratch_local(transfer_context, layout, local_index);
-            if target_can_acquire_mutable_alias
-                && local_state.mode.contains(LocalMode::SLOT)
-                && rhs_is_place
-                && let Some(rhs_roots) = rhs_roots.as_ref().filter(|roots| !roots.is_empty())
-            {
-                // A slot path receiving a Place becomes a mutable alias. Validate that incoming
-                // relationship before the destination's previous binding state is replaced. Roots
-                // already checked as part of this write must not issue a second overlapping access.
-                let mut unchecked_roots = rhs_roots.clone();
-                unchecked_roots.subtract_with(&write_roots);
-                if !unchecked_roots.is_empty() {
-                    let mut check = AccessCheckContext {
-                        context: transfer_context,
-                        layout,
-                        state: &*state,
-                        block_id,
-                        tracker,
-                        location,
-                        span: value_expression.span,
-                        stats,
-                        actor_index_hint: Some(local_index),
-                        current_order,
-                    };
-                    check_mutable_access(
-                        &mut check,
-                        &unchecked_roots,
-                        MutableAccessPolicy {
-                            allow_prior_shared: true,
-                            require_root_mutable: true,
-                            strict_move_exclusivity: false,
-                            alias_exclusivity: AliasExclusivity::All,
-                        },
-                    )?;
-                }
-            }
-
-            let rhs_derivation = alias_derivation_roots_from_expression(
-                layout,
-                state,
-                transfer_context.expressions,
-                value,
+    if !target.projections.is_empty() {
+        let roots = access_roots_for_place(
+            layout,
+            check.state,
+            target,
+            check.location,
+            check.span,
+            &transfer.diagnostics,
+        )?;
+        let addresses = layer::check_layer_field_write(&mut check, local, target, &roots)?;
+        check.tracker.record_write(&roots);
+        let has_layer = !state.layer_is_empty();
+        let stored = stored_values(&values, state, value, has_layer)?;
+        if has_layer || !stored.is_empty() {
+            state.publish_store(
+                &TypedStore::replace_cells(addresses, stored),
+                context.current_order,
+                None,
             );
-
-            match (
-                local_state.mode.contains(LocalMode::SLOT),
-                local_state.mode.contains(LocalMode::ALIAS),
-            ) {
-                (has_slot, true) => {
-                    // The alias path writes through; a simultaneous slot path makes each
-                    // referent only a possible destination.
-                    transfer_layer_alias_write(
-                        &mut AccessCheckContext {
-                            context: transfer_context,
-                            layout,
-                            state: &*state,
-                            block_id,
-                            tracker,
-                            location,
-                            span,
-                            stats,
-                            actor_index_hint: Some(local_index),
-                            current_order,
-                        },
-                        local_index,
-                    )?;
-                    let captured = capture_layer_alias_write(
-                        &layer_values,
-                        state,
-                        local_index,
-                        &local_state,
-                        value,
-                        has_slot && mutable_alias,
-                        value_expression.span.or(location),
-                    )?;
-                    let (observed, retirement) = refresh_alias_referents(
-                        state,
-                        local_index,
-                        &local_state,
-                        rhs_roots.as_ref(),
-                        current_order,
-                        captured.has_facts(),
-                        captured.publishes_weak_whole_ids(),
-                    );
-                    captured.apply(state, local_index, &local_state, retirement);
-                    if !has_slot {
-                        return Ok(());
-                    }
-
-                    // Both alternatives now hold the incoming value. Keep their union of
-                    // storage cells, since the joined root state has no per-path partition.
-                    let mut direct_alias_roots = local_state.direct_alias_roots;
-                    let mut write_target_roots = local_state.write_target_roots;
-                    if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
-                        direct_alias_roots.union_with(&rhs_direct_roots);
-                    }
-                    if let Some(rhs_target_roots) = rhs_write_target_roots {
-                        write_target_roots.union_with(&rhs_target_roots);
-                    }
-
-                    let mut derived_from_roots = local_state.derived_from_roots;
-                    derived_from_roots.intersect_with(&rhs_derivation);
-                    state.update_local_state(
-                        local_index,
-                        LocalState {
-                            mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-                            value_roots: observed,
-                            direct_alias_roots,
-                            write_target_roots,
-                            derived_from_roots,
-                        },
-                    );
-                }
-
-                (true, false) => {
-                    let mut captured = capture_local_value(
-                        &layer_values,
-                        state,
-                        value,
-                        mutable_alias,
-                        value_expression.span.or(location),
-                    )?;
-                    let mut new_state = match rhs_roots {
-                        Some(roots) if rhs_is_place => LocalState::alias_with_cells(
-                            roots,
-                            rhs_direct_alias_roots
-                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
-                            rhs_write_target_roots
-                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
-                        ),
-                        Some(roots) if !roots.is_empty() => LocalState::slot_with_value_roots(
-                            roots,
-                            rhs_direct_alias_roots
-                                .unwrap_or_else(|| RootSet::empty(layout.local_count())),
-                        ),
-                        _ => LocalState::slot(layout.local_count()),
-                    };
-                    new_state.derived_from_roots = rhs_derivation;
-                    let retirement = if captured.has_facts() && state.layer_is_empty() {
-                        // The captured RHS may be the first sparse fact about the old allocation.
-                        let retirement =
-                            state.retire_binding_allocation(local_index, current_order);
-                        state.update_local_state(local_index, new_state);
-                        retirement
-                    } else {
-                        state.rebind_local(local_index, new_state, current_order)
-                    };
-                    state.release_projected_observers(local_index, current_order);
-                    captured.remap(state, retirement);
-                    captured.apply(state, local_index);
-                }
-
-                (false, false) => {
-                    let mut new_state = LocalState::slot(layout.local_count());
-                    new_state.derived_from_roots = rhs_derivation;
-                    state.rebind_local(local_index, new_state, current_order);
-                }
-            }
         }
+        return Ok(());
+    }
 
-        false => {
-            // The projection writes through the base binding. Cell roots decide mutability and
-            // cell overlap; value provenance still names whatever allocation the place observes.
-            let roots = access_roots_for_place(
-                layout,
-                state,
-                target,
-                location,
-                span,
-                &transfer_context.diagnostics,
-            )?;
-            tracker.record_write(&roots);
-            let mut check = AccessCheckContext {
-                context: transfer_context,
-                layout,
-                state: &*state,
-                block_id,
-                tracker,
-                location,
-                span,
-                stats,
-                actor_index_hint: Some(local_index),
-                current_order,
+    let expression = transfer.expressions.expression(value);
+    let source = place_load_source(layout, transfer.expressions, value);
+    let mode = check.state.binding_mode(local);
+    let own_cell = CellId::Slot(WrapperId::current(local));
+
+    let rhs_roots = direct_value_roots_from_expression(
+        layout,
+        check.state,
+        transfer.expressions,
+        value,
+        check.location,
+        &transfer.diagnostics,
+    )?;
+    let derivation =
+        alias_derivation_roots_from_expression(layout, check.state, transfer.expressions, value);
+
+    if is_definition
+        && mode.is_definitely_uninit()
+        && layout.local_mutable[local]
+        && let Some(roots) = rhs_roots.as_ref().filter(|roots| !roots.is_empty())
+        && roots.iter_ones().all(|root| layout.local_mutable[root])
+    {
+        let status =
+            match classify_move_decision(layout, context.block_id, roots, context.current_order) {
+                MoveDecision::Borrow => OptionalTransferStatus::Borrow,
+                MoveDecision::Move => OptionalTransferStatus::Transfer,
             };
-            let field_write =
-                layer::check_layer_field_write(&mut check, local_index, target, &roots, value)?;
-            if let Some(field_write) = field_write {
-                field_write.apply(&layer_values, state, value)?;
+        context
+            .value_fact_buffer
+            .record_optional_transfer(value, status, roots);
+    }
+    let rhs_roots = rhs_roots.unwrap_or_else(|| RootSet::empty(layout.local_count()));
+    let direct_self =
+        source.is_some_and(|(source, place)| source == local && place.projections.is_empty());
+
+    if !is_definition
+        && mode == LocalMode::SLOT
+        && check.state.layer_is_empty()
+        && !layout.local_has_in_place_mutation_surface[local]
+        && (source.is_none() || direct_self)
+    {
+        // No wrapper can observe this implicit scalar cell. Only shared expression reads
+        // precede an ordinary assignment, and those can precede its replacement.
+        debug_assert!(!matches!(
+            check.tracker.conflict(local, AccessKind::Mutable),
+            Some(AccessKind::Mutable),
+        ));
+        check.stats.conflicts_checked += 1;
+        let mut writes = RootSet::empty(layout.local_count());
+        writes.insert(local);
+        check.tracker.record(local, AccessKind::Mutable, check.span);
+        check.tracker.record_write(&writes);
+        if direct_self {
+            return Ok(());
+        }
+        state.publish_store(
+            &TypedStore::replace_cells(
+                AddressSet::from_cells([own_cell], Coverage::Complete).with_singleton_proof(),
+                Default::default(),
+            )
+            .with_slot_roots(rhs_roots),
+            context.current_order,
+            None,
+        );
+        state.mark_slot_derivation(local, derivation);
+        return Ok(());
+    }
+
+    let local_addresses = (!is_definition).then(|| {
+        check
+            .state
+            .resolve_cells_with_permission(local, false, &layout.local_mutable)
+    });
+    let writes = if let Some((addresses, readonly_source)) = &local_addresses {
+        let roots = check_local_update_access(
+            &mut check,
+            addresses,
+            mode == LocalMode::SLOT,
+            *readonly_source,
+        )?;
+        check.tracker.record_write(&roots);
+        roots
+    } else {
+        RootSet::empty(layout.local_count())
+    };
+    // Scratch may carry a shared link, but its synthetic mutability cannot grant exclusivity.
+    let writable =
+        layout.local_mutable[local] && !is_compiler_owned_scratch_local(transfer, layout, local);
+    // Only the slot alternative acquires a link; existing aliases receive the loaded value.
+    let acquisition = source.filter(|_| is_definition || mode.contains(LocalMode::SLOT));
+    let mut preserve_slot = false;
+    let mixed_acquisition = !is_definition && mode.contains(LocalMode::ALIAS);
+    let mut place_payload = None;
+    let binding = if let Some((source, place)) = acquisition {
+        if place.projections.is_empty() && !is_definition && source == local {
+            preserve_slot = true;
+            None
+        } else if place.projections.is_empty() {
+            let (addresses, readonly_source) =
+                check
+                    .state
+                    .resolve_cells_with_permission(source, false, &layout.local_mutable);
+            preserve_slot = !is_definition
+                && (addresses.cells().contains(&own_cell)
+                    || addresses.coverage == Coverage::Partial);
+            if !is_definition && addresses.definite() == Some(own_cell) {
+                None
+            } else {
+                let capture_payload = mixed_acquisition && layer::is_heap_value(transfer, value)?;
+                let needs_overlap_payload = writable
+                    && !check.state.layer_is_empty()
+                    && layout.local_has_in_place_mutation_surface[source];
+                let resolved = (capture_payload || needs_overlap_payload).then(|| {
+                    check
+                        .state
+                        .resolve_local_allocs_from_cells(source, &addresses, readonly_source)
+                });
+                if writable {
+                    check.span = expression.span;
+                    if let Some(origin) = readonly_source {
+                        return Err(immutable_cell_error(&check, origin));
+                    }
+                    let mut roots = rhs_roots.clone();
+                    check
+                        .state
+                        .binding(source)
+                        .include_overlap_roots(&mut roots);
+                    roots.subtract_with(&writes);
+                    check.actor_index_hint = Some(source);
+                    layer::check_alias_acquisition_overlap(
+                        &mut check,
+                        source,
+                        &addresses,
+                        &roots,
+                        resolved.as_ref(),
+                    )?;
+                }
+                if capture_payload && let Some(resolved) = resolved {
+                    place_payload = Some(layer::stored_allocations(
+                        layout,
+                        check.state,
+                        resolved,
+                        readonly_source.is_none(),
+                    ));
+                }
+                Some(BindingSpec::Link {
+                    source: WrapperId::current(source),
+                    writable,
+                })
             }
+        } else {
+            let mut roots = rhs_roots.clone();
+            check
+                .state
+                .binding(source)
+                .include_overlap_roots(&mut roots);
+            roots.subtract_with(&writes);
+            check.span = expression.span;
+            check.actor_index_hint = Some(source);
+            let capture_payload = mixed_acquisition && layer::is_heap_value(transfer, value)?;
+            let (binding, payload) = capture_projected_binding(
+                &mut check,
+                &place,
+                source,
+                writable,
+                &roots,
+                capture_payload,
+            )?;
+            place_payload = payload;
+            Some(binding)
+        }
+    } else {
+        None
+    };
+
+    if is_definition {
+        let defines_slot = binding.is_none();
+        let mut slot = if defines_slot {
+            capture_slot_value(&values, state, value)?
+        } else {
+            Default::default()
+        };
+        let mut legacy = if defines_slot {
+            Default::default()
+        } else {
+            CapturedLocalFacts::from_load(&values, state, value)
+        };
+        let mut binding = binding.unwrap_or(BindingSpec::Slot);
+        if matches!(&binding, BindingSpec::Link { source, .. } if *source == WrapperId::current(local))
+        {
+            state.retain_captured_wrapper(local);
+        }
+        if let Some(retirement) = state.rebind_local_after_capture(
+            local,
+            LocalState::slot(layout.local_count()),
+            context.current_order,
+            pristine_definition,
+            false,
+        ) {
+            slot.remap(state, retirement);
+            legacy.remap(state, retirement);
+            remap_binding_capture(&mut binding, state, retirement);
+        }
+        let mut derivation = derivation;
+        derivation.remove(local);
+        if defines_slot {
+            state.set_binding(
+                local,
+                binding,
+                RootSet::empty(layout.local_count()),
+                derivation,
+            );
+            layer::publish_slot_capture(state, local, None, slot, rhs_roots, context.current_order);
+        } else {
+            state.set_binding(local, binding, rhs_roots, derivation);
+            legacy.apply(state, local);
+        }
+        // Only retiring an old alias can remove a route to a previously retained wrapper.
+        if mode.contains(LocalMode::ALIAS) {
+            state.prune_retired_wrappers();
+        }
+        return Ok(());
+    }
+
+    let (mut addresses, _) = local_addresses.expect("an assignment has pre-state destinations");
+    if binding.is_some() || preserve_slot {
+        if mode.contains(LocalMode::ALIAS) {
+            addresses = state.resolve_alias_cells(local);
+        } else {
+            addresses = AddressSet::from_cells([], Coverage::Complete);
         }
     }
 
+    if let Some(mut binding) = binding {
+        let stores = mode.contains(LocalMode::ALIAS);
+        let mut stored = place_payload.unwrap_or_default();
+        let mut legacy = CapturedLocalFacts::from_load(&values, state, value);
+        let captures_old_holder = matches!(&binding, BindingSpec::Projected { addresses, .. }
+            if addresses.cells().iter().any(|cell| matches!(*cell, CellId::Projected(holder, _)
+                if state.alloc_origin_local(holder) == Some(local))));
+        if !preserve_slot && (!state.layer_is_empty() || !stored.is_empty() || captures_old_holder)
+        {
+            let retirement = state.retire_slot_value(local, context.current_order);
+            addresses.remap_allocations(state, retirement);
+            stored.remap(state, retirement);
+            legacy.remap(state, retirement);
+            remap_binding_capture(&mut binding, state, retirement);
+        }
+        if stores {
+            state.publish_store(
+                &TypedStore::write_through(addresses, stored, Replacement::May, local)
+                    .with_slot_roots(rhs_roots.clone()),
+                context.current_order,
+                None,
+            );
+        }
+        state.transition_slot_to_alias(local, binding, rhs_roots, derivation, preserve_slot);
+        legacy.apply(state, local);
+    } else if !preserve_slot && let Some(CellId::Slot(wrapper)) = addresses.definite() {
+        let mut captured = capture_slot_value(&values, state, value)?;
+        if captured.has_facts() || !state.layer_is_empty() {
+            let retirement = state.retire_slot_value(wrapper.local, context.current_order);
+            captured.remap(state, retirement);
+        }
+        state.mark_slot_derivation(wrapper.local, derivation);
+        layer::publish_slot_capture(
+            state,
+            wrapper.local,
+            (local != wrapper.local).then_some(local),
+            captured,
+            rhs_roots,
+            context.current_order,
+        );
+    } else if !preserve_slot || mode.contains(LocalMode::ALIAS) {
+        let stored = stored_values(&values, state, value, true)?;
+        let mut store = if preserve_slot {
+            TypedStore::write_through(addresses, stored, Replacement::May, local)
+        } else {
+            let complete = addresses.coverage == Coverage::Complete;
+            let store = TypedStore::replace_cells(addresses, stored);
+            if complete && mode.contains(LocalMode::ALIAS) {
+                store.with_actor_observation(local)
+            } else {
+                store
+            }
+        };
+        store = store.with_slot_roots(rhs_roots);
+        if mode.contains(LocalMode::SLOT) && !preserve_slot {
+            state.mark_slot_derivation(local, derivation);
+        }
+        state.publish_store(&store, context.current_order, None);
+    }
     Ok(())
+}
+
+fn remap_binding_capture(
+    binding: &mut BindingSpec,
+    state: &BorrowState,
+    retirement: AllocationRetirement,
+) {
+    match binding {
+        BindingSpec::Link { source, .. } => *source = retirement.remap_wrapper(*source),
+        BindingSpec::Projected {
+            addresses, origin, ..
+        } => {
+            addresses.remap_allocations(state, retirement);
+            *origin = retirement.remap_wrapper(*origin);
+        }
+        BindingSpec::Slot => {}
+        #[cfg(test)]
+        BindingSpec::Alias { .. } => {
+            unreachable!("assignments capture immediate links or projections")
+        }
+    }
 }
 
 // WHAT: Reports whether a local is compiler-owned scratch/result storage rather than a
@@ -734,112 +707,6 @@ fn place_root_local_index(layout: &FunctionLayout, place: &HirPlace) -> Option<u
     layout.index_of(place.root)
 }
 
-/// Record the value a write through an alias stores in its referent cells and return the value
-/// the alias now observes.
-///
-/// WHAT: a non-fresh write stores the incoming provenance. A fresh write stores an allocation
-///       owned by the referent storage, so the alias observes the designated cells themselves.
-/// WHY: a previous projection observed an older allocation stored in the cell, and an alias-only
-///      binding has no own root in `effective_roots`. Without recording the referent storage, a
-///      returned value or projected argument of the fresh write observed nothing and missed later
-///      exclusive accesses. A write through a joined state can reach its own slot or several
-///      referents, so it only unions provenance into the possible cells. Only a pure alias of
-///      exactly one whole cell, with no other write target, definitely replaces that cell's value.
-///      A projected-origin alias writes one field of the base value, so the base's allocation
-///      provenance stays unchanged.
-fn refresh_alias_referents(
-    state: &mut BorrowState,
-    local_index: usize,
-    alias_state: &LocalState,
-    new_value_roots: Option<&RootSet>,
-    order: OrderKey,
-    preserve_allocation: bool,
-    publishes_weak_whole_ids: bool,
-) -> (RootSet, Option<AllocationRetirement>) {
-    let provenance = new_value_roots.filter(|roots| !roots.is_empty());
-    let storage_identity = state.write_storage_cells(local_index);
-    let observed = match provenance {
-        Some(roots) => roots.clone(),
-        None => storage_identity,
-    };
-    let retirement = if let Some(cell_index) =
-        definite_slot_referent(state, local_index, alias_state)
-    {
-        let retirement = (preserve_allocation || !state.layer_is_empty())
-            .then(|| state.retire_binding_allocation(cell_index, order));
-        let local_count = state.local_state(cell_index).value_roots.bit_len();
-        state.local_state_mut(cell_index).value_roots = provenance
-            .cloned()
-            .unwrap_or_else(|| RootSet::empty(local_count));
-        retirement
-    } else {
-        if let Some(roots) = provenance {
-            for cell_index in alias_state.direct_alias_roots.iter_ones() {
-                if cell_index == local_index {
-                    continue;
-                }
-                if publishes_weak_whole_ids
-                    && state.local_state(cell_index).mode.contains(LocalMode::SLOT)
-                    && !state.has_layer_binding(cell_index)
-                {
-                    // Capture only the old allocations. The incoming coarse roots may name
-                    // a containing allocation rather than the exact child the sparse write uses.
-                    let (old_ids, _) = state.local_alloc_ids(cell_index);
-                    state.bind_alloc_ids(cell_index, &old_ids, false);
-                }
-                let referent = state.local_state_mut(cell_index);
-                if referent.mode.contains(LocalMode::SLOT) {
-                    // Its old value survives on paths that write elsewhere. Make the
-                    // implicit slot root explicit before the incoming roots displace it.
-                    if !referent.mode.contains(LocalMode::ALIAS) && referent.value_roots.is_empty()
-                    {
-                        referent.value_roots.insert(cell_index);
-                    }
-                    referent.value_roots.union_with(roots);
-                }
-            }
-        }
-        None
-    };
-    state.local_state_mut(local_index).value_roots = observed.clone();
-    (observed, retirement)
-}
-
-/// The one whole cell a write through `alias_state` definitely replaces.
-///
-/// WHAT: A definite referent means every path writes one whole cell.
-/// WHY: one direct cell is not definite when the joined state also carries its own slot or a
-///      write target for another cell; that path leaves the direct cell's value untouched.
-fn definite_referent(alias_state: &LocalState) -> Option<usize> {
-    let mut direct_cells = alias_state.direct_alias_roots.iter_ones();
-    match (direct_cells.next(), direct_cells.next()) {
-        (Some(cell_index), None)
-            if alias_state.mode.contains(LocalMode::ALIAS)
-                && !alias_state.mode.contains(LocalMode::SLOT)
-                && alias_state
-                    .write_target_roots
-                    .iter_ones()
-                    .all(|target| target == cell_index) =>
-        {
-            Some(cell_index)
-        }
-        _ => None,
-    }
-}
-
-/// A definite whole-cell update also requires that the target itself is a definite slot.
-fn definite_slot_referent(
-    state: &BorrowState,
-    local_index: usize,
-    alias_state: &LocalState,
-) -> Option<usize> {
-    definite_referent(alias_state).filter(|&cell| {
-        cell != local_index
-            && state.local_state(cell).mode == LocalMode::SLOT
-            && state.alias_cells(local_index).is_empty()
-    })
-}
-
 fn mutable_argument_roots(
     context: &BorrowTransferContext<'_>,
     layout: &FunctionLayout,
@@ -862,9 +729,10 @@ fn mutable_argument_roots(
         if place.projections.is_empty()
             && let Some(local_index) = layout.index_of(place.root)
         {
-            let mut roots = state.designated_cells(local_index);
+            let binding = state.binding(local_index);
+            let mut roots = binding.overlap_roots();
             if layout.local_has_in_place_mutation_surface[local_index] {
-                roots.union_with(&state.local_state(local_index).value_roots);
+                roots.union_with(binding.value_roots());
             }
             if !roots.is_empty() {
                 return Ok(roots);
@@ -923,34 +791,12 @@ fn place_load_source(
     Some((layout.index_of(place.root)?, *place))
 }
 
-/// A shared binding cannot grant exclusive access. For a whole scalar cell, value roots
-/// still govern overlap but can include immutable provenance unrelated to cell mutability.
-fn check_mutable_alias_source(
-    check: &AccessCheckContext<'_, '_>,
-    source: &HirExpressionKind,
-) -> Result<bool, BorrowCheckError> {
-    if let HirExpressionKind::Load(place) = source
-        && let Some(local_index) = place_root_local_index(check.layout, place)
-    {
-        require_mutable_local(
-            check.layout,
-            local_index,
-            &check.context.diagnostics,
-            check.span.or(check.location),
-        )?;
-        return Ok(!place.projections.is_empty()
-            || check.layout.local_has_in_place_mutation_surface[local_index]);
-    }
-    Ok(true)
-}
-
 fn direct_value_roots_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
     location: Option<SourceSpan>,
-    _span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<RootSet>, BorrowCheckError> {
     let expression = expressions.expression(expression_id);
@@ -970,62 +816,6 @@ fn direct_value_roots_from_expression(
         )?)),
         ValueKind::Const => Ok(Some(RootSet::empty(layout.local_count()))),
     }
-}
-
-/// Cell index of a projection-free definite slot, for overlap identity.
-///
-/// WHAT: reports the slot's own binding cell, never allocation provenance.
-/// WHY: exclusivity and same-call overlap ask which cells a place touches, while value
-///      provenance asks which immutable origins a value came from. Keeping them separate
-///      prevents a cell bit from travelling through call results into fresh scalars.
-fn place_cell_root(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    place: &HirPlace,
-) -> Option<usize> {
-    if !place.projections.is_empty() {
-        return None;
-    }
-    let local_index = layout.index_of(place.root)?;
-    let mode = state.local_state(local_index).mode;
-    (mode.contains(LocalMode::SLOT) && !mode.contains(LocalMode::ALIAS)).then_some(local_index)
-}
-
-fn direct_root_aliases_from_expression(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    expressions: &HirExpressionStore,
-    expression_id: HirValueId,
-) -> RootSet {
-    let mut direct_roots = RootSet::empty(layout.local_count());
-    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
-        return direct_roots;
-    };
-
-    // A projected load observes the value stored under a projection: the older allocation, which
-    // a later rebinding of the source binding cannot replace. Only the source place's value
-    // provenance records that observation, so a projection must not inherit the source cell's
-    // direct alias identity. A later whole-binding replacement then stays legal while the
-    // projected value is live.
-    if !place.projections.is_empty() {
-        return direct_roots;
-    }
-
-    // A place load binds the source place's own cell when that source is a definite slot. Cell
-    // identity is overlap information only; it must not enter the value's provenance roots or a
-    // returned scalar would inherit a later slot write.
-    if let Some(cell_index) = place_cell_root(layout, state, &place) {
-        direct_roots.insert(cell_index);
-    }
-    let source_state = state.local_state(source_index);
-    if source_state.mode.contains(LocalMode::ALIAS) {
-        // An alias source carries the referent cells through to the new binding. Chained aliases
-        // must keep observing the same cells, while a slot-backed value alias contributes no
-        // direct roots and keeps only its allocation provenance.
-        direct_roots.union_with(&source_state.direct_alias_roots);
-    }
-
-    direct_roots
 }
 
 /// Alias bindings a value expression was provably created through.
@@ -1049,62 +839,6 @@ fn alias_derivation_roots_from_expression(
         return RootSet::empty(layout.local_count());
     };
     state.derived_roots_from_source(source_index)
-}
-
-/// Write targets an immutable alias inherits from another alias.
-///
-/// WHAT: the source alias's write targets for a projection-free load; empty for a projected load
-///       or a slot source.
-/// WHY: `view = writer` observes the storage `writer` writes through, so a replacement through
-///      `writer` must see the live view. `old = holder.first` observes its containing allocation
-///      through value provenance rather than the holder binding cell, so it inherits no cell
-///      identity.
-fn inherited_alias_targets_from_expression(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    expressions: &HirExpressionStore,
-    expression_id: HirValueId,
-) -> RootSet {
-    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
-        return RootSet::empty(layout.local_count());
-    };
-    if !place.projections.is_empty() {
-        return RootSet::empty(layout.local_count());
-    }
-    let source_state = state.local_state(source_index);
-    if source_state.mode.contains(LocalMode::ALIAS) {
-        source_state.write_target_roots.clone()
-    } else {
-        RootSet::empty(layout.local_count())
-    }
-}
-
-/// Storage a mutable alias acquired from this expression writes through.
-///
-/// WHAT: a whole-binding load targets the source binding's designated cells; a projected load
-///       targets those same cells plus the containing allocation(s) the source value observed at
-///       binding time.
-/// WHY: the cell is the pre-correction conservative identity. A fresh allocation's identity is
-///      encoded as its owning cell or as empty provenance, and that identity cannot be carried
-///      accurately through every join, alias chain, call or scope exit, so keeping the cell
-///      retains the rejections that guard those paths. The allocation roots add the containing
-///      allocation family, which publishes a write through a call-returned holder to the
-///      parameter that owns it and overlaps other holders of the same allocation. A whole-binding
-///      alias always writes through the source binding cells, so it keeps just the cell identity.
-fn mutable_alias_write_targets_from_expression(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    expressions: &HirExpressionStore,
-    expression_id: HirValueId,
-) -> RootSet {
-    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
-        return RootSet::empty(layout.local_count());
-    };
-    let mut targets = state.designated_cells(source_index);
-    if !place.projections.is_empty() {
-        targets.union_with(&state.effective_roots(source_index));
-    }
-    targets
 }
 
 /// Roots a shared access to `place` must check for overlap.
@@ -1138,7 +872,7 @@ fn include_designated_cells(
     roots: &mut RootSet,
 ) {
     if let Some(local_index) = layout.index_of(place.root) {
-        roots.union_with(&state.designated_cells(local_index));
+        state.binding(local_index).include_overlap_roots(roots);
     }
 }
 
@@ -1159,8 +893,7 @@ fn roots_for_place(
         )));
     };
 
-    let local_state = state.local_state(local_index);
-    if local_state.mode.is_definitely_uninit() {
+    if state.binding_mode(local_index).is_definitely_uninit() {
         return Err(diagnostics.use_of_uninitialized_local(
             diagnostics.local_place(layout.local_ids[local_index]),
             span.or(location),

@@ -1,0 +1,6 @@
+Pair = | left I32, right I32 |
+
+pair = Pair(1, 2)
+code ~= 0
+~code = pair.left
+~[: code=[code]]

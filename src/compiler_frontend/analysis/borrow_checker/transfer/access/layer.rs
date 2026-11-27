@@ -8,8 +8,8 @@
 //!      precision the layer's strong updates allow.
 
 use super::conflicts::{
-    PlaceAccess, check_layer_conflict, check_layer_shared_access, check_mutable_access_with_targets,
-    check_shared_access_with_place,
+    LayerConflictAccess, PlaceAccess, check_layer_conflict, check_layer_shared_access,
+    check_mutable_access_with_targets, check_shared_access_with_place,
 };
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
@@ -49,7 +49,7 @@ pub(super) fn mark_alloc_provenance_readonly(
     local_mutable: &[bool],
     resolved: &mut ResolvedPlace,
 ) {
-    if !resolved.readonly
+    if resolved.readonly_source.is_none()
         && let Some(origin) = resolved
             .ids
             .iter()
@@ -81,24 +81,11 @@ fn resolve_path(
     resolved
 }
 
-#[derive(Default, Clone)]
-pub(super) struct CapturedValue {
-    pub values: Vec<StoredValue>,
-    pub views: Vec<AllocId>,
-}
+pub(super) use crate::compiler_frontend::analysis::borrow_checker::state::CapturedValue;
 
 impl CapturedValue {
     pub(super) fn is_empty(&self) -> bool {
         self.values.is_empty()
-    }
-
-    fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
-        for value in &mut self.values {
-            retirement.remap_value(state, value);
-        }
-        for view in &mut self.views {
-            retirement.remap_id(state, view);
-        }
     }
 
     fn fresh(id: AllocId) -> Self {
@@ -109,7 +96,7 @@ impl CapturedValue {
     }
 }
 
-fn stored_allocations(
+pub(super) fn stored_allocations(
     layout: &FunctionLayout,
     state: &BorrowState,
     resolved: ResolvedPlace,
@@ -147,6 +134,140 @@ fn resolve_place_cell(
     Some((holders, projection_key(last)))
 }
 
+fn projected_addresses(state: &BorrowState, holders: &ResolvedPlace, key: FieldKey) -> AddressSet {
+    let addresses = AddressSet::from_cells(
+        holders
+            .ids
+            .iter()
+            .map(|&holder| CellId::Projected(holder, key)),
+        if holders.complete && !holders.ids.is_empty() {
+            Coverage::Complete
+        } else {
+            Coverage::Partial
+        },
+    );
+    if matches!(holders.ids.as_slice(), [holder] if state.alloc_singular(*holder)) {
+        addresses.with_singleton_proof()
+    } else {
+        addresses
+    }
+}
+
+pub(super) fn capture_projected_binding(
+    check: &mut AccessCheckContext<'_, '_>,
+    place: &HirPlace,
+    source: usize,
+    writable: bool,
+    roots: &RootSet,
+    capture_payload: bool,
+) -> Result<(BindingSpec, Option<CapturedValue>), BorrowCheckError> {
+    let (mut holders, key) =
+        resolve_place_cell(check.layout, check.state, check.context.expressions, place)
+            .expect("a projected source has a holder and final selector");
+    let addresses = projected_addresses(check.state, &holders, key);
+    let isolated = check.state.binding_mode(source) == LocalMode::SLOT
+        && check.state.binding(source).value_roots().is_empty()
+        && !check.state.has_layer_binding(source)
+        && addresses.definite().is_some()
+        && matches!(holders.ids.as_slice(), [holder] if
+            check.state.alloc_origin_local(*holder) == Some(source));
+    let readonly_source = check
+        .state
+        .resolve_cells_with_permission(source, false, &check.layout.local_mutable)
+        .1
+        .or_else(|| {
+            holders
+                .readonly
+                .then_some(holders.readonly_source.unwrap_or(source))
+        });
+    let refine_overlap = writable && !check.state.layer_is_empty();
+    if writable && let Some(origin) = readonly_source {
+        return Err(immutable_cell_error(check, origin));
+    }
+    if capture_payload || refine_overlap {
+        check
+            .state
+            .step_resolved(&mut holders, key, &check.layout.local_mutable);
+    }
+    if writable {
+        check_alias_acquisition_overlap(
+            check,
+            source,
+            &addresses,
+            roots,
+            refine_overlap.then_some(&holders),
+        )?;
+    }
+    let mut route_roots = check.state.binding(source).overlap_roots();
+    route_roots.union_with(&check.state.effective_roots(source));
+    let payload = capture_payload.then(|| {
+        stored_allocations(
+            check.layout,
+            check.state,
+            holders,
+            readonly_source.is_none(),
+        )
+    });
+    Ok((
+        BindingSpec::Projected {
+            addresses,
+            origin: WrapperId::current(source),
+            writable: writable && readonly_source.is_none(),
+            isolated,
+            route_roots,
+        },
+        payload,
+    ))
+}
+
+pub(super) fn check_alias_acquisition_overlap(
+    check: &mut AccessCheckContext<'_, '_>,
+    source: usize,
+    addresses: &AddressSet,
+    roots: &RootSet,
+    payload: Option<&ResolvedPlace>,
+) -> Result<(), BorrowCheckError> {
+    let policy = MutableAccessPolicy {
+        allow_prior_shared: true,
+        require_root_mutable: false,
+        strict_move_exclusivity: false,
+        alias_exclusivity: AliasExclusivity::All,
+    };
+    if check.state.layer_is_empty() {
+        return check_mutable_access(check, roots, policy);
+    }
+    let cells: Vec<_> = addresses
+        .cells()
+        .iter()
+        .filter_map(|&cell| match cell {
+            CellId::Projected(holder, key) => Some((holder, key)),
+            CellId::Slot(_) => None,
+        })
+        .collect();
+    // Previous contents only refine overlap, never the cell's permission.
+    let targets: Vec<_> = payload
+        .into_iter()
+        .flat_map(|payload| {
+            payload.ids.iter().map(|&id| MutationTarget {
+                id,
+                layer_reached: payload.layer_only,
+                deep: false,
+            })
+        })
+        .collect();
+    let access = PlaceAccess {
+        cells: &cells,
+        values: &targets,
+    };
+    check_mutable_access_with_targets(
+        check,
+        roots,
+        policy,
+        (addresses.coverage == Coverage::Complete).then_some(access),
+    )?;
+    check_layer_conflict(check, source, access, LayerConflictAccess::ObservedValue)
+}
+
 /// A projected place keeps its address even when its value has no allocation.
 fn place_cells(
     check: &AccessCheckContext<'_, '_>,
@@ -156,14 +277,19 @@ fn place_cells(
     let Some((holders, key)) =
         resolve_place_cell(check.layout, check.state, check.context.expressions, place)
     else {
+        let binding = check.state.binding(actor);
         return (
-            check.state.alias_cells(actor),
-            check.state.alias_cells_cover_place(actor),
+            binding.projected_cells().collect(),
+            binding.projected_coverage() == Coverage::Complete,
         );
     };
     let complete = holders.complete && !holders.ids.is_empty();
     (
-        holders.ids.into_iter().map(|holder| (holder, key)).collect(),
+        holders
+            .ids
+            .into_iter()
+            .map(|holder| (holder, key))
+            .collect(),
         complete,
     )
 }
@@ -209,11 +335,15 @@ pub(super) fn check_shared_place_access(
         cells: &cells,
         values: &targets,
     };
-    check_shared_access_with_place(check, roots, (complete && resolved.complete).then_some(access))?;
+    check_shared_access_with_place(
+        check,
+        roots,
+        (complete && resolved.complete).then_some(access),
+    )?;
     check_layer_shared_access(check, actor, access)
 }
 
-fn is_heap_value(
+pub(super) fn is_heap_value(
     context: &BorrowTransferContext<'_>,
     expression_id: HirValueId,
 ) -> Result<bool, BorrowCheckError> {
@@ -328,21 +458,7 @@ pub(super) fn stored_values(
     let expression = context.expressions.expression(expression_id);
     match &expression.kind {
         HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
-            let Some(root) = values.layout.index_of(place.root) else {
-                return Ok(CapturedValue::default());
-            };
-            let resolved = resolve_path(
-                values.layout,
-                state,
-                root,
-                context.expressions.projections(place.projections),
-            );
-            Ok(stored_allocations(
-                values.layout,
-                state,
-                resolved,
-                values.layout.local_mutable[root],
-            ))
+            Ok(stored_place(values, state, place))
         }
         HirExpressionKind::VariantPayloadGet {
             source,
@@ -408,6 +524,32 @@ pub(super) fn stored_values(
         ))),
         _ => Ok(CapturedValue::default()),
     }
+}
+
+fn stored_place(
+    values: &LayerValueContext<'_, '_>,
+    state: &BorrowState,
+    place: &HirPlace,
+) -> CapturedValue {
+    let Some(root) = values.layout.index_of(place.root) else {
+        return CapturedValue::default();
+    };
+    let projections = values.context.expressions.projections(place.projections);
+    let (resolved, readonly_source) = if projections.is_empty() {
+        let (addresses, readonly_source) =
+            state.resolve_cells_with_permission(root, false, &values.layout.local_mutable);
+        // The route permission applies to the whole capture; payload evidence is independent.
+        (
+            state.resolve_local_allocs_from_cells(root, &addresses, None),
+            readonly_source,
+        )
+    } else {
+        let resolved = resolve_path(values.layout, state, root, projections);
+        let (_, readonly_source) =
+            state.resolve_cells_with_permission(root, false, &values.layout.local_mutable);
+        (resolved, readonly_source)
+    };
+    stored_allocations(values.layout, state, resolved, readonly_source.is_none())
 }
 
 /// Edges to install after the destination binding has received its new allocation. Nested
@@ -482,204 +624,131 @@ fn capture_construction(
     Ok(captured)
 }
 
-/// The allocation facts for a whole-binding replacement, captured before its old value retires.
-pub(super) enum LocalLayerValue {
-    None,
-    Constructed(Construction),
-    Bound {
-        ids: Vec<AllocId>,
-        views: Vec<AllocId>,
-        readonly: bool,
-        override_roots: bool,
-        cells: Vec<(AllocId, FieldKey)>,
-        complete: bool,
-        detached: Vec<AllocId>,
-        stability: Vec<AllocId>,
-    },
+/// Sparse value facts captured before a whole-slot replacement. Locations are planned separately.
+#[derive(Default)]
+pub(super) struct SlotCapture {
+    value: CapturedValue,
+    explicit_payload: bool,
+    construction: Construction,
+    legacy: CapturedLocalFacts,
 }
 
-impl LocalLayerValue {
+impl SlotCapture {
     pub(super) fn has_facts(&self) -> bool {
-        !matches!(self, Self::None)
+        self.explicit_payload
+            || !self.value.is_empty()
+            || !self.value.views.is_empty()
+            || !self.construction.0.is_empty()
+            || !self.legacy.detached.is_empty()
+            || !self.legacy.stability.is_empty()
     }
 
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
-        match self {
-            Self::None => {}
-            Self::Constructed(captured) => captured.remap(state, retirement),
-            Self::Bound {
-                ids,
-                views,
-                override_roots,
-                cells,
-                detached,
-                stability,
-                ..
-            } => {
-                for id in ids {
-                    let old = *id;
-                    retirement.remap_id(state, id);
-                    *override_roots |= old != *id;
-                }
-                for view in views {
-                    retirement.remap_id(state, view);
-                }
-                for (holder, _) in cells {
-                    retirement.remap_id(state, holder);
-                }
-                for holder in detached.iter_mut().chain(stability) {
-                    retirement.remap_id(state, holder);
-                }
-            }
+        self.value.remap(state, retirement);
+        self.construction.remap(state, retirement);
+        self.legacy.remap(state, retirement);
+    }
+}
+
+pub(super) fn publish_slot_capture(
+    state: &mut BorrowState,
+    local: usize,
+    observer: Option<usize>,
+    capture: SlotCapture,
+    roots: RootSet,
+    order: OrderKey,
+) {
+    let addresses = AddressSet::from_cells(
+        [CellId::Slot(WrapperId::current(local))],
+        Coverage::Complete,
+    )
+    .with_singleton_proof();
+    let mut store = TypedStore::replace_cells(addresses, capture.value).with_slot_roots(roots);
+    if capture.explicit_payload {
+        store = store.with_explicit_slot_payload();
+    }
+    if let Some(observer) = observer {
+        store = store.with_actor_observation(observer);
+    }
+    state.publish_store(&store, order, None);
+    if !capture.construction.0.is_empty() {
+        let (holders, _) = state.local_alloc_ids(local);
+        for holder in holders {
+            capture.construction.apply(state, holder);
+        }
+    }
+    capture.legacy.apply(state, local);
+}
+
+/// Detachments and receiver stability associated with the loaded local.
+#[derive(Default)]
+pub(super) struct CapturedLocalFacts {
+    detached: Vec<AllocId>,
+    stability: Vec<AllocId>,
+}
+
+impl CapturedLocalFacts {
+    pub(super) fn from_load(
+        values: &LayerValueContext<'_, '_>,
+        state: &BorrowState,
+        value: HirValueId,
+    ) -> Self {
+        let expression = values.context.expressions.expression(value);
+        let HirExpressionKind::Load(place) = &expression.kind else {
+            return Self::default();
+        };
+        if state.layer_is_empty() || expression.value_kind == ValueKind::Const {
+            return Self::default();
+        }
+        let Some(source) = values.layout.index_of(place.root) else {
+            return Self::default();
+        };
+        Self {
+            detached: state.detached_holders(source).collect(),
+            stability: state.stability_holders(source).collect(),
         }
     }
 
-    fn apply_cells(&self, state: &mut BorrowState, local: usize, strong: bool) {
-        if let Self::Bound {
-            cells, complete, ..
-        } = self
-            && !cells.is_empty()
-        {
-            state.bind_alias_cells(local, cells, strong, *complete);
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        for holder in self.detached.iter_mut().chain(&mut self.stability) {
+            retirement.remap_id(state, holder);
         }
     }
 
     pub(super) fn apply(self, state: &mut BorrowState, local: usize) {
-        self.apply_cells(state, local, true);
-        match self {
-            Self::None => {}
-            Self::Constructed(captured) => {
-                let (holders, _) = state.local_alloc_ids(local);
-                debug_assert!(
-                    matches!(holders.as_slice(), [holder] if state.alloc_singular(*holder))
-                );
-                for holder in holders {
-                    captured.apply(state, holder);
-                }
-            }
-            Self::Bound {
-                ids,
-                views,
-                readonly,
-                override_roots,
-                detached,
-                stability,
-                ..
-            } => {
-                if override_roots {
-                    state.bind_alloc_ids(local, &ids, readonly);
-                }
-                if !views.is_empty() {
-                    state.bind_alloc_views(local, &views);
-                }
-                if !detached.is_empty() {
-                    state.bind_detached_holders(local, detached);
-                }
-                state.add_stability_loans(local, stability);
-            }
+        if !self.detached.is_empty() {
+            state.bind_detached_holders(local, self.detached);
         }
+        state.add_stability_loans(local, self.stability);
     }
 }
 
-pub(super) fn capture_local_value(
+pub(super) fn capture_slot_value(
     values: &LayerValueContext<'_, '_>,
     state: &mut BorrowState,
     value: HirValueId,
-    mutable_alias: bool,
-    span: Option<SourceSpan>,
-) -> Result<LocalLayerValue, BorrowCheckError> {
-    let context = values.context;
-    let expression = context.expressions.expression(value);
-    Ok(match &expression.kind {
+) -> Result<SlotCapture, BorrowCheckError> {
+    let expression = values.context.expressions.expression(value);
+    let mut capture = SlotCapture::default();
+    match &expression.kind {
         kind if kind.is_aggregate_construction() => {
-            let captured = capture_construction(values, state, value)?;
-            if captured.0.is_empty() {
-                LocalLayerValue::None
-            } else {
-                LocalLayerValue::Constructed(captured)
-            }
+            capture.construction = capture_construction(values, state, value)?;
         }
         HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
-            if state.layer_is_empty() && place.projections.is_empty() {
-                return Ok(LocalLayerValue::None);
+            if is_heap_value(values.context, value)? {
+                capture.value = stored_place(values, state, place);
+                capture.explicit_payload = true;
             }
-            let source = values.layout.index_of(place.root);
-            let stability: Vec<_> = source
-                .into_iter()
-                .flat_map(|source| state.stability_holders(source))
-                .collect();
-            let heap = is_heap_value(context, value)?;
-            let (cells, complete) = if mutable_alias {
-                if let Some((holders, key)) =
-                    resolve_place_cell(values.layout, state, context.expressions, place)
-                {
-                    (
-                        holders.ids.into_iter().map(|holder| (holder, key)).collect::<Vec<_>>(),
-                        holders.complete,
-                    )
-                } else if let Some(source) = source {
-                    (state.alias_cells(source), state.alias_cells_cover_place(source))
-                } else {
-                    (Vec::new(), false)
-                }
-            } else {
-                (Vec::new(), false)
-            };
-            if cells.is_empty() && stability.is_empty() && !heap {
-                return Ok(LocalLayerValue::None);
-            }
-            let Some(mut resolved) =
-                resolve_place_allocs(values.layout, state, context.expressions, place)
-            else {
-                return Ok(LocalLayerValue::None);
-            };
-            if mutable_alias && resolved.readonly {
-                return Err(readonly_mutation(values, place, &resolved, span));
-            }
-            if !heap {
-                resolved.ids.clear();
-                resolved.views.clear();
-            }
-            let detached = values
-                .layout
-                .index_of(place.root)
-                .into_iter()
-                .flat_map(|source| state.detached_holders(source))
-                .collect();
-            LocalLayerValue::Bound {
-                ids: resolved.ids,
-                views: resolved.views,
-                readonly: resolved.readonly,
-                override_roots: heap && (resolved.layer_only || !place.projections.is_empty()),
-                cells,
-                complete,
-                detached,
-                stability,
-            }
+            capture.legacy = CapturedLocalFacts::from_load(values, state, value);
         }
-        HirExpressionKind::Copy(_) | HirExpressionKind::VariantPayloadGet { .. } => {
-            if state.layer_is_empty() {
-                return Ok(LocalLayerValue::None);
-            }
-            let stored = stored_values(values, state, value, false)?;
-            if stored.is_empty() {
-                LocalLayerValue::None
-            } else {
-                let readonly = stored.values.iter().any(|value| !value.writable);
-                LocalLayerValue::Bound {
-                    ids: stored.values.into_iter().map(|value| value.id).collect(),
-                    views: stored.views,
-                    readonly,
-                    override_roots: true,
-                    cells: Vec::new(),
-                    complete: false,
-                    detached: Vec::new(),
-                    stability: Vec::new(),
-                }
-            }
+        HirExpressionKind::Copy(_) | HirExpressionKind::VariantPayloadGet { .. }
+            if !state.layer_is_empty() =>
+        {
+            capture.value = stored_values(values, state, value, false)?;
         }
-        _ => LocalLayerValue::None,
-    })
+        _ => {}
+    }
+    Ok(capture)
 }
 
 fn readonly_mutation(
@@ -709,6 +778,7 @@ pub(super) fn check_mutable_place_access(
     roots: &RootSet,
     policy: MutableAccessPolicy,
     reaches_children: bool,
+    borrow_location: bool,
 ) -> Result<(), BorrowCheckError> {
     let Some(place) = place else {
         return check_mutable_access(check, roots, policy);
@@ -717,13 +787,13 @@ pub(super) fn check_mutable_place_access(
         return check_mutable_access(check, roots, policy);
     };
     let (cells, complete) = place_cells(check, place, actor);
-    let targets = layer_mutation_targets(check, place, reaches_children)?;
+    let targets = layer_mutation_targets(check, place, reaches_children, borrow_location)?;
     let access = PlaceAccess {
         cells: &cells,
         values: &targets,
     };
     check_mutable_access_with_targets(check, roots, policy, complete.then_some(access))?;
-    check_layer_conflict(check, actor, access, true)?;
+    check_layer_conflict(check, actor, access, LayerConflictAccess::ObservedValue)?;
     Ok(())
 }
 
@@ -736,23 +806,41 @@ pub(super) fn check_layer_place_mutation(
     check: &mut AccessCheckContext<'_, '_>,
     place: &HirPlace,
     reaches_children: bool,
+    borrow_location: bool,
 ) -> Result<(), BorrowCheckError> {
     let Some(actor) = check.layout.index_of(place.root) else {
         return Ok(());
     };
-    let targets = layer_mutation_targets(check, place, reaches_children)?;
+    let targets = layer_mutation_targets(check, place, reaches_children, borrow_location)?;
     let (cells, _) = place_cells(check, place, actor);
-    check_layer_conflict(check, actor, PlaceAccess { cells: &cells, values: &targets }, true)
+    check_layer_conflict(
+        check,
+        actor,
+        PlaceAccess {
+            cells: &cells,
+            values: &targets,
+        },
+        LayerConflictAccess::ObservedValue,
+    )
 }
 
 fn layer_mutation_targets(
     check: &AccessCheckContext<'_, '_>,
     place: &HirPlace,
     reaches_children: bool,
+    borrow_location: bool,
 ) -> Result<Vec<MutationTarget>, BorrowCheckError> {
     let Some(actor) = check.layout.index_of(place.root) else {
         return Ok(Vec::new());
     };
+    if borrow_location
+        && let Some(source) = check
+            .state
+            .resolve_cells_with_permission(actor, false, &check.layout.local_mutable)
+            .1
+    {
+        return Err(immutable_cell_error(check, source));
+    }
     if place.projections.is_empty() && !check.layout.local_has_in_place_mutation_surface[actor] {
         return Ok(Vec::new());
     }
@@ -839,14 +927,20 @@ fn projected_write_targets(
         .collect()
 }
 
-/// Check a projected assignment and keep its resolved cell for the subsequent store.
+/// Check a projected replacement, retaining the final cell and not its old payload.
 pub(super) fn check_layer_field_write(
     check: &mut AccessCheckContext<'_, '_>,
     actor: usize,
     place: &HirPlace,
     roots: &RootSet,
-    value: HirValueId,
-) -> Result<Option<LayerFieldWrite>, BorrowCheckError> {
+) -> Result<AddressSet, BorrowCheckError> {
+    if let Some(origin) = check
+        .state
+        .resolve_cells_with_permission(actor, false, &check.layout.local_mutable)
+        .1
+    {
+        return Err(immutable_cell_error(check, origin));
+    }
     let (holders, key) =
         resolve_place_cell(check.layout, check.state, check.context.expressions, place)
             .expect("projected assignment has a holder and final selector");
@@ -863,13 +957,17 @@ pub(super) fn check_layer_field_write(
     } else {
         Vec::new()
     };
-    let cells: Vec<_> = holders.ids.iter().map(|&holder| (holder, key)).collect();
+    let cells: Vec<_> = if has_layer {
+        holders.ids.iter().map(|&holder| (holder, key)).collect()
+    } else {
+        Vec::new()
+    };
     check_mutable_access_with_targets(
         check,
         roots,
         MutableAccessPolicy {
             allow_prior_shared: true,
-            require_root_mutable: true,
+            require_root_mutable: false,
             strict_move_exclusivity: false,
             alias_exclusivity: AliasExclusivity::All,
         },
@@ -891,43 +989,19 @@ pub(super) fn check_layer_field_write(
             check.span.or(check.location),
         ));
     }
+    let addresses = projected_addresses(check.state, &holders, key);
     if has_layer {
-        check_layer_conflict(check, actor, PlaceAccess {
-            cells: &cells,
-            values: &targets[..holders.ids.len()],
-        }, true)?;
-    } else if !needs_allocation_facts(check.context, check.state, value)? {
-        return Ok(None);
+        check_layer_conflict(
+            check,
+            actor,
+            PlaceAccess {
+                cells: &cells,
+                values: &targets[..holders.ids.len()],
+            },
+            LayerConflictAccess::CapturedProjection(&addresses),
+        )?;
     }
-    Ok(Some(LayerFieldWrite { holders, key }))
-}
-
-/// The cell a projected write stores into, resolved before the write.
-pub(super) struct LayerFieldWrite {
-    holders: ResolvedPlace,
-    key: FieldKey,
-}
-
-impl LayerFieldWrite {
-    pub(super) fn apply(
-        self,
-        values: &LayerValueContext<'_, '_>,
-        state: &mut BorrowState,
-        value: HirValueId,
-    ) -> Result<(), BorrowCheckError> {
-        let stored = stored_values(values, state, value, true)?;
-        let strong = self.key != FieldKey::Elem
-            && matches!(self.holders.ids.as_slice(), [holder] if state.alloc_singular(*holder));
-        state.store_alloc_field_with_views(
-            &self.holders.ids,
-            self.key,
-            &stored.values,
-            &stored.views,
-            strong,
-            true,
-        );
-        Ok(())
-    }
+    Ok(addresses)
 }
 
 /// Store `value` into every holder's `key` through a collection operation.
@@ -950,169 +1024,31 @@ pub(super) fn layer_store_values(
     Ok(Some(stored_values(values, state, value, true)?))
 }
 
-/// Check a write through a mutable alias of a projected place against the layer.
-///
-/// WHY: the write replaces a field of the holder the alias was formed from, so a binding that
-///      reaches that holder through the layer observes it.
-pub(super) fn transfer_layer_alias_write(
+/// A local store through a retained slot or projection checks the actual captured cells.
+pub(super) fn check_captured_cell_write(
     check: &mut AccessCheckContext<'_, '_>,
-    local_index: usize,
+    actor: usize,
+    addresses: &AddressSet,
 ) -> Result<(), BorrowCheckError> {
-    let cells = check.state.alias_cells(local_index);
-    if let Some(origin) = cells
+    let targets: Vec<_> = addresses
+        .cells()
         .iter()
-        .filter_map(|&(holder, _)| check.state.alloc_origin_local(holder))
-        .find(|&origin| !check.layout.local_mutable[origin])
-    {
-        let diagnostics = &check.context.diagnostics;
-        return Err(diagnostics.invalid_mutable_access(
-            diagnostics.local_place(check.layout.local_ids[origin]),
-            InvalidMutableAccessReason::ImmutablePlace,
-            None,
-            None,
-            check.span.or(check.location),
-        ));
-    }
-    let targets = cells
-        .iter()
-        .map(|&(holder, _)| MutationTarget {
-            id: holder,
-            layer_reached: true,
-            deep: false,
+        .filter_map(|&cell| match cell {
+            CellId::Projected(holder, _) => Some(MutationTarget {
+                id: holder,
+                layer_reached: true,
+                deep: false,
+            }),
+            CellId::Slot(_) => None,
         })
-        .collect::<Vec<_>>();
-    check_layer_conflict(check, local_index, PlaceAccess { cells: &cells, values: &targets }, false)
-}
-
-/// A through-alias write either replaces one whole binding or stores into its possible cells.
-pub(super) enum LayerAliasWrite {
-    None,
-    Whole(usize, LocalLayerValue),
-    Cells {
-        cells: Vec<(AllocId, FieldKey)>,
-        exact: bool,
-        stored: Vec<StoredValue>,
-        views: Vec<AllocId>,
-        incoming_alias: LocalLayerValue,
-    },
-}
-
-impl LayerAliasWrite {
-    pub(super) fn has_facts(&self) -> bool {
-        match self {
-            Self::None => false,
-            Self::Whole(_, value) => value.has_facts(),
-            Self::Cells { .. } => true,
-        }
-    }
-
-    pub(super) fn publishes_weak_whole_ids(&self) -> bool {
-        matches!(self, Self::Cells { exact: false, stored, .. } if !stored.is_empty())
-    }
-
-    pub(super) fn apply(
-        self,
-        state: &mut BorrowState,
-        local_index: usize,
-        alias_state: &LocalState,
-        retirement: Option<AllocationRetirement>,
-    ) {
-        match self {
-            Self::None => {}
-            Self::Whole(cell, mut value) => {
-                if let Some(retirement) = retirement {
-                    value.remap(state, retirement);
-                }
-                value.apply(state, cell);
-                if state.layer_is_empty() {
-                    return;
-                }
-                let (ids, bound) = state.local_alloc_ids(cell);
-                let views: Vec<_> = state.alloc_binding_views(cell).collect();
-                let readonly = state.alloc_binding_readonly(cell);
-                state.bind_alloc_ids(local_index, if bound { &ids } else { &[] }, readonly);
-                if !views.is_empty() {
-                    state.bind_alloc_views(local_index, &views);
-                }
-                let detached = state.detached_holders(cell).collect::<Vec<_>>();
-                if !detached.is_empty() {
-                    state.bind_detached_holders(local_index, detached);
-                }
-            }
-            Self::Cells {
-                cells,
-                exact,
-                stored,
-                views,
-                incoming_alias,
-            } => {
-                // A joined alias may target several projected or whole cells. None of those
-                // targets can drop its old contents unless this is one exact projected write.
-                for (holder, key) in cells {
-                    state.store_alloc_field_with_views(
-                        &[holder],
-                        key,
-                        &stored,
-                        &views,
-                        exact,
-                        true,
-                    );
-                }
-                let ids = stored.iter().map(|value| value.id).collect::<Vec<_>>();
-                let readonly = stored.iter().any(|value| !value.writable);
-                // Every path replaces what the writer itself observes, even when none of its
-                // possible referents can be strongly updated.
-                state.bind_alloc_ids(local_index, &ids, readonly);
-                if !views.is_empty() {
-                    state.bind_alloc_views(local_index, &views);
-                }
-                if !exact && !ids.is_empty() {
-                    for cell in alias_state.direct_alias_roots.iter_ones() {
-                        if cell != local_index
-                            && state.local_state(cell).mode.contains(LocalMode::SLOT)
-                        {
-                            state.extend_alloc_ids(cell, &ids, &views, readonly);
-                        }
-                    }
-                }
-                incoming_alias.apply_cells(state, local_index, false);
-            }
-        }
-    }
-}
-
-pub(super) fn capture_layer_alias_write(
-    values: &LayerValueContext<'_, '_>,
-    state: &mut BorrowState,
-    local_index: usize,
-    alias_state: &LocalState,
-    value: HirValueId,
-    incoming_mutable_alias: bool,
-    span: Option<SourceSpan>,
-) -> Result<LayerAliasWrite, BorrowCheckError> {
-    if let Some(cell) = definite_slot_referent(state, local_index, alias_state) {
-        let captured = capture_local_value(values, state, value, false, span)?;
-        return Ok(LayerAliasWrite::Whole(cell, captured));
-    }
-    let cells = state.alias_cells(local_index);
-    if cells.is_empty()
-        && state.layer_is_empty()
-        && !needs_allocation_facts(values.context, state, value)?
-    {
-        return Ok(LayerAliasWrite::None);
-    }
-    let exact = state.exact_projected_cell(local_index, &cells);
-    let stored = stored_values(values, state, value, true)?;
-    let incoming_alias = if incoming_mutable_alias {
-        capture_local_value(values, state, value, true, span)?
-    } else {
-        LocalLayerValue::None
-    };
-    Ok(LayerAliasWrite::Cells {
-        cells,
-        exact,
-        stored: stored.values,
-        views: stored.views,
-        incoming_alias,
-    })
+        .collect();
+    check_layer_conflict(
+        check,
+        actor,
+        PlaceAccess {
+            cells: &[],
+            values: &targets,
+        },
+        LayerConflictAccess::CapturedBinding(addresses),
+    )
 }
