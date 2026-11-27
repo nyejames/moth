@@ -1,0 +1,5 @@
+items ~= {1, 2}
+writer ~= items
+value = writer.get(0)!
+length = writer.length()
+~[:[value],[length],[writer.length()]]

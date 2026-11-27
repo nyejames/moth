@@ -1,0 +1,8 @@
+Pair = |first {I32}, second {I32}|
+
+holder ~= Pair({1}, {0})
+writer ~= holder.first
+~holder = Pair({2, 3}, {4})
+new_count = holder.first.length()
+old_count = writer.length()
+~[:[new_count],[old_count]]

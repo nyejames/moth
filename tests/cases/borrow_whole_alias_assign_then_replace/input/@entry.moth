@@ -1,0 +1,6 @@
+slot ~= 2
+source ~= 3
+writer ~= slot
+~writer = source
+~writer = 9
+~[:[slot],[source]]

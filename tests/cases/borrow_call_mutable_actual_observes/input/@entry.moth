@@ -1,0 +1,8 @@
+show |value ~I32|:
+    io.line([:[value]])
+;
+
+scores ~{String = I32} = {"k" = 7}
+score ~= scores.get("k")!
+~scores.clear()
+show(~score)

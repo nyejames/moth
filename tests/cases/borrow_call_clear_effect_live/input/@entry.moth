@@ -1,0 +1,10 @@
+Scores as {String = I32}
+
+edit |scores ~Scores|:
+    ~scores.clear()
+;
+
+scores ~Scores = {"k" = 7}
+score = scores.get("k")!
+edit(~scores)
+~[:[score]]

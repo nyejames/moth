@@ -1,0 +1,7 @@
+Pair = |left I32, right I32|
+
+pair ~= Pair(1, 2)
+left ~= pair.left
+right ~= pair.left
+~right = 7
+~[:[left],[right]]

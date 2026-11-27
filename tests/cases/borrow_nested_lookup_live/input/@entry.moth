@@ -1,0 +1,8 @@
+Bucket = |rows {{I32}}|
+
+bucket ~= Bucket({{1, 2}})
+row = bucket.rows.get(0)!
+item = row.get(0)!
+~bucket.rows.push({3})
+observed = item + 0
+~[:[observed]]

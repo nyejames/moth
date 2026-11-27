@@ -1,0 +1,7 @@
+Pair = |left I32, right I32|
+
+pair ~= Pair(1, 2)
+writer ~= pair.left
+observed = pair.right
+~writer = 7
+~[:[observed],[writer]]

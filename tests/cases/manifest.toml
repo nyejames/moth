@@ -23721,3 +23721,262 @@ path = "runtime_call_opaque_projected_store_result_rejected"
 tags = ["integration", "functions", "borrows", "diagnostics"]
 contract = "language.borrows.opaque_call_results_retain_projected_stores"
 role = "primary"
+
+[[case]]
+id = "borrow_aggregate_item_live"
+path = "borrow_aggregate_item_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.aggregate_field_retains_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_aggregate_count_only"
+path = "borrow_aggregate_count_only"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.aggregate_sibling_read_ignores_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_aggregate_replace_field"
+path = "borrow_aggregate_replace_field"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.aggregate_field_replacement_ends_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_aggregate_item_after_score_replace"
+path = "borrow_aggregate_item_after_score_replace"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.aggregate_field_retains_replaced_source_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_aggregate_count_after_score_replace"
+path = "borrow_aggregate_count_after_score_replace"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.aggregate_sibling_and_replaced_source_ignore_old_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_nested_lookup_live"
+path = "borrow_nested_lookup_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.nested_lookup_retains_outer_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_nested_lookup_last_use"
+path = "borrow_nested_lookup_last_use"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.nested_lookup_final_use_allows_outer_receiver_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_identity_lookup_live"
+path = "borrow_identity_lookup_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.identity_result_retains_lookup_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_identity_lookup_last_use"
+path = "borrow_identity_lookup_last_use"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.unused_identity_result_allows_receiver_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_write_through_lookup_live"
+path = "borrow_write_through_lookup_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.alias_store_retains_lookup_receiver_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_write_through_lookup_last_use"
+path = "borrow_write_through_lookup_last_use"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.stored_lookup_final_use_allows_receiver_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_lookup_read_before_replace"
+path = "borrow_lookup_read_before_replace"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.lookup_read_before_replacement_keeps_dependency_live"
+role = "primary"
+
+[[case]]
+id = "borrow_lookup_replace_before_read"
+path = "borrow_lookup_replace_before_read"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.lookup_replacement_before_read_ends_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_lookup_via_writer"
+path = "borrow_lookup_via_writer"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.lookup_and_read_through_live_writer"
+role = "primary"
+
+[[case]]
+id = "borrow_lookup_via_writer_parent_read"
+path = "borrow_lookup_via_writer_parent_read"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.lookup_writer_blocks_parent_read"
+role = "primary"
+
+[[case]]
+id = "borrow_scalar_sibling_alias_write"
+path = "borrow_scalar_sibling_alias_write"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.exclusive_aliases_to_disjoint_scalar_fields"
+role = "primary"
+
+[[case]]
+id = "borrow_scalar_same_cell_alias_write"
+path = "borrow_scalar_same_cell_alias_write"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.exclusive_aliases_conflict_on_same_scalar_field"
+role = "primary"
+
+[[case]]
+id = "borrow_scalar_sibling_shared_read"
+path = "borrow_scalar_sibling_shared_read"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.exclusive_scalar_field_alias_allows_sibling_read"
+role = "primary"
+
+[[case]]
+id = "borrow_scalar_same_cell_shared_read"
+path = "borrow_scalar_same_cell_shared_read"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.exclusive_scalar_field_alias_blocks_same_field_read"
+role = "primary"
+
+[[case]]
+id = "borrow_heap_sibling_push"
+path = "borrow_heap_sibling_push"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.disjoint_heap_children_allow_sibling_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_heap_shared_child_push"
+path = "borrow_heap_shared_child_push"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.shared_heap_children_conflict_on_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_branch_holders_disjoint"
+path = "borrow_branch_holders_disjoint"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.disjoint_heap_children_across_all_branch_alternatives"
+role = "primary"
+
+[[case]]
+id = "borrow_branch_holder_shared_child"
+path = "borrow_branch_holder_shared_child"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.shared_heap_child_in_one_branch_conflicts_on_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_rebound_holder_writer_live"
+path = "borrow_rebound_holder_writer_live"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.fresh_holder_read_disjoint_from_live_old_field_alias"
+role = "primary"
+
+[[case]]
+id = "borrow_rebound_holder_writer_done"
+path = "borrow_rebound_holder_writer_done"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.fresh_holder_read_after_old_field_alias_final_use"
+role = "primary"
+
+[[case]]
+id = "borrow_whole_slot_replace_live_alias"
+path = "borrow_whole_slot_replace_live_alias"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.whole_slot_replacement_conflicts_with_live_writer"
+role = "primary"
+
+[[case]]
+id = "borrow_whole_slot_replace_through_alias"
+path = "borrow_whole_slot_replace_through_alias"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.whole_slot_replacement_through_writer_updates_value"
+role = "primary"
+
+[[case]]
+id = "borrow_whole_slot_replace_copied_control"
+path = "borrow_whole_slot_replace_copied_control"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.whole_slot_replacement_does_not_affect_copy"
+role = "primary"
+
+[[case]]
+id = "borrow_whole_slot_retarget_then_replace"
+path = "borrow_whole_slot_retarget_then_replace"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.independent_slot_retargets_before_write_through"
+role = "primary"
+
+[[case]]
+id = "borrow_whole_alias_assign_then_replace"
+path = "borrow_whole_alias_assign_then_replace"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.whole_alias_assignment_keeps_original_referent"
+role = "primary"
+
+[[case]]
+id = "borrow_map_scalar_lookup_last_use"
+path = "borrow_map_scalar_lookup_last_use"
+tags = ["integration", "language", "borrows", "runtime", "js-backend"]
+contract = "language.borrows.scalar_lookup_final_use_allows_map_mutation"
+role = "primary"
+
+[[case]]
+id = "borrow_call_clear_effect_live"
+path = "borrow_call_clear_effect_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.call_clear_effect_conflicts_with_live_lookup"
+role = "primary"
+
+[[case]]
+id = "borrow_call_mutable_actual_observes"
+path = "borrow_call_mutable_actual_observes"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.mutable_actual_observes_live_lookup_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_member_forward_remove_live"
+path = "borrow_member_forward_remove_live"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.remove_observes_stored_lookup_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_call_scalar_field"
+path = "borrow_call_scalar_field"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.call_result_field_retains_scalar_lookup_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_call_scalar_store"
+path = "borrow_call_scalar_store"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.call_store_retains_scalar_lookup_dependency"
+role = "primary"
+
+[[case]]
+id = "borrow_pack_then_extract"
+path = "borrow_pack_then_extract"
+tags = ["integration", "language", "borrows", "diagnostics", "js-backend"]
+contract = "language.borrows.successive_calls_retain_scalar_lookup_dependency"
+role = "primary"

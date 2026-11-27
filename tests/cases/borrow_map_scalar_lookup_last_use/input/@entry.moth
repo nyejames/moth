@@ -1,0 +1,7 @@
+scores ~{String = I32} = {"Priya" = 10}
+score = scores.get("Priya") catch:
+    then 0
+;
+~[:[score]]
+~scores.set("Rob", 7) catch:
+;
