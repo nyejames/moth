@@ -18,10 +18,13 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    MultipleMutableBorrowsView, SharedMutableConflictView, UseOfUninitializedLocalView,
+    InvalidMutableAccessView, MultipleMutableBorrowsView, SharedMutableConflictView,
+    UseOfUninitializedLocalView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
@@ -745,12 +748,159 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     );
 }
 
-fn check_place_access_source(source: &str) -> Result<(), BorrowCheckError> {
+pub(super) fn check_place_access_source(source: &str) -> Result<(), BorrowCheckError> {
     let (ast, mut paths, mut strings) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut strings);
     let (hir, types) = lower_ast(ast, &mut strings, &mut paths, &registry)
         .expect("place access fixture should lower");
     run_borrow_checker_with_types(&hir, &types, &registry, &paths, &strings).map(|_| ())
+}
+
+pub(super) fn assert_lookup_conflict(source: &str, operation: &str) {
+    let draft = check_place_access_source(source)
+        .expect_err("the receiver edit must be rejected")
+        .into_draft_or_infrastructure()
+        .expect("typed borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    let view = diagnostic
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access");
+    assert_eq!(
+        view.reason,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess
+    );
+    let start = source.find(operation).expect("authored operation");
+    let end = source[start..]
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset);
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span.local().inline_range()
+                .is_some_and(|range| (start..end).contains(&(range.start() as usize)))
+        ),
+        "expected rejection at {operation}, got {:?}",
+        diagnostic.primary_site()
+    );
+}
+
+#[test]
+fn scalar_map_lookup_protects_its_receiver_but_not_an_independent_map() {
+    let fixture = |receiver, capture| {
+        format!(
+            r#"
+scores ~{{String = I32}} = {{"k" = 7}}
+other ~{{String = I32}} = {{"k" = 9}}
+score = scores.get("k")!
+observed = {capture}
+~{receiver}.set("different", 11) catch:
+;
+~[:[observed]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("scores", "score"), "~scores.set");
+    check_place_access_source(&fixture("other", "score")).expect("independent receiver");
+    check_place_access_source(&fixture("scores", "copy score")).expect("independent copy");
+}
+
+#[test]
+fn collection_lookup_value_keeps_receiver_live_until_its_last_use() {
+    let lookup = "items ~= {1, 2}\nitem = items.get(0)!\n";
+    let write = "~items.push(3)\n";
+    let read = "seen = item + 0\n";
+    let render = "~[:[seen]]\n";
+    assert_lookup_conflict(&format!("{lookup}{write}{read}{render}"), "~items.push");
+    check_place_access_source(&format!("{lookup}{read}{write}{render}"))
+        .expect("the last lookup use precedes the edit");
+}
+
+#[test]
+fn map_get_and_collection_get_failure_do_not_acquire_lookup_dependencies() {
+    for (declaration, get, change) in [
+        (
+            r#"receiver ~{String = I32} = {"k" = 7}"#,
+            r#"get("missing")"#,
+            "~receiver.clear()",
+        ),
+        ("receiver ~= {1, 2}", "get(99)", "~receiver.push(3)"),
+    ] {
+        let source = format!(
+            "{declaration}\n\
+             value = receiver.{get} catch:\n\
+                 {change}\n\
+                 then 0\n\
+             ;\n\
+             ~[:[value]]\n"
+        );
+        check_place_access_source(&source).expect("only the success edge acquires a dependency");
+    }
+}
+
+#[test]
+fn clear_refill_kills_only_definitely_erased_lookup_members() {
+    let fixture = |clear: &str, refill: &str| {
+        format!(
+            r#"
+probe |flag Bool| -> I32, Error!:
+    src ~{{String = I32}} = {{"k" = 7}}
+    score = src.get("k")!
+    dst ~{{String = I32}} = {{"k" = score}}
+    {clear}
+    ~src.clear()
+    {refill}
+    return dst.get("k")!
+;
+~[:[probe(true)!],[probe(false)!]]
+"#
+        )
+    };
+    check_place_access_source(&fixture("~dst.clear()", "~dst.set(\"k\", 11) catch:\n;"))
+        .expect("definite erase kills the old member before refill");
+    assert_lookup_conflict(&fixture("if flag:\n~dst.clear()\n;", ""), "~src.clear()");
+}
+
+#[test]
+fn member_forward_remove_live() {
+    for member in [r#"~dst.remove("k")!"#, r#"dst.get("k")!"#] {
+        let fixture = |before, after| {
+            format!(
+                r#"
+src ~{{String = I32}} = {{"k" = 7}}
+score = src.get("k")!
+dst ~{{String = I32}} = {{"k" = score}}
+{before}
+forwarded = {member}
+seen = forwarded + 0
+{after}
+~[:[seen]]
+"#
+            )
+        };
+        assert_lookup_conflict(&fixture("~src.clear()", ""), "~src.clear()");
+        check_place_access_source(&fixture("", "~src.clear()"))
+            .expect("the member was last observed before the source edit");
+    }
+}
+
+#[test]
+fn remove_transports_existing_dependencies_without_acquiring_its_own() {
+    let fixture = |receiver| {
+        format!(
+            r#"
+src ~{{String = I32}} = {{"k" = 7}}
+score = src.get("k")!
+dst ~{{String = I32}} = {{"k" = score}}
+removed = ~dst.remove("k")!
+~{receiver}.clear()
+~[:[removed]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("src"), "~src.clear()");
+    check_place_access_source(&fixture("dst"))
+        .expect("a removed value does not depend on the receiver it left");
 }
 
 #[test]

@@ -27,7 +27,6 @@ pub(in super::super) enum CallReturns<'a> {
     Summary(&'a FunctionReturnAliasSummary),
     External(&'a [ExternalReturnSlot]),
     Fresh,
-    Get,
 }
 
 /// Per-argument effect contract consumed by transfer.

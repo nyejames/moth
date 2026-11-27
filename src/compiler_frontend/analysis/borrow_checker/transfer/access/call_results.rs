@@ -7,7 +7,8 @@ use super::super::layer::{
 use super::{CallArgumentTransfer, CallTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, Coverage, FieldKey, PlaceResolution, ResolvedPlace, RootSet, StoredValue, TypedStore,
+    AllocId, Coverage, DependencySet, FieldKey, PlaceResolution, ResolvedPlace, RootSet,
+    StoredValue, TypedStore, ValueAlt, ValueAlternatives, ValueKind as PayloadKind,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
@@ -28,6 +29,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(super) enum CallLane<'a> {
     Unreachable,
     Known(&'a CallLaneSummary),
+    Lookup,
     External(&'a [ExternalReturnSlot]),
     Opaque(Inputs<'a>),
 }
@@ -60,8 +62,7 @@ impl<'a> CallLane<'a> {
             }
             (CallReturns::External(slots), InvokeLane::Success) => Self::External(slots),
             (CallReturns::External(_), InvokeLane::Error) => Self::Opaque(Inputs::Any),
-            (CallReturns::Get, InvokeLane::Success) => Self::Opaque(Inputs::Args(&[0])),
-            (CallReturns::Get | CallReturns::Fresh, _) => Self::Opaque(Inputs::Fresh),
+            (CallReturns::Fresh, _) => Self::Opaque(Inputs::Fresh),
         }
     }
 
@@ -77,13 +78,16 @@ impl<'a> CallLane<'a> {
                 Some(ExternalReturnAlias::Fresh) => Inputs::Fresh,
                 None => Inputs::Any,
             },
-            Self::Known(_) | Self::Unreachable => unreachable!("expected an opaque lane"),
+            Self::Lookup | Self::Known(_) | Self::Unreachable => {
+                unreachable!("expected an opaque lane")
+            }
         }
     }
 
     pub(super) fn retains_result(self) -> bool {
         match self {
             Self::Unreachable | Self::Opaque(Inputs::Fresh) => false,
+            Self::Lookup => true,
             Self::Known(facts) => facts.sources.iter().any(|row| {
                 matches!(row.source, CallAllocationSource::Parameter(_))
             }),
@@ -104,6 +108,7 @@ impl<'a> CallLane<'a> {
     pub(super) fn may_retain(self, argument: usize, roots: &[RootSet]) -> bool {
         let opaque = || roots.get(argument).is_some_and(|root| !root.is_empty());
         match self {
+            Self::Lookup => argument == 0,
             Self::Known(facts) => facts.sources.iter().any(|row| match &row.source {
                 CallAllocationSource::Parameter(path) => path.index == argument,
                 CallAllocationSource::OpaqueFresh | CallAllocationSource::Fresh => false,
@@ -127,6 +132,7 @@ impl<'a> CallLane<'a> {
         'a: 'b,
     {
         match self {
+            Self::Lookup => Some(if slot == 0 { &[0] } else { &[] }),
             Self::Known(facts) => {
                 let rows = result_root_rows(&facts.sources, slot);
                 if let [row] = rows
@@ -161,10 +167,17 @@ impl<'a> CallLane<'a> {
     pub(super) fn derive_result(
         self,
         slot: usize,
-        args: &[RootSet],
+        actuals: &CallActuals<'_>,
         local_count: usize,
     ) -> RootSet {
         let empty = || RootSet::empty(local_count);
+        if matches!(self, Self::Lookup) {
+            return if slot == 0 {
+                actuals.derivations.first().cloned().unwrap_or_else(empty)
+            } else {
+                empty()
+            };
+        }
         let Self::Known(facts) = self else {
             // An opaque result may be fresh even when it is allowed to alias an actual.
             return empty();
@@ -172,7 +185,7 @@ impl<'a> CallLane<'a> {
         let mut rows = result_root_rows(&facts.sources, slot).iter();
         let origin = |row: &CallPathSource| {
             if let CallAllocationSource::Parameter(path) = &row.source {
-                args.get(path.index)
+                actuals.derivations.get(path.index)
             } else {
                 None
             }
@@ -215,20 +228,33 @@ pub(super) fn call_result_ops(
     match lane {
         CallLane::Unreachable => return Ok(ops),
         CallLane::Known(facts) => {
-            if facts.stores.is_empty()
+            let mut ops = if facts.stores.is_empty()
                 && facts.sharing.is_empty()
                 && let Some(ops) =
                     direct_result_ops(input, actuals, results.clone(), facts, allow_plain_roots)?
             {
-                return Ok(ops);
+                ops
+            } else {
+                instantiate_lane(input, actuals, results.clone(), facts, outcome)?
+            };
+            if input.state.has_value_alternatives() {
+                append_scalar_results(input, actuals, results, facts, &mut ops)?;
+                append_uncertain_scalar_stores(input, actuals, facts, &mut ops)?;
             }
-            return instantiate_lane(input, actuals, results, facts, outcome);
+            return Ok(ops);
         }
         _ => {}
     }
     let multiple = results.clone().nth(1).is_some();
     for (slot, dest) in results.enumerate() {
         let Some(ty) = result_type(input, dest)? else {
+            if input.state.has_value_alternatives() {
+                let inputs = lane.opaque_inputs(slot);
+                let opaque = opaque_inputs(&mut opaque, input, actuals, inputs)?;
+                let mut captured = CapturedValue::default();
+                opaque.add_uncertain_dependencies(&mut captured, true);
+                bind_result(&mut ops, dest, captured);
+            }
             continue;
         };
         let inputs = lane.opaque_inputs(slot);
@@ -241,9 +267,161 @@ pub(super) fn call_result_ops(
         {
             values.extend(opaque.add_result_type(input, ty, outcome, &mut ops)?);
         }
-        bind_result(&mut ops, dest, values, Vec::new());
+        let mut captured = CapturedValue::new(values, Vec::new());
+        opaque.add_uncertain_dependencies(&mut captured, false);
+        bind_result(&mut ops, dest, captured);
     }
     Ok(ops)
+}
+
+fn append_scalar_results(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    results: impl Iterator<Item = HirLocalDestination>,
+    facts: &CallLaneSummary,
+    ops: &mut Vec<InvokeLayerOp>,
+) -> Result<(), BorrowCheckError> {
+    let mut captures = PathCaptures::default();
+    let mut possible = None;
+    for (slot, dest) in results.enumerate() {
+        if result_type(input, dest)?.is_some() {
+            continue;
+        }
+        let mut alternatives = Vec::new();
+        let rows = result_root_rows(&facts.sources, slot);
+        let mut unresolved = rows.is_empty();
+        for row in rows {
+            if let CallAllocationSource::Parameter(source) = &row.source {
+                let value = captures.get(input, actuals, source.index, &source.path)?;
+                if value.alternatives.is_empty() {
+                    alternatives.push(ValueAlt::plain(PayloadKind::Scalar));
+                } else {
+                    alternatives.extend_from_slice(&value.alternatives);
+                }
+            } else {
+                unresolved = true;
+            }
+        }
+        if unresolved {
+            if possible.is_none() {
+                possible = Some(possible_dependencies(input, actuals, Inputs::Any)?);
+            }
+            let deps = possible
+                .as_ref()
+                .expect("unresolved output captures possible sources");
+            if !deps.is_empty() {
+                alternatives.push(ValueAlt::plain(PayloadKind::Scalar));
+                alternatives.push(ValueAlt {
+                    kind: PayloadKind::Unknown,
+                    deps: deps.clone(),
+                });
+            }
+        }
+        if alternatives.iter().any(|alt| !alt.deps.is_empty()) {
+            bind_result(
+                ops,
+                dest,
+                CapturedValue {
+                    alternatives,
+                    ..CapturedValue::default()
+                }
+                .into_scalar(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn unresolved_scalar(deps: &DependencySet) -> CapturedValue {
+    CapturedValue {
+        alternatives: vec![ValueAlt {
+            kind: PayloadKind::Scalar,
+            deps: deps.clone(),
+        }],
+        ..Default::default()
+    }
+}
+
+/// The allocation summary can describe a store without recording scalar writes. Replay the
+/// omitted scalar destinations as may writes; an absent allocation row cannot kill anything.
+fn append_uncertain_scalar_stores(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    facts: &CallLaneSummary,
+    ops: &mut Vec<InvokeLayerOp>,
+) -> Result<(), BorrowCheckError> {
+    if !actuals.args.iter().any(CallArgumentTransfer::may_write) {
+        return Ok(());
+    }
+    let deps = possible_dependencies(input, actuals, Inputs::Any)?;
+    if deps.is_empty() {
+        return Ok(());
+    }
+    for index in 0..actuals.args.len() {
+        if !actuals.args[index].may_write() {
+            continue;
+        }
+        let ty = actuals.ty(input, index)?;
+        if !heap_type(input.context, ty)? {
+            if !has_scalar_store(facts, index, &[])
+                && let Some(place) = actuals.entry_place(input, index)?
+                && !place.address.cells().is_empty()
+            {
+                ops.push(InvokeLayerOp::Store(TypedStore::write_cells(
+                    place.address.clone(),
+                    unresolved_scalar(&deps),
+                )));
+            }
+            continue;
+        }
+        let root = ResolvedPlace::from_capture(actuals.root(input, index)?);
+        visit_uncertain_scalar_stores(input, facts, index, ty, root, &mut Vec::new(), &deps, ops)?;
+    }
+    Ok(())
+}
+
+fn has_scalar_store(facts: &CallLaneSummary, index: usize, fields: &[CallField]) -> bool {
+    facts.stores.iter().any(|row| {
+        matches!(&row.output,
+        CallOutputPath::Store { target, path } if target.index == index
+            && target.path.iter().chain(path).copied().eq(fields.iter().copied())
+            && matches!(row.source, CallAllocationSource::Parameter(_)))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_uncertain_scalar_stores(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    facts: &CallLaneSummary,
+    index: usize,
+    ty: TypeId,
+    holders: ResolvedPlace,
+    path: &mut Vec<CallField>,
+    deps: &DependencySet,
+    ops: &mut Vec<InvokeLayerOp>,
+) -> Result<(), BorrowCheckError> {
+    if holders.ids.is_empty() {
+        return Ok(());
+    }
+    CallField::for_each_child(ty, input.context.type_environment, |selector, _| {
+        let (key, child) = typed_child(input.context, ty, selector)?;
+        path.push(selector);
+        if heap_type(input.context, child)? {
+            let mut nested = holders.clone();
+            step_graph(input, &mut nested, key);
+            visit_uncertain_scalar_stores(input, facts, index, child, nested, path, deps, ops)?;
+        } else if !has_scalar_store(facts, index, path) {
+            ops.push(InvokeLayerOp::Store(TypedStore::write_projected(
+                holders.ids.iter().copied(),
+                key,
+                Coverage::Partial,
+                unresolved_scalar(deps),
+                false,
+            )));
+        }
+        path.pop();
+        Ok(())
+    })
 }
 
 /// The identity/forwarding boundary does not require a synthetic graph, even when an
@@ -269,6 +447,9 @@ fn direct_result_ops(
     let Some(ty) = result_type(input, dest)? else {
         return Ok(Some(Vec::new()));
     };
+    if matches!(first.source, CallAllocationSource::Fresh) && input.state.has_value_alternatives() {
+        return Ok(None);
+    }
     let CallAllocationSource::Parameter(param) = &first.source else {
         return Ok((facts.sources.len() == 1
             && matches!(first.source, CallAllocationSource::Fresh)
@@ -301,17 +482,14 @@ fn direct_result_ops(
             .binding_mode(index)
             .contains(super::LocalMode::ALIAS)
         && preserves_plain_roots(input, actuals, index, param.index)?
+        && (!input.state.has_value_alternatives()
+            || actuals.root(input, param.index)?.alternatives.is_empty())
     {
         return Ok(Some(Vec::new()));
     }
     let captured = actuals.root(input, param.index)?;
     let mut ops = Vec::new();
-    bind_result(
-        &mut ops,
-        dest,
-        captured.values.iter().copied(),
-        captured.views.clone(),
-    );
+    bind_result(&mut ops, dest, captured.clone());
     Ok(Some(ops))
 }
 
@@ -343,26 +521,18 @@ fn result_type(
         })
 }
 
-fn bind_result(
+pub(super) fn bind_result(
     ops: &mut Vec<InvokeLayerOp>,
     dest: HirLocalDestination,
-    values: impl IntoIterator<Item = StoredValue>,
-    views: Vec<AllocId>,
+    mut value: CapturedValue,
 ) {
-    let mut readonly = false;
-    let ids: Vec<_> = values
-        .into_iter()
-        .map(|value| {
-            readonly |= !value.writable;
-            value.id
-        })
-        .collect();
-    if !ids.is_empty() {
+    if !value.is_empty() {
+        // Allocation permission is a meet over the possible result values.
+        let readonly = value.readonly();
+        value.restrict_permission(readonly);
         ops.push(InvokeLayerOp::Bind {
             local: dest.local(),
-            readonly,
-            ids,
-            views,
+            value,
         });
     }
 }
@@ -418,6 +588,7 @@ fn heap_type(context: &BorrowTransferContext<'_>, ty: TypeId) -> Result<bool, Bo
 pub(super) struct CallActuals<'a> {
     args: &'a [CallArgumentTransfer],
     entries: Vec<Option<CallActual>>,
+    derivations: Vec<RootSet>,
 }
 
 struct CallActual {
@@ -431,7 +602,22 @@ impl<'a> CallActuals<'a> {
         Self {
             args,
             entries: (0..args.len()).map(|_| None).collect(),
+            derivations: Vec::new(),
         }
+    }
+
+    pub(super) fn capture_derivations(
+        &mut self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    ) {
+        self.derivations.extend(self.args.iter().map(|arg| {
+            super::alias_derivation_roots_from_expression(
+                input.layout,
+                input.state,
+                input.context.expressions,
+                arg.argument,
+            )
+        }));
     }
 
     fn argument(
@@ -496,7 +682,8 @@ impl<'a> CallActuals<'a> {
         let entry = self.entry(input, index)?;
         if entry.value.is_none() {
             let expression = input.context.expressions.expression(argument);
-            let value = if !heap_type(input.context, expression.ty)? {
+            let heap = heap_type(input.context, expression.ty)?;
+            let value = if !heap && !input.state.has_value_alternatives() {
                 CapturedValue::default()
             } else if expression.value_kind != ValueKind::Const
                 && !entry.is_copy
@@ -504,12 +691,12 @@ impl<'a> CallActuals<'a> {
             {
                 input
                     .state
-                    .load_place_content(place, &input.layout.local_mutable, false);
+                    .load_place_content(place, &input.layout.local_mutable, !heap);
                 let content = place
                     .content
                     .as_ref()
                     .expect("captured place requests content");
-                CapturedValue {
+                let captured = CapturedValue {
                     values: stored_allocation_values(
                         input.layout,
                         input.state,
@@ -517,8 +704,15 @@ impl<'a> CallActuals<'a> {
                         place.permission.wrapper_readonly_source.is_none(),
                     ),
                     views: content.views.clone(),
+                    alternatives: content.alternatives.clone(),
+                };
+                if heap {
+                    captured
+                } else {
+                    captured.into_scalar()
                 }
-            } else if entry.is_copy
+            } else if heap
+                && entry.is_copy
                 && let Some(source) = entry.place.as_mut()
             {
                 let source = if input.state.has_alloc_edges() {
@@ -588,13 +782,7 @@ impl<'a> CallActuals<'a> {
         };
         let addresses = &place.address;
         Ok((!addresses.cells().is_empty()).then(|| {
-            InvokeLayerOp::Store(TypedStore::write_cells(
-                addresses.clone(),
-                CapturedValue {
-                    values: node.values.clone(),
-                    views: output_views(node),
-                },
-            ))
+            InvokeLayerOp::Store(TypedStore::write_cells(addresses.clone(), node.capture()))
         }))
     }
 
@@ -638,7 +826,7 @@ impl<'a> PathCaptures<'a> {
                     .value
                     .as_ref()
                     .expect("demanded entry value was captured");
-                let mut graph = ResolvedPlace::from_values(&value.values, value.views.clone());
+                let mut graph = ResolvedPlace::from_capture(value);
                 if !actual.is_copy
                     && let Some(content) = actual
                         .place
@@ -648,8 +836,14 @@ impl<'a> PathCaptures<'a> {
                     graph.coverage = content.coverage;
                     graph.may_be_absent = content.may_be_absent;
                 }
-                for &field in path {
+                for (index, &field) in path.iter().enumerate() {
                     let (key, child) = typed_child(input.context, ty, field)?;
+                    if index + 1 == path.len()
+                        && input.state.has_value_alternatives()
+                        && !heap_type(input.context, child)?
+                    {
+                        return Ok(entry.insert(input.state.capture_scalar_projection(&graph, key)));
+                    }
                     step_graph(input, &mut graph, key);
                     ty = child;
                 }
@@ -702,12 +896,53 @@ struct LaneNode<'a> {
     route: &'a CallOutputPath,
     ty: TypeId,
     values: Vec<StoredValue>,
+    alternatives: ValueAlternatives,
     inherited: Vec<AllocId>,
     view: Option<AllocId>,
     nonsingular: bool,
     /// A projected parent that came from a parameter already has its own graph.
     /// Only these call-owned alternatives receive synthetic child edges.
     fresh: Vec<AllocId>,
+}
+
+impl LaneNode<'_> {
+    fn capture(&self) -> CapturedValue {
+        CapturedValue {
+            values: self.values.clone(),
+            views: output_views(self),
+            alternatives: self.alternatives.clone(),
+        }
+    }
+
+    fn contribute(&mut self, value: &CapturedValue) {
+        if self.alternatives.is_empty() && !value.alternatives.is_empty() {
+            self.alternatives
+                .extend(self.values.iter().copied().map(allocation_alt));
+        }
+        if !self.alternatives.is_empty() || !value.alternatives.is_empty() {
+            if value.alternatives.is_empty() {
+                self.alternatives
+                    .extend(value.values.iter().copied().map(allocation_alt));
+            } else {
+                self.alternatives.extend_from_slice(&value.alternatives);
+            }
+        }
+        self.values.extend_from_slice(&value.values);
+    }
+
+    fn add_fresh(&mut self, id: AllocId, writable: bool) {
+        let value = StoredValue { id, writable };
+        self.fresh.push(id);
+        self.values.push(value);
+        self.inherited.push(id);
+        if !self.alternatives.is_empty() {
+            self.alternatives.push(allocation_alt(value));
+        }
+    }
+}
+
+fn allocation_alt(value: StoredValue) -> ValueAlt {
+    ValueAlt::plain(PayloadKind::Allocation(value))
 }
 
 fn instantiate_lane(
@@ -751,6 +986,7 @@ fn instantiate_lane(
                 route: output,
                 ty: typed_path(input.context, root_ty, path)?,
                 values: Vec::new(),
+                alternatives: Vec::new(),
                 fresh: Vec::new(),
                 inherited: Vec::new(),
                 view: None,
@@ -769,7 +1005,7 @@ fn instantiate_lane(
                 }
                 let values = captures.get(input, actuals, path.index, &path.path)?;
                 node.inherited.extend(captured_occurrences(values));
-                node.values.extend_from_slice(&values.values);
+                node.contribute(values);
             }
             CallAllocationSource::Fresh | CallAllocationSource::OpaqueFresh => {
                 let opaque = matches!(row.source, CallAllocationSource::OpaqueFresh);
@@ -788,9 +1024,7 @@ fn instantiate_lane(
                     input.block_id,
                     &input.layout.block_successors,
                 );
-                node.fresh.push(id);
-                node.values.push(StoredValue { id, writable: true });
-                node.inherited.push(id);
+                node.add_fresh(id, true);
             }
         }
     }
@@ -838,9 +1072,7 @@ fn instantiate_lane(
             for index in [left, right] {
                 let node = &mut nodes[index];
                 let writable = node.values.iter().all(|value| value.writable);
-                node.fresh.push(id);
-                node.values.push(StoredValue { id, writable });
-                node.inherited.push(id);
+                node.add_fresh(id, writable);
             }
         }
     }
@@ -937,10 +1169,7 @@ fn instantiate_lane(
                         holders.values.iter().map(|holder| holder.id),
                         key,
                         Coverage::Partial,
-                        CapturedValue {
-                            values: node.values.clone(),
-                            views: output_views(node),
-                        },
+                        node.capture(),
                         false,
                     )));
                     continue;
@@ -963,19 +1192,45 @@ fn instantiate_lane(
                 }
             }
             for &holder in &parent.fresh {
-                if parent.view.is_none() && !views.is_empty() {
+                if parent.view.is_none() && !views.is_empty() || !node.alternatives.is_empty() {
                     // Rewrapping a projected actual carries its occurrence with the edge.
                     ops.push(InvokeLayerOp::ConstructField {
                         holder,
                         key,
-                        values: node.values.clone(),
-                        views: views.clone(),
+                        value: CapturedValue {
+                            values: node.values.clone(),
+                            views: if parent.view.is_none() {
+                                views.clone()
+                            } else {
+                                Vec::new()
+                            },
+                            alternatives: node.alternatives.clone(),
+                        },
                     });
                 } else {
                     for &value in &node.values {
                         ops.push(InvokeLayerOp::Contribute { holder, key, value });
                     }
                 }
+            }
+        }
+    }
+    if input.state.has_value_alternatives() && nodes.iter().any(|node| !node.fresh.is_empty()) {
+        let deps = possible_dependencies(input, actuals, Inputs::Any)?;
+        if !deps.is_empty() {
+            for node in &nodes {
+                if node.fresh.is_empty() || !heap_type(input.context, node.ty)? {
+                    continue;
+                }
+                append_fresh_scalar_fields(
+                    input,
+                    &nodes,
+                    node.route,
+                    node.ty,
+                    &node.fresh,
+                    &deps,
+                    &mut ops,
+                )?;
             }
         }
     }
@@ -989,13 +1244,59 @@ fn instantiate_lane(
         let dest = results
             .clone()
             .nth(result.slot)
-            .expect("result was previously validated");
+            .expect("allocation summary result slot must name a destination");
         // The direct-root fast path above handles elision. A shaped return keeps its
         // pre-call allocation captures even when a second result also retires their source.
         let views = output_views(&node);
-        bind_result(&mut ops, dest, node.values, views);
+        bind_result(
+            &mut ops,
+            dest,
+            CapturedValue {
+                values: node.values,
+                views,
+                alternatives: node.alternatives,
+            },
+        );
     }
     Ok(ops)
+}
+
+/// Only synthesised allocations lack field captures. Parameter-derived alternatives keep their
+/// own graphs; an explicitly supplied child is handled at its own allocation-summary node.
+fn append_fresh_scalar_fields(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    nodes: &[LaneNode<'_>],
+    parent: &CallOutputPath,
+    ty: TypeId,
+    holders: &[AllocId],
+    deps: &DependencySet,
+    ops: &mut Vec<InvokeLayerOp>,
+) -> Result<(), BorrowCheckError> {
+    CallField::for_each_child(ty, input.context.type_environment, |selector, _| {
+        let (key, child) = typed_child(input.context, ty, selector)?;
+        let mut route = parent.clone();
+        match &mut route {
+            CallOutputPath::Result(result) => result.path.push(selector),
+            CallOutputPath::Store { path, .. } => path.push(selector),
+        }
+        if nodes.iter().any(|node| *node.route == route) {
+            return Ok(());
+        }
+        if heap_type(input.context, child)? {
+            let nested: Vec<_> = holders
+                .iter()
+                .map(|&holder| input.state.alloc_child(holder, key))
+                .collect();
+            append_fresh_scalar_fields(input, nodes, &route, child, &nested, deps, ops)?;
+        } else {
+            ops.extend(holders.iter().map(|&holder| InvokeLayerOp::ConstructField {
+                holder,
+                key,
+                value: unresolved_scalar(deps),
+            }));
+        }
+        Ok(())
+    })
 }
 
 fn captured_occurrences(value: &CapturedValue) -> impl Iterator<Item = AllocId> + '_ {
@@ -1027,7 +1328,7 @@ fn step(
     values: &CapturedValue,
     key: FieldKey,
 ) -> CapturedValue {
-    let mut place = ResolvedPlace::from_values(&values.values, values.views.clone());
+    let mut place = ResolvedPlace::from_capture(values);
     step_graph(input, &mut place, key);
     capture_graph_values(place)
 }
@@ -1045,7 +1346,7 @@ fn step_graph(
         .mark_alloc_provenance_readonly(&input.layout.local_mutable, graph);
 }
 
-fn capture_graph_values(place: ResolvedPlace) -> CapturedValue {
+pub(super) fn capture_graph_values(place: ResolvedPlace) -> CapturedValue {
     CapturedValue {
         values: place
             .ids
@@ -1056,6 +1357,7 @@ fn capture_graph_values(place: ResolvedPlace) -> CapturedValue {
             })
             .collect(),
         views: place.views,
+        alternatives: place.alternatives,
     }
 }
 
@@ -1074,12 +1376,37 @@ fn opaque_inputs<'a, 'b>(
     }
 }
 
+fn possible_dependencies(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    sources: Inputs<'_>,
+) -> Result<DependencySet, BorrowCheckError> {
+    let mut dependencies = DependencySet::new();
+    if input.state.has_value_alternatives() {
+        for index in 0..actuals.args.len() {
+            match sources {
+                Inputs::Fresh => break,
+                Inputs::Args(indices) if !indices.contains(&index) => continue,
+                _ => {}
+            }
+            let value = actuals.root(input, index)?;
+            input
+                .state
+                .extend_possible_dependencies(value, &mut dependencies);
+        }
+        dependencies.sort_unstable();
+        dependencies.dedup();
+    }
+    Ok(dependencies)
+}
+
 /// Without a validated shape, a result path may contain any compatible input path or an
 /// unknown allocation. Both are separate from allocations of other types. The latter is one
 /// nonsingular node per call site and type; opaque results in that class may share it.
 #[derive(Default)]
 struct OpaqueInputs {
     inputs: FxHashMap<TypeId, Vec<StoredValue>>,
+    dependencies: DependencySet,
     built: FxHashSet<TypeId>,
     scope: u32,
 }
@@ -1093,6 +1420,7 @@ impl OpaqueInputs {
     ) -> Result<Self, BorrowCheckError> {
         let mut this = Self {
             scope,
+            dependencies: possible_dependencies(input, actuals, sources)?,
             ..Self::default()
         };
         let mut active = FxHashSet::default();
@@ -1109,6 +1437,23 @@ impl OpaqueInputs {
             }
         }
         Ok(this)
+    }
+
+    fn add_uncertain_dependencies(&self, value: &mut CapturedValue, scalar: bool) {
+        if !self.dependencies.is_empty() {
+            value
+                .alternatives
+                .extend(value.values.iter().copied().map(allocation_alt));
+            if scalar {
+                value
+                    .alternatives
+                    .push(ValueAlt::plain(PayloadKind::Scalar));
+            }
+            value.alternatives.push(ValueAlt {
+                kind: PayloadKind::Unknown,
+                deps: self.dependencies.clone(),
+            });
+        }
     }
 
     fn has_inputs(&self) -> bool {
@@ -1134,7 +1479,7 @@ impl OpaqueInputs {
             seen.push(*value);
             true
         });
-        if values.is_empty() {
+        if values.values.is_empty() {
             return Ok(());
         }
         // Validated source/HIR does not have recursive value layouts. Don't produce an

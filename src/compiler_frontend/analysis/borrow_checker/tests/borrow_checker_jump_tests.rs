@@ -2,8 +2,10 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BindingSpec, BorrowState, CellId, FieldKey, RootSet, StoredValue, WrapperId,
+    BindingSpec, BorrowState, CapturedValue, CellId, Coverage, FieldKey, ReceiverDependency,
+    RootSet, StoredValue, TypedStore, ValueAlt, ValueKind, WrapperId,
 };
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{Carrier, CarrierValue};
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
@@ -124,7 +126,7 @@ return source_a
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
-    let layout = checker
+    let mut layout = checker
         .build_function_layout(function, &reachable)
         .expect("fixture local layout should build");
     let source_a_index = layout
@@ -251,4 +253,81 @@ return source_a
         assert_eq!(transported.readonly, readonly);
         assert!(state.detached_from(destination, detached));
     }
+
+    // A same-slot jump still consumes its entry payload before it replaces the destination.
+    layout.lookup_observations = true;
+    let mut state = BorrowState::new_uninitialized(count);
+    state.initialize_parameter(root_a_index);
+    state.initialize_parameter(slot_destination_index);
+    let receiver = state.local_alloc_ids(root_a_index).0[0];
+    let alternative = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: [receiver].into_iter().collect(),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let addresses = state.resolve_cells(slot_destination_index);
+    state.publish_store(
+        &TypedStore::replace_cells(
+            addresses,
+            CapturedValue {
+                alternatives: vec![alternative.clone()],
+                ..Default::default()
+            },
+        ),
+        2,
+        None,
+    );
+    let same_slot = HirTerminator::Jump {
+        target: entry,
+        args: vec![HirJumpArgument {
+            source: slot_destination,
+            destination: slot_destination,
+        }],
+    };
+    let observations = checker
+        .apply_jump_argument_transfer(function_id, &layout, &same_slot, entry, 3, &mut state)
+        .expect("same-slot jump should transfer");
+    let mut demand = Default::default();
+    observations.backward(&mut demand, |_, _| {
+        panic!("jump does not mutate a receiver")
+    });
+    assert_eq!(demand.len(), 1);
+    assert!(demand.contains(&Carrier::Cell(
+        CellId::Slot(WrapperId::current(slot_destination_index)),
+        CarrierValue::Scalar,
+        alternative.deps.clone(),
+    )));
+    let received = state
+        .capture_jump_value(slot_destination_index, true, false)
+        .unwrap();
+    assert_eq!(received.alternatives, [alternative]);
+}
+
+#[test]
+fn jump_observes_old_scalar_before_receiving_its_result() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement| {
+        format!(
+            r#"
+probe |flag Bool| -> I32, Error!:
+    scores ~{{String = I32}} = {{"k" = 7}}
+    score ~= scores.get("k")!
+    ~scores.clear()
+    {replacement}
+    chosen = if flag:
+        then score
+    else
+        then 0
+    ;
+    return 0
+;
+~[:[probe(true)!],[probe(false)!]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture(""), "~scores.clear()");
+    check_place_access_source(&fixture("~score = 0"))
+        .expect("the jump transports only the replacement");
 }

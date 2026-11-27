@@ -4129,3 +4129,181 @@ retained_reference |value ~String, fallback String, trigger I32| -> String:
         }
     }
 }
+
+#[test]
+fn call_clear_effect_live() {
+    let source = r#"
+Scores as {String = I32}
+
+edit |scores ~Scores|:
+    ~scores.clear()
+;
+
+scores ~Scores = {"k" = 7}
+score = scores.get("k")!
+edit(~scores)
+~[:[score]]
+"#;
+    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "edit(~scores)");
+}
+
+#[test]
+fn call_mutable_actual_observes() {
+    let source = r#"
+show |value ~I32|:
+    io.line([:[value]])
+;
+
+scores ~{String = I32} = {"k" = 7}
+score ~= scores.get("k")!
+~scores.clear()
+show(~score)
+"#;
+    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+}
+
+#[test]
+fn lookup_via_writer_preserves_directional_derivation() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+
+    let fixture = |operation| {
+        format!(
+            "items ~= {{1, 2}}\nwriter ~= items\nvalue = writer.get(0)!\n\
+         {operation}\n~[:[value],[length],[writer.length()]]\n"
+        )
+    };
+    check_place_access_source(&fixture("length = writer.length()"))
+        .expect("the lookup derives from the writer");
+
+    let parent = fixture("length = items.length()");
+    let draft = check_place_access_source(&parent)
+        .expect_err("the parent bypasses the active writer")
+        .into_draft_or_infrastructure()
+        .expect("typed borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<SharedMutableConflictView>()
+            .is_some()
+    );
+    let start = parent.find("length = items.length()").unwrap();
+    let end = start + "length = items.length()".len();
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if span.local().inline_range()
+            .is_some_and(|range| (start..end).contains(&(range.start() as usize)))
+    ));
+
+    assert_lookup_conflict(
+        &fixture("~writer.push(3)\nlength = writer.length()"),
+        "~writer.push",
+    );
+}
+
+#[test]
+fn identity_call_transports_both_scalar_and_heap_lookup_values() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    for (ty, payload, read) in [
+        ("I32", "7", "forwarded + 0"),
+        ("{I32}", "{7}", "forwarded.length()"),
+    ] {
+        let fixture = |before, after| {
+            format!(
+                r#"
+identity |value {ty}| -> {ty}:
+    return value
+;
+scores ~{{String = {ty}}} = {{"k" = {payload}}}
+score = scores.get("k")!
+forwarded = identity(score)
+{before}
+seen = {read}
+{after}
+~[:[seen]]
+"#
+            )
+        };
+        assert_lookup_conflict(&fixture("~scores.clear()", ""), "~scores.clear()");
+        check_place_access_source(&fixture("", "~scores.clear()"))
+            .expect("the forwarded value was already observed");
+    }
+}
+
+#[test]
+fn call_scalar_field_keeps_lookup_dependency() {
+    let source = r#"
+Saved = |item I32, count I32|
+pack |item I32| -> Saved:
+    return Saved(item, 3)
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k")!
+saved = pack(score)
+~scores.clear()
+~[:[saved.item]]
+"#;
+    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+}
+
+#[test]
+fn call_scalar_store_keeps_lookup_dependency() {
+    let source = r#"
+Saved = |item I32|
+store |dst ~Saved, item I32|:
+    ~dst.item = item
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k")!
+saved ~= Saved(3)
+store(~saved, score)
+~scores.clear()
+~[:[saved.item]]
+"#;
+    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+}
+
+#[test]
+fn pack_then_extract_keeps_lookup_dependency() {
+    let source = r#"
+Saved = |item I32, count I32|
+pack |item I32| -> Saved:
+    return Saved(item, 3)
+;
+item_of |saved Saved| -> I32:
+    return saved.item
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k") catch then 0
+saved = pack(score)
+forwarded = item_of(saved)
+~scores.clear()
+~[:[forwarded]]
+"#;
+    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+}
+
+#[test]
+fn call_missing_scalar_paths_do_not_taint_explicit_parameter_subtree() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |field| {
+        format!(
+            r#"
+Saved = |item I32|
+Wrapped = |plain Saved, dependent I32|
+pack |plain Saved, value I32| -> Wrapped:
+    return Wrapped(plain, value)
+;
+scores ~{{String = I32}} = {{"k" = 7}}
+score = scores.get("k")!
+plain = Saved(3)
+wrapped = pack(plain, score)
+~scores.clear()
+~[:[wrapped.{field}]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("dependent"), "~scores.clear()");
+    check_place_access_source(&fixture("plain.item"))
+        .expect("the known parameter subtree keeps its own independent contents");
+}

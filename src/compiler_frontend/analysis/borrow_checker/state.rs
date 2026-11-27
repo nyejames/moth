@@ -41,7 +41,7 @@ impl WrapperId {
         }
     }
 
-    fn retired(self, retires: impl FnOnce(usize) -> bool) -> Self {
+    pub(super) fn retired(self, retires: impl FnOnce(usize) -> bool) -> Self {
         if self.age == WrapperAge::Current && retires(self.local) {
             Self {
                 age: WrapperAge::Prior,
@@ -53,27 +53,40 @@ impl WrapperId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum CellId {
     Slot(WrapperId),
     Projected(AllocId, FieldKey),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl CellId {
+    pub(super) fn remap(
+        self,
+        wrapper: impl FnOnce(WrapperId) -> WrapperId,
+        allocation: impl FnOnce(AllocId) -> AllocId,
+    ) -> Self {
+        match self {
+            Self::Slot(slot) => Self::Slot(wrapper(slot)),
+            Self::Projected(holder, key) => Self::Projected(allocation(holder), key),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum Coverage {
     Complete,
     Partial,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum SmallSet<T> {
     Empty,
     One(T),
     Many(Vec<T>),
 }
 
-impl<T: Copy + Ord> SmallSet<T> {
-    fn from_iter(items: impl IntoIterator<Item = T>) -> Self {
+impl<T: Copy + Ord> FromIterator<T> for SmallSet<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(items: I) -> Self {
         let mut items = items.into_iter();
         let Some(first) = items.next() else {
             return Self::Empty;
@@ -87,7 +100,9 @@ impl<T: Copy + Ord> SmallSet<T> {
         known.dedup();
         Self::Many(known)
     }
+}
 
+impl<T: Copy + Ord> SmallSet<T> {
     pub(super) fn insert(&mut self, item: T) {
         match self {
             Self::Empty => *self = Self::One(item),
@@ -145,6 +160,7 @@ pub(super) struct AddressSet {
     pub coverage: Coverage,
     definite: Option<CellId>,
     all_candidates_known: bool,
+    routes: CapturedRoutes,
 }
 
 impl AddressSet {
@@ -154,6 +170,7 @@ impl AddressSet {
             coverage,
             definite: None,
             all_candidates_known: coverage == Coverage::Complete,
+            routes: Vec::new(),
         }
     }
 
@@ -163,6 +180,22 @@ impl AddressSet {
 
     pub(super) fn definite(&self) -> Option<CellId> {
         self.definite
+    }
+
+    pub(super) fn retained_routes(&self) -> &[(CellId, DependencySet)] {
+        &self.routes
+    }
+
+    pub(super) fn captures_current(&self, local: usize, names: impl Fn(AllocId) -> bool) -> bool {
+        let names_cell = |cell| match cell {
+            CellId::Slot(slot) => slot == WrapperId::current(local),
+            CellId::Projected(holder, _) => names(holder),
+        };
+        self.cells().iter().copied().any(&names_cell)
+            || self
+                .routes
+                .iter()
+                .any(|(cell, deps)| names_cell(*cell) || dependencies_name(deps, &names))
     }
 
     /// A missing binding alternative need not hide a possible storage location.
@@ -194,13 +227,13 @@ impl AddressSet {
         state: &BorrowState,
         retirement: AllocationRetirement,
     ) {
-        self.cells.remap(|cell| match cell {
-            CellId::Slot(wrapper) => CellId::Slot(retirement.remap_wrapper(wrapper)),
-            CellId::Projected(mut holder, key) => {
-                retirement.remap_id(state, &mut holder);
-                CellId::Projected(holder, key)
-            }
-        });
+        let remap_id = |mut id| {
+            retirement.remap_id(state, &mut id);
+            id
+        };
+        let remap_cell = |cell: CellId| cell.remap(|slot| retirement.remap_wrapper(slot), remap_id);
+        self.cells.remap(remap_cell);
+        remap_routes(&mut self.routes, remap_cell, remap_id);
         // A definite destination was already a singleton; a prior slot is never exact.
         if self.definite.is_some() {
             self.definite = match self.cells() {
@@ -275,9 +308,37 @@ struct BindingRow {
     route_roots: RootSet,
     /// Slot provenance when the local's may-set cannot describe the owned cell on its own.
     slot_roots: Option<RootSet>,
+    routes: CapturedRoutes,
 }
 
 impl BindingRow {
+    fn union_row_alts(&mut self, incoming: &Self) {
+        if !self.routes.is_empty() || !incoming.routes.is_empty() {
+            let implicit_routes = |alts: &SmallSet<BindingAlt>| {
+                alts.as_slice()
+                    .iter()
+                    .filter_map(|alt| match alt.target {
+                        BindingTarget::Projected(holder, key) => {
+                            Some((CellId::Projected(holder, key), Vec::new()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<CapturedRoutes>()
+            };
+            if self.routes.is_empty() {
+                self.routes = implicit_routes(&self.alts);
+            }
+            if incoming.routes.is_empty() {
+                self.routes.extend(implicit_routes(&incoming.alts));
+            } else {
+                self.routes.extend_from_slice(&incoming.routes);
+            }
+            self.routes.sort_unstable();
+            self.routes.dedup();
+        }
+        self.union_alts(incoming.alts.as_slice());
+    }
+
     fn union_alts(&mut self, incoming: &[BindingAlt]) {
         if incoming
             .iter()
@@ -313,21 +374,169 @@ enum Init {
     Maybe,
 }
 
+type CapturedRoutes = Vec<(CellId, DependencySet)>;
+
+fn remap_routes(
+    routes: &mut CapturedRoutes,
+    mut remap_cell: impl FnMut(CellId) -> CellId,
+    mut remap_alloc: impl FnMut(AllocId) -> AllocId,
+) {
+    for (cell, deps) in &mut *routes {
+        *cell = remap_cell(*cell);
+        remap_dependencies(deps, &mut remap_alloc);
+    }
+    routes.sort_unstable();
+    routes.dedup();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) struct ReceiverDependency {
+    pub entries: SmallSet<AllocId>,
+    pub coverage: Coverage,
+}
+
+pub(super) type DependencySet = Vec<ReceiverDependency>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum ValueKind {
+    Scalar,
+    Allocation(StoredValue),
+    Unknown,
+    Absent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct ValueAlt {
+    pub kind: ValueKind,
+    pub deps: DependencySet,
+}
+
+impl ValueAlt {
+    pub(super) fn plain(kind: ValueKind) -> Self {
+        Self {
+            kind,
+            deps: Vec::new(),
+        }
+    }
+
+    fn remap(&mut self, remap: &mut impl FnMut(AllocId) -> AllocId) {
+        if let ValueKind::Allocation(value) = &mut self.kind {
+            value.id = remap(value.id);
+        }
+        remap_dependencies(&mut self.deps, remap);
+    }
+}
+
+pub(super) fn remap_dependencies(
+    deps: &mut DependencySet,
+    mut remap: impl FnMut(AllocId) -> AllocId,
+) {
+    for dep in &mut *deps {
+        dep.entries.remap(&mut remap);
+    }
+    deps.sort_unstable();
+    deps.dedup();
+}
+
+fn dependencies_name(deps: &DependencySet, names: &impl Fn(AllocId) -> bool) -> bool {
+    deps.iter()
+        .any(|dep| dep.entries.as_slice().iter().copied().any(names))
+}
+
+/// No side payload is needed while the compact allocation facts describe every alternative.
+pub(super) type ValueAlternatives = Vec<ValueAlt>;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct CapturedValue {
     pub values: Vec<StoredValue>,
     pub views: Vec<AllocId>,
+    pub alternatives: ValueAlternatives,
 }
 
 impl CapturedValue {
-    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
-        for value in &mut self.values {
-            retirement.remap_value(state, value);
-        }
-        for view in &mut self.views {
-            retirement.remap_id(state, view);
+    pub(super) fn new(values: Vec<StoredValue>, views: Vec<AllocId>) -> Self {
+        Self {
+            values,
+            views,
+            alternatives: Vec::new(),
         }
     }
+
+    pub(super) fn names_allocation(&self, names: &impl Fn(AllocId) -> bool) -> bool {
+        self.values.iter().any(|value| names(value.id))
+            || self.views.iter().copied().any(names)
+            || self.alternatives.iter().any(|alt| {
+                matches!(alt.kind, ValueKind::Allocation(value) if names(value.id))
+                    || dependencies_name(&alt.deps, names)
+            })
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.values.is_empty() && self.alternatives.is_empty()
+    }
+
+    pub(super) fn into_scalar(mut self) -> Self {
+        self.values.clear();
+        self.views.clear();
+        for alt in &mut self.alternatives {
+            if matches!(alt.kind, ValueKind::Allocation(_)) {
+                alt.kind = ValueKind::Scalar;
+            }
+        }
+        self.alternatives.sort_unstable();
+        self.alternatives.dedup();
+        self
+    }
+
+    pub(super) fn readonly(&self) -> bool {
+        self.values.iter().any(|value| !value.writable)
+    }
+
+    pub(super) fn restrict_permission(&mut self, readonly: bool) {
+        if readonly {
+            for value in &mut self.values {
+                value.writable = false;
+            }
+            for alt in &mut self.alternatives {
+                if let ValueKind::Allocation(value) = &mut alt.kind {
+                    value.writable = false;
+                }
+            }
+        }
+    }
+
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        self.remap_allocations(|mut id| {
+            retirement.remap_id(state, &mut id);
+            id
+        });
+    }
+
+    pub(super) fn remap_allocations(&mut self, mut remap: impl FnMut(AllocId) -> AllocId) {
+        for value in &mut self.values {
+            value.id = remap(value.id);
+        }
+        for view in &mut self.views {
+            *view = remap(*view);
+        }
+        remap_value_alternatives(&mut self.alternatives, remap);
+    }
+}
+
+fn remap_value_alternatives(
+    alternatives: &mut ValueAlternatives,
+    mut remap: impl FnMut(AllocId) -> AllocId,
+) {
+    for alt in &mut *alternatives {
+        alt.remap(&mut remap);
+    }
+    alternatives.sort_unstable();
+    alternatives.dedup();
+}
+
+#[derive(Debug, Default)]
+pub(super) struct StoreReceipt {
+    pub replaced: [Option<(CellId, ValueAlternatives)>; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +674,20 @@ impl TypedStore {
     pub(super) fn captures_slot(&self, local: usize) -> bool {
         matches!(self, Self::Write(write)
             if write.addresses.cells().contains(&CellId::Slot(WrapperId::current(local))))
+    }
+
+    pub(super) fn captures_current(&self, local: usize, names: &impl Fn(AllocId) -> bool) -> bool {
+        match self {
+            Self::Write(write) => {
+                write.addresses.captures_current(local, names)
+                    || write.value.names_allocation(names)
+                    || write
+                        .slot_roots
+                        .as_ref()
+                        .is_some_and(|roots| roots.contains(local))
+            }
+            Self::EraseFamily { receivers, .. } => receivers.iter().copied().any(names),
+        }
     }
 
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
@@ -616,6 +839,7 @@ pub(super) struct FunctionLayout {
     pub block_successors: FxHashMap<BlockId, Vec<BlockId>>,
     /// The entry block if no reachable edge can feed it after parameter initialization.
     pub acyclic_entry_block: Option<BlockId>,
+    pub lookup_observations: bool,
     // Shared by assignment reachability and forward state kills at lexical region exits.
     pub visible_locals_by_block: FxHashMap<BlockId, RootSet>,
     pub may_use_from_block: FxHashMap<BlockId, RootSet>,
@@ -732,6 +956,7 @@ impl FunctionLayout {
             block_local_max_use_order: inputs.block_local_max_use_order,
             block_successors: inputs.block_successors,
             acyclic_entry_block: None,
+            lookup_observations: false,
             visible_locals_by_block: inputs.visible_locals_by_block,
             may_use_from_block: inputs.may_use_from_block,
             must_use_from_block: inputs.must_use_from_block,

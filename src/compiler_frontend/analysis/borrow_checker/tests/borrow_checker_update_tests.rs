@@ -1890,6 +1890,87 @@ probe |input Box| -> I32:\n\
     assert_layer_conflict_at(source, "items.push");
 }
 
+#[test]
+fn scalar_lookup_survives_write_through_until_exact_replacement() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement| {
+        format!(
+            r#"
+scores ~{{String = I32}} = {{"k" = 7}}
+slot ~= 0
+writer ~= slot
+score = scores.get("k")!
+~writer = score
+other ~= writer
+~scores.clear()
+{replacement}
+seen = other + 0
+~[:[seen]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture(""), "~scores.clear()");
+    check_place_access_source(&fixture("~other = 0"))
+        .expect("another alias definitely replaces the same occurrence");
+    assert_lookup_conflict(&fixture("~other = other + 1"), "~scores.clear()");
+}
+
+#[test]
+fn lookup_observations_distinguish_direct_and_conditional_overwrite() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement| {
+        format!(
+            r#"
+probe |flag Bool| -> I32, Error!:
+    scores ~{{String = I32}} = {{"k" = 7}}
+    score ~= scores.get("k")!
+    ~scores.clear()
+    {replacement}
+    return score
+;
+~[:[probe(true)!],[probe(false)!]]
+"#
+        )
+    };
+    check_place_access_source(&fixture("~score = 0"))
+        .expect("definite replacement does not observe the old lookup");
+    assert_lookup_conflict(&fixture("if flag:\n~score = 0\n;"), "~scores.clear()");
+    assert_lookup_conflict(&fixture("~score = score + 1"), "~scores.clear()");
+}
+
+#[test]
+fn construction_retains_lookup_on_the_selected_field_only() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement, observed| {
+        format!(
+            r#"
+Bucket = |scores {{String = {{I32}}}}|
+Saved = |item {{I32}}, count I32|
+bucket ~= Bucket({{"k" = {{1, 2}}}})
+score ~= bucket.scores.get("k")!
+saved ~= Saved(score, 3)
+~score = {{0}}
+{replacement}
+first = saved.item
+second = saved.item
+~bucket.scores.clear()
+~[:[{observed}]]
+"#
+        )
+    };
+    assert_lookup_conflict(
+        &fixture("", "first.length() + second.length()"),
+        "~bucket.scores.clear()",
+    );
+    check_place_access_source(&fixture("", "saved.count"))
+        .expect("the sibling scalar field is independent");
+    check_place_access_source(&fixture(
+        "~saved.item = {0}",
+        "first.length() + second.length()",
+    ))
+    .expect("an exact field replacement kills the retained lookup");
+}
+
 fn assert_layer_conflict_at(source: &str, access: &str) {
     let error = check_source(source).expect_err("a live alias must block this write");
     let draft = error

@@ -3,14 +3,16 @@
 //! WHAT: classifies when a requested access overlaps an active borrow state.
 //! WHY: transfer logic needs one place to keep borrow-conflict rules deterministic and testable.
 
-use super::{AccessCheckContext, BorrowTransferContext, MutableAccessPolicy};
+use super::{AccessCheckContext, BORROW_ACCESS, BorrowTransferContext, MutableAccessPolicy};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, BorrowState, CellId, Coverage, FieldKey, FunctionLayout, FutureUseKind,
     PlaceResolution, RootSet, SmallSet, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
-    AccessFootprint, AccessReservation, PlaceUse,
+    AccessFootprint, AccessReservation, Demand, ObservationBoundary, ObservationCheckpoint,
+    PlaceUse, StatementAccessTracker, ValueObservations, matching_carriers,
+    visit_observed_carriers,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
 use crate::compiler_frontend::compiler_messages::{
@@ -18,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::source::SourceSpan;
 use std::cell::OnceCell;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +74,7 @@ fn touches_entries(key: FieldKey) -> bool {
 fn projected_edit_overlaps(
     state: &BorrowState,
     edit: &AccessFootprint,
-    observer: &AccessFootprint,
+    observer: GraphFootprint<'_>,
 ) -> Overlap {
     if !writable(edit) || !edit.usage.touches_cell() {
         return Overlap::No;
@@ -80,10 +83,7 @@ fn projected_edit_overlaps(
         observer.usage,
         PlaceUse::ReadEntries | PlaceUse::WriteEntries
     );
-    let descendants = deep(observer);
-    let Some(content) = observer.content.as_ref() else {
-        return Overlap::No;
-    };
+    let descendants = observer.deep();
     if !entries && !descendants {
         return Overlap::No;
     }
@@ -96,56 +96,86 @@ fn projected_edit_overlaps(
             continue;
         }
         projected = true;
-        if state.alloc_reaches_typed(&content.ids, holder, descendants, writable(observer)) {
+        if state.alloc_reaches_typed(observer.ids, holder, descendants, observer.writable()) {
             return Overlap::Yes;
         }
     }
-    if projected && content.coverage == Coverage::Partial
+    if projected && observer.coverage == Coverage::Partial
         || edit.address.may_coverage() == Coverage::Partial
-            && (!content.ids.is_empty() || content.coverage == Coverage::Partial)
+            && (!observer.ids.is_empty() || observer.coverage == Coverage::Partial)
     {
         return Overlap::Unknown;
     }
     Overlap::No
 }
 
-fn graph_reaches(state: &BorrowState, from: &AccessFootprint, targets: &[AllocId]) -> bool {
-    deep(from)
-        && from.content.as_ref().is_some_and(|content| {
-            content.ids.iter().any(|&id| {
+#[derive(Clone, Copy)]
+struct GraphFootprint<'a> {
+    ids: &'a [AllocId],
+    views: &'a [AllocId],
+    coverage: Coverage,
+    usage: PlaceUse,
+}
+
+impl<'a> GraphFootprint<'a> {
+    fn of(access: &'a AccessFootprint) -> Option<Self> {
+        let content = access.content.as_ref()?;
+        Some(Self {
+            ids: &content.ids,
+            views: &content.views,
+            coverage: content.coverage,
+            usage: access.usage,
+        })
+    }
+
+    fn deep(self) -> bool {
+        matches!(self.usage, PlaceUse::Read | PlaceUse::Mutate { deep: true })
+    }
+
+    fn writable(self) -> bool {
+        self.usage.kind() == AccessKind::Mutable
+    }
+
+    fn reaches(self, state: &BorrowState, targets: &[AllocId]) -> bool {
+        self.deep()
+            && self.ids.iter().any(|&id| {
                 targets.iter().any(|&target| {
-                    id != target && state.alloc_reaches_typed(&[id], target, true, writable(from))
+                    id != target && state.alloc_reaches_typed(&[id], target, true, self.writable())
                 })
             })
-        })
+    }
 }
 
 fn graph_relation(state: &BorrowState, a: &AccessFootprint, b: &AccessFootprint) -> Overlap {
-    let (Some(x), Some(y)) = (&a.content, &b.content) else {
-        return Overlap::No;
-    };
-    if state.alloc_paths_may_share(&x.ids, &x.views, &y.ids, &y.views)
-        || graph_reaches(state, a, &y.ids)
-        || graph_reaches(state, b, &x.ids)
+    match (GraphFootprint::of(a), GraphFootprint::of(b)) {
+        (Some(a), Some(b)) => graph_overlap(state, a, b),
+        _ => Overlap::No,
+    }
+}
+
+fn graph_overlap(state: &BorrowState, a: GraphFootprint<'_>, b: GraphFootprint<'_>) -> Overlap {
+    if state.alloc_paths_may_share(a.ids, a.views, b.ids, b.views)
+        || a.reaches(state, b.ids)
+        || b.reaches(state, a.ids)
     {
         return Overlap::Yes;
     }
-    if deep(a) && deep(b) && state.has_alloc_edges() {
+    if a.deep() && b.deep() && state.has_alloc_edges() {
         // Distinct roots can share a child reachable from neither root's peer.
-        let descendants = if writable(a) {
-            state.alloc_writable_closure(&x.ids)
+        let descendants = if a.writable() {
+            state.alloc_writable_closure(a.ids)
         } else {
-            state.alloc_readable_closure(&x.ids)
+            state.alloc_readable_closure(a.ids)
         };
         if descendants
             .iter()
-            .any(|&child| state.alloc_reaches_typed(&y.ids, child, true, writable(b)))
+            .any(|&child| state.alloc_reaches_typed(b.ids, child, true, b.writable()))
         {
             return Overlap::Yes;
         }
     }
-    if x.coverage == Coverage::Partial && (!y.ids.is_empty() || y.coverage == Coverage::Partial)
-        || y.coverage == Coverage::Partial && !x.ids.is_empty()
+    if a.coverage == Coverage::Partial && (!b.ids.is_empty() || b.coverage == Coverage::Partial)
+        || b.coverage == Coverage::Partial && !a.ids.is_empty()
     {
         return Overlap::Unknown;
     }
@@ -199,7 +229,9 @@ fn overlap_with_detachment(
         {
             return Overlap::Yes;
         }
-        if consider(projected_edit_overlaps(state, writer, reader)) {
+        if let Some(graph) = GraphFootprint::of(reader)
+            && consider(projected_edit_overlaps(state, writer, graph))
+        {
             return Overlap::Yes;
         }
     }
@@ -237,8 +269,156 @@ pub(super) fn check_access(
     policy: MutableAccessPolicy,
 ) -> Result<(), BorrowCheckError> {
     validate_access(check, &access, source, policy)?;
+    if check.stats.observations.enabled {
+        let terminal = matches!(
+            access.usage,
+            PlaceUse::Read | PlaceUse::ReadEntries | PlaceUse::WriteEntries
+        );
+        check.stats.observations.tail.observe(
+            check.state,
+            &access,
+            terminal,
+            check.actor_index_hint,
+        );
+        if let Some(checkpoint) = mutation_checkpoint(
+            check.state,
+            &access,
+            check.actor_index_hint,
+            check.span,
+            check.current_order,
+            None,
+        ) {
+            check
+                .stats
+                .observations
+                .split(ObservationBoundary::Checkpoint(checkpoint));
+        }
+    }
     publish_access(check, roots, access);
     Ok(())
+}
+
+/// Call reservations are validated individually, but the call executes after all operands.
+pub(super) fn check_call_access(
+    check: &mut AccessCheckContext<'_, '_>,
+    roots: &RootSet,
+    access: AccessFootprint,
+    source: Option<&PlaceResolution>,
+) -> Result<(), BorrowCheckError> {
+    validate_access(check, &access, source, BORROW_ACCESS)?;
+    publish_access(check, roots, access);
+    Ok(())
+}
+
+pub(super) fn record_call_observations(
+    observations: &mut ValueObservations,
+    state: &BorrowState,
+    tracker: &StatementAccessTracker,
+    order: i32,
+    call_span: Option<SourceSpan>,
+    user_call: bool,
+    defer_writes: bool,
+) -> Vec<ObservationCheckpoint> {
+    let mut deferred = Vec::new();
+    for reservation in tracker.reservations() {
+        let terminal = !writable(&reservation.footprint)
+            || matches!(reservation.footprint.usage, PlaceUse::WriteEntries);
+        observations
+            .tail
+            .observe(state, &reservation.footprint, terminal, reservation.actor);
+    }
+    for reservation in tracker.reservations() {
+        if let Some(checkpoint) = mutation_checkpoint(
+            state,
+            &reservation.footprint,
+            reservation.actor,
+            if user_call {
+                call_span.or(reservation.span)
+            } else {
+                reservation.span
+            },
+            order,
+            Some(tracker),
+        ) {
+            if defer_writes {
+                deferred.push(checkpoint);
+            } else {
+                observations.split(ObservationBoundary::Checkpoint(checkpoint));
+            }
+        }
+    }
+    if user_call {
+        // The contract need not contain a store or result for the callee to read an entry
+        // value. Its read can follow any of the call's possible writes.
+        for reservation in tracker.reservations().filter(|r| writable(&r.footprint)) {
+            observations
+                .tail
+                .observe(state, &reservation.footprint, true, reservation.actor);
+        }
+    }
+    deferred
+}
+
+fn mutation_checkpoint(
+    state: &BorrowState,
+    access: &AccessFootprint,
+    actor: Option<usize>,
+    span: Option<SourceSpan>,
+    order: i32,
+    pending: Option<&StatementAccessTracker>,
+) -> Option<ObservationCheckpoint> {
+    if !state.has_value_alternatives()
+        || !matches!(
+            access.usage,
+            PlaceUse::WriteEntries | PlaceUse::Mutate { deep: true }
+        ) && !(matches!(access.usage, PlaceUse::Replace | PlaceUse::Mutate { .. })
+            && (access.address.may_coverage() == Coverage::Partial
+                || access.address.cells().iter().any(
+                    |cell| matches!(*cell, CellId::Projected(_, key) if touches_entries(key)),
+                )))
+    {
+        return None;
+    }
+    let graph = GraphFootprint::of(access);
+    let candidates: Demand = matching_carriers(state, |deps| {
+        deps.iter().any(|dependency| {
+            let receiver = GraphFootprint {
+                ids: dependency.entries.as_slice(),
+                views: &[],
+                coverage: dependency.coverage,
+                usage: PlaceUse::ReadEntries,
+            };
+            projected_edit_overlaps(state, access, receiver) != Overlap::No
+                || graph.is_some_and(|graph| graph_overlap(state, graph, receiver) != Overlap::No)
+        })
+    })
+    .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let mut reads = Demand::default();
+    if let Some(tracker) = pending {
+        for reservation in tracker.reservations().filter(|r| !writable(&r.footprint)) {
+            visit_observed_carriers(
+                state,
+                &reservation.footprint,
+                true,
+                reservation.actor,
+                |carrier| {
+                    if candidates.contains(&carrier) {
+                        reads.insert(carrier);
+                    }
+                },
+            );
+        }
+    }
+    Some(ObservationCheckpoint {
+        order,
+        actor,
+        span,
+        candidates,
+        pending: reads,
+    })
 }
 
 /// A successful optimisation probe publishes the checked reservation; a failed probe
@@ -312,13 +492,6 @@ fn validate_access(
             diagnostics.local_source_span(check.layout.local_ids[candidate]),
             check.span,
         )
-    };
-    // Stability is not discharged by derivation. If a CFG-live source alias also conflicts,
-    // preserve its ordinary shared/mutable diagnostic.
-    let receiver_loan = if mutable {
-        receiver_loan_conflict(check, access)
-    } else {
-        None
     };
     let old_projection = OnceCell::new();
     let derivation = source
@@ -551,10 +724,7 @@ fn validate_access(
                 check.span,
             ));
         }
-        return Err(reject_mutation(receiver_loan.unwrap_or(candidate)));
-    }
-    if let Some(local) = receiver_loan {
-        return Err(reject_mutation(local));
+        return Err(reject_mutation(candidate));
     }
     if let Some(existing) = check.tracker.conflict(access, |existing| {
         !(policy.allow_prior_shared && !writable(&existing.footprint))
@@ -579,42 +749,6 @@ fn validate_access(
         ));
     }
     Ok(())
-}
-
-fn receiver_loan_conflict(
-    check: &AccessCheckContext<'_, '_>,
-    access: &AccessFootprint,
-) -> Option<usize> {
-    let mut loans = check.state.stability_locals().peekable();
-    loans.peek()?;
-    // Editing entries invalidates loans of lazy receivers reached through those entries.
-    // Only a deep referent write follows independently stored allocations as well.
-    let (roots, descendants) = match (&access.content, access.usage) {
-        (Some(content), PlaceUse::Mutate { deep: true }) => (
-            content.ids.as_slice(),
-            check.state.alloc_writable_closure(&content.ids),
-        ),
-        (Some(content), PlaceUse::WriteEntries) => (content.ids.as_slice(), Vec::new()),
-        _ => (&[][..], Vec::new()),
-    };
-    let edited_cells = match access.usage {
-        PlaceUse::Replace | PlaceUse::Mutate { .. } => access.address.cells(),
-        _ => &[],
-    };
-    let projected = edited_cells.iter().filter_map(|cell| match *cell {
-        CellId::Projected(id, key) if touches_entries(key) => Some(id),
-        _ => None,
-    });
-    let targets = roots.iter().chain(&descendants).copied().chain(projected);
-    targets.clone().next()?;
-    loans.find(|&local| {
-        Some(local) != check.actor_index_hint
-            && check.state.stability_overlaps(local, targets.clone())
-            && check
-                .layout
-                .future_use_kind(check.block_id, local, check.current_order - 1)
-                != FutureUseKind::None
-    })
 }
 
 /// A read through the recorded holder occurrence is conservative across a rebind unless

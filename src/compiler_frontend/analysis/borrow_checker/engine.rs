@@ -8,8 +8,12 @@ use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, BorrowState, CapturedValue, FunctionLayout, LocalState, OrderKey,
-    StoredValue, TypedStore, UNKNOWN_ORDER_KEY, remap_invoke_capture,
+    AllocationRetirement, BorrowState, CapturedValue, CellId, FunctionLayout, LocalState, OrderKey,
+    StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, remap_invoke_capture,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
+    AccessFootprint, Carrier, Demand, ObservationBoundary, ObservationCheckpoint, PlaceUse,
+    ValueObservations,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, InvokeLayerOp, InvokeTransfer, transfer_block,
@@ -18,6 +22,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
     LocalMode, ValueBorrowFact,
 };
+use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -30,11 +35,135 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::{BinaryHeap, hash_map::Entry};
+use std::collections::{BinaryHeap, VecDeque, hash_map::Entry};
 
 #[cfg(test)]
 #[path = "transfer/tests/invoke_edge_tests.rs"]
 mod invoke_edge_tests;
+
+#[derive(Default)]
+struct FunctionObservations {
+    blocks: FxHashMap<BlockId, ValueObservations>,
+    edges: FxHashMap<(BlockId, usize), ValueObservations>,
+    diverges: FxHashSet<BlockId>,
+}
+
+impl FunctionObservations {
+    fn record_block(
+        &mut self,
+        block: BlockId,
+        observations: ValueObservations,
+        diverges: bool,
+    ) -> bool {
+        let divergence_changed = if diverges {
+            self.diverges.insert(block)
+        } else {
+            self.diverges.remove(&block)
+        };
+        if observations.is_empty() {
+            self.blocks.remove(&block);
+        } else {
+            self.blocks.insert(block, observations);
+        }
+        divergence_changed
+    }
+
+    fn solve<'s>(
+        &'s self,
+        layout: &FunctionLayout,
+        outputs: &FxHashMap<BlockId, BorrowState>,
+        invokes: &FxHashMap<BlockId, InvokeTransfer>,
+    ) -> Option<(BlockId, &'s ObservationCheckpoint, &'s Carrier)> {
+        if !self
+            .blocks
+            .values()
+            .chain(self.edges.values())
+            .any(ValueObservations::has_obligations)
+        {
+            return None;
+        }
+        let executable = |block, edge| {
+            !self.diverges.contains(&block)
+                && invokes.get(&block).is_none_or(|invoke| {
+                    if edge == 0 {
+                        !invoke.success.unreachable
+                    } else {
+                        !invoke.error.unreachable
+                    }
+                })
+        };
+        let successors = |block| {
+            layout.block_successors[&block]
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(move |&(edge, successor)| {
+                    executable(block, edge) && outputs.contains_key(&successor)
+                })
+        };
+
+        let mut predecessors = FxHashMap::<BlockId, Vec<BlockId>>::default();
+        for &block in outputs.keys() {
+            for (_, successor) in successors(block) {
+                predecessors.entry(successor).or_default().push(block);
+            }
+        }
+        let mut pending: FxHashSet<_> = self
+            .blocks
+            .keys()
+            .copied()
+            .chain(self.edges.keys().map(|&(block, _)| block))
+            .collect();
+        let mut worklist: VecDeque<_> = pending.iter().copied().collect();
+        let mut entry_demand = FxHashMap::<BlockId, Demand>::default();
+        let mut conflict: Option<(BlockId, &ObservationCheckpoint, &Carrier)> = None;
+        while let Some(block) = worklist.pop_front() {
+            pending.remove(&block);
+            let mut check = |checkpoint: &'s ObservationCheckpoint, demand: &Demand| {
+                let offender = checkpoint
+                    .candidates
+                    .iter()
+                    .filter(|carrier| {
+                        demand.contains(*carrier) || checkpoint.pending.contains(*carrier)
+                    })
+                    .min();
+                if let Some(offender) = offender
+                    && conflict.is_none_or(|(prior_block, prior, prior_offender)| {
+                        (checkpoint.order, checkpoint.span, block.0, offender)
+                            < (prior.order, prior.span, prior_block.0, prior_offender)
+                    })
+                {
+                    conflict = Some((block, checkpoint, offender));
+                }
+            };
+            let mut demand = Demand::default();
+            for (edge, successor) in successors(block) {
+                let next = entry_demand.get(&successor);
+                if let Some(summary) = self.edges.get(&(block, edge)) {
+                    let mut edge_demand = next.cloned().unwrap_or_default();
+                    summary.backward(&mut edge_demand, &mut check);
+                    demand.extend(edge_demand);
+                } else if let Some(next) = next {
+                    demand.extend(next.iter().cloned());
+                }
+            }
+            if let Some(summary) = self.blocks.get(&block) {
+                summary.backward(&mut demand, check);
+            }
+            if !demand.is_empty() && entry_demand.get(&block) != Some(&demand) {
+                entry_demand.insert(block, demand);
+                if let Some(predecessors) = predecessors.get(&block) {
+                    for &pred in predecessors {
+                        if pending.insert(pred) {
+                            worklist.push_back(pred);
+                        }
+                    }
+                }
+            }
+        }
+        conflict
+    }
+}
 
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
@@ -186,6 +315,7 @@ impl<'a> BorrowChecker<'a> {
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut invoke_by_block = FxHashMap::<BlockId, InvokeTransfer>::default();
+        let mut observations = FunctionObservations::default();
         // HIR expression rows are immutable and may be shared across blocks. Keep only the
         // latest facts for each block during fixed-point iteration, then merge those surviving
         // snapshots after the state has stabilized.
@@ -271,10 +401,17 @@ impl<'a> BorrowChecker<'a> {
                     .insert(terminator_block, fact);
             }
             final_value_facts_by_block.insert(block_id, block_stats.value_facts);
+            let divergence_changed = layout.lookup_observations
+                && observations.record_block(
+                    block_id,
+                    block_stats.observations,
+                    block_stats.diverges,
+                );
             let invoke = block_stats.invoke;
             let previous_invoke = invoke_by_block.get(&block_id);
             let has_invoke_effects = !invoke.is_empty();
             let changed_out = out_states.get(&block_id) != Some(&output_state)
+                || divergence_changed
                 || previous_invoke.map_or(has_invoke_effects, |previous| previous != &invoke);
 
             // If output state is unchanged, successor joins cannot change either.
@@ -284,13 +421,22 @@ impl<'a> BorrowChecker<'a> {
 
             // The target visitor enumerates success before error, even when both share a block.
             let mut invoke_lanes = [&invoke.success, &invoke.error].into_iter();
+            let mut edge_index = 0;
 
             try_for_each_terminator_target(&block.terminator, |successor| {
+                let edge = (block_id, edge_index);
+                edge_index += 1;
                 if block_stats.diverges {
+                    observations.edges.remove(&edge);
                     return Ok::<(), BorrowCheckError>(());
                 }
-                let invoke_lane = invoke_lanes.next();
+                let invoke_lane = if matches!(&block.terminator, HirTerminator::Invoke { .. }) {
+                    invoke_lanes.next()
+                } else {
+                    None
+                };
                 if invoke_lane.is_some_and(|lane| lane.unreachable) {
+                    observations.edges.remove(&edge);
                     return Ok::<(), BorrowCheckError>(());
                 }
                 let Some(&rank) = ranks.get(&successor) else {
@@ -298,28 +444,55 @@ impl<'a> BorrowChecker<'a> {
                 };
 
                 let mut successor_input = output_state.clone();
-                if let Some(lane) = invoke_lane {
+                let order = layout.terminator_order_or_unknown(block_id);
+                let fresh_outcomes = invoke_lane.is_some_and(|lane| lane.operations.is_empty())
+                    && !successor_input.layer_is_empty()
+                    && !successor_input.block_may_repeat(block_id, &layout.block_successors);
+                let mut edge_observations = if let Some(lane) = invoke_lane {
                     apply_invoke_edge_transfer(
                         &layout,
                         &block.terminator,
                         lane,
-                        layout.terminator_order_or_unknown(block_id),
+                        order,
+                        |index: usize| {
+                            fresh_outcomes
+                            && layout.local_first_write_order[index] == order
+                            && matches!(
+                                self.diagnostics.local_origin_kind(layout.local_ids[index]),
+                                Some(crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind::CompilerTemp)
+                            )
+                        },
                         &mut successor_input,
-                    );
-                }
-                self.apply_jump_argument_transfer(
-                    function.id,
-                    &layout,
-                    &block.terminator,
-                    successor,
-                    layout.terminator_order_or_unknown(block_id),
-                    &mut successor_input,
-                )?;
+                    )
+                } else {
+                    self.apply_jump_argument_transfer(
+                        function.id,
+                        &layout,
+                        &block.terminator,
+                        successor,
+                        order,
+                        &mut successor_input,
+                    )?
+                };
 
                 // Apply lexical visibility kills before join to prevent
                 // branch-local aliases from leaking into outer regions.
-                if let Some(mask) = visible_locals_by_block.get(&successor) {
+                if let Some(mask) = visible_locals_by_block.get(&successor)
+                    && !mask.covers_all(layout.local_count())
+                {
+                    let before = edge_observations.before_rekey(&successor_input);
                     successor_input.kill_invisible(mask);
+                    edge_observations.after_rekey(
+                        before,
+                        &successor_input,
+                        |slot| slot.retired(|local| !mask.contains(local)),
+                        |id| successor_input.visible_allocation(id, mask),
+                    );
+                }
+                if !edge_observations.is_empty() {
+                    observations.edges.insert(edge, edge_observations);
+                } else {
+                    observations.edges.remove(&edge);
                 }
 
                 // Revisit successors only when their input state grows.
@@ -347,6 +520,29 @@ impl<'a> BorrowChecker<'a> {
             } else {
                 invoke_by_block.remove(&block_id);
             }
+        }
+
+        // The verdict uses final executable edges and cannot change forward state.
+        if let Some((block, at, carrier)) =
+            observations.solve(&layout, &out_states, &invoke_by_block)
+        {
+            let local = match carrier {
+                Carrier::Cell(CellId::Slot(slot), ..) | Carrier::Route(slot, ..) => {
+                    Some(slot.local)
+                }
+                Carrier::Cell(CellId::Projected(holder, _), ..) => {
+                    out_states[&block].alloc_origin_local(*holder)
+                }
+            };
+            let diagnostics = &transfer_context.diagnostics;
+            let name = |local: usize| diagnostics.local_place(layout.local_ids[local]);
+            return Err(diagnostics.invalid_mutable_access(
+                at.actor.map_or(DiagnosticPlace::Unknown, name),
+                InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+                local.map(name),
+                local.and_then(|local| diagnostics.local_source_span(layout.local_ids[local])),
+                at.span,
+            ));
         }
 
         // A row may be observed under different final states in different blocks or functions.
@@ -580,13 +776,17 @@ impl<'a> BorrowChecker<'a> {
         successor: BlockId,
         order: OrderKey,
         successor_input: &mut BorrowState,
-    ) -> Result<(), BorrowCheckError> {
+    ) -> Result<ValueObservations, BorrowCheckError> {
+        let mut observations = ValueObservations {
+            enabled: layout.lookup_observations,
+            ..Default::default()
+        };
         let HirTerminator::Jump { target, args } = terminator else {
-            return Ok(());
+            return Ok(observations);
         };
 
         if *target != successor || args.is_empty() {
-            return Ok(());
+            return Ok(observations);
         }
 
         let mut destination_states = args
@@ -601,12 +801,22 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                let layer_ids = successor_input.has_layer_binding(source_index).then(|| {
-                    let resolved = successor_input.resolve_local_allocs(source_index);
-                    (resolved.ids, resolved.readonly, resolved.views)
-                });
+                if observations.enabled && successor_input.has_value_alternatives() {
+                    let mut resolved =
+                        successor_input.resolve_place_path(source_index, &layout.local_mutable, []);
+                    if layout.local_has_in_place_mutation_surface[source_index] {
+                        successor_input.load_place_content(&mut resolved, &layout.local_mutable, false);
+                    }
+                    let mut access = AccessFootprint::cells(resolved.address, PlaceUse::Read);
+                    access.content = resolved.content;
+                    observations.tail.observe(successor_input, &access, true, Some(source_index));
+                }
+                let payload = successor_input.capture_jump_value(
+                    source_index,
+                    !layout.local_has_in_place_mutation_surface[source_index],
+                    false,
+                );
                 let detached = successor_input.detached_holders(source_index).collect::<Vec<_>>();
-                let stability = successor_input.stability_holders(source_index).collect::<Vec<_>>();
                 let destination_state = if successor_input
                     .binding_mode(source_index)
                     .is_definitely_uninit()
@@ -625,7 +835,7 @@ impl<'a> BorrowChecker<'a> {
                     destination
                 };
 
-                Ok((source_index, destination_state, layer_ids, detached, stability))
+                Ok((source_index, destination_state, payload, detached))
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
@@ -660,73 +870,68 @@ impl<'a> BorrowChecker<'a> {
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
         let retires = |local| destination_indices.contains(&local);
-        for (source, destination_state, layer_ids, _, _) in &mut destination_states {
+        for (source, destination_state, payload, _) in &mut destination_states {
             for &retired in &destination_indices {
                 destination_state.derived_from_roots.remove(retired);
             }
-            if layer_ids.is_none() && destination_state.value_roots.iter_ones().any(retires) {
+            if payload.is_none() && destination_state.value_roots.iter_ones().any(retires) {
                 // A root-only source also needs an override when the edge overwrites its root.
-                *layer_ids = Some((
-                    successor_input.local_alloc_ids(*source).0,
-                    false,
-                    Vec::new(),
-                ));
+                *payload = successor_input.capture_jump_value(
+                    *source,
+                    !layout.local_has_in_place_mutation_surface[*source],
+                    true,
+                );
             }
         }
 
         if !successor_input.layer_is_empty()
             || destination_states
                 .iter()
-                .any(|(_, _, ids, detached, stability)| {
-                    ids.is_some() || !detached.is_empty() || !stability.is_empty()
-                })
+                .any(|(_, _, payload, detached)| payload.is_some() || !detached.is_empty())
         {
             for &index in &destination_indices {
-                successor_input.retire_binding_allocation(index, order);
+                let before = observations.before_rekey(successor_input);
+                let retirement = successor_input.retire_binding_allocation(index, order);
                 successor_input.update_local_state(index, LocalState::uninit(layout.local_count()));
+                observations.after_retirement(before, successor_input, retirement);
             }
         }
 
         // No destination is installed until all sources and their detachments have been captured
         // and every old destination has been retired.
-        for ((_, destination_state, layer_ids, mut detached, mut stability), &destination_index) in
+        for ((_, destination_state, payload, mut detached), &destination_index) in
             destination_states.into_iter().zip(&destination_indices)
         {
             successor_input.update_local_state(destination_index, destination_state);
             let remap = |id| successor_input.remap_retired_alloc_id(id, order, retires);
-            for holder in detached.iter_mut().chain(&mut stability) {
+            for holder in &mut detached {
                 *holder = remap(*holder);
             }
-            if let Some((mut ids, readonly, mut views)) = layer_ids {
-                for id in ids.iter_mut().chain(&mut views) {
-                    *id = remap(*id);
-                }
+            if let Some(mut value) = payload {
+                value.remap_allocations(remap);
+                let readonly = value.readonly();
+                let explicit_allocation = value.alternatives.is_empty() || !value.values.is_empty();
                 let store = TypedStore::receive_result(
                     successor_input.resolve_cells(destination_index),
-                    CapturedValue {
-                        values: ids
-                            .into_iter()
-                            .map(|id| StoredValue {
-                                id,
-                                writable: !readonly,
-                            })
-                            .collect(),
-                        views,
-                    },
+                    value,
                     destination_index,
                     readonly,
-                )
-                .with_explicit_slot_payload();
-                successor_input.publish_store(&store, order, None);
+                );
+                let store = if explicit_allocation {
+                    store.with_explicit_slot_payload()
+                } else {
+                    store
+                };
+                observations
+                    .tail
+                    .replace(successor_input.publish_store(&store, order, None));
             }
             if !detached.is_empty() {
                 successor_input.bind_detached_holders(destination_index, detached);
             }
-            successor_input.add_stability_loans(destination_index, stability);
         }
-        successor_input.prune_retired_wrappers();
-
-        Ok(())
+        observations.prune_retired_wrappers(successor_input);
+        Ok(observations)
     }
 }
 
@@ -763,20 +968,36 @@ fn apply_invoke_edge_transfer(
     terminator: &HirTerminator,
     lane: &super::transfer::InvokeLaneTransfer,
     order: OrderKey,
+    virgin_outcome: impl Fn(usize) -> bool,
     edge_state: &mut BorrowState,
-) {
+) -> ValueObservations {
     let HirTerminator::Invoke {
         success_results,
         error_result,
         ..
     } = terminator
     else {
-        return;
+        return ValueObservations::default();
     };
+    let mut observations = ValueObservations {
+        enabled: layout.lookup_observations,
+        ..Default::default()
+    };
+    for checkpoint in &lane.checkpoints {
+        observations.split(ObservationBoundary::Checkpoint(checkpoint.clone()));
+    }
+    observations.tail.read(lane.member_reads.iter().cloned());
     let apply_layer_effects = !lane.operations.is_empty();
-    for local in success_results.iter().chain(std::iter::once(error_result)) {
+    let outcomes = || success_results.iter().chain(std::iter::once(error_result));
+    for local in outcomes() {
         if let Some(index) = layout.index_of(*local) {
-            if apply_layer_effects {
+            // An acyclic first write to compiler-owned result storage has no old capture.
+            if virgin_outcome(index) && edge_state.can_publish_first_definition(index) {
+                edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+                continue;
+            }
+            let before = observations.before_rekey(edge_state);
+            let retirement = if apply_layer_effects {
                 if lane.operations.iter().any(
                     |op| matches!(op, InvokeLayerOp::Store(store) if store.captures_slot(index)),
                 ) {
@@ -784,17 +1005,19 @@ fn apply_invoke_edge_transfer(
                 }
                 // Captures can create the first sparse facts on this edge. Still snapshot any
                 // existing root-only observers before changing the result binding.
-                edge_state.retire_binding_allocation(index, order);
+                let retirement = edge_state.retire_binding_allocation(index, order);
                 edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+                retirement
             } else {
-                edge_state.rebind_local(index, LocalState::uninit(layout.local_count()), order);
-            }
+                edge_state.rebind_local(index, LocalState::uninit(layout.local_count()), order)
+            };
+            observations.after_retirement(before, edge_state, retirement);
         }
     }
     for (local, result) in &lane.results {
         if let Some(index) = layout.index_of(*local) {
             let mut result = result.clone();
-            for retired in success_results.iter().chain(std::iter::once(error_result)) {
+            for retired in outcomes() {
                 if let Some(retired) = layout.index_of(*retired) {
                     result.derived_from_roots.remove(retired);
                 }
@@ -807,18 +1030,66 @@ fn apply_invoke_edge_transfer(
         local == *error_result || success_results.contains(&local)
     };
     for op in &lane.operations {
-        op.apply(layout, edge_state, Some((order, &retires)));
+        observations
+            .tail
+            .replace(op.apply(layout, edge_state, Some((order, &retires))));
     }
-    edge_state.prune_retired_wrappers();
+    observations.prune_retired_wrappers(edge_state);
+    observations
 }
 
 impl InvokeLayerOp {
+    pub(super) fn captures_current(
+        &self,
+        local: usize,
+        names: &impl Fn(super::state::AllocId) -> bool,
+    ) -> bool {
+        match self {
+            Self::Store(store) => store.captures_current(local, names),
+            Self::Contribute { holder, value, .. } => names(*holder) || names(value.id),
+            Self::ConstructField { holder, value, .. } => {
+                names(*holder) || value.names_allocation(names)
+            }
+            Self::Remove { holders, .. } => holders.iter().copied().any(names),
+            Self::Bind { value, .. } => value.names_allocation(names),
+            Self::ViewMember { view, id } => names(*view) || names(*id),
+            Self::ViewField { holder, view, .. } => names(*holder) || names(*view),
+            Self::ViewPair { left, right, .. } => names(*left) || names(*right),
+        }
+    }
+
+    pub(super) fn apply_owned(
+        self,
+        layout: &FunctionLayout,
+        state: &mut BorrowState,
+    ) -> StoreReceipt {
+        match self {
+            Self::Bind { local, value } => Self::publish_bound_value(layout, state, local, value),
+            other => other.apply(layout, state, None),
+        }
+    }
+
+    fn publish_bound_value(
+        layout: &FunctionLayout,
+        state: &mut BorrowState,
+        local: LocalId,
+        value: CapturedValue,
+    ) -> StoreReceipt {
+        let Some(index) = layout.index_of(local) else {
+            return StoreReceipt::default();
+        };
+        // The receiving place is resolved after retirement. Only the value uses entry IDs.
+        let readonly = value.readonly();
+        let store = TypedStore::receive_result(state.resolve_cells(index), value, index, readonly);
+        state.publish_store(&store, UNKNOWN_ORDER_KEY, None)
+    }
+
     pub(super) fn apply(
         &self,
         layout: &FunctionLayout,
         state: &mut BorrowState,
         rebase: Option<(OrderKey, &dyn Fn(usize) -> bool)>,
-    ) {
+    ) -> StoreReceipt {
         let remap_id = |state: &BorrowState, id| match rebase {
             Some((order, retires)) => state.remap_retired_alloc_id(id, order, retires),
             None => id,
@@ -829,7 +1100,7 @@ impl InvokeLayerOp {
                     .map_or((UNKNOWN_ORDER_KEY, None), |(order, retires)| {
                         (order, Some(retires))
                     });
-                state.publish_store(store, order, retires);
+                return state.publish_store(store, order, retires);
             }
             Self::Contribute { holder, key, value } => {
                 let holder = remap_id(state, *holder);
@@ -837,19 +1108,22 @@ impl InvokeLayerOp {
                 value.id = remap_id(state, value.id);
                 state.contribute_alloc_edge(holder, *key, value);
             }
-            Self::ConstructField {
-                holder,
-                key,
-                values,
-                views,
-            } => {
+            Self::ConstructField { holder, key, value } => {
                 let holder = remap_id(state, *holder);
-                let values = remap_invoke_capture(values, |mut value| {
-                    value.id = remap_id(state, value.id);
-                    value
-                });
-                let views = remap_invoke_capture(views, |id| remap_id(state, id));
-                state.record_constructed_field(holder, *key, &values, &views, false);
+                if rebase.is_none() {
+                    state.record_constructed_value(holder, *key, value, false);
+                } else if value.alternatives.is_empty() {
+                    let values = remap_invoke_capture(&value.values, |mut value| {
+                        value.id = remap_id(state, value.id);
+                        value
+                    });
+                    let views = remap_invoke_capture(&value.views, |id| remap_id(state, id));
+                    state.record_constructed_field(holder, *key, &values, &views, false);
+                } else {
+                    let mut value = value.clone();
+                    value.remap_allocations(|id| remap_id(state, id));
+                    state.record_constructed_value(holder, *key, &value, false);
+                }
             }
             Self::Remove {
                 holders,
@@ -857,44 +1131,18 @@ impl InvokeLayerOp {
                 result,
             } => {
                 let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
-                state.remove_alloc_element(
+                return state.remove_alloc_element(
                     &holders,
                     *map,
                     result.and_then(|local| layout.index_of(local)),
                 );
             }
-            Self::Bind {
-                local,
-                ids,
-                views,
-                readonly,
-            } => {
-                if let Some(index) = layout.index_of(*local) {
-                    // Bind resolves the receiving place after retirement, unlike a store
-                    // captured on entry. Only the value uses entry allocation coordinates.
-                    let store = TypedStore::receive_result(
-                        state.resolve_cells(index),
-                        CapturedValue {
-                            values: ids
-                                .iter()
-                                .map(|&id| StoredValue {
-                                    id: remap_id(state, id),
-                                    writable: !*readonly,
-                                })
-                                .collect(),
-                            views: views.iter().map(|&id| remap_id(state, id)).collect(),
-                        },
-                        index,
-                        *readonly,
-                    );
-                    state.publish_store(&store, UNKNOWN_ORDER_KEY, None);
+            Self::Bind { local, value } => {
+                let mut value = value.clone();
+                if rebase.is_some() {
+                    value.remap_allocations(|id| remap_id(state, id));
                 }
-            }
-            Self::KeepReceiverStable { result, holders } => {
-                if let Some(index) = layout.index_of(*result) {
-                    let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
-                    state.add_stability_loans(index, holders.iter().copied());
-                }
+                return Self::publish_bound_value(layout, state, *local, value);
             }
             Self::ViewMember { view, id } => {
                 state.add_view_member(remap_id(state, *view), remap_id(state, *id));
@@ -910,6 +1158,7 @@ impl InvokeLayerOp {
                 state.relate_views(remap_id(state, *left), remap_id(state, *right), *may_share);
             }
         }
+        StoreReceipt::default()
     }
 }
 
@@ -922,30 +1171,16 @@ impl InvokeLayerOp {
                 retirement.remap_id(state, holder);
                 retirement.remap_value(state, value);
             }
-            Self::ConstructField {
-                holder,
-                values,
-                views,
-                ..
-            } => {
+            Self::ConstructField { holder, value, .. } => {
                 retirement.remap_id(state, holder);
-                for value in values {
-                    retirement.remap_value(state, value);
-                }
-                for view in views {
-                    retirement.remap_id(state, view);
-                }
+                value.remap(state, retirement);
             }
-            Self::Remove { holders, .. } | Self::KeepReceiverStable { holders, .. } => {
+            Self::Remove { holders, .. } => {
                 for holder in holders {
                     retirement.remap_id(state, holder);
                 }
             }
-            Self::Bind { ids, views, .. } => {
-                for holder in ids.iter_mut().chain(views) {
-                    retirement.remap_id(state, holder);
-                }
-            }
+            Self::Bind { value, .. } => value.remap(state, retirement),
             Self::ViewMember { view, id } => {
                 retirement.remap_id(state, view);
                 retirement.remap_id(state, id);

@@ -44,7 +44,7 @@ mod tests;
 
 use conflicts::{check_access, footprint, probe_mutable_access};
 use layer::{
-    CapturedLocalFacts, LayerValueContext, capture_projected_binding, capture_slot_value,
+    CapturedDetachments, LayerValueContext, capture_projected_binding, capture_slot_value,
     check_cell_permission, check_place_replacement, check_shared_place_access, resolve_place,
     stored_values,
 };
@@ -213,8 +213,8 @@ fn record_shared_reads_in_pattern(
     Ok(())
 }
 
-/// Identify a first heap definition before its inputs can materialize allocation identities.
-fn first_heap_definition_index(
+/// An acyclic entry prefix cannot contain an earlier legal reference to an unwritten local.
+fn first_definition_index(
     layout: &FunctionLayout,
     state: &BorrowState,
     block: BlockId,
@@ -224,9 +224,8 @@ fn first_heap_definition_index(
     if layout.acyclic_entry_block == Some(block)
         && order >= 0
         && let Some(index) = resolve_index()
-        && layout.local_has_in_place_mutation_surface[index]
         && layout.local_first_write_order[index] == order
-        && state.has_pristine_alloc_binding(index)
+        && state.is_virgin_definition(index)
     {
         // Only parameters enter this block initialized. The prefix has never written this
         // local, and a read cannot produce coarse observers of an uninitialized local.
@@ -277,7 +276,7 @@ fn transfer_assign_target(
         tracker: context.tracker,
         location: context.location,
         span: context.span,
-        stats: context.stats,
+        stats: &mut *context.stats,
         actor_index_hint: Some(local),
         current_order: context.current_order,
     };
@@ -300,11 +299,12 @@ fn transfer_assign_target(
         let has_layer = !state.layer_is_empty();
         let stored = stored_values(&values, state, value, has_layer)?;
         if has_layer || !stored.is_empty() {
-            state.publish_store(
+            let receipt = state.publish_store(
                 &TypedStore::replace_cells(addresses, stored),
                 context.current_order,
                 None,
             );
+            context.stats.observations.tail.replace(receipt);
         }
         return Ok(());
     }
@@ -376,11 +376,12 @@ fn transfer_assign_target(
                 None
             } else {
                 let heap = layout.local_has_in_place_mutation_surface[source];
-                let capture_payload = mixed_acquisition && heap;
-                if heap && (capture_payload || writable) {
+                let capture_payload =
+                    mixed_acquisition && (heap || check.state.has_value_alternatives());
+                if capture_payload || writable && heap {
                     check
                         .state
-                        .load_place_content(&mut resolved, &layout.local_mutable, false);
+                        .load_place_content(&mut resolved, &layout.local_mutable, !heap);
                 }
                 if writable {
                     check.span = expression.span;
@@ -413,7 +414,8 @@ fn transfer_assign_target(
             check.span = expression.span;
             check.actor_index_hint = Some(source);
             let heap = layer::is_heap_value(transfer, value)?;
-            let capture_payload = mixed_acquisition && heap;
+            let capture_payload =
+                mixed_acquisition && (heap || check.state.has_value_alternatives());
             let (binding, payload) = capture_projected_binding(
                 &mut check,
                 &place,
@@ -428,6 +430,7 @@ fn transfer_assign_target(
     } else {
         None
     };
+    let observations = &mut context.stats.observations;
 
     if is_definition {
         let defines_slot = binding.is_none();
@@ -436,25 +439,57 @@ fn transfer_assign_target(
         } else {
             Default::default()
         };
-        let mut legacy = if defines_slot {
+        let mut detachments = if defines_slot {
             Default::default()
         } else {
-            CapturedLocalFacts::from_load(&values, state, value)
+            CapturedDetachments::from_load(&values, state, value)
         };
         let mut binding = binding.unwrap_or(BindingSpec::Slot);
         if matches!(&binding, BindingSpec::Link { source, .. } if *source == WrapperId::current(local))
         {
             state.retain_captured_wrapper(local);
         }
-        if let Some(retirement) = state.rebind_local_after_capture(
-            local,
-            LocalState::slot(layout.local_count()),
-            context.current_order,
-            pristine_definition,
-            false,
-        ) {
+        let first = pristine_definition == Some(local);
+        let names = |id| state.is_current_allocation_of(id, local);
+        let captures_old = first
+            && (rhs_roots.contains(local)
+                || slot.names_allocation(&names)
+                || detachments.names_allocation(&names)
+                || match &binding {
+                    BindingSpec::Slot => false,
+                    BindingSpec::Link { source, .. } => *source == WrapperId::current(local),
+                    BindingSpec::Projected {
+                        addresses,
+                        origin,
+                        owner,
+                        route_roots,
+                        ..
+                    } => {
+                        *origin == WrapperId::current(local)
+                            || *owner == Some(WrapperId::current(local))
+                            || route_roots.contains(local)
+                            || addresses.captures_current(local, names)
+                    }
+                    #[cfg(test)]
+                    BindingSpec::Alias { .. } => {
+                        unreachable!("assignment captures a link or projection")
+                    }
+                });
+        if first && !captures_old && state.can_publish_first_definition(local) {
+            state.update_local_state(local, LocalState::slot(layout.local_count()));
+        } else {
+            let before = observations.before_rekey(state);
+            let next = LocalState::slot(layout.local_count());
+            let retirement = if first {
+                let retirement = state.retire_binding_allocation(local, context.current_order);
+                state.update_local_state(local, next);
+                retirement
+            } else {
+                state.rebind_local(local, next, context.current_order)
+            };
+            observations.after_retirement(before, state, retirement);
             slot.remap(state, retirement);
-            legacy.remap(state, retirement);
+            detachments.remap(state, retirement);
             remap_binding_capture(&mut binding, state, retirement);
         }
         let mut derivation = derivation;
@@ -466,14 +501,22 @@ fn transfer_assign_target(
                 RootSet::empty(layout.local_count()),
                 derivation,
             );
-            layer::publish_slot_capture(state, local, None, slot, rhs_roots, context.current_order);
+            let receipt = layer::publish_slot_capture(
+                state,
+                local,
+                None,
+                slot,
+                rhs_roots,
+                context.current_order,
+            );
+            observations.tail.replace(receipt);
         } else {
             state.set_binding(local, binding, rhs_roots, derivation);
-            legacy.apply(state, local);
+            detachments.apply(state, local);
         }
-        // Only retiring an old alias can remove a route to a previously retained wrapper.
+        // Retiring an alias can leave a prior wrapper without any remaining routes.
         if mode.contains(LocalMode::ALIAS) {
-            state.prune_retired_wrappers();
+            observations.prune_retired_wrappers(state);
         }
         return Ok(());
     }
@@ -492,36 +535,43 @@ fn transfer_assign_target(
     if let Some(mut binding) = binding {
         let stores = mode.contains(LocalMode::ALIAS);
         let mut stored = place_payload.unwrap_or_default();
-        let mut legacy = CapturedLocalFacts::from_load(&values, state, value);
+        let mut detachments = CapturedDetachments::from_load(&values, state, value);
         let captures_old_holder = matches!(&binding, BindingSpec::Projected { addresses, .. }
             if addresses.cells().iter().any(|cell| matches!(*cell, CellId::Projected(holder, _)
                 if state.alloc_origin_local(holder) == Some(local))));
         if !preserve_slot && (!state.layer_is_empty() || !stored.is_empty() || captures_old_holder)
         {
+            let before = observations.before_rekey(state);
             let retirement = state.retire_slot_value(local, context.current_order);
+            observations.after_retirement(before, state, retirement);
             addresses.remap_allocations(state, retirement);
             stored.remap(state, retirement);
-            legacy.remap(state, retirement);
+            detachments.remap(state, retirement);
             remap_binding_capture(&mut binding, state, retirement);
         }
         if stores {
-            state.publish_store(
+            let receipt = state.publish_store(
                 &TypedStore::write_through(addresses, stored, Replacement::May, local)
                     .with_slot_roots(rhs_roots.clone()),
                 context.current_order,
                 None,
             );
+            observations.tail.replace(receipt);
         }
+        let before = observations.before_rekey(state);
         state.transition_slot_to_alias(local, binding, rhs_roots, derivation, preserve_slot);
-        legacy.apply(state, local);
+        observations.after_rekey(before, state, |slot| slot, |id| id);
+        detachments.apply(state, local);
     } else if !preserve_slot && let Some(CellId::Slot(wrapper)) = addresses.definite() {
         let mut captured = capture_slot_value(&values, state, value)?;
         if captured.has_facts() || !state.layer_is_empty() {
+            let before = observations.before_rekey(state);
             let retirement = state.retire_slot_value(wrapper.local, context.current_order);
+            observations.after_retirement(before, state, retirement);
             captured.remap(state, retirement);
         }
         state.mark_slot_derivation(wrapper.local, derivation);
-        layer::publish_slot_capture(
+        let receipt = layer::publish_slot_capture(
             state,
             wrapper.local,
             (local != wrapper.local).then_some(local),
@@ -529,6 +579,7 @@ fn transfer_assign_target(
             rhs_roots,
             context.current_order,
         );
+        observations.tail.replace(receipt);
     } else if !preserve_slot || mode.contains(LocalMode::ALIAS) {
         let stored = stored_values(&values, state, value, true)?;
         let mut store = if preserve_slot {
@@ -546,7 +597,8 @@ fn transfer_assign_target(
         if mode.contains(LocalMode::SLOT) && !preserve_slot {
             state.mark_slot_derivation(local, derivation);
         }
-        state.publish_store(&store, context.current_order, None);
+        let receipt = state.publish_store(&store, context.current_order, None);
+        observations.tail.replace(receipt);
     }
     Ok(())
 }

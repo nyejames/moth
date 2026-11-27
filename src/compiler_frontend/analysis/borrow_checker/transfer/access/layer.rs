@@ -10,7 +10,8 @@
 use super::conflicts::{check_access, footprint};
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, FieldKey, PlaceResolution, ResolvedPlace, StoredValue,
+    AllocId, FieldKey, PlaceResolution, ResolvedPlace, StoreReceipt, StoredValue, ValueAlt,
+    ValueKind as PayloadKind,
 };
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
@@ -57,15 +58,8 @@ pub(super) fn resolve_place(
 pub(super) use crate::compiler_frontend::analysis::borrow_checker::state::CapturedValue;
 
 impl CapturedValue {
-    pub(super) fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-
     fn fresh(id: AllocId) -> Self {
-        Self {
-            values: vec![StoredValue { id, writable: true }],
-            views: Vec::new(),
-        }
+        Self::new(vec![StoredValue { id, writable: true }], Vec::new())
     }
 }
 
@@ -75,10 +69,14 @@ pub(super) fn stored_allocations(
     resolved: ResolvedPlace,
     source_writable: bool,
 ) -> CapturedValue {
-    CapturedValue {
+    let readonly = !source_writable || resolved.readonly;
+    let mut value = CapturedValue {
         values: stored_allocation_values(layout, state, &resolved, source_writable),
         views: resolved.views,
-    }
+        alternatives: resolved.alternatives,
+    };
+    value.restrict_permission(readonly);
+    value
 }
 
 pub(super) fn stored_allocation_values(
@@ -131,7 +129,7 @@ pub(super) fn capture_projected_binding(
     if capture_payload || writable && heap {
         check
             .state
-            .load_place_content(&mut resolved, &check.layout.local_mutable, false);
+            .load_place_content(&mut resolved, &check.layout.local_mutable, !heap);
     }
     if writable {
         check_access(
@@ -141,6 +139,13 @@ pub(super) fn capture_projected_binding(
             Some(&resolved),
             STORE_ACCESS,
         )?;
+    } else if check.stats.observations.enabled {
+        check.stats.observations.tail.observe(
+            check.state,
+            &footprint(&resolved, PlaceUse::Acquire),
+            false,
+            Some(source),
+        );
     }
     let mut route_roots = check.state.binding(source).attribution_roots();
     route_roots.union_with(&check.state.effective_roots(source));
@@ -265,13 +270,11 @@ fn needs_allocation_facts(
 ) -> Result<bool, BorrowCheckError> {
     let expression = context.expressions.expression(expression_id);
     match &expression.kind {
-        HirExpressionKind::Load(_) => {
-            Ok(expression.value_kind != ValueKind::Const && is_heap_value(context, expression_id)?)
-        }
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            Ok(is_heap_value(context, expression_id)?
-                && needs_allocation_facts(context, state, *source)?)
-        }
+        HirExpressionKind::Load(_) => Ok(expression.value_kind != ValueKind::Const
+            && (state.has_value_alternatives() || is_heap_value(context, expression_id)?)),
+        HirExpressionKind::VariantPayloadGet { source, .. } => Ok((state.has_value_alternatives()
+            || is_heap_value(context, expression_id)?)
+            && needs_allocation_facts(context, state, *source)?),
         kind if kind.is_aggregate_construction() => {
             for (_, child) in construction_children(context.expressions, expression_id) {
                 if needs_allocation_facts(context, state, child)? {
@@ -304,13 +307,14 @@ pub(super) fn stored_values(
     explicit_fresh: bool,
 ) -> Result<CapturedValue, BorrowCheckError> {
     let context = values.context;
-    if !is_heap_value(context, expression_id)? {
+    let heap = is_heap_value(context, expression_id)?;
+    if !heap && !state.has_value_alternatives() {
         return Ok(CapturedValue::default());
     }
     let expression = context.expressions.expression(expression_id);
     match &expression.kind {
         HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
-            Ok(stored_place(values, state, place))
+            Ok(stored_place(values, state, place, !heap))
         }
         HirExpressionKind::VariantPayloadGet {
             source,
@@ -320,14 +324,17 @@ pub(super) fn stored_values(
         } => {
             let sources = stored_values(values, state, *source, false)?;
             let key = payload_key(*variant_index, *field_index);
-            let mut resolved = ResolvedPlace::from_values(&sources.values, sources.views);
+            let mut resolved = ResolvedPlace::from_capture(&sources);
+            if !heap {
+                return Ok(state.capture_scalar_projection(&resolved, key));
+            }
             if resolved.ids.is_empty() {
                 return Ok(CapturedValue::default());
             }
             state.step_resolved(&mut resolved, key, &values.layout.local_mutable);
             Ok(stored_allocations(values.layout, state, resolved, true))
         }
-        HirExpressionKind::Copy(place) if state.has_alloc_edges() => {
+        HirExpressionKind::Copy(place) if heap && state.has_alloc_edges() => {
             let Some(source) =
                 resolve_place_allocs(values.layout, state, context.expressions, place)
             else {
@@ -353,7 +360,7 @@ pub(super) fn stored_values(
             capture_construction(values, state, expression_id)?.apply(state, site);
             Ok(CapturedValue::fresh(site))
         }
-        _ if explicit_fresh => Ok(CapturedValue::fresh(state.site_id(
+        _ if heap && explicit_fresh => Ok(CapturedValue::fresh(state.site_id(
             expression_id.0,
             values.block_id,
             &values.layout.block_successors,
@@ -378,31 +385,37 @@ pub(super) fn capture_copy(
     if copied.is_empty() && explicit_fresh {
         return CapturedValue::fresh(site);
     }
-    CapturedValue {
-        values: copied
+    CapturedValue::new(
+        copied
             .into_iter()
             .map(|id| StoredValue { id, writable: true })
             .collect(),
-        views: Vec::new(),
-    }
+        Vec::new(),
+    )
 }
 
 fn stored_place(
     values: &LayerValueContext<'_, '_>,
     state: &BorrowState,
     place: &HirPlace,
+    scalar: bool,
 ) -> CapturedValue {
     let Some(mut resolved) = resolve_place(values.layout, state, values.context.expressions, place)
     else {
         return CapturedValue::default();
     };
-    state.load_place_content(&mut resolved, &values.layout.local_mutable, false);
-    stored_allocations(
+    state.load_place_content(&mut resolved, &values.layout.local_mutable, scalar);
+    let captured = stored_allocations(
         values.layout,
         state,
         resolved.content.expect("stored place requests content"),
         resolved.permission.wrapper_readonly_source.is_none(),
-    )
+    );
+    if scalar {
+        captured.into_scalar()
+    } else {
+        captured
+    }
 }
 
 /// Edges to install after the destination binding has received its new allocation. Nested
@@ -416,6 +429,13 @@ enum ConstructionEdge {
 }
 
 impl Construction {
+    fn names_allocation(&self, names: &impl Fn(AllocId) -> bool) -> bool {
+        self.0.iter().any(|edge| match edge {
+            ConstructionEdge::Nested(_, nested) => nested.names_allocation(names),
+            ConstructionEdge::Stored(_, value) => value.names_allocation(names),
+        })
+    }
+
     fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
         for edge in &mut self.0 {
             match edge {
@@ -433,13 +453,7 @@ impl Construction {
                     nested.apply(state, child);
                 }
                 ConstructionEdge::Stored(key, captured) => {
-                    state.record_constructed_field(
-                        holder,
-                        *key,
-                        &captured.values,
-                        &captured.views,
-                        true,
-                    );
+                    state.record_constructed_value(holder, *key, captured, true);
                 }
             }
         }
@@ -458,6 +472,7 @@ fn capture_construction(
     }
     // Once a collection lists references, list fresh elements too so removal can count them.
     let list_elements = is_collection_like(&context.expressions.expression(expression_id).kind);
+    let track_scalars = list_elements && state.has_value_alternatives();
     for (key, child) in construction_children(context.expressions, expression_id) {
         let child_kind = &context.expressions.expression(child).kind;
         if child_kind.is_aggregate_construction() && !list_elements {
@@ -467,12 +482,38 @@ fn capture_construction(
             }
         } else {
             let captured_value = stored_values(values, state, child, list_elements)?;
-            if !captured_value.is_empty() {
+            if !captured_value.is_empty() || track_scalars && !is_heap_value(context, child)? {
                 captured
                     .0
                     .push(ConstructionEdge::Stored(key, captured_value));
             }
         }
+    }
+    if track_scalars {
+        let is_dependent = |key| {
+            captured.0.iter().any(|edge| {
+                matches!(edge, ConstructionEdge::Stored(field, value)
+                if *field == key && !value.alternatives.is_empty())
+            })
+        };
+        let track_keys = is_dependent(FieldKey::MapKey);
+        let track_elements = is_dependent(FieldKey::Elem);
+        captured.0.retain_mut(|edge| match edge {
+            ConstructionEdge::Stored(key, value) if value.is_empty() => {
+                let track = match key {
+                    FieldKey::Elem => track_elements,
+                    FieldKey::MapKey => track_keys,
+                    _ => false,
+                };
+                if track {
+                    value
+                        .alternatives
+                        .push(ValueAlt::plain(PayloadKind::Scalar));
+                }
+                track
+            }
+            _ => true,
+        });
     }
     Ok(captured)
 }
@@ -483,7 +524,7 @@ pub(super) struct SlotCapture {
     value: CapturedValue,
     explicit_payload: bool,
     construction: Construction,
-    legacy: CapturedLocalFacts,
+    detachments: CapturedDetachments,
 }
 
 impl SlotCapture {
@@ -492,14 +533,19 @@ impl SlotCapture {
             || !self.value.is_empty()
             || !self.value.views.is_empty()
             || !self.construction.0.is_empty()
-            || !self.legacy.detached.is_empty()
-            || !self.legacy.stability.is_empty()
+            || !self.detachments.0.is_empty()
+    }
+
+    pub(super) fn names_allocation(&self, names: &impl Fn(AllocId) -> bool) -> bool {
+        self.value.names_allocation(names)
+            || self.construction.names_allocation(names)
+            || self.detachments.names_allocation(names)
     }
 
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
         self.value.remap(state, retirement);
         self.construction.remap(state, retirement);
-        self.legacy.remap(state, retirement);
+        self.detachments.remap(state, retirement);
     }
 }
 
@@ -510,7 +556,7 @@ pub(super) fn publish_slot_capture(
     capture: SlotCapture,
     roots: RootSet,
     order: OrderKey,
-) {
+) -> StoreReceipt {
     let addresses = AddressSet::from_cells(
         [CellId::Slot(WrapperId::current(local))],
         Coverage::Complete,
@@ -523,24 +569,26 @@ pub(super) fn publish_slot_capture(
     if let Some(observer) = observer {
         store = store.with_actor_observation(observer);
     }
-    state.publish_store(&store, order, None);
+    let receipt = state.publish_store(&store, order, None);
     if !capture.construction.0.is_empty() {
         let (holders, _) = state.local_alloc_ids(local);
         for holder in holders {
             capture.construction.apply(state, holder);
         }
     }
-    capture.legacy.apply(state, local);
+    capture.detachments.apply(state, local);
+    receipt
 }
 
-/// Detachments and receiver stability associated with the loaded local.
+/// Detachments associated with the loaded local.
 #[derive(Default)]
-pub(super) struct CapturedLocalFacts {
-    detached: Vec<AllocId>,
-    stability: Vec<AllocId>,
-}
+pub(super) struct CapturedDetachments(Vec<AllocId>);
 
-impl CapturedLocalFacts {
+impl CapturedDetachments {
+    pub(super) fn names_allocation(&self, names: &impl Fn(AllocId) -> bool) -> bool {
+        self.0.iter().copied().any(names)
+    }
+
     pub(super) fn from_load(
         values: &LayerValueContext<'_, '_>,
         state: &BorrowState,
@@ -556,23 +604,19 @@ impl CapturedLocalFacts {
         let Some(source) = values.layout.index_of(place.root) else {
             return Self::default();
         };
-        Self {
-            detached: state.detached_holders(source).collect(),
-            stability: state.stability_holders(source).collect(),
-        }
+        Self(state.detached_holders(source).collect())
     }
 
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
-        for holder in self.detached.iter_mut().chain(&mut self.stability) {
+        for holder in &mut self.0 {
             retirement.remap_id(state, holder);
         }
     }
 
     pub(super) fn apply(self, state: &mut BorrowState, local: usize) {
-        if !self.detached.is_empty() {
-            state.bind_detached_holders(local, self.detached);
+        if !self.0.is_empty() {
+            state.bind_detached_holders(local, self.0);
         }
-        state.add_stability_loans(local, self.stability);
     }
 }
 
@@ -588,11 +632,12 @@ pub(super) fn capture_slot_value(
             capture.construction = capture_construction(values, state, value)?;
         }
         HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
-            if is_heap_value(values.context, value)? {
-                capture.value = stored_place(values, state, place);
-                capture.explicit_payload = true;
+            let heap = is_heap_value(values.context, value)?;
+            if heap || state.has_value_alternatives() {
+                capture.value = stored_place(values, state, place, !heap);
+                capture.explicit_payload = heap;
             }
-            capture.legacy = CapturedLocalFacts::from_load(values, state, value);
+            capture.detachments = CapturedDetachments::from_load(values, state, value);
         }
         HirExpressionKind::Copy(_) | HirExpressionKind::VariantPayloadGet { .. }
             if !state.layer_is_empty() =>

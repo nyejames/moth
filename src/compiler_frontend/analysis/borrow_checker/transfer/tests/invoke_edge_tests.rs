@@ -3,9 +3,11 @@
 use super::{InvokeLayerOp, apply_invoke_edge_transfer};
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, BorrowState, CapturedValue, CellId, Coverage, EntryFamilies, FieldKey,
-    FunctionLayout, FunctionLayoutInputs, LocalState, RootSet, StoredValue, TypedStore, WrapperId,
+    FunctionLayout, FunctionLayoutInputs, LocalState, ReceiverDependency, RootSet, StoredValue,
+    TypedStore, ValueAlt, ValueKind, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::InvokeLaneTransfer;
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{Carrier, CarrierValue};
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::LoopStepFailureCause;
@@ -61,21 +63,42 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
         ..Default::default()
     };
     let mut success = output.clone();
-    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 0, &mut success);
+    apply_invoke_edge_transfer(
+        &layout,
+        &terminator,
+        &success_lane,
+        0,
+        |_| false,
+        &mut success,
+    );
     assert_eq!(success.binding_mode(2), LocalMode::UNINIT);
     assert!(success.binding(1).value_roots().contains(0));
     assert!(success.binding(2).value_roots().is_empty());
 
     // A following failure cannot observe the preceding successful iteration's payload.
     let mut failure = success;
-    apply_invoke_edge_transfer(&layout, &terminator, &error_lane, 0, &mut failure);
+    apply_invoke_edge_transfer(
+        &layout,
+        &terminator,
+        &error_lane,
+        0,
+        |_| false,
+        &mut failure,
+    );
     assert_eq!(failure.binding_mode(1), LocalMode::UNINIT);
     assert!(failure.binding(1).value_roots().is_empty());
     assert_eq!(failure.binding_mode(2), LocalMode::SLOT);
     assert!(failure.binding(2).value_roots().is_empty());
 
     // Returning to success similarly discards the preceding error.
-    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 0, &mut failure);
+    apply_invoke_edge_transfer(
+        &layout,
+        &terminator,
+        &success_lane,
+        0,
+        |_| false,
+        &mut failure,
+    );
     assert_eq!(failure.binding_mode(2), LocalMode::UNINIT);
     assert!(failure.binding(1).value_roots().contains(0));
 }
@@ -113,21 +136,25 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
         operations: vec![
             InvokeLayerOp::Bind {
                 local: LocalId(1),
-                ids: vec![previous_error_child],
-                views: Vec::new(),
-                readonly: true,
+                value: CapturedValue::new(
+                    vec![StoredValue {
+                        id: previous_error_child,
+                        writable: false,
+                    }],
+                    Vec::new(),
+                ),
             },
             InvokeLayerOp::Store(TypedStore::write_projected(
                 [previous_success],
                 stored,
                 Coverage::Complete,
-                CapturedValue {
-                    values: vec![StoredValue {
+                CapturedValue::new(
+                    vec![StoredValue {
                         id: previous_error_child,
                         writable: false,
                     }],
-                    views: Vec::new(),
-                },
+                    Vec::new(),
+                ),
                 true,
             )),
             InvokeLayerOp::Contribute {
@@ -158,28 +185,39 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
         operations: vec![
             InvokeLayerOp::Bind {
                 local: LocalId(2),
-                ids: vec![previous_success_child],
-                views: Vec::new(),
-                readonly: false,
+                value: CapturedValue::new(
+                    vec![StoredValue {
+                        id: previous_success_child,
+                        writable: true,
+                    }],
+                    Vec::new(),
+                ),
             },
             InvokeLayerOp::Store(TypedStore::write_projected(
                 [previous_error],
                 error_only,
                 Coverage::Complete,
-                CapturedValue {
-                    values: vec![StoredValue {
+                CapturedValue::new(
+                    vec![StoredValue {
                         id: previous_success_child,
                         writable: true,
                     }],
-                    views: Vec::new(),
-                },
+                    Vec::new(),
+                ),
                 true,
             )),
         ],
         ..Default::default()
     };
     let mut failure = state.clone();
-    apply_invoke_edge_transfer(&layout, &terminator, &error_lane, 1, &mut failure);
+    apply_invoke_edge_transfer(
+        &layout,
+        &terminator,
+        &error_lane,
+        1,
+        |_| false,
+        &mut failure,
+    );
     let retired_success = failure.local_alloc_ids(3).0[0];
     assert_ne!(retired_success, previous_success);
     let retired_error = failure.local_alloc_ids(4).0[0];
@@ -203,7 +241,14 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
         [marker],
     );
 
-    apply_invoke_edge_transfer(&layout, &terminator, &success_lane, 1, &mut state);
+    apply_invoke_edge_transfer(
+        &layout,
+        &terminator,
+        &success_lane,
+        1,
+        |_| false,
+        &mut state,
+    );
     let observed_error = state.resolve_alloc_path(4, &layout.local_mutable, [field]);
     let observed_store = state.resolve_alloc_path(3, &layout.local_mutable, [stored]);
     assert_ne!(observed_error.ids, [previous_error_child]);
@@ -255,17 +300,17 @@ fn invoke_weak_cell_store_does_not_replace_a_new_outcome_slot() {
                 [1, 3].map(|slot| CellId::Slot(WrapperId::current(slot))),
                 Coverage::Complete,
             ),
-            CapturedValue {
-                values: vec![StoredValue {
+            CapturedValue::new(
+                vec![StoredValue {
                     id: marker,
                     writable: true,
                 }],
-                views: Vec::new(),
-            },
+                Vec::new(),
+            ),
         ))],
         ..Default::default()
     };
-    apply_invoke_edge_transfer(&layout, &terminator, &success, 1, &mut state);
+    apply_invoke_edge_transfer(&layout, &terminator, &success, 1, |_| false, &mut state);
     assert!(!state.local_alloc_ids(1).0.contains(&marker));
     let (live_contents, _) = state.local_alloc_ids(3);
     assert!(live_contents.contains(&marker));
@@ -304,7 +349,7 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
         (failure_lane, false),
     ] {
         let mut state = entry.clone();
-        apply_invoke_edge_transfer(&layout, &terminator, &selected, 1, &mut state);
+        apply_invoke_edge_transfer(&layout, &terminator, &selected, 1, |_| false, &mut state);
         for (key, old) in keys.into_iter().zip(old_members) {
             let mut place = state.resolve_place_path(0, &layout.local_mutable, [key]);
             state.load_place_content(&mut place, &layout.local_mutable, false);
@@ -314,6 +359,78 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
             } else {
                 assert_eq!(contents, [old]);
             }
+        }
+    }
+}
+
+#[test]
+fn invoke_success_observes_entry_member_and_rebases_lookup_payload() {
+    let (mut layout, terminator) = invoke_fixture(3);
+    layout.lookup_observations = true;
+    let mut entry = BorrowState::new_uninitialized(layout.local_count());
+    entry.initialize_parameter(0);
+    entry.initialize_parameter(1);
+    let old_outcome = entry.local_alloc_ids(1).0[0];
+    let receiver = entry.local_alloc_ids(0).0[0];
+    let dependency = |id| ReceiverDependency {
+        entries: [id].into_iter().collect(),
+        coverage: Coverage::Complete,
+    };
+    let member = CellId::Projected(old_outcome, FieldKey::Elem);
+    let member_deps = vec![dependency(receiver)];
+    entry.record_constructed_value(
+        old_outcome,
+        FieldKey::Elem,
+        &CapturedValue {
+            alternatives: vec![ValueAlt {
+                kind: ValueKind::Scalar,
+                deps: member_deps.clone(),
+            }],
+            ..Default::default()
+        },
+        true,
+    );
+    let observed = Carrier::Cell(member, CarrierValue::Scalar, member_deps.clone());
+    let mut result_deps = member_deps;
+    result_deps.push(dependency(old_outcome));
+    let success = InvokeLaneTransfer {
+        results: vec![(LocalId(1), LocalState::slot(layout.local_count()))],
+        operations: vec![InvokeLayerOp::Bind {
+            local: LocalId(1),
+            value: CapturedValue {
+                alternatives: vec![ValueAlt {
+                    kind: ValueKind::Scalar,
+                    deps: result_deps,
+                }],
+                ..Default::default()
+            },
+        }],
+        member_reads: [observed.clone()].into_iter().collect(),
+        ..Default::default()
+    };
+    let failure = InvokeLaneTransfer {
+        results: vec![(LocalId(2), LocalState::slot(layout.local_count()))],
+        ..Default::default()
+    };
+    for (lane, succeeds) in [(&success, true), (&failure, false)] {
+        let mut state = entry.clone();
+        let summary =
+            apply_invoke_edge_transfer(&layout, &terminator, lane, 7, |_| false, &mut state);
+        let mut reads = Default::default();
+        summary.backward(&mut reads, |_, _| {
+            panic!("a lookup does not mutate its receiver")
+        });
+        assert_eq!(reads.contains(&observed), succeeds);
+        let output = state.capture_jump_value(1, true, false);
+        if succeeds {
+            let payload = output.expect("success binds the dependent value");
+            let rebased = state.remap_retired_alloc_id(old_outcome, 7, |local| local == 1);
+            assert_ne!(rebased, old_outcome);
+            assert_eq!(payload.alternatives.len(), 1);
+            assert!(payload.alternatives[0].deps.contains(&dependency(receiver)));
+            assert!(payload.alternatives[0].deps.contains(&dependency(rebased)));
+        } else {
+            assert!(output.is_none());
         }
     }
 }

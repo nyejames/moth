@@ -9,10 +9,11 @@ use super::diagnostics::BorrowDiagnostics;
 use super::engine::BorrowChecker;
 use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
-use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
@@ -614,6 +615,11 @@ impl<'a> BorrowChecker<'a> {
         let mut block_local_max_use_order = FxHashMap::default();
         let mut block_liveness = FxHashMap::default();
         let mut entry_has_predecessor = false;
+        let mut lookup_observations = false;
+        let collection_get = |target: &CallTarget| {
+            matches!(target, CallTarget::External(id)
+                if matches!(CollectionBuiltinOp::from_external_function_id(*id), Some(CollectionBuiltinOp::Get)))
+        };
         let mut next_order_key = 0i32;
 
         for block_id in reachable_blocks {
@@ -622,6 +628,14 @@ impl<'a> BorrowChecker<'a> {
             let mut liveness = BlockLiveness::new(local_ids.len());
 
             for statement in &block.statements {
+                lookup_observations = lookup_observations
+                    || match &statement.kind {
+                        HirStatementKind::Call { target, .. } => collection_get(target),
+                        HirStatementKind::MapOp {
+                            op: HirMapOp::Get, ..
+                        } => true,
+                        _ => false,
+                    };
                 // WHAT: assign a deterministic ordinal key for this statement.
                 // WHY: same-line source locations are not sufficient for precise move decisions.
                 let order_key = next_order_key;
@@ -679,6 +693,17 @@ impl<'a> BorrowChecker<'a> {
             let terminator_order = next_order_key;
             next_order_key += 1;
             terminator_order_by_block.insert(*block_id, terminator_order);
+            lookup_observations = lookup_observations
+                || match &block.terminator {
+                    HirTerminator::Invoke { operation, .. } => match operation {
+                        HirFallibleOperation::Call { target, .. } => collection_get(target),
+                        HirFallibleOperation::MapOp {
+                            op: HirMapOp::Get, ..
+                        } => true,
+                        _ => false,
+                    },
+                    _ => false,
+                };
 
             collect_terminator_loaded_locals(
                 &self.module.expressions,
@@ -787,6 +812,7 @@ impl<'a> BorrowChecker<'a> {
             may_assign_from_block,
         });
         layout.acyclic_entry_block = (!entry_has_predecessor).then_some(function.entry);
+        layout.lookup_observations = lookup_observations;
         Ok(layout)
     }
 

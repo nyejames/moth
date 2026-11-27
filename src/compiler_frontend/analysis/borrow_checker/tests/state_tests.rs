@@ -249,6 +249,50 @@ fn visibility_edge_preserves_payloads_independently_of_interning() {
 }
 
 #[test]
+fn rebind_preserves_uninitialised_root_observers_independently_of_interning() {
+    let count = 3;
+    for after_capture in [false, true] {
+        let mut fresh = BorrowState::new_uninitialized(count);
+        fresh.set_binding(1, BindingSpec::Slot, roots(count, &[0]), roots(count, &[]));
+        fresh.initialize_parameter(2);
+        let unrelated = fresh.local_alloc_ids(2).0[0];
+        fresh.add_alloc_edge(
+            unrelated,
+            FieldKey::Elem,
+            StoredValue {
+                id: unrelated,
+                writable: true,
+            },
+        );
+        let rebind = |state: &mut BorrowState| {
+            let slot = super::super::state::LocalState::slot(count);
+            if after_capture {
+                assert!(
+                    state
+                        .rebind_local_after_capture(0, slot, 5, Some(0), true)
+                        .is_some()
+                );
+            } else {
+                state.rebind_local(0, slot, 5);
+            }
+        };
+        // A sibling state may intern the target's implicit root before its edge runs.
+        let mut preinterned = fresh.clone();
+        rebind(&mut fresh);
+        let mut sibling = preinterned.clone();
+        sibling.initialize_parameter(0);
+        let current = sibling.local_alloc_ids(0).0[0];
+        rebind(&mut preinterned);
+        assert_eq!(fresh, preinterned);
+        assert_eq!(fresh.local_alloc_ids(0).0, [current]);
+        let retained = fresh.local_alloc_ids(1).0;
+        assert_eq!(retained.len(), 1);
+        assert_ne!(retained[0], current);
+        assert_eq!(fresh.alloc_origin_local(retained[0]), Some(0));
+    }
+}
+
+#[test]
 fn join_intersects_derived_alias_facts() {
     let count = 5;
     let empty = RootSet::empty(count);

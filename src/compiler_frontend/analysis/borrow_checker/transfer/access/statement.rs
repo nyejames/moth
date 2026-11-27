@@ -7,14 +7,17 @@
 #[path = "call_results.rs"]
 mod call_results;
 
-use super::conflicts::{Overlap, overlap};
+use super::conflicts::{Overlap, check_call_access, overlap, record_call_observations};
 use super::layer::needs_layer_store_capture;
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, CapturedValue, Coverage, EntryFamilies, FieldKey, ResolvedPlace, RootSet,
-    StoredValue, TypedStore, WrapperId,
+    AllocationRetirement, CapturedValue, Coverage, EntryFamilies, FieldKey, ReceiverDependency,
+    ResolvedPlace, RootSet, SmallSet, TypedStore, ValueAlt, ValueKind as PayloadKind, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
+    Demand, selected_members,
+};
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{InvokeLane, InvokeLayerOp};
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -24,7 +27,7 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::source::SourceSpan;
-use call_results::{CallActuals, CallLane, call_result_ops};
+use call_results::{CallActuals, CallLane, bind_result, call_result_ops, capture_graph_values};
 
 pub(crate) fn transfer_statement(
     context: &BorrowTransferContext<'_>,
@@ -51,9 +54,7 @@ pub(crate) fn transfer_statement(
             };
             let local_index = layout.index_of(target_place.root);
             let pristine_definition = if is_definition {
-                first_heap_definition_index(layout, state, block_id, statement_order, || {
-                    local_index
-                })
+                first_definition_index(layout, state, block_id, statement_order, || local_index)
             } else {
                 None
             };
@@ -198,7 +199,7 @@ pub(crate) fn transfer_statement(
                 },
                 &call_args,
                 result.iter().copied(),
-                map_result_alias(*op),
+                CallReturns::Fresh,
                 CallResultTransfer::Immediate,
                 CallStorage::for_map_op(*op),
             )?;
@@ -518,7 +519,7 @@ pub(super) fn transfer_invoke(
                 input,
                 &arguments,
                 results,
-                map_result_alias(*op),
+                CallReturns::Fresh,
                 CallResultTransfer::Edge(*error_result),
                 CallStorage::for_map_op(*op),
             )
@@ -600,6 +601,15 @@ pub(super) fn transfer_never_call(
 pub(super) struct CallArgumentTransfer {
     pub(super) argument: HirValueId,
     effect: ArgEffect,
+}
+
+impl CallArgumentTransfer {
+    pub(super) fn may_write(&self) -> bool {
+        matches!(
+            self.effect,
+            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
+        )
+    }
 }
 
 /// How a call moves values between its arguments' allocations.
@@ -686,7 +696,7 @@ impl CallResultTransfer {
         let [HirLocalDestination::Define(local)] = results else {
             return Self::Immediate;
         };
-        first_heap_definition_index(layout, state, block, order, || layout.index_of(*local))
+        first_definition_index(layout, state, block, order, || layout.index_of(*local))
             .map_or(Self::Immediate, Self::FirstDefinition)
     }
 }
@@ -712,7 +722,11 @@ fn transfer_call_arguments_and_result(
         CallResultTransfer::Edge(local) => Some(HirLocalDestination::Define(local)),
         _ => None,
     };
-    let success_lane = CallLane::new(returns, InvokeLane::Success);
+    let success_lane = if matches!(storage, CallStorage::Get) {
+        CallLane::Lookup
+    } else {
+        CallLane::new(returns, InvokeLane::Success)
+    };
     let error_returns = if matches!(storage, CallStorage::User | CallStorage::Native) {
         returns
     } else {
@@ -751,10 +765,9 @@ fn transfer_call_arguments_and_result(
     // WHY: `Fresh` results and calls without a result never inspect them, so building the sets
     //      would walk every argument expression for no consumer.
     let mut arg_value_roots = Vec::new();
-    let mut arg_derived_roots = Vec::new();
     if retains_success || retains_error {
         arg_value_roots.reserve(args.len());
-        arg_derived_roots.reserve(args.len());
+        actuals.capture_derivations(input);
         for arg in args {
             let argument_location = input
                 .context
@@ -767,14 +780,6 @@ fn transfer_call_arguments_and_result(
                 arg.argument,
                 argument_location,
             )?);
-            // The derivation ledger travels with the value, so a result derived through an alias
-            // keeps the same exemption from that alias's exclusivity.
-            arg_derived_roots.push(alias_derivation_roots_from_expression(
-                input.layout,
-                input.state,
-                input.context.expressions,
-                arg.argument,
-            ));
         }
     }
 
@@ -839,6 +844,17 @@ fn transfer_call_arguments_and_result(
             resolution.as_deref(),
         )?;
     }
+    if input.stats.observations.enabled && input.state.has_value_alternatives() {
+        input.stats.invoke.success.checkpoints = record_call_observations(
+            &mut input.stats.observations,
+            input.state,
+            input.tracker,
+            input.current_order,
+            input.location,
+            storage.reaches_children(),
+            error.is_some() && !storage.reaches_children(),
+        );
+    }
     // Call loans end before any result destination is written.
     input.tracker.clear_reservations();
     if storage.reaches_children()
@@ -862,6 +878,7 @@ fn transfer_call_arguments_and_result(
     if !matches!(result_transfer, CallResultTransfer::Diverges) {
         // Capture both lanes against entry storage. Neither lane may see the other's stores
         // or a new binding for either outcome.
+        let mut member_reads = Demand::default();
         let mut success_ops = match storage {
             CallStorage::User | CallStorage::Native | CallStorage::Plain | CallStorage::Builtin => {
                 call_result_ops(
@@ -890,6 +907,7 @@ fn transfer_call_arguments_and_result(
                 &mut actuals,
                 results.clone().next(),
                 storage,
+                error.is_some().then_some(&mut member_reads),
             )?,
         };
         let error_ops = if error.is_some() {
@@ -916,11 +934,7 @@ fn transfer_call_arguments_and_result(
                     input,
                     success_lane.root_sources(slot, &mut root_sources),
                     &arg_value_roots,
-                    success_lane.derive_result(
-                        slot,
-                        &arg_derived_roots,
-                        input.layout.local_count(),
-                    ),
+                    success_lane.derive_result(slot, &actuals, input.layout.local_count()),
                 )?;
                 writes.push(capture_call_result_write(
                     input,
@@ -935,33 +949,18 @@ fn transfer_call_arguments_and_result(
                 if error.is_none() && matches!(result, HirLocalDestination::Update(_)) {
                     continue;
                 }
-                if error.is_none() && let Some(index) = input.layout.index_of(result.local())
-                    && (success_ops.iter().any(|op| matches!(op, InvokeLayerOp::Store(store) if store.captures_slot(index)))
-                        || writes.iter().any(|write| write.store.captures_slot(index)))
-                {
-                    input.state.retain_captured_wrapper(index);
-                }
-                let derived = success_lane.derive_result(
-                    slot,
-                    &arg_derived_roots,
-                    input.layout.local_count(),
-                );
-                if let Some((retired, retirement)) = prepare_call_result_definition(
+                let derived =
+                    success_lane.derive_result(slot, &actuals, input.layout.local_count());
+                prepare_call_result_definition(
                     input,
                     result.local(),
                     success_lane.root_sources(slot, &mut root_sources),
                     &arg_value_roots,
                     derived,
                     result_transfer,
-                )? {
-                    for op in &mut success_ops {
-                        op.remap(input.state, retirement);
-                    }
-                    for write in &mut writes {
-                        write.derivation.remove(retired);
-                        write.remap(input.state, retirement);
-                    }
-                }
+                    &mut success_ops,
+                    &mut writes,
+                )?;
             }
         }
         if let Some(error) = error {
@@ -970,7 +969,7 @@ fn transfer_call_arguments_and_result(
                     input,
                     error_lane.root_sources(0, &mut root_sources),
                     &arg_value_roots,
-                    error_lane.derive_result(0, &arg_derived_roots, input.layout.local_count()),
+                    error_lane.derive_result(0, &actuals, input.layout.local_count()),
                 )?;
                 input
                     .stats
@@ -982,6 +981,7 @@ fn transfer_call_arguments_and_result(
             input.stats.invoke.success.unreachable = success_lane.unreachable();
             input.stats.invoke.error.unreachable = error_lane.unreachable();
             input.stats.invoke.success.operations = success_ops;
+            input.stats.invoke.success.member_reads = member_reads;
             input.stats.invoke.error.operations = error_ops;
         } else {
             apply_immediate_call_operations(input, success_ops, writes);
@@ -1043,10 +1043,11 @@ fn capture_builtin_store(
 
 /// Capture the element before removal and before a result can rebind the receiver.
 fn capture_builtin_element_result(
-    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
     result: Option<HirLocalDestination>,
     storage: CallStorage,
+    deferred_reads: Option<&mut Demand>,
 ) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
     let heap_result = result
         .and_then(|result| input.layout.index_of(result.local()))
@@ -1057,6 +1058,14 @@ fn capture_builtin_element_result(
     let Some(mut elements) = call_receiver_allocs(input, actuals)? else {
         return Ok(Vec::new());
     };
+    if input.stats.observations.enabled {
+        let reads = selected_members(input.state, &elements);
+        if let Some(deferred) = deferred_reads {
+            deferred.extend(reads);
+        } else {
+            input.stats.observations.tail.read(reads);
+        }
+    }
     let holders = if matches!(storage, CallStorage::Remove { .. })
         && elements.holder_coverage() == Coverage::Complete
     {
@@ -1065,27 +1074,56 @@ fn capture_builtin_element_result(
         Vec::new()
     };
     let mut ops = Vec::new();
-    if matches!(storage, CallStorage::Get)
-        && let Some(result) = result
-        && !elements.ids.is_empty()
+    let lookup = matches!(storage, CallStorage::Get);
+    if let Some(result) =
+        result.filter(|_| lookup || heap_result || input.state.has_value_alternatives())
     {
-        ops.push(InvokeLayerOp::KeepReceiverStable {
-            result: result.local(),
-            holders: elements.ids.clone(),
+        let dependency = lookup.then(|| ReceiverDependency {
+            entries: SmallSet::from_iter(elements.ids.iter().copied()),
+            coverage: elements.holder_coverage(),
         });
-    }
-    if let Some(result) = result.filter(|_| heap_result) {
-        input
-            .state
-            .step_resolved(&mut elements, FieldKey::Elem, &input.layout.local_mutable);
-        if !elements.ids.is_empty() {
-            ops.push(InvokeLayerOp::Bind {
-                local: result.local(),
-                ids: elements.ids,
-                views: elements.views,
-                readonly: elements.readonly || matches!(storage, CallStorage::Get),
-            });
+        let mut value = if heap_result {
+            input
+                .state
+                .step_resolved(&mut elements, FieldKey::Elem, &input.layout.local_mutable);
+            capture_graph_values(elements)
+        } else {
+            input
+                .state
+                .capture_scalar_projection(&elements, FieldKey::Elem)
+        };
+        let readonly = value.readonly() || lookup;
+        value.restrict_permission(readonly);
+        if let Some(dependency) = dependency {
+            // The selected value may inherit dependencies from both its holder and its payload.
+            value
+                .alternatives
+                .retain(|alt| !matches!(alt.kind, PayloadKind::Absent));
+            if value.alternatives.is_empty() {
+                if heap_result {
+                    value.alternatives.extend(
+                        value
+                            .values
+                            .iter()
+                            .copied()
+                            .map(|value| ValueAlt::plain(PayloadKind::Allocation(value))),
+                    );
+                }
+                if value.alternatives.is_empty() {
+                    value.alternatives.push(ValueAlt::plain(if heap_result {
+                        PayloadKind::Unknown
+                    } else {
+                        PayloadKind::Scalar
+                    }));
+                }
+            }
+            for alt in &mut value.alternatives {
+                if let Err(index) = alt.deps.binary_search(&dependency) {
+                    alt.deps.insert(index, dependency.clone());
+                }
+            }
         }
+        bind_result(&mut ops, result, value);
     }
     if let CallStorage::Remove { map } = storage {
         ops.push(InvokeLayerOp::Remove {
@@ -1368,7 +1406,7 @@ fn transfer_call_argument_access(
             Some(plan.access)
         };
         if let Some(access) = fallback {
-            check_access(&mut check, &plan.roots, access, source, BORROW_ACCESS)?;
+            check_call_access(&mut check, &plan.roots, access, source)?;
             false
         } else {
             true
@@ -1401,6 +1439,7 @@ fn transfer_call_argument_access(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_call_result_definition(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     result_local: LocalId,
@@ -1408,42 +1447,83 @@ fn prepare_call_result_definition(
     arg_value_roots: &[RootSet],
     derived_roots: RootSet,
     result_transfer: CallResultTransfer,
-) -> Result<Option<(usize, AllocationRetirement)>, BorrowCheckError> {
+    operations: &mut [InvokeLayerOp],
+    writes: &mut [CallResultWrite],
+) -> Result<(), BorrowCheckError> {
     let local_index = call_result_index(input, result_local)?;
+    let on_edge = matches!(result_transfer, CallResultTransfer::Edge(_));
+    if !on_edge
+        && (operations.iter().any(
+            |op| matches!(op, InvokeLayerOp::Store(store) if store.captures_slot(local_index)),
+        ) || writes
+            .iter()
+            .any(|write| write.store.captures_slot(local_index)))
+    {
+        input.state.retain_captured_wrapper(local_index);
+    }
     let new_local_state =
         call_result_local_state(input, alias_arguments, arg_value_roots, derived_roots)?;
-    if matches!(result_transfer, CallResultTransfer::Edge(_)) {
+    if on_edge {
         input
             .stats
             .invoke
             .success
             .results
             .push((result_local, new_local_state));
-        return Ok(None);
+        return Ok(());
     }
 
-    if !input.layout.local_has_in_place_mutation_surface[local_index] {
-        return Ok(Some((
-            local_index,
+    if matches!(result_transfer, CallResultTransfer::FirstDefinition(index) if index == local_index)
+        && input.state.can_publish_first_definition(local_index)
+        && !arg_value_roots
+            .iter()
+            .any(|roots| roots.contains(local_index))
+        && {
+            let names = |id| input.state.is_current_allocation_of(id, local_index);
+            !operations
+                .iter()
+                .any(|op| op.captures_current(local_index, &names))
+                && !writes
+                    .iter()
+                    .any(|write| write.store.captures_current(local_index, &names))
+        }
+    {
+        input.state.update_local_state(local_index, new_local_state);
+        return Ok(());
+    }
+    let before = input.stats.observations.before_rekey(input.state);
+    let retirement = if !input.layout.local_has_in_place_mutation_surface[local_index]
+        && !matches!(result_transfer, CallResultTransfer::FirstDefinition(_))
+    {
+        Some(
             input
                 .state
                 .rebind_local(local_index, new_local_state, input.current_order),
-        )));
-    }
-    let pristine_definition = match result_transfer {
-        CallResultTransfer::FirstDefinition(index) => Some(index),
-        _ => None,
-    };
-    Ok(input
-        .state
-        .rebind_local_after_capture(
+        )
+    } else {
+        // A captured old wrapper takes the normal retirement path, even on a first definition.
+        input.state.rebind_local_after_capture(
             local_index,
             new_local_state,
             input.current_order,
-            pristine_definition,
+            None,
             true,
         )
-        .map(|retirement| (local_index, retirement)))
+    };
+    if let Some(retirement) = retirement {
+        input
+            .stats
+            .observations
+            .after_retirement(before, input.state, retirement);
+        for op in operations {
+            op.remap(input.state, retirement);
+        }
+        for write in writes {
+            write.derivation.remove(local_index);
+            write.remap(input.state, retirement);
+        }
+    }
+    Ok(())
 }
 
 struct CallResultWrite {
@@ -1499,31 +1579,15 @@ fn capture_call_result_write(
 
     // Bind carries the captured value for either call form. Immediate updates already
     // captured their receiving address, so move the payload out instead of applying Bind.
-    let (captured, readonly) = match ops
+    let captured = match ops
         .iter()
         .position(|op| matches!(op, InvokeLayerOp::Bind { local, .. } if *local == result))
         .map(|index| ops.remove(index))
     {
-        Some(InvokeLayerOp::Bind {
-            ids,
-            views,
-            readonly,
-            ..
-        }) => (
-            CapturedValue {
-                values: ids
-                    .into_iter()
-                    .map(|id| StoredValue {
-                        id,
-                        writable: !readonly,
-                    })
-                    .collect(),
-                views,
-            },
-            readonly,
-        ),
-        _ => (CapturedValue::default(), false),
+        Some(InvokeLayerOp::Bind { value, .. }) => value,
+        _ => CapturedValue::default(),
     };
+    let readonly = captured.readonly();
     let definite_slot = match addresses.definite() {
         Some(CellId::Slot(wrapper)) => Some(wrapper.local),
         _ => None,
@@ -1542,31 +1606,31 @@ fn apply_immediate_call_operations(
     mut ops: Vec<InvokeLayerOp>,
     writes: Vec<CallResultWrite>,
 ) {
-    if writes.is_empty() {
-        for op in ops {
-            op.apply(input.layout, input.state, None);
-        }
-        return;
-    }
-    // When a builtin result updates a slot, keep its result-dependent operation after
-    // the receipt: replacement clears earlier stability, and Remove observes detachment.
-    let mut post_result = if matches!(
-        ops.last(),
-        Some(InvokeLayerOp::KeepReceiverStable { .. } | InvokeLayerOp::Remove { .. })
-    ) {
-        ops.pop()
-    } else {
-        None
-    };
+    // Removal must observe the installed result to record its detachment.
+    let mut post_result =
+        if !writes.is_empty() && matches!(ops.last(), Some(InvokeLayerOp::Remove { .. })) {
+            ops.pop()
+        } else {
+            None
+        };
     for op in ops {
-        op.apply(input.layout, input.state, None);
+        input
+            .stats
+            .observations
+            .tail
+            .replace(op.apply_owned(input.layout, input.state));
     }
     let mut writes = writes.into_iter();
     while let Some(mut write) = writes.next() {
         if let Some(slot) = write.definite_slot
             && input.layout.local_has_in_place_mutation_surface[slot]
         {
+            let before = input.stats.observations.before_rekey(input.state);
             let retirement = input.state.retire_slot_value(slot, input.current_order);
+            input
+                .stats
+                .observations
+                .after_retirement(before, input.state, retirement);
             write.remap(input.state, retirement);
             for pending in writes.as_mut_slice() {
                 pending.remap(input.state, retirement);
@@ -1575,15 +1639,20 @@ fn apply_immediate_call_operations(
                 op.remap(input.state, retirement);
             }
         }
-        input
+        let receipt = input
             .state
             .publish_store(&write.store, input.current_order, None);
+        input.stats.observations.tail.replace(receipt);
         input
             .state
             .mark_slot_derivation(write.definite_slot.unwrap_or(write.actor), write.derivation);
     }
     if let Some(op) = post_result {
-        op.apply(input.layout, input.state, None);
+        input
+            .stats
+            .observations
+            .tail
+            .replace(op.apply_owned(input.layout, input.state));
     }
 }
 
@@ -1641,13 +1710,5 @@ fn map_argument_effect(op: HirMapOp, arg_index: usize) -> ArgEffect {
         ArgEffect::MayConsumeShared
     } else {
         ArgEffect::SharedBorrow
-    }
-}
-
-fn map_result_alias(op: HirMapOp) -> CallReturns<'static> {
-    if matches!(op, HirMapOp::Get) {
-        CallReturns::Get
-    } else {
-        CallReturns::Fresh
     }
 }

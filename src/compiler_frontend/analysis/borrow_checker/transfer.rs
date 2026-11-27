@@ -8,12 +8,13 @@
 
 mod access;
 mod call_semantics;
-mod facts;
+pub(super) mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocId, BorrowState, FieldKey, FunctionLayout, LocalState, StoredValue, TypedStore,
+    AllocId, BorrowState, CapturedValue, FieldKey, FunctionLayout, LocalState, StoredValue,
+    TypedStore,
 };
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
@@ -39,7 +40,7 @@ use access::{
     AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
     transfer_terminator,
 };
-use facts::ValueFactBuffer;
+use facts::{Demand, ObservationCheckpoint, ValueFactBuffer, ValueObservations};
 
 #[cfg(test)]
 #[path = "transfer/tests/value_fact_buffer_tests.rs"]
@@ -74,8 +75,7 @@ pub(super) enum InvokeLayerOp {
     ConstructField {
         holder: AllocId,
         key: FieldKey,
-        values: Vec<StoredValue>,
-        views: Vec<AllocId>,
+        value: CapturedValue,
     },
     Remove {
         holders: Vec<AllocId>,
@@ -84,13 +84,7 @@ pub(super) enum InvokeLayerOp {
     },
     Bind {
         local: LocalId,
-        ids: Vec<AllocId>,
-        views: Vec<AllocId>,
-        readonly: bool,
-    },
-    KeepReceiverStable {
-        result: LocalId,
-        holders: Vec<AllocId>,
+        value: CapturedValue,
     },
     ViewMember {
         view: AllocId,
@@ -118,6 +112,8 @@ pub(super) enum InvokeLane {
 pub(super) struct InvokeLaneTransfer {
     pub results: Vec<(LocalId, LocalState)>,
     pub operations: Vec<InvokeLayerOp>,
+    pub member_reads: Demand,
+    pub checkpoints: Vec<ObservationCheckpoint>,
     pub unreachable: bool,
 }
 
@@ -129,9 +125,13 @@ pub(super) struct InvokeTransfer {
 
 impl InvokeTransfer {
     pub(super) fn is_empty(&self) -> bool {
-        [&self.success, &self.error]
-            .into_iter()
-            .all(|lane| lane.results.is_empty() && lane.operations.is_empty() && !lane.unreachable)
+        [&self.success, &self.error].into_iter().all(|lane| {
+            lane.results.is_empty()
+                && lane.operations.is_empty()
+                && lane.member_reads.is_empty()
+                && lane.checkpoints.is_empty()
+                && !lane.unreachable
+        })
     }
 }
 
@@ -154,6 +154,7 @@ pub(super) struct BlockTransferStats {
     pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
     // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
     pub invoke: InvokeTransfer,
+    pub observations: ValueObservations,
     pub diverges: bool,
 }
 
@@ -168,6 +169,7 @@ pub(super) fn transfer_block(
     state: &mut BorrowState,
 ) -> Result<BlockTransferStats, BorrowCheckError> {
     let mut stats = BlockTransferStats::default();
+    stats.observations.enabled = layout.lookup_observations;
     let mut value_fact_buffer = ValueFactBuffer::new(layout.local_count());
 
     for statement in &block.statements {

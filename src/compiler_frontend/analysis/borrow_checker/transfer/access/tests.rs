@@ -4,9 +4,9 @@ use super::PlaceUse;
 use super::conflicts::{Overlap, footprint, overlap};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, FieldKey,
-    LocalState, Replacement, RootSet, StoredValue, TypedStore, UNKNOWN_ORDER_KEY, WrapperAge,
-    WrapperId,
+    AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, EntryFamilies,
+    FieldKey, LocalState, ReceiverDependency, Replacement, RootSet, StoredValue, TypedStore,
+    UNKNOWN_ORDER_KEY, ValueAlt, ValueKind, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -337,10 +337,7 @@ fn set_link(state: &mut BorrowState, count: usize, local: usize, source: usize, 
 }
 
 fn writable_value(id: AllocId) -> CapturedValue {
-    CapturedValue {
-        values: vec![StoredValue { id, writable: true }],
-        views: Vec::new(),
-    }
+    CapturedValue::new(vec![StoredValue { id, writable: true }], Vec::new())
 }
 
 #[test]
@@ -921,6 +918,212 @@ fn copied_nested_sharing_is_pairwise_not_transitive() {
         assert!(!overlaps(&slots[0], &slots[2]));
         assert!(slots.iter().all(|slot| !slot.contains(&common)));
     }
+}
+
+#[test]
+fn publisher_kills_only_exact_dependent_scalar_replacements() {
+    let mut entry = BorrowState::new_uninitialized(2);
+    entry.initialize_parameter(0);
+    entry.initialize_parameter(1);
+    let receiver = entry.local_alloc_ids(0).0[0];
+    let holder = entry.local_alloc_ids(1).0[0];
+    let field = FieldKey::Field(0);
+    let cell = CellId::Projected(holder, field);
+    let old = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: [receiver].into_iter().collect(),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let capture = CapturedValue {
+        alternatives: vec![old.clone()],
+        ..Default::default()
+    };
+    entry.record_constructed_value(holder, field, &capture, true);
+
+    for (coverage, replacement) in [
+        (Coverage::Complete, Replacement::May),
+        (Coverage::Partial, Replacement::Must),
+        (Coverage::Complete, Replacement::Must),
+    ] {
+        let mut state = entry.clone();
+        let addresses = AddressSet::from_cells([cell], coverage).with_singleton_proof();
+        let store = match replacement {
+            Replacement::May => TypedStore::write_cells(addresses, CapturedValue::default()),
+            Replacement::Must => TypedStore::replace_cells(addresses, CapturedValue::default()),
+        };
+        let receipt = state.publish_store(&store, 0, None);
+        if coverage == Coverage::Complete && replacement == Replacement::Must {
+            assert_eq!(receipt.replaced[0], Some((cell, vec![old.clone()])));
+            assert!(state.value_cell(cell).is_empty());
+        } else {
+            assert!(
+                receipt
+                    .replaced
+                    .into_iter()
+                    .all(|replace| replace.is_none())
+            );
+            assert!(state.value_cell(cell).contains(&old));
+        }
+    }
+}
+
+#[test]
+fn retirement_preserves_distinct_dependencies_on_one_allocation() {
+    let mut state = BorrowState::new_uninitialized(3);
+    for local in 0..3 {
+        state.initialize_parameter(local);
+    }
+    let holder = state.local_alloc_ids(0).0[0];
+    let other = state.local_alloc_ids(1).0[0];
+    let child = StoredValue {
+        id: state.local_alloc_ids(2).0[0],
+        writable: true,
+    };
+    let key = FieldKey::Field(0);
+    let alternatives = [holder, other].map(|receiver| ValueAlt {
+        kind: ValueKind::Allocation(child),
+        deps: vec![ReceiverDependency {
+            entries: [receiver].into_iter().collect(),
+            coverage: Coverage::Complete,
+        }],
+    });
+    state.record_constructed_value(
+        holder,
+        key,
+        &CapturedValue {
+            values: vec![child],
+            alternatives: alternatives.to_vec(),
+            ..Default::default()
+        },
+        true,
+    );
+    let retirement = state.retire_slot_value(0, 1);
+    let mut retired = holder;
+    retirement.remap_id(&state, &mut retired);
+    let (cell, retained) = state.value_cells().next().unwrap();
+    assert_eq!(cell, CellId::Projected(retired, key));
+    assert_ne!(holder, retired);
+    assert_eq!(retained.len(), 2);
+    assert!(
+        retained
+            .iter()
+            .all(|alt| alt.kind == ValueKind::Allocation(child))
+    );
+    assert!(
+        retained
+            .iter()
+            .any(|alt| alt.deps[0].entries.as_slice() == [retired])
+    );
+    assert!(
+        retained
+            .iter()
+            .any(|alt| alt.deps[0].entries.as_slice() == [other])
+    );
+}
+
+#[test]
+fn family_erase_receipt_distinguishes_exact_partial_and_multiple_receivers() {
+    let mut entry = BorrowState::new_uninitialized(2);
+    entry.initialize_parameter(0);
+    entry.initialize_parameter(1);
+    let receiver = entry.local_alloc_ids(0).0[0];
+    let other = entry.local_alloc_ids(1).0[0];
+    let payload = CapturedValue {
+        alternatives: vec![ValueAlt {
+            kind: ValueKind::Scalar,
+            deps: vec![ReceiverDependency {
+                entries: [other].into_iter().collect(),
+                coverage: Coverage::Complete,
+            }],
+        }],
+        ..Default::default()
+    };
+    let keys = [FieldKey::Elem, FieldKey::MapKey];
+    for key in keys {
+        entry.record_constructed_value(receiver, key, &payload, true);
+    }
+    for (receivers, coverage, exact) in [
+        (vec![receiver], Coverage::Complete, true),
+        (vec![receiver], Coverage::Partial, false),
+        (vec![receiver, other], Coverage::Complete, false),
+    ] {
+        let mut state = entry.clone();
+        let receipt = state.publish_store(
+            &TypedStore::EraseFamily {
+                receivers,
+                coverage,
+                keys: EntryFamilies::MapEntries,
+            },
+            0,
+            None,
+        );
+        let erased = receipt
+            .replaced
+            .into_iter()
+            .flatten()
+            .map(|(cell, values)| {
+                assert_eq!(values, payload.alternatives);
+                cell
+            })
+            .collect::<Vec<_>>();
+        if exact {
+            assert_eq!(erased, keys.map(|key| CellId::Projected(receiver, key)));
+        } else {
+            assert!(erased.is_empty());
+        }
+        assert_eq!(state.value_cells().count(), if exact { 0 } else { 2 });
+    }
+}
+
+#[test]
+fn proven_sole_remove_erases_member_and_keeps_detachment() {
+    let mut state = BorrowState::new_uninitialized(4);
+    for local in 0..4 {
+        state.initialize_parameter(local);
+    }
+    let holder = state.local_alloc_ids(0).0[0];
+    let old_receiver = state.local_alloc_ids(1).0[0];
+    // A lazy Elem child summarises arbitrarily many entries and cannot prove a sole member.
+    let child = StoredValue {
+        id: state.local_alloc_ids(3).0[0],
+        writable: true,
+    };
+    let value = CapturedValue {
+        values: vec![child],
+        alternatives: vec![ValueAlt {
+            kind: ValueKind::Allocation(child),
+            deps: vec![ReceiverDependency {
+                entries: [old_receiver].into_iter().collect(),
+                coverage: Coverage::Complete,
+            }],
+        }],
+        ..Default::default()
+    };
+    state.record_constructed_value(holder, FieldKey::Elem, &value, true);
+    let result = state.resolve_cells(2);
+    state.publish_store(
+        &TypedStore::receive_result(result, value.clone(), 2, false),
+        0,
+        None,
+    );
+    let receipt = state.remove_alloc_element(&[holder], false, Some(2));
+    assert_eq!(
+        receipt.replaced[0],
+        Some((
+            CellId::Projected(holder, FieldKey::Elem),
+            value.alternatives.clone()
+        ))
+    );
+    assert!(state.detached_from(2, &[holder]));
+    assert_eq!(
+        state
+            .capture_jump_value(2, false, false)
+            .unwrap()
+            .alternatives,
+        value.alternatives
+    );
 }
 
 #[test]
