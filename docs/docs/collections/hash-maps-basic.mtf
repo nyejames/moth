@@ -1,29 +1,29 @@
 A hash map stores values under keys.
 
 [codeblock, $code "moth":
-    scores ~= {
+    scores ~= [
         "Priya" = 10,
         "Rob" = 12,
-    }
+    ]
 ]
 
 Use `get` to read a value:
 
 [codeblock, $code "moth":
-    score = scores.get("Priya") catch:
+    score = scores.get("Priya") catch {
         then 0
-    ;
+    }
 ]
 
 Use `set` and `remove` through a mutable receiver:
 
 [codeblock, $code "moth":
-    ~scores.set("Emmy", 7) catch:
-    ;
+    ~scores.set("Emmy", 7) catch {
+    }
 
-    removed = ~scores.remove("Rob") catch:
+    removed = ~scores.remove("Rob") catch {
         then 0
-    ;
+    }
 ]
 
 Maps remember insertion order.

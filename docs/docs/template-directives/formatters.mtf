@@ -1,0 +1,56 @@
+A formatter supplies a String receiving context. A formatter on a construction
+with a known sequence receiver is a type conflict. Choose one formatter per
+head. Each formatter applies to its own body. A nested child chooses its own
+formatting. In a `.mtf` file the outer body and nested templates without an
+explicit directive default to `$md`. Any explicit nested directive overrides
+that default. See @../moth-templates (Moth template files).
+
+### Whitespace and Markdown
+
+`$raw` takes no operand. It keeps authored body whitespace, including leading
+and trailing spaces and line breaks. Nested templates and expressions still
+contribute their values. `$md` also takes no operand. It formats Moth's
+Markdown, which supports explicit section IDs and treats child templates as
+opaque formatting boundaries.
+
+[codeblock, $code "moth":
+    details = [$md:Current status: [$html:<em>ready</em>].]
+]
+
+The outer template supplies a paragraph. The child supplies its own HTML.
+
+### HTML, escaped text and CSS
+
+`$html` takes no operand. It keeps authored markup and can warn about constructs
+such as a script tag or inline event handler. `$escape_html` also takes no
+operand. It replaces ampersands, angle brackets and both kinds of quotes in
+authored text with HTML entities. Nested templates and dynamic expressions
+pass through as separate contributions. A surrounding escape directive cannot
+escape a child's output after the child has rendered.
+
+`$css` checks CSS block syntax. The optional compile-time String operand
+`"inline"` selects declaration syntax. The checker can warn about malformed
+CSS. The resulting String becomes page content only when the application
+uses it. Supply a tracked CSS file to the entry's `stylesheets` destination
+to share rules across a page.
+
+### Code listings
+
+`$code` takes an optional compile-time String naming a supported language.
+Omit it for generic highlighting, use `"moth"` for Moth source or use
+`"text"` to escape HTML-sensitive characters without adding syntax classes.
+The code body keeps balanced brackets as source instead of interpreting
+them as nested templates. For a multiline listing the first content line
+sets the indentation baseline. Deeper lines keep their relative indentation.
+
+[codeblock, $code "moth":
+    example = [$code "moth":
+        greeting = [:
+            Hello, [name]
+        ]
+    ]
+]
+
+The listing shows `name` as written, without looking up its value. A formatter
+controls text and composition. It cannot rewrite functions, change a nominal
+type or change language safety rules.

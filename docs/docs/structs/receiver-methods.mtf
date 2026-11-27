@@ -1,73 +1,62 @@
-A receiver method is a top-level function whose first parameter is named
-`this`.
+A receiver method belongs to a struct or choice declared in the same source
+file. Define it outside the type declaration, alongside the other top-level
+functions. Its first parameter names the value that receives the call.
 
 [codeblock, $code "moth":
-    Vector2 = |
-        x F64,
-        y F64,
-    |
+    Vector2 = | x F64, y F64 |
 
-    length_squared |this Vector2| -> F64:
+    length_squared |this Vector2| -> F64 {
         return this.x * this.x + this.y * this.y
-    ;
+    }
 
     vector = Vector2(3.0, 4.0)
     length = vector.length_squared()
 ]
 
+The dot supplies `vector` as the receiver. The parameter `this` gives the
+body shared access to its fields. To change those fields, declare a
+@#mutable-receivers (mutable receiver).
+
 ### Receiver declaration
 
-- `this` must be the first parameter.
-- A signature may contain exactly one `this` parameter.
-- `this T` is a shared receiver.
-- `this ~T` is a mutable receiver.
-- `this` is reserved for receiver declarations and the receiver method body.
-- A receiver method is called only with receiver syntax.
-- Calling it as `method(value, ...)` is invalid.
-- A receiver method may declare `-> !`. The contract is exact, like any
-  other callable.
+Reserve `this` for the first parameter and its uses inside the method.
+A method takes exactly one receiver and callers use dot syntax. Any other
+parameters take arguments inside the call's parentheses. A method can also
+declare a @../functions/#returns-and-multiple-values (Never return contract)
+with `-> !`.
 
-### Supported receiver ownership
-
-A source-authored receiver method belongs to a user-defined struct or choice
-declared in the same source file.
-
-Aligned declaration-site generic nominal receivers are supported when the
-method belongs to that generic type declaration.
-
-Source-authored receiver methods are rejected for:
-
-- builtin scalars
-- imported source types
-- dependency package types
-- external opaque types
-- nominal types declared in another file
-
-Use a free function for a type owned elsewhere.
-
-Compiler-owned collection operations and builder-owned builtin operations are
-not user extension methods.
-
-Implicit failure follows the closed module boundary: an exported receiver method without an error slot must handle it locally, while a private method propagates it within the same module. See @../errors (Errors).
-
-### Constants and receiver methods
-
-A struct instance folded into a constant becomes a data-only const record.
-Its folded fields remain available under the constant rules, but runtime
-receiver methods are not available on the const record itself.
-
-Use one projected field when runtime code needs the value. See
-@../constants/#const-records (Const records) for the const-record contract.
-
-A non-generic const receiver method uses the ordinary const marker and shared `this T` on an eligible same-file nominal struct or choice. Its receiver and arguments must be available at compile time. The receiver is evaluated once before the explicit arguments and follows the same shared access and generational validation as an ordinary const parameter. The method may return one or more success values through the same const execution path. Mutable and generic const receiver methods are not part of this contract. Eligible nominal constant receivers do not make anonymous data-only records method-capable or enable runtime methods on const records. See @../functions/function-declarations (Function declarations) and @../progress (Progress).
+For a generic struct or choice, the method's type parameters must line up
+with the type's declaration. Use a free function to work with a builtin
+scalar, an imported type, a dependency's type, an external opaque type or a
+type declared in another file. Collections and builders have their own
+builtin operations.
 
 ### Visibility
 
-Receiver-method visibility follows receiver-type visibility.
+A file that receives a value can call the methods its type provides, even
+when that file doesn't bind the type name. To name the type in an annotation,
+constructor, conformance declaration or bound, bring the type name into scope.
 
-- A value carries its receiver type's usable methods into any file that holds it, without importing or binding the type's name.
-- Naming the type in an annotation, constructor, conformance or bound still needs an import or binding.
-- Methods are not imported, aliased or re-exported independently.
-- Namespace bindings may expose the receiver type, but its methods are not namespace fields.
-- A module public surface exposes same-file receiver methods when it exposes the receiver type.
-- A field and receiver method on the same type cannot use the same name.
+A module that exposes a type also exposes its same-file methods. Methods
+can't be imported, aliased or re-exported independently, and a namespace
+binding for a type doesn't make its methods namespace fields. A field and
+a method on the same type need different names.
+
+Private methods can propagate implicit failure within their module. An
+exported method without an error slot handles that failure locally. See
+@../errors (Errors).
+
+### Constants and receiver methods
+
+Folding a struct instance into a constant produces a data-only const record.
+Runtime code can read its folded fields but can't call runtime methods on the
+record. See @../constants/#const-records (Const records).
+
+For an eligible same-file struct or choice, a const method takes a shared
+receiver and carries the same `#` marker as a const function. The receiver and
+arguments must all be available at compile time. Moth evaluates the receiver
+once, before the explicit arguments, and checks its shared access in the same
+way as a const parameter. The method can return one or more success values.
+This contract excludes mutable or generic const methods and methods on anonymous
+const records. See @../functions/#function-declarations (Function declarations)
+and @../progress (Progress) for current compiler support.

@@ -16,15 +16,12 @@ exposed but does not own, and coverage ownership. It cannot accept public API or
 ```text
 STATUS: semantic contract published and implemented; corrections and the accepted arithmetic surface delivered
 CURRENT_SLICE: none - the contract, the four corrections and the five arithmetic functions are complete
-BLOCKERS: a Wasm lowering set still waits for a target decision; the repeated same-name `catch`
-binder defect below is inherited and owned outside this package; the umbrella programme keeps the
-package lane paused under the roadmap order until MON syntax, MON Rust tooling, Wiring V1 and
-native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeout
-`4cfd9d492` is accepted.
+BLOCKERS: a Wasm lowering set waits for a target decision. The repeated same-name `catch` binder
+defect below is owned outside this package. The main roadmap controls when package work resumes.
 NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
 
-The delivered numeric migration gives default numeric parameters/accessors F64 contracts.
+Data-layout Phase 3 closed at `4cfd9d492`. The delivered numeric migration gives default numeric parameters/accessors F64 contracts.
 Historical Float evidence below retains its checkpoint meaning, not a supported type identity.
 Preserve opaque time domains, units, arithmetic range/exactness and code 304 at the read boundary.
 Shared external validation uses resolved F64 without package-specific guards.

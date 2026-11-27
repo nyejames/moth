@@ -7,33 +7,30 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Directives"]]
-[$in description:["General compiler directives in Moth, including the template-head form, the source-modifier form, configuration, numeric constraints, builder slots and shared operand rules."]]
+[$in description:["Source directives for exports, build inputs, documentation and numeric constraints, with their attachment and operand rules."]]
 [$in head:[language_theme_head]]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Directives
 
-    `$` introduces a registered compiler directive. Template-head directives
-    already use this marker. The accepted source-modifier family adds next-construct
-    modifiers such as `$config` and later compiler-owned forms. HTML document
-    metadata uses direct const inserts in `@entry.moth` through builder slots.
-
-    Template directives are implemented. The `$config` source modifier is
-    delivered for typed build inputs; later compiler-owned source forms remain
-    accepted design. No root-purpose directive exists: `@entry.moth` owns entry
-    eligibility, and `$entry` and `$page` are not source syntax.
+    A source directive annotates the declaration or statement that follows it.
+    Use one to publish a name, document a declaration or set a constraint on
+    a function. For directives written inside brackets, see
+    @../template-directives (Template directives). For HTML page metadata, see
+    @../project-structure/#entry-config (Entry metadata and builder slots).
 ]
 
 [section:
     [doc_level:
         [$in key:directive-pages]
-        [$in title:Directives]
+        [$in title:Source directives]
         [$in advanced:[directives]]
 
         [directives_basic]
@@ -46,14 +43,20 @@ init_docs_sidebar()!
         [$in title:Numeric constraints]
         [$in advanced:[constraints]]
 
-        [$md: `$fast_math`, `$safe_math` and `$infallible` refine numeric behaviour on a function or complete statement. Ordinary checked arithmetic stays the default. Choose Advanced for placement, meanings, proof policy, external evidence and examples.]
+        [$md:
+            Ordinary arithmetic checks for failure. Use `$fast_math` to select
+            fast semantics for eligible arithmetic on a function or complete
+            statement. Use `$safe_math` to require that reachable work avoids
+            fast arithmetic. Use `$infallible` to require that the boundary
+            lets no error escape and can reach no Moth panic or trap.
+        ]
     ]
 ]
 
 [section:
     [doc_pager:
-        [$in previous_path:../templates/]
-        [$in previous_title:Templates]
+        [$in previous_path:../memory/]
+        [$in previous_title:Memory and lifetimes]
         [$in next_path:../project-structure/]
         [$in next_title:Project structure]
     ]

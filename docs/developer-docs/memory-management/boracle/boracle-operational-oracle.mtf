@@ -4,6 +4,17 @@ Boracle's operational oracle is a bounded executor for normalized `BorrowProblem
 
 The reference solver this oracle deliberately differs from is specified in `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`. The live production checker inventory, known handoff issues and queued Boracle tooling work are tracked in `docs/roadmap/plans/production-borrow-checker.md`.
 
+## Deferred Channels events
+
+The accepted Channels V1 source contract is `docs/docs/async/channels.mtf`.
+Its implementation must extend the normalized input with exact task and
+channel events and define bounded concrete scheduling traces before extending
+this executor. Preserve independence from static solvers, dynamic invocation
+and binding generations, explicit outcome effects and the distinction between
+a found conflict and inconclusive exploration. The oracle does not yet execute
+these events and bounded interleavings do not prove general deadlock freedom.
+Physical reclamation and full lifetime topology remain separate owners.
+
 ## Purpose and locked constraints
 
 The oracle is a second, deliberately different executable semantics for a normalized `BorrowProblem`. It executes concrete events with concrete dynamic value generations and concrete control flow. It exists to find likely soundness defects, precision candidates, malformed normalized inputs and minimal counterexamples.

@@ -2,9 +2,9 @@
 
 This document owns implementation style for new and refactored compiler code.
 
-@./testing.mtf (Test strategy and test construction guide).
+@./#testing-standards (Test strategy and test construction guide).
 
-@./validation.mtf (Final technical gates and completion checks guide).
+@./#validation-gates (Final technical gates and completion checks guide).
 
 Priorities:
 

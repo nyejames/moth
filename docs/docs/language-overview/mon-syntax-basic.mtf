@@ -1,6 +1,4 @@
-MON means Moth Object Notation. MON syntax gives supplied arguments and record
-values a common notation. Pipes declare fields or parameters. Parentheses supply
-values or group an expression.
+Moth uses constructor syntax for struct and choice arguments and for the named entries of an anonymous record. Pipes enclose a declaration's fields. Parentheses supply constructor arguments or group an expression.
 
 [codeblock, $code "moth":
     Size = |
@@ -26,11 +24,14 @@ The label and `=` share one logical line. The value may start on the next line.
 Named types still need their constructors. An anonymous record with matching
 fields does not become a `Size`.
 
-Moth MON source syntax allows ordinary expressions according to the receiving
-Moth context. MON serialised data is self-contained literal data only, and a MON
-reader never evaluates Moth expressions, including foldable ones.
+Moth Object Notation (MON) uses the same named entries for literal data.
+Suppose a program reads a MON file using a schema for `Size`. The file can
+contain this record:
 
-@../mon/#mon-format (MON format) owns the serialised literal-data contract.
-This page owns the shared notation only.
+[codeblock, $code "text":
+    (width = 1280, height = 720)
+]
 
-MON syntax alone does not turn a record into serialised text or make every Moth value serialisable.
+The schema identifies the two fields as a `Size`. In Moth source, write
+`Size(...)` to choose that named type. See @../mon/#mon-format (MON format)
+for the data rules.

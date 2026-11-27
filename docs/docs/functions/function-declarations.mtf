@@ -1,29 +1,29 @@
 A source function forms a named top-level declaration.
 
 [codeblock, $code "moth":
-    greet |name String|:
+    greet |name String| {
         io.line([: Hello, [name]])
-    ;
+    }
 
-    double |value I32| -> I32:
+    double |value I32| -> I32 {
         return value * 2
-    ;
+    }
 ]
 
 ### Declaration shape
 
 [codeblock, $code "moth":
-    name |parameters|:
+    name |parameters| {
         body
-    ;
+    }
 
-    name |parameters| -> ReturnType:
+    name |parameters| -> ReturnType {
         body
-    ;
+    }
 
-    name |parameters| -> !:
+    name |parameters| -> ! {
         body
-    ;
+    }
 ]
 
 - The function name comes first.
@@ -35,7 +35,7 @@ A source function forms a named top-level declaration.
 - A function with only an error slot still writes `-> Error!`.
 - `-> !` is mutually exclusive with every success, optional and error slot.
 - `Void` is not written as a return type.
-- `:` opens the body and `;` closes it. An inline body closes on the line containing its `:`. A multiline body closes with `;` alone on its own line.
+- A pair of braces encloses the function body. Reaching its end follows the declared result contract.
 - Function names use `regular_snake_case`.
 
 Scope placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
@@ -62,9 +62,9 @@ A const function declares that every call is executed by the compiler and
 never receives a runtime body.
 
 [codeblock, $code "moth":
-    double #|value I32| -> I32:
+    double #|value I32| -> I32 {
         return value * 2
-    ;
+    }
 
     label #= [: result [double(21)]]
 ]
@@ -82,7 +82,7 @@ never receives a runtime body.
   @#returns-and-multiple-values (multi-return rules). Each call runs once at
   its receiving site and delivers every slot in order.
 - A const body may use statement matches with the ordinary
-  @../branching/pattern-matching (pattern contract). The compiler evaluates
+  @../branching/#pattern-matching (pattern contract). The compiler evaluates
   the scrutinee once and tests arms in order. A guard runs only after its
   pattern matches. Unselected arms never execute, but they are still
   type-checked.
@@ -102,7 +102,7 @@ never receives a runtime body.
 Const functions use Moth's ordinary reference, mutation and explicit-copy rules, but their access checks differ from runtime code. They execute sequentially and can mutate local state. They cannot access external mutable state, perform IO or execute asynchronous work.
 
 [codeblock, $code "moth":
-    calculate #|| -> I32:
+    calculate #|| -> I32 {
         value ~= 10
         reader = value
         first ~= value
@@ -111,7 +111,7 @@ Const functions use Moth's ordinary reference, mutation and explicit-copy rules,
         ~first = 20
         ~second = second + 1
         return before + second
-    ;
+    }
 ]
 
 This returns `32`. The two mutable aliases are legal during const execution. The first write invalidates `reader`, but the function never uses it again. Returning or otherwise reading `reader` after that write would diagnose the compilation. A fresh immutable reference acquired from a valid source after the write can observe the new value. A mutable alias still requires a mutation-capable source, so a shared parameter cannot be made mutable by declaring an alias.
@@ -132,15 +132,15 @@ A callable that never returns control normally declares one whole return
 contract:
 
 [codeblock, $code "moth":
-    fatal |message String| -> !:
+    fatal |message String| -> ! {
         assert(false, message)
-    ;
+    }
 
-    serve || -> !:
-        loop true:
+    serve || -> ! {
+        loop true {
             io.line("ready")
-        ;
-    ;
+        }
+    }
 ]
 
 The bare `!` sits immediately after `->`. It is not a type, a suffix on a type
@@ -148,20 +148,20 @@ or a reserved keyword. It cannot mix with ordinary return slots:
 
 [codeblock, $code "moth":
     -- Invalid: Never mixed with a success slot
-    bad || -> String, !:
-    ;
+    bad || -> String, ! {
+    }
 
     -- Invalid: Never mixed with an error slot
-    bad || -> Error!, !:
-    ;
+    bad || -> Error!, ! {
+    }
 
     -- Invalid: Never followed by another slot
-    bad || -> !, String:
-    ;
+    bad || -> !, String {
+    }
 
     -- Invalid: Never combined with `!` error syntax
-    bad || -> !!:
-    ;
+    bad || -> !! {
+    }
 ]
 
 Keep `T!` as the final error slot of an ordinary return contract.
@@ -208,17 +208,17 @@ proof coverage.
 Declaration-site generic parameters appear after the function name.
 
 [codeblock, $code "moth":
-    identity type A |value A| -> A:
+    identity type A |value A| -> A {
         return value
-    ;
+    }
 ]
 
 Generic inference and bounds are documented by @../generics (Generics).
 
 ### Function values
 
-Source functions are named declarations and cannot currently be used as
-ordinary values. General closures, anonymous function values, generic function
-values and higher-order polymorphism are outside scope. A narrower future
-design for references to named, monomorphic, non-capturing functions remains an
-open design question and has no current syntax or implementation commitment.
+Source functions are named declarations. The planned closure design lets a
+caller supply an expression where a parameter or named struct field declares
+a callback. See @../closures/#closures-reference (Closures). Generic function
+values and higher-order polymorphism remain outside scope. References to named,
+monomorphic, non-capturing functions remain an open design question.

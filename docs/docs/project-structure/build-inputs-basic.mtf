@@ -8,9 +8,9 @@ CLI numeric spelling stays raw until the exact contract selects its type. `$conf
     $config
     analytics #Bool = false
 
-    if analytics:
+    if analytics {
         send_analytics()
-    ;
+    }
 ]
 
 The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer and then reports a missing-input diagnostic when no value is supplied. An optional input with no initializer or with `= none` resolves to absence. Ordinary constants still need one.

@@ -1,9 +1,8 @@
-**Accepted deferred implementation.** Runtime anonymous records are queued after
-shared MON syntax and numeric semantics. The examples below describe the accepted
-contract, not current executable support. See @../progress (Progress).
+**Planned feature.** The Alpha compiler doesn't yet support runtime anonymous
+records. See @../progress (Progress).
 
 A runtime anonymous record is a local value backed by a hidden nominal struct.
-It uses the named-only form of @../language-overview/#mon-syntax (MON syntax).
+It uses the named-entry form of @../language-overview/#mon-syntax (constructor syntax).
 The ordinary struct owners provide construction, field access, copy, borrow
 validation and lifetime validation.
 
@@ -15,7 +14,7 @@ validation and lifetime validation.
         height I32,
     |
 
-    show_window ||:
+    show_window || {
         window ~= (
             title = "Strategy",
             bounds = (
@@ -27,7 +26,7 @@ validation and lifetime validation.
         ~window.bounds.size.width = 1440
         independent ~= copy window
         ~independent.title = "Overview"
-    ;
+    }
 ]
 
 A runtime receiving context selects a runtime record. Its field expressions
@@ -60,7 +59,7 @@ already bound local. They may also contain ordinary supported values, including
 explicitly constructed nominal structs and choices.
 
 [codeblock, $code "moth":
-    show_state ||:
+    show_state || {
         child = (count = 3)
         state = (
             saved = child,
@@ -69,7 +68,7 @@ explicitly constructed nominal structs and choices.
 
         selected = state.fresh
         count = state.saved.count
-    ;
+    }
 ]
 
 A compiler-generated parent field carries the child's resolved hidden type.
@@ -110,6 +109,6 @@ Compile-time records remain separate folded member groups, with the whole-value
 runtime restrictions in @../constants/#const-records (Const records). A runtime
 record never uses the compile-time record marker as its runtime type.
 
-Wiring retains its own storage rules. MON construction does not turn wire
-identity or routes into ordinary storable field values. Runtime records gain no
-serialisation support from sharing MON syntax.
+Only a named struct can declare a callback field under the planned
+@../closures/ (closure design). An anonymous record can't declare one.
+Runtime records gain no serialisation support from sharing constructor syntax with MON.

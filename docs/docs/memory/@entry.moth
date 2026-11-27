@@ -14,7 +14,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Memory and lifetimes"]]
 [$in description:["Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."]]
@@ -22,7 +23,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Memory and lifetimes
 
@@ -88,9 +89,9 @@ init_docs_sidebar()!
 
 [section:
     [doc_pager:
-        [$in previous_path:../wiring/]
-        [$in previous_title:Wiring]
-        [$in next_path:../project-structure/]
-        [$in next_title:Project structure]
+        [$in previous_path:../closures/]
+        [$in previous_title:Closures]
+        [$in next_path:../directives/]
+        [$in next_title:Directives]
     ]
 ]

@@ -2,26 +2,25 @@ A collection loop visits the values in a collection, from the first item to the
 last by default.
 
 [codeblock, $code "moth":
-    names = {"Priya", "Rob", "Emmy"}
+    names [String] = ["Priya", "Rob", "Emmy"]
 
-    loop names |name|:
+    loop names |name| {
         io.line([: Hello, [name]])
-    ;
+    }
 ]
 
-The name inside `|...|` is created for the loop body. On each iteration it
-refers to the current item.
+Here the pipes introduce a capture. On each iteration, `name` refers to the current item inside the loop body.
 
 ### Add an index when you need one
 
 A second name receives the item's index in the source.
 
 [codeblock, $code "moth":
-    names = {"Priya", "Rob", "Emmy"}
+    names [String] = ["Priya", "Rob", "Emmy"]
 
-    loop names |name, index|:
+    loop names |name, index| {
         io.line([: [index]: [name]])
-    ;
+    }
 ]
 
 Without a step, the first item has index `0`, the second has index `1` and so
@@ -32,11 +31,11 @@ on. The index binding has type `I32`.
 Add `by` after the source to set a signed step.
 
 [codeblock, $code "moth":
-    names = {"Priya", "Rob", "Emmy"}
+    names [String] = ["Priya", "Rob", "Emmy"]
 
-    loop names by 2 |name, index|:
+    loop names by 2 |name, index| {
         io.line([: [index]: [name]])
-    ;
+    }
 ]
 
 This visits `Priya` at index `0` and `Emmy` at index `2`. The index binding
@@ -50,12 +49,24 @@ signed whole number and cannot be zero.
 Bindings are optional.
 
 [codeblock, $code "moth":
-    items = {10, 20, 30}
+    items = [10, 20, 30]
     count ~= 0
 
-    loop items:
+    loop items {
         ~count += 1
-    ;
+    }
 ]
 
 After this loop, `count` is `3`.
+
+### Build one result per item
+
+[codeblock, $code "moth":
+    greetings |names [String]| -> [String] {
+        return [loop names |name|:
+            [: Hello, [name]!]
+        ]
+    }
+]
+
+The return type supplies a collection of strings. Each iteration constructs one greeting. With an empty input, the result contains zero elements.

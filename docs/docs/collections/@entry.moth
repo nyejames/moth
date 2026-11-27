@@ -14,7 +14,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Collections and maps"]]
 [$in description:["Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."]]
@@ -22,15 +23,15 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Collections and maps
 
     Collections store one element type in order. Maps associate one value type
     with scalar keys and preserve insertion order.
 
-    Both use braces because square brackets build Moth templates. Unlike many
-    languages, indexing doesn't form part of the source surface. Fallible
+    Both use square brackets. A direct key/value entry selects a map.
+    Read and update stored items through methods. Fallible
     methods such as `get`, `set` and `remove` make bounds and lookup failure
     explicit.
 ]

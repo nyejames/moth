@@ -4,17 +4,17 @@ Use `continue` when the current iteration should stop but the loop itself should
 keep going.
 
 [codeblock, $code "moth":
-    loop 0 to 10 |value|:
-        if value is 2:
+    loop 0 to 10 |value| {
+        if value is 2 {
             continue
-        ;
+        }
 
-        if value is 7:
+        if value is 7 {
             break
-        ;
+        }
 
         io.line([: [value]])
-    ;
+    }
 ]
 
 The loop skips `2`. It ends when it reaches `7`, so `7` and the later numbers
@@ -25,15 +25,15 @@ are not printed.
 `break` and `continue` affect the closest loop around them.
 
 [codeblock, $code "moth":
-    loop 0 to 3 |row|:
-        loop 0 to 3 |column|:
-            if column is 1:
+    loop 0 to 3 |row| {
+        loop 0 to 3 |column| {
+            if column is 1 {
                 continue
-            ;
+            }
 
             io.line([: row [row], column [column]])
-        ;
-    ;
+        }
+    }
 ]
 
 In this example, `continue` skips one column. The outer row loop keeps running.

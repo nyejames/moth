@@ -38,6 +38,8 @@ A lexer might emit a sequence in this spirit:
 
 Notice what the lexer does **not** record: that `@greeting` names a dependency, or that `greet` is a function. It emits a path handle and a symbol handle. Header processing decides what those mean later.
 
+A brace in code can open a block or choice declaration. A brace in raw template text stays text. A colon at a bracket head opens its body. The lexer records those lexical boundaries before the checker knows which value a bracket will construct.
+
 Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them.
 
 Marking boundaries is the headline job, though not the only one. The lexer also classifies each piece, tracks locations, tracks string and template delimiter context, scans numeric text and raises its own spacing and directive diagnostics. What it leaves alone is meaning.

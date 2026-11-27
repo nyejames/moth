@@ -1,88 +1,56 @@
-A component can be an ordinary value holding its HTML and the stylesheets it
-needs. A const function constructs that value. Another const function combines
-several parts into one page.
-
-This is the intended `@core/html` component API, **not yet a shipped package
-surface**. Const functions and combined stylesheet contributions still need
-their planned implementation.
-
-### Compose a documentation page
+A template wrapper can expose a slot for its text and one for inline styles.
+A style helper supplies a named insert to the same element.
 
 [codeblock, $code "moth":
-    -- docs/functions/@entry.moth
-    -- Proposed @core/html component helpers
+    heading #= [$html:<h2 style="[$slot style]">[$slot]</h2>]
+    strong #= [$html:<strong>[$slot]</strong>]
+    heavy #= [$in style:font-weight: 700;]
+    red #= [$in style:color: red;]
 
-    @core/html HtmlPart, html_page
-    @components site_navbar, docs_sidebar, docs_topic
+    [heading, heavy, red:Build status]
+    [heading, red:Build status: [strong:experimental]]
+]
+
+The first heading receives both CSS declarations in source order. The second
+contains a strong element around just the word `experimental`. Nest a
+second element explicitly. Style helpers can share their receiver's head.
+
+### Carry a stylesheet with a component
+
+A shared support package can return markup and a tracked stylesheet as an
+ordinary struct. This example defines its own component API.
+
+[codeblock, $code "moth":
+    -- components/@package.moth
+    $export
+    HtmlPart = | body String, stylesheet String |
+
+    $export
+    docs_sidebar #|heading String| -> HtmlPart {
+        return HtmlPart(
+            body = [$html:<aside class="docs-sidebar"><h2>[heading]</h2></aside>],
+            stylesheet = @sidebar.css
+        )
+    }
+]
+
+An entry imports the component and contributes its stylesheet and body
+separately. The HTML builder resolves the CSS URL for this page.
+
+[codeblock, $code "moth":
+    -- docs/@entry.moth
+    @components docs_sidebar
     @introduction content as introduction
 
-    article #= HtmlPart(
-        body = [introduction]
-    )
-
-    page #= html_page({
-        site_navbar(),
-        docs_sidebar("Documentation"),
-        docs_topic("Functions", article)
-    })
-
+    sidebar #= docs_sidebar("Documentation")
     [$in title:Functions]
-    [$in description:Function declarations and calls.]
-
-    -- Proposed multi-resource stylesheet contribution.
-    [$in stylesheets:[page.stylesheets]]
-
-    [page.body]
+    [$in stylesheets:[sidebar.stylesheet]]
+    [sidebar.body]
+    [introduction]
 ]
 
-The entry owns the final document. Each component returns its body and
-stylesheet references, while `html_page()` assembles the parts in order. The
-page forwards those dependencies to the builder rather than letting a nested
-template insert into a distant `head` or `stylesheets` slot.
-
-A small page can skip `html_page()` and write its main content directly:
-
-[codeblock, $code "moth":
-    @components sidebar
-
-    [sidebar]
-
-    [$md:
-        # Getting started
-
-        Write an ordinary Moth program first.
-    ]
-]
-
-Use the abstraction where it saves work. A component system should not make a
-simple page harder to read.
-
-### Build a component value
-
-A sidebar can become a const function in the shared component package. Its
-return type says what the page receives:
-
-[codeblock, $code "moth":
-    -- components/sidebar.moth
-    -- Proposed @core/html type and const function
-
-    @core/html HtmlPart
-
-    docs_sidebar #|heading String| -> HtmlPart:
-        return HtmlPart(
-            body = [$html:
-                <aside class="docs-sidebar">
-                    <h2>[heading]</h2>
-                </aside>
-            ],
-            stylesheets = [@sidebar.css]
-        )
-    ;
-]
-
-A different page can call `docs_sidebar("Reference")` and receive the same
-markup and the same stylesheet reference. The CSS dependency is declared once.
-The returned path stays a tracked resource, not a guessed URL.
+Each direct `stylesheets` insert supplies one tracked CSS resource. The
+builder keeps the first contribution for a repeated resource.
 
 ### Use a named template slot
 

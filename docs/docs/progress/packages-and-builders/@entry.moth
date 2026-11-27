@@ -1,6 +1,6 @@
 @core/html span
 @core/css center
-@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Packages and Builders Progress Matrix"]]
 [$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
@@ -13,7 +13,7 @@ green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [title, center: PACKAGES AND BUILDERS PROGRESS]
 
 [section, $md:

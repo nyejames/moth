@@ -22,7 +22,7 @@ instead. A field that is itself a const record keeps the same restriction.
 ### Anonymous records
 
 Anonymous construction uses
-@../language-overview/#mon-syntax (MON syntax) and requires all fields to fold.
+@../language-overview/#mon-syntax (constructor syntax) and requires all fields to fold.
 
 [codeblock, $code "moth":
     settings #= (

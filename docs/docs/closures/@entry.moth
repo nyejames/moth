@@ -1,0 +1,41 @@
+@closures content as closures_reference
+@closures-basic content as closures_basic
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager,
+    sidebar, sync_navigation, sidebar_id
+
+[$in title:["Closures"]]
+[$in description:["Use a closure to read a row's current title or turn an edit into a message for that row."]]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+listed = sync_navigation(sidebar_id)!
+[section, $md:
+    # Closures
+
+    A row editor knows what someone typed. The code that built the editor knows
+    which row they edited. A closure brings those two pieces together. It can
+    use a value from the surrounding code each time someone calls it.
+
+    **Planned feature.** Moth has accepted constrained closures for implementation
+    after the syntax migration. The current compiler can't run these examples.
+    See @../progress (Compiler progress).
+]
+
+[section:
+    [doc_level:
+        [$in key:closures-reference]
+        [$in title:Using closures]
+        [$in advanced:[closures_reference]]
+        [closures_basic]
+    ]
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../traits/]
+        [$in previous_title:Traits]
+        [$in next_path:../memory/]
+        [$in next_title:Memory and lifetimes]
+    ]
+]

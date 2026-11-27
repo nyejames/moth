@@ -3,8 +3,7 @@ Moth has three ways to describe a feature that isn't available today.
 ### Accepted but not built yet
 
 Some features belong to the accepted design but aren't built yet. Examples
-include declared regions, recursive choice types and the future compiler-owned
-`$async:` block spelling. These features may appear in the progress matrix as
+include declared regions, recursive choice types and invocation-owned child tasks. These features may appear in the progress matrix as
 implementation work.
 
 ### Still being considered
@@ -13,9 +12,7 @@ Some ideas have no final contract. Moth may consider distinct primitive-backed
 nominal wrappers, narrow named function references and checked proof-budget
 blocks.
 
-The `$checked:` spelling and compiler-owned direction are agreed for future
-documentation, but proof-tier semantics, deterministic limits and soundness
-evidence remain open. Code inside or outside any eventual block would still
+The proposed `$checked` directive would change the proof budget for a block. Its limits and soundness evidence remain open. Code inside or outside any eventual block would still
 follow the same mandatory safety rules.
 
 Target-, OS-, architecture- and backend-specific source is outside scope, not

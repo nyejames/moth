@@ -1,14 +1,14 @@
-`{T}` is a growable collection of `T`.
+`["[T]"]` is a growable collection of `T`.
 
 [codeblock, $code "moth":
-    names ~{String} = {}
-    values {I32} = {1, 2, 3}
+    names ~[String] = []
+    values [I32] = [1, 2, 3]
 ]
 
 ### Contract
 
 - The element type is part of semantic type identity.
-- A growable `{I32}` is not compatible with `{String}`.
+- A growable `["[I32]"]` is not compatible with `["[String]"]`.
 - Growable and fixed collections are different types.
 - A mutable binding is required for operations that change the collection.
 - An immutable growable collection remains readable but cannot be mutated through that binding.
@@ -20,7 +20,7 @@ value. Allocation exhaustion is unrecoverable and traps rather than entering
 `Error!`, so growable `push` takes neither postfix `!` nor `catch`.
 
 [codeblock, $code "moth":
-    names ~{String} = {}
+    names ~[String] = []
 
     ~names.push("Priya")
 ]
@@ -29,12 +29,12 @@ Handling a growable push is a compile-time error:
 
 [codeblock, $code "moth":
     -- INVALID: growable push takes neither handling form
-    ~names.push("Priya") catch:
-    ;
+    ~names.push("Priya") catch {
+    }
     ~names.push("Rob")!
 ]
 
-Fixed `{N T}` push is the fallible one, because a fixed collection can be full.
+Fixed `["[N T]"]` push is the fallible one, because a fixed collection can be full.
 See @./#collection-operations (Collection operations) for both contracts.
 
 Use @../bindings/#mutable-bindings (Mutable bindings) for the distinction

@@ -5,12 +5,12 @@ Match patterns describe the values an arm accepts.
 A literal pattern must be compatible with the scrutinee type.
 
 [codeblock, $code "moth":
-    if value is:
-        1 => io.line("one")
-        2 => io.line("two")
-        3 => io.line("three")
-        else =>
-    ;
+    if value is {
+        case 1: io.line("one")
+        case 2: io.line("two")
+        case 3: io.line("three")
+        else:
+    }
 ]
 
 One statically typed match can't mix unrelated `I32`, `String` and `Bool`
@@ -19,21 +19,21 @@ literal patterns.
 ### Choice variants
 
 [codeblock, $code "moth":
-    if status is:
-        Ready => io.line("ready")
-        Status::Waiting => io.line("waiting")
-    ;
+    if status is {
+        case Ready: io.line("ready")
+        case Status::Waiting: io.line("waiting")
+    }
 ]
 
 ### Choice payload captures
 
 [codeblock, $code "moth":
-    if response is:
-        Success => io.line("done")
-        Err(message) => io.line(message)
-        Pending(retry_count, message as pending_message) =>
+    if response is {
+        case Success: io.line("done")
+        case Err(message): io.line(message)
+        case Pending(retry_count, message as pending_message):
             io.line(pending_message)
-    ;
+    }
 ]
 
 ### Option patterns
@@ -45,20 +45,20 @@ Options support:
 - relational present-value patterns
 - `|name|` to capture any present value
 
-An option match may omit `else =>` only when it has both:
+An option match may omit `else:` only when it has both:
 
 - an unguarded `none` arm
 - an unguarded `|name|` present-value capture
 
 [codeblock, $code "moth":
-    if maybe_name is:
-        none => io.line("missing")
-        |name| => io.line(name)
-    ;
+    if maybe_name is {
+        case none: io.line("missing")
+        case |name|: io.line(name)
+    }
 ]
 
 Literal or relational option arms don't replace the unguarded present-value
-capture when `else =>` is omitted.
+capture when `else:` is omitted.
 
 ### Relational patterns
 
@@ -75,15 +75,15 @@ type. A `Dec` pattern must be exactly representable at the subject's scale.
 
 ### The catch-all arm
 
-`else =>` is the only full-match catch-all. A bare unknown name in choice
+`else:` is the only full-match catch-all. A bare unknown name in choice
 pattern position is treated as an unknown or invalid variant. A bare name in
 other full-match pattern positions is invalid syntax.
 
 [codeblock, $code "moth":
-    if value is:
-        0 => io.line("zero")
-        else => io.line("other")
-    ;
+    if value is {
+        case 0: io.line("zero")
+        else: io.line("other")
+    }
 ]
 
 General bare-name capture has been removed from full-match positions, and
@@ -103,13 +103,13 @@ current backend and coverage status.
 
 ### Exhaustiveness
 
-- An ordinary non-choice full match requires `else =>`.
+- An ordinary non-choice full match requires `else:`.
 - An option match may instead use unguarded `none` plus unguarded `|name|`.
-- A choice match may omit `else =>` only when every variant is covered.
-- Any guarded choice arm requires `else =>`.
+- A choice match may omit `else:` only when every variant is covered.
+- Any guarded choice arm requires `else:`.
 - Several arms can test the same choice variant. Only an unguarded arm covers the whole variant, so an arm after that coverage is redundant.
 - Payload exhaustiveness is tag-level. One unguarded payload capture arm covers every value of that variant.
-- A statement match may use bodyless `else =>`.
+- A statement match may use bodyless `else:`.
 - A value-producing match must produce the required values on every selected path or leave the value-producing block through a return, divergence or an enclosing-loop exit.
 
 ### Single-predicate value matches

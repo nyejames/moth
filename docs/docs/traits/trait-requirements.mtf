@@ -3,14 +3,14 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 ### Receiver syntax
 
 [codeblock, $code "moth":
-    RESETTABLE must:
+    RESETTABLE must {
         reset |~This|
-    ;
+    }
 
-    COMPARABLE_WITH_SELF must:
+    COMPARABLE_WITH_SELF must {
         same |This, other This| -> Bool
         clone_value |This| -> This
-    ;
+    }
 ]
 
 ### Exact trait requirement contract
@@ -22,7 +22,7 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 - `~This` is a mutable receiver.
 - Direct non-receiver `This` parameters must be named, such as `other This`.
 - Direct return `This` is supported.
-- Composed `This` forms such as `This?`, `{This}` and `Box of This` are rejected in the Alpha surface.
+- Composed `This` forms such as `This?`, `["[This]"]` and `Box of This` are rejected in the Alpha surface.
 - `This` is trait-local and invalid outside trait declarations.
 - Requirements have no body.
 - Parameter names are not part of the later conformance shape.
@@ -33,21 +33,21 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 
 ### Multiple requirements
 
-Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon, inline on the line containing its `must:` or alone on its own line. See @../language-overview/#blocks-and-statements (Blocks and statements).
+A trait can contain several method requirements. Write each signature on its own line inside the declaration's braces. See @../language-overview/#blocks-and-statements (Blocks and statements).
 
 [codeblock, $code "moth":
-    NAMED must:
+    NAMED must {
         name |This| -> String
         id |This| -> I32
-    ;
+    }
 ]
 
 ### Non-receiver `This`
 
 [codeblock, $code "moth":
-    SAME must:
+    SAME must {
         equals |This, other This| -> Bool
-    ;
+    }
 ]
 
 `This` as a non-receiver parameter must carry a name.

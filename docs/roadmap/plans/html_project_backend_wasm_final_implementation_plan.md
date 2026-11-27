@@ -18,8 +18,11 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 - per-function link facts and target validation roots
 - dense HIR values and places, native zero/one/multiple success slots and separate error CFG channels, with the supported JS/Wasm consumers migrated
 - delivered `HirFunctionReturnContract::Never` and `HirTerminator::NeverCall`, zero-result ABI for Never functions, and call plus defensive unreachable semantics for local, cross-module, generated and binding-backed Never targets (see `docs/compiler-design-overview.md` for HIR callable contracts and terminators, and the language function/call references for the source contract)
-- removal of Reactivity V1 without a replacement observation or scheduler runtime
+- removal of Reactivity V1 without a replacement observation model; consume the delivered Channels V1 scheduler instead of creating a second async runtime
 - exact I*/U*/F* identities and I32/F64 defaults, D15 result domains, per-operation F16 completion, runtime Byte and U32 Error.code, with actual scalar target coverage inventoried
+
+- delivered host-integrated Channels V1 on HTML-JS, compiler suspension/transfer/cleanup facts and a reviewed portable continuation/host ABI handoff with native mechanism evidence
+- delivered complete physical memory planning for Channels and ordinary values, including full-control collector-free strategy and verification contracts
 
 These are capability gates, not a requirement to wait for every later optimisation in the compiler
 foundation work. Confirm the required checkpoints have merged and refresh actual target support at
@@ -32,6 +35,7 @@ lowering. The completed compact typed-expression and native result-channel found
 - `docs/build-system-design.md` for HTML project builder, mixed-target planning, physical variants, runtime and memory, output ownership
 - `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/docs/progress/@entry.moth` for current support
+- `docs/docs/async/channels.mtf` for the accepted Channels source contract; the canonical compiler, memory and build handoffs and Lappet host ABI for its delivered execution requirements
 - `docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf` for
   emission quality and compiler versus runtime optimisation ownership
 - canonical package/module references for the graph contract
@@ -103,6 +107,31 @@ success edge and the error value only on its error edge. Backend arrays, records
 encode a physical ABI where needed, but never become synthetic semantic tuple or fallible types.
 Preserve exactly-once producer evaluation and evaluate all receiving RHS values before assignment.
 Slot identity alone proves no fresh allocation, disjointness or ownership transfer.
+
+### Channels handoff
+
+Refresh the delivered Channels implementation and validated memory handoff
+before selecting Wasm LIR, continuation representation or cross-target
+wrappers. Consume compiler-inferred suspension, explicit task-dispatch and
+select/send/receive CFG outcomes, native result slots, bounded task/queue
+lifetimes, semantic endpoint release and planned cancellation cleanup. No
+source-level async types, independent scheduler or universal dispatcher
+for synchronous bodies. Require portable suspend/resume and host wakeup
+ABI evidence rather than assuming optional Wasm stack switching. Keep
+unsupported execution gated until the corresponding parity tests pass.
+
+The full backend implementation must deliver channel behavior on Wasm
+with the same ownership and commit rules as HTML-JS: rendezvous, bounded
+FIFO buffering, multiple endpoints, last-sender drain, last-reader failure,
+atomic selection, nested suspension, function-owned join, error and
+cancellation cleanup, global deadlock reporting and real host ingress.
+Preserve ordinary call, result/error and fragment contracts across
+suspension, including cross-target edges under the approved target policy.
+Add explicit task/frame/queue/registration coverage to collector-free
+verification and measure synchronous call overhead, task memory, wait
+storage and cancellation cost. The activation review must turn these into
+concrete LIR, runtime/ABI and integration tasks in the relevant phases.
+Authored Wasm mechanism fixtures alone are not language/backend delivery.
 
 ### Numeric handoff
 
@@ -251,7 +280,7 @@ See `docs/build-system-design.md` "Entry and package link planning" and "Per-fun
 
 - Replace any remaining `BackendBuilder::build_backend(Vec<Module>, ...)` with consumption of `ProjectCompilation`.
 - Build HTML link plans from entry assemblies and per-function link facts.
-- Compute exact reachable function and runtime-fact unions for each entry.
+- Compute exact reachable function and runtime-fact unions for each entry. Include closure bodies and their private dependencies when reachable formation needs them. Charge execution effects to invocation. Preserve the scoped callback workload on supported HTML-Wasm paths and keep precise pre-lowering refusals for unsupported reachable handler uses.
 - Plan one Wasm selected-function closure per entry physical variant. Do not map semantic modules one-to-one to Wasm binaries.
 - Keep backend-facing access narrow: module artefacts, generated sidecars, entry assemblies, package facade and runtime metadata.
 - Remove source-path graph reconstruction from the builder.

@@ -3,13 +3,13 @@ Some trait contracts are mutually exclusive. A type cannot claim both.
 ### Two ways to produce text
 
 [codeblock, $code "moth":
-    TEXT must:
+    TEXT must {
         text |This| -> String
-    ;
+    }
 
-    FALLIBLE_TEXT must:
+    FALLIBLE_TEXT must {
         try_text |This| -> String, Error!
-    ;
+    }
 
     TEXT must not FALLIBLE_TEXT
 ]

@@ -11,10 +11,10 @@ A file path is an ordinary expression.
     font  #= @fonts/cmunss.woff2
     intro #= @docs/intro.mtf
 
-    icons {String} = {
+    icons [String] = [
         @icons/add.svg,
         @icons/remove.svg,
-    }
+    ]
 ]
 
 A file path:

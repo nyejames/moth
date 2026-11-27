@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Constants and compile-time behaviour"]]
 [$in description:["Compile-time bindings, folding, const records and const templates in Moth."]]
@@ -20,7 +21,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Constants and compile-time behaviour
 
@@ -74,8 +75,8 @@ init_docs_sidebar()!
 
 [section:
     [doc_pager:
-        [$in previous_path:../templates/]
-        [$in previous_title:Templates]
+        [$in previous_path:../template-directives/]
+        [$in previous_title:Template directives]
         [$in next_path:../aliases/]
         [$in next_title:Aliases]
     ]

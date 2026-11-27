@@ -2,7 +2,7 @@
 @host-packages content as host_content
 @capabilities-and-directives content as capability_content
 @assemblies-and-runtime content as assembly_content
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Create a project builder in Rust"]]
 [$in description:["Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."]]
@@ -10,7 +10,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Create a project builder in Rust

@@ -1,4 +1,5 @@
-A struct declares a nominal runtime type with named fields.
+A struct declaration introduces a distinct runtime type. Between the pipes,
+give each field a name, an explicit type and, if needed, a default.
 
 [codeblock, $code "moth":
     Vector2 = |
@@ -7,23 +8,22 @@ A struct declares a nominal runtime type with named fields.
     |
 ]
 
-### Contract for struct declarations
+Under the planned @../closures/ (closure design), a named struct can also
+declare a callback field such as `on_edit |text String| -> EditMessage`.
 
-- The declaration form is `Name = | fields |`.
-- Struct names use `PascalCase`.
-- Every field has a name and explicit type.
-- A field keeps its exact declared type. `I32` and `U32` remain distinct even when their physical widths match, as do `Byte` and `U8`.
-- Field names must be unique.
-- A field may provide `= default`.
-- Every field default must fully evaluate at compile time.
-- A field without a default is required during construction.
-- Matching field shapes do not make two structs interchangeable.
-- A transparent type alias does not create a new struct identity.
+A named struct has one constructor with the same name as its type. A choice
+variant uses the same field list and default rules. See @../choices (Choices).
 
-Field types remain concrete declaration facts. Constructors and defaults check
-values against those exact types; later uses never retag a field. Generic
-nominal shapes follow the bounded numeric-origin rules in
-@../generics (Generics).
+Use `PascalCase` for the struct name and give each field a unique name.
+A field default must evaluate at compile time. The constructor requires an
+argument for each field without a default.
+
+Constructors and defaults check values against each field's declared type.
+The width alone doesn't determine the type. An `I32` field requires an
+`I32`, even though `U32` also occupies 32 bits. Likewise, `Byte` and
+`U8` designate distinct types.
+
+### Type identity
 
 [codeblock, $code "moth":
     Point = |
@@ -37,7 +37,9 @@ nominal shapes follow the bounded numeric-origin rules in
     |
 ]
 
-`Point` and `Position` remain different types.
+`Point` and `Position` remain different types despite having identical
+fields. A transparent type alias gives a type another name and preserves
+its identity.
 
 ### Generic structs
 
@@ -49,4 +51,5 @@ Struct declarations may introduce declaration-site generic parameters.
     |
 ]
 
-Generic construction and inference are documented by @../generics (Generics).
+See @../generics (Generics) for constructor inference, including the rules
+for numeric literals in generic fields.

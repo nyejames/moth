@@ -1,29 +1,32 @@
-A template `if` includes its body only when a `Bool` condition is true.
+Use `if` at the end of a template head to include one piece of output. A
+false condition leaves that piece out. A surrounding template can still
+produce its own text.
 
 [codeblock, $code "moth":
-    [if signed_in:
-        Welcome back
-    ]
+    changed = true
+    status = [:Build complete[if changed: with changes].]
 ]
 
-An option-present capture includes its body only when the option has a value.
-The captured value is available inside that body.
+With `changed` set to `true`, the result reads `Build complete with changes.`.
+Set it to `false` and the result reads `Build complete.`. To include a value
+only when an option contains it, use an option capture.
 
 [codeblock, $code "moth":
-    [if maybe_name is |name|:
-        Hello [name]
-    ]
+    maybe_name String? = "Priya"
+    message = [:Welcome[if maybe_name is |name|:, [name]]!]
 ]
 
-Template `if` has no `else` or `else if` form. Template loops repeat content
-with an ordinary loop header, including its signed `by` step and bindings.
+Use `loop` to make one contribution per iteration. This function collects
+each greeting as a separate String. The inner template puts the name into
+the greeting. The outer template collects the results in order.
 
 [codeblock, $code "moth":
-    [loop names |name|:
-        <p>Hello [name]</p>
-    ]
+    greetings |names [String]| -> [String] {
+        return [loop names |name|:
+            [:Hello, [name]!]
+        ]
+    }
 ]
 
-Template control flow has no `break` or `continue` markers. Ordinary Moth
-statements still have their own `if`, `else`, `break` and `continue` forms.
-Template bodies build lazily at runtime unless they are const-required.
+Template conditions select one body. For alternative bodies or an early loop
+exit, use ordinary @../branching (branching) or @../loops (loops).

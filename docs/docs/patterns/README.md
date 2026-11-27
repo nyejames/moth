@@ -33,8 +33,8 @@ page, docs index, sidebar, pager and this map together.
 ### Source is the composition system
 
 - Use normal nominal types, values, const functions, functions, collections,
-  choices and templates. Do not invent a `$component` directive, macros,
-  closures or a second HTML-specific expression language.
+  choices and templates. HTML composition uses the same expression language
+  as the rest of Moth.
 - Use local `$slot` / `$in` for immediate template composition. Ordinary
   slots do not search ancestor templates and their contribution routing does
   not escape bindings or function results.
@@ -61,11 +61,11 @@ page, docs index, sidebar, pager and this map together.
   output placement, URL contexts and stylesheet deduplication by stable
   resource origin. Source Strings do not compare unresolved resources by
   rendered URL.
-- The current HTML `stylesheets` slot accepts exactly one tracked CSS
-  resource per insert. Passing a concatenated structural String containing
-  several CSS origins is an **intended extension to investigate** and is not
-  current source acceptance. Examples using it must say so. A collection-
-  valued builder handoff is an alternative still open, not a settled syntax.
+- Each HTML `stylesheets` insert takes one tracked CSS resource. Use separate
+  direct inserts for independent resources. Additional resource handoffs
+  remain separate design work.
+- A bracket applies one receiving wrapper. Apply several named style inserts
+  to that receiver in the same head. Nest another receiving element explicitly.
 - The current `head` slot deduplicates *complete direct contributions*
   after URL rendering. Concatenating several head snippets into one String
   loses the per-snippet boundary: do not claim independent head/script
@@ -103,9 +103,9 @@ page, docs index, sidebar, pager and this map together.
   permanent JS helper.
 - The intended `@builder/web/events` requires Channel delivery, structured async,
   host-to-Moth ingress, scheduling and lifetime ownership. Browser events
-  become ordinary typed messages. `Route of ...` supplies constructor
-  completion, **not** a destination or callback. `Wire of T` preserves a
-  binding's identity, **not** a subscription.
+  become ordinary typed messages. In the planned closure design, a Moth-owned
+  component can call a handler to construct a message. The consumer chooses
+  where to send it and when to redraw.
 - There is no accepted final user-facing event subscription API yet. Do not
   fabricate concrete `listen()`, `mount()`, `on_change()` or callback
   signatures and call them official. Show the message/data flow as a diagram
@@ -173,7 +173,8 @@ the relevant unsuffixed references and the current roadmap/progress matrix:
 - `docs/docs/templates/`, `docs/docs/constants/` and
   `docs/compiler-design-overview.md` for TIR, constant semantics and slots.
 - `docs/docs/directives/directives.mtf` for directive attachment/ownership.
-- `docs/docs/wiring/wiring.mtf` for Wire, Route and Channel constraints.
+- `docs/docs/closures/closures.mtf` for callback signatures, captures and retention.
+- `docs/docs/async/channels.mtf` for channel transport and endpoint lifetimes.
 - `docs/docs/packages/core/`, `docs/docs/packages/builder/` and
   `docs/docs/packages/external-binding-contracts.mtf` for @core/html, @core/css,
   @builder/web/page, DOM prerequisites and JS ABI limits.

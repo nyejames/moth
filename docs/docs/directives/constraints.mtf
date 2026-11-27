@@ -16,15 +16,15 @@ may share a line with whitespace in any order:
 
 [codeblock, $code "moth":
     $fast_math $infallible
-    increment |value I32| -> I32:
+    increment |value I32| -> I32 {
         return value + 1
-    ;
+    }
 
     $safe_math
-    recover |left I32, right I32| -> I32:
+    recover |left I32, right I32| -> I32 {
         value = left + right catch then 0
         return value
-    ;
+    }
 ]
 
 A blank physical line, a scope boundary or the end of the file breaks
@@ -215,19 +215,19 @@ These are the minimum valid examples:
 
 [codeblock, $code "moth":
     $safe_math $infallible
-    sum_small |left I8, right U8| -> I16:
+    sum_small |left I8, right U8| -> I16 {
         return left + right
-    ;
+    }
 
     $fast_math $infallible
-    wrap_small |left U8, right U8| -> U8:
+    wrap_small |left U8, right U8| -> U8 {
         return left + right
-    ;
+    }
 
     $fast_math $safe_math
-    dec_only |left Dec4, right Dec4| -> Dec4:
+    dec_only |left Dec4, right Dec4| -> Dec4 {
         return left + right
-    ;
+    }
 ]
 
 The first function is valid because every `I8 + U8` sum fits `I16`. Equal
@@ -240,24 +240,35 @@ These combinations are invalid:
 [codeblock, $code "moth":
     -- INVALID: reaches wrap_small's fast arithmetic
     $safe_math
-    call_wrapper |left U8, right U8| -> U8:
+    call_wrapper |left U8, right U8| -> U8 {
         return wrap_small(left, right)
-    ;
+    }
 
     -- INVALID: the divisor is not proved nonzero
     $fast_math $infallible
-    divide |left I32, right I32| -> I32:
+    divide |left I32, right I32| -> I32 {
         return left // right
-    ;
+    }
 
     -- INVALID: the handler's checked arithmetic can overflow
     $infallible
-    halve_or_step |left I32, right I32| -> I32:
+    halve_or_step |left I32, right I32| -> I32 {
         value I32 = left // right catch then left - 1
         return value
-    ;
+    }
 ]
 
 The division failure is caught, but the handler's checked `left - 1` can
 overflow when `left` is `I32` minimum. That failure escapes the `$infallible`
 boundary.
+
+### Deferred Channels constraint
+
+The accepted Channels V1 design adds `$no_suspend` as an optional function,
+method and generic-function guarantee. It requires proof that reachable
+execution, including implicit child joins and cancellation cleanup, cannot
+suspend. It does not grant suspension permission, change ordinary call syntax
+or imply `$infallible`. Use canonical inferred suspension summaries and trusted
+provider evidence, including recursion and concrete materialisations. Unknown
+external effects cannot prove absence. Ordinary runtime functions remain
+unannotated. See @../async (Channels). This constraint is not implemented.

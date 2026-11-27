@@ -1,4 +1,4 @@
-@docs_styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_pager, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Builder packages"]]
 [$in description:["Static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."]]
@@ -6,7 +6,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Builder packages
 

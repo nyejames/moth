@@ -1,10 +1,10 @@
-`{N T}` is a fixed collection of `T` with maximum length `N`.
+`["[N T]"]` is a fixed collection of `T` with maximum length `N`.
 
 [codeblock, $code "moth":
-    values {3 I32} = {10, 20}
+    values [3 I32] = [10, 20]
 
     capacity #I32 = 4
-    scratch ~{capacity String} = {}
+    scratch ~[capacity String] = []
 ]
 
 ### Type identity
@@ -14,14 +14,14 @@ Fixed capacity is semantic type identity.
 These are distinct incompatible types:
 
 [codeblock, $code "moth":
-    {I32}
-    {4 I32}
-    {8 I32}
+    [I32]
+    [4 I32]
+    [8 I32]
 ]
 
-Capacity is not a growable allocation hint.
+A fixed type limits membership. A growable type has no declared capacity.
 
-There is no implicit conversion:
+Direct assignment requires the same type. These pairs need explicit construction:
 
 - from growable to fixed
 - from fixed to growable
@@ -44,27 +44,31 @@ Name the calculation first:
 [codeblock, $code "moth":
     base #I32 = 4
     larger_capacity #I32 = base + 2
-    values ~{larger_capacity String} = {}
+    values ~[larger_capacity String] = []
 ]
 
-### Capacity-only shorthand
+### Proving a construction fits
 
-A binding declaration with an immediate non-empty literal may infer the element
-type:
+Every fixed type states both its capacity and its element type. In value
+position, `["[8]"]` constructs one integer. In type position it lacks an
+element type.
 
 [codeblock, $code "moth":
-    capacity #I32 = 4
-    labels {capacity} = {"alpha", "beta"}
+    append_last |prefix [3 I32], last I32| -> [4 I32] {
+        return [prefix, last]
+    }
 ]
 
-`{capacity}` shorthand is invalid for:
+The prefix can contribute at most three elements and `last` contributes one.
+The result contains the actual items without padding. An unbounded runtime
+splice cannot establish that it fits. Use checked insertion when the bound
+depends on runtime data.
 
-- empty literals
-- non-literal initializers
-- function signatures
-- aliases
-- fields
-- return slots
+The compiler adds bounds for consecutive contributions and takes the maximum
+over mutually exclusive branches. A nested head row counts once toward its
+outer capacity. Loops, slots and wrappers must have a proven upper bound that
+accounts for every emission, including repeated slot uses. A known constant
+length can supply a tighter bound than a sequence's capacity.
 
 ### Empty fixed values
 
@@ -87,11 +91,11 @@ free slot, the push succeeds and returns no value. When the collection is
 full, the push fails, so a fixed push needs `catch` or postfix `!`:
 
 [codeblock, $code "moth":
-    values ~{3 I32} = {10, 20}
+    values ~[3 I32] = [10, 20]
 
-    ~values.push(30) catch:
+    ~values.push(30) catch {
         io.error("no free slot")
-    ;
+    }
 ]
 
 The failure goes through the builtin `Error!` collection error path, and a

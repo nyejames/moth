@@ -26,10 +26,10 @@ Use a generic bound for static reuse. Use a choice for runtime heterogeneity.
     render type Item is DISPLAY_TEXT |item Item| -> String
 
     -- Runtime heterogeneity
-    Renderable ::
+    Renderable = {
         LabelItem | value Label |,
         ButtonItem | value Button |,
-    ;
+    }
 ]
 
 Static traits are backend-independent. Backends do not receive trait objects, erased dispatch or runtime evidence tables.

@@ -2,35 +2,35 @@ A collection loop visits values from a Moth collection. By default it walks
 from the first item to the last.
 
 [codeblock, $code "moth":
-    names = {"Priya", "Rob", "Emmy"}
+    names [String] = ["Priya", "Rob", "Emmy"]
 
-    loop names |name, index|:
+    loop names |name, index| {
         io.line([: [index]: [name]])
-    ;
+    }
 ]
 
 ### Forms of collection loops
 
 [codeblock, $code "moth":
-    loop items:
+    loop items {
         ~count += 1
-    ;
+    }
 
-    loop items |item|:
+    loop items |item| {
         inspect(item)
-    ;
+    }
 
-    loop items by step:
+    loop items by step {
         ~count += 1
-    ;
+    }
 
-    loop items by step |item|:
+    loop items by step |item| {
         inspect(item)
-    ;
+    }
 
-    loop items by step |item, index|:
+    loop items by step |item, index| {
         inspect(item)
-    ;
+    }
 ]
 
 ### Collection loop contract
@@ -72,38 +72,34 @@ dynamic zero step fails with built-in error code 306 (`InvalidLoopStep`) before
 the empty-source check.
 
 [codeblock, $code "moth":
-    stride_items = {10, 20, 30, 40, 50}
+    stride_items = [10, 20, 30, 40, 50]
 
-    loop stride_items by 2 |item, index|:
+    loop stride_items by 2 |item, index| {
         io.line([: [index]: [item]])
-    ;
+    }
 
-    loop stride_items by -2 |item, index|:
+    loop stride_items by -2 |item, index| {
         io.line([: [index]: [item]])
-    ;
+    }
 ]
 
 The first loop visits `10` at index `0`, `30` at index `2` and `50` at index
 `4`. The second loop visits `50` at index `4`, `30` at index `2` and `10` at
 index `0`.
 
-### Removed syntax
+### Collecting loop output
 
-The old `in` form is not valid.
-
-[codeblock, $code "moth":
-    loop item in items:
-        inspect(item)
-    ;
-]
-
-Write the collection source first, then any `by` step, then bindings after it:
+A statement loop executes the statements inside braces. To collect output, place the loop in a bracket head and separate it from the body with a colon.
 
 [codeblock, $code "moth":
-    loop items by 2 |item|:
-        inspect(item)
-    ;
+    positives |items [I32]| -> [I32] {
+        return [loop items |item|:
+            [if item > 0:[item]]
+        ]
+    }
 ]
+
+The conditional child contributes only positive items. Each iteration can contribute zero, one or several elements. In a sequence body, formatting whitespace between child constructions contributes nothing. A String child can contribute one text element. Use a braced loop when the body needs local declarations, mutation, `break` or `continue`.
 
 @../progress (Progress) records target support, including current HTML-Wasm
 collection limits, separately from these collection semantics.

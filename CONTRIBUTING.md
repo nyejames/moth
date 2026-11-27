@@ -60,7 +60,7 @@ The independent codec suite lives in `crates/moth-mon/tests/`. Shared lexical
 and numeric tests live with `moth-lexical`. The real-source cross-parser suite
 at `src/compiler_tests/mon_syntax_parity/` compares expected exact-width typed
 values under equivalent receiving contexts. Its `gaps.rs` records
-intentional data/source differences and the undelivered source `{=}`, Unicode
+intentional data/source differences and the undelivered source `[=]`, Unicode
 escape and contextual `::Variant` cases. These gaps do not claim delivered
 Moth-native `$mon`, automatic schema extraction or static builder support.
 

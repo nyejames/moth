@@ -151,8 +151,8 @@ whole and decimal/exponent literals select the binary-float family regardless
 of order:
 
 [codeblock, $code "moth":
-    values = {1, 2.5}
-    samples = {2.5, 1}
+    values = [1, 2.5]
+    samples = [2.5, 1]
 ]
 
 Both default to `F64` unless a receiver selects another binary-float precision.
@@ -160,7 +160,7 @@ A bound integer never changes family to fit:
 
 [codeblock, $code "moth":
     count = 1
-    mixed = {count, 2.5} -- Rejected: count remains an integer.
+    mixed = [count, 2.5] -- Rejected: count remains an integer.
 ]
 
 An empty collection creates no numeric unknown and keeps its existing explicit

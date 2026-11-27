@@ -1,20 +1,15 @@
-Create a unit variant without parentheses:
+A choice gives each variant its own constructor. Use `::` to select one. In this example, `Opened` carries no fields and `Resized` takes arguments.
 
 [codeblock, $code "moth":
-    current = Status::Ready
+    WindowEvent = {
+        Opened,
+        Resized | width I32, height I32 = 720 |,
+    }
+
+    opened = WindowEvent::Opened
+    wide = WindowEvent::Resized(1280)
+    tall = WindowEvent::Resized(width = 1280, height = 1080)
 ]
 
-Create a payload variant with its values:
-
-[codeblock, $code "moth":
-    failure = Status::Failed("network")
-]
-
-Named arguments also work:
-
-[codeblock, $code "moth":
-    failure = Status::Failed(message = "network")
-]
-
-Payload values cannot be changed after construction. Match the choice to read
-them.
+`wide` uses the default height of 720. `tall` supplies both dimensions.
+Match a `WindowEvent` to read its payload.

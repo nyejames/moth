@@ -64,15 +64,25 @@ Exported signatures stay closed and must discharge failure or declare a
 compatible error slot. See @#returns-and-multiple-values (Returns and multiple
 values) for the contract.
 
+### Deferred Channels execution
+
+Ordinary runtime calls can suspend transitively under the accepted @../async (Channels)
+model. They need no source suspension marker. Prefix `>>` on a direct call
+creates a child task rather than returning a result; its owning invocation
+joins on success or cancels and joins on failure. Child errors become
+implicit builtin failure at the owning invocation boundary. The existing
+explicit typed-error syntax remains unchanged. Required const evaluation
+cannot execute these runtime operations.
+
 ### Never calls
 
 A call whose declared contract is `-> !` is valid only as a standalone
 statement:
 
 [codeblock, $code "moth":
-    fatal |message String| -> !:
+    fatal |message String| -> ! {
         assert(false, message)
-    ;
+    }
 
     fatal("unreachable")
 ]
@@ -87,9 +97,9 @@ It is invalid in every value-consuming position:
     value String = fatal("x")
     return fatal("x")
     consume(fatal("x"))
-    if fatal("x"):
+    if fatal("x") {
         io.line("unreachable")
-    ;
+    }
 ]
 
 The same restriction applies inside arguments, operators, constructors,
@@ -105,9 +115,9 @@ value slot. See @../branching/#value-producing-if (Value-producing if).
 
 Never calls use the ordinary argument grammar.
 
-### Shared MON syntax
+### Constructor syntax and calls
 
-@../language-overview/#mon-syntax (MON syntax) names the shared parenthesised
+@../language-overview/#mon-syntax (Constructor syntax) describes the shared parenthesised
 argument and value-construction notation. The accepted record and directive
 integrations use one argument parser with context-specific policies.
 
@@ -126,9 +136,9 @@ Directive values retain their compile-time and specialised category rules.
 A shared parameter receives an ordinary argument without `~`.
 
 [codeblock, $code "moth":
-    show |value String|:
+    show |value String| {
         io.line(value)
-    ;
+    }
 
     show("hello")
 ]
@@ -140,9 +150,9 @@ Passing `~value` to a shared parameter is invalid.
 An existing mutable place needs explicit `~` at the call site.
 
 [codeblock, $code "moth":
-    increment |value ~I32|:
+    increment |value ~I32| {
         ~value += 1
-    ;
+    }
 
     count ~= 1
     increment(~count)

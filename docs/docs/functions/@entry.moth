@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Functions"]]
 [$in description:["Function declarations, parameters, calls, access and return values in Moth."]]
@@ -20,13 +21,12 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Functions
 
-    Moth functions use named declarations rather than anonymous closures or
-    general function values. A signature records each parameter's type and
-    access mode, then lists every success and error return or the whole Never
+    A named function declares a signature and a body. The signature records each
+    parameter's type and access mode, then lists every success and error return or the whole Never
     contract `-> !`.
 
     Calls stay local and explicit. The source shows named arguments, mutable

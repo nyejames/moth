@@ -1,7 +1,7 @@
 `copy` requests an independent value from an existing place.
 
 [codeblock, $code "moth":
-    items ~= {"a", "b"}
+    items ~[String] = ["a", "b"]
     independent_items ~= copy items
 
     ~items.push("c")

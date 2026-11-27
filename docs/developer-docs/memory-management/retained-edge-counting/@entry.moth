@@ -1,5 +1,5 @@
 @retained-edge-counting content as reference_content
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Retained Edge Counting"]]
 [$in description:["The narrow counted strategy for runtime-many persistent retained edges."]]
@@ -7,7 +7,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     **REC is a physical representation, not source semantics.** Moth has no source-visible reference counting, and no program can name, observe or request a counter.

@@ -1,5 +1,5 @@
 @core/html table
-@docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, codeblock, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Developer documentation"]]
 [$in description:["Compiler and build-system references for contributors and anyone reading Moth's internals."]]
@@ -7,7 +7,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Developer documentation

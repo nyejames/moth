@@ -2,7 +2,7 @@
 
 > **Final design only.** This document specifies accepted compiler design, regardless of implementation progress. Status, migration steps and backend coverage belong in the roadmap and progress matrices. `V1` identifies a deliberately bounded feature contract, not unfinished implementation. Mark genuinely unsettled design explicitly.
 
-Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by project tools, development servers, tooling overlays and builders. Backend neutrality preserves one source meaning across a closed set of official execution families: native Wasm hosted by Lappet, and browser JavaScript/HTML5 with optional integrated Wasm. The future full-stack environment composes these families. A native machine-code backend or arbitrary third-party runtime is not an official design target.
+Moth is a high-level language with typed bracket construction and composable String templates. Its compiler is a staged, backend-neutral library used by project tools, development servers, tooling overlays and builders. Backend neutrality preserves one source meaning across a closed set of official execution families: native Wasm hosted by Lappet, and browser JavaScript/HTML5 with optional integrated Wasm. The future full-stack environment composes these families. A native machine-code backend or arbitrary third-party runtime is not an official design target.
 
 This document owns core compiler architecture, semantic ownership and cross-stage contracts. `docs/build-system-design.md` owns bootstrap, Stage 0 graphs, project and package topology, command policy, linking and output orchestration. Read both for cross-boundary work.
 
@@ -37,7 +37,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 | Typing, calls, directives, constants or casts | Relevant Stage 4 subsection | The feature's accepted language contract |
 | Multiple results and Core constant evaluation | Stage 4 > `Result slots and receiving boundaries` and `Core external constant evaluation` | Stage 5 > `Result channels` and routed memory references |
 | Callable Never contracts, standalone Never calls or HIR `NeverCall` | Stage 4 > `Callable return contracts` and Stage 5 > `Never functions and terminating calls` | Canonical function, call, trait, generic and external-binding references |
-| Wiring | Stage 4 > `Wiring boundary` | The accepted Wiring source contract named there |
+| Constrained closures | Stage 4 > `Constrained closures` and Stage 5 > `Call targets` | [Closure reference](docs/closures/closures.mtf) and the memory authority's borrow and lifetime rules |
 | Numeric identities, literals and arithmetic | `Exact numeric identities and physical representation` and Stage 4 > `Numeric typing and literal materialisation` | Stage 5 > `Numeric ownership` and build-input materialisation |
 | Templates and structural strings | Stage 4 > `Templates and TIR` and `File values and resources` | Canonical template/resource references and build resource linking |
 | HIR lowering and validation | Stage 5 | The producing Stage 4 owner and consuming analysis or lowerer |
@@ -68,7 +68,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - File values are `String`, with structural resource and site-root pieces until builder placement. Semantic origins, authored uses, byte sources and rendered URLs remain distinct.
 - Source cannot select or inspect physical targets. The language has one exact numeric identity for each fixed width and precision. Target partition, build profile and backend never select semantic numeric types.
 - TIR is AST-local. Completed AST and HIR contain folded values or neutral owned runtime data, never TIR authority. HIR is the first backend-facing semantic IR.
-- Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types. Wiring capabilities do not turn strings into live templates.
+- Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types.
 - Callable return contracts are `Returns` or `Never`. Never is not a `TypeId`, a value type or an empty result list. Function types may carry a Never signature without becoming Never values.
 - Borrow and lifetime-topology validation are mandatory for runtime executable bodies. Required source const functions instead use Stage 4 dynamic generational access validation over bounded interpreter-owned storage, without runtime HIR. GC choice and build profile preserve runtime access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
 - A compiler-owned validated memory plan determines each physical variant's layout, strategies, cleanup and count transitions. Lowerers only realise it. Full-control release lowering has no tracing-collector fallback.
@@ -281,7 +281,7 @@ Each compiled module owns one `TypeEnvironment`. Module-local semantic equality 
 
 A consumer interns dependency types into local handles with a canonical-origin map. Cross-module equality compares canonical identity, never rendered names or unrelated local handles. Authored type syntax resolves directly to `TypeId`s and stays with its retained declaration or signature syntax where deferred resolution or authored-name diagnostics need it. No owned type tree duplicates a resolved `TypeId`, and diagnostics render types from the `TypeId` through the diagnostic render context. Mutability and shared/exclusive access remain classifications, not manufactured type shapes.
 
-Growable `{T}` and fixed `{N T}` collections are distinct canonical shapes. Fixed capacity is semantic identity, not an allocation hint. Maps retain key and value identities directly. Later stages query semantic shapes instead of parse syntax or private duplicate tables.
+Growable `[T]` and fixed `[N T]` collections are distinct canonical shapes. Fixed capacity is semantic identity, not an allocation hint. A map `[K = V]` retains its key and value identities directly. String has its own identity, distinct from byte and character sequences. Later stages query semantic shapes instead of parse syntax or private duplicate tables.
 
 AST registers nominal identity and generic parameters early, then completes fields and variants after their type shells resolve. Body emission may intern derived or dependency-bound types but cannot mutate completed nominal declarations. Member queries borrow resolved views rather than cloning lists. Unmapped external parameters use an explicit unknown-external state, not sentinel valid IDs.
 
@@ -336,11 +336,13 @@ A public interface contains the complete semantic facts observable by consumers:
 
 - exported origin identities and export bindings, each binding carrying its owned public route beside the leaf name
 - canonical exported type shapes
-- owned folded constants and const-template values, including structural resource/site-root pieces and exact numeric width, precision or scale
+- owned folded constants, including completed collections and maps, structural resource/site-root pieces and exact numeric width, precision or scale
+- for open wrappers, the stable output type, one receiving type per slot key, completed defaults and portable composition data
+- typed field defaults for exported struct and choice constructors
 - generic templates, bounds and required evidence
 - exported traits and reusable conformance evidence
 - receiver surfaces and visible methods
-- parameter access modes and Wiring parameter contracts with canonical underlying types
+- parameter access modes and callback contracts, including invocation parameter names and access modes, canonical input and result types and any declared retention destination
 - whole callable return contracts, including Never, distinct from ordinary success and error slots
 - mutation, optional-transfer eligibility and effects
 - complete result provenance, including fresh roots, parameter aliases, projections, detached stored results, result-to-result aliases and independent result graphs
@@ -350,6 +352,7 @@ A public interface contains the complete semantic facts observable by consumers:
 - frontier-enabling retention effects and outcome-sensitive success/error effects
 - external-boundary classifications
 - summary-carried numeric constraint guarantees for fast use, semantic traps and escaping recoverable failure
+- inferred suspension and outcome-sensitive mandatory channel transfer and logical endpoint capability contracts
 - project-context provenance for every affected exported fact
 
 Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Semantic constraint guarantees and public interface facts are derived from profile-independent authored semantics, never from an optional profile-dependent executable optimisation. A future optimiser must separately maintain correct executable reachability/link facts without changing those semantic summaries. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, output routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
@@ -359,6 +362,8 @@ Foreign callable evidence enters these summaries only through compiler-authorise
 ### Public-surface and package-export validation
 
 Validation transitively covers every interface fact above, including signatures, fields, aliases, constants, generic templates, evidence, receivers and all access/effect/lifetime summaries. AST validates resolved source surfaces. Later analysis completes and validates its summaries before interface publication.
+
+Public closure and interface fingerprints include a wrapper's output and slot types, even when the output type doesn't mention a slot type. Importers rebuild any needed structure with consumer-local identities.
 
 An export cannot expose a private nominal type, private trait/evidence identity, private receiver surface, hidden runtime anonymous-record identity or project-context fact prohibited by package policy.
 
@@ -418,6 +423,8 @@ Stage 0 belongs to the build system. It selects graphs, source sets, provider or
 
 Tokenization recognises lexical forms and records exact source locations, string/template delimiter context, numeric spelling, operator/assignment spacing and recognised directive syntax. Retained tokens belong to their source. Later consumers use bounded ranges and typed handles rather than cloned token vectors.
 
+In the accepted grammar, the lexer tracks balanced brackets, braced blocks and the transition from a bracket head into body text. Strings, literal template text and embedded CSS or JavaScript retain their own delimiter rules. The lexer needs no semantic type to recognise those boundaries.
+
 The neutral numeric spelling and destination-aware materialisation service belongs to `moth-lexical`. Tokenization retains source-local spelling so the compiler can select that service for its receiving type, rather than assigning every literal an `i32` or `f64` value early.
 
 The frontend owns every directive name, and there is no builder extension point. Tokenization and template parsing use one frontend registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, operand contract and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
@@ -444,6 +451,8 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - structural provider references and structural file references
 - conservative local declaration-ordering hints
 - diagnostics and identity/remap data
+
+A shell retains its opener, closer and nested boundaries. In the accepted grammar a named struct has a pipe-delimited field list and a choice has a braced list of variants. Payload fields retain their declared types and any default expression ranges for Stage 4.
 
 Source-kind adapters may synthesise ordinary declarations. The `@mod` and `@package` roles reject authored root runtime/output activity. `@entry` retains the corresponding dormant work and fragment facts.
 
@@ -530,7 +539,9 @@ Stage 3 does not order modules or body-local declarations, inspect executable bo
 
 The typed abstract syntax tree (AST) stage consumes sorted shells and bound visibility. It resolves declarations and canonical types, parses/checks executable bodies, applies receiving-context rules, folds constants/templates, validates public surfaces and prepares active executable work for HIR.
 
-Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and builder root slot contributions. Root slot facts enter the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
+Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, callback contracts, TIR and builder root slot contributions. Root slot facts enter the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
+
+In the accepted block grammar, a Boolean conditional has sibling branch scopes inside one brace pair. A subject match gives each line-initial `case` its own scope and makes captures available to its guard and body. A readiness case makes its receive binding available only in the winning body. Match and readiness parsing use the active arm-list depth to recognise the next arm and its colon. The readiness selector checks enabled operations and commits at most one. AST preserves the operation, guard and binding scope for later lowering. Child dispatch and join belong to the function invocation, independent of a block or declared region.
 
 Synthetic control-flow scopes take their identity from the module's path interner. The
 compiler-only component cannot collide with a source binding, and unrelated or parallel
@@ -587,6 +598,14 @@ A top-level lookup that cannot work from sorted declarations and bound visibilit
 Expressions have natural semantic types. Only an explicit receiving-boundary owner applies contextual coercion. These boundaries include declarations/assignments, returns, concrete parameters, fields, defaults, typed collection/map entries, string/template content, explicit cast targets and `then` arms with a known receiver.
 
 Compiler and binding-backed calls use the same rule. AST carries `TypeId` through fields, receivers, calls, operators and compatibility checks. A receiving annotation does not retroactively change an already typed operator result.
+
+#### Bracket construction
+
+The accepted grammar uses one bounded bracket interpretation at the expression owner. It distinguishes direct map entries, values in a head, direct nested rows, directive operands and children in a body. The immediate receiver, wrapper schema, applicable directive and local evidence determine one output type. Construction kind and nesting are fixed before numeric-only leaf inference. A later use or a backend cannot select another interpretation.
+
+Simple sequence and map literals use ordinary typed construction. AST supplies one stored element or one shallow splice per contribution according to its declared type. Direct head rows create fresh inner membership. A generic contribution declared as `T` retains its one-element role when specialised to a collection. Fixed construction requires a conservative upper bound within its declared capacity on every selected path, including repeated emissions. An unproved bound is a source error in every profile.
+
+Read each operand once at its authored position, including the membership and elements of a splice or an explicit copy before a later mutation. Preserve shared referents, earlier explicit effects and the failure order. Publish a receiving value only when construction completes. Runtime lowering preserves this ordering through ordinary typed operations and control flow. Target validation still owns support for the resulting operations.
 
 #### Typed semantic expression ownership
 
@@ -705,13 +724,15 @@ The closed operation vocabulary contains only registered operations with real co
 
 #### Call-shaped syntax and assertion intrinsics
 
+Struct and choice constructors share field routing. Stage 4 strictly folds field defaults in their declaring environment, validates their types even when callers supply every field and fills only omitted slots. Each construction must supply every required field. A pattern sees the completed payload.
+
 One shared argument owner parses delimiters, commas, multiline whitespace, positional/named entries, mutable-access markers and expression boundaries. Signatures route values to parameter slots and retain that mapping for default, type and access validation. Anonymous records use named-only field routing instead. No consumer reroutes the source list or manufactures a callee signature merely to parse a record.
 
 A call whose declared contract is Never is valid only as a standalone statement. AST rejects it in every value-consuming position, including arguments, operators, constructors, casts, templates, collections, maps, conditions, assertion arguments, postfix `!`/`?`/`catch` and member continuation. The shared argument owner still routes its arguments. Never does not add a second call grammar.
 
-AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity. Wire and Route retain their own receiving contracts.
+AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity.
 
-Handler directives take at most one bare compile-time operand, reject escaping or mutable evaluation and reject the call spelling `$name(...)`. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and one bare `$before`/`$after` operand. Directives are compiler-defined; no builder or source file can extend the parser.
+Handler directives take at most one bare compile-time operand, reject escaping or mutable evaluation and reject the call spelling `$name(...)`. Core template directives keep their own head syntax: `$slot` declarations with an optional completed compile-time default of the slot type, `$in` named targets, and one bare `$before`/`$after` operand. Directives are compiler-defined; no builder or source file can extend the parser.
 
 `assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:
 
@@ -723,7 +744,7 @@ These expectations create no importable, shadowable or first-class function. Sha
 
 A handled fallible expression retains its ordinary call/value location separately from the authored propagation-operator location. Call side-table mapping remains call-owned while escape diagnostics identify the operator.
 
-The completed assertion carries a typed condition and typed optional message. Omission uses ordinary typed `none`. Even for a compile-time `true` condition, the message is parsed, type-checked, generic-inferred, evidence-checked and fully normalised, including nested templates. Finalisation replaces it with typed `none` and removes executable message demand. Retained private generic witnesses keep canonical validation-only requests until concrete failure-summary convergence. They use the ordinary provider materialisation route, then executable reachability removes validation-only sidecars before publication. No inactive TIR, runtime payload, Wiring capture or executable link/target fact survives from that message.
+The completed assertion carries a typed condition and typed optional message. Omission uses ordinary typed `none`. Even for a compile-time `true` condition, the message is parsed, type-checked, generic-inferred, evidence-checked and fully normalised, including nested templates. Finalisation replaces it with typed `none` and removes executable message demand. Retained private generic witnesses keep canonical validation-only requests until concrete failure-summary convergence. They use the ordinary provider materialisation route, then executable reachability removes validation-only sidecars before publication. No inactive TIR, runtime payload or executable link/target fact survives from that message.
 
 A compile-time `false` or dynamic assertion retains message work only on the failure edge. Stage 5 defines its lazy lowering and target validation checks capability without silently discarding evaluation.
 
@@ -789,7 +810,7 @@ The declaring module validates immutable generic templates. At a call, AST infer
 
 Retain local folded constants and aliases only for the union of the generic artefacts' installed local declarations. The existing nominal/default closure supplies their type dependencies. Inherited contexts keep their original authority, while shared donor source and identity domains retain their own lifetimes. A module without generic templates or an inherited context needs no local folded semantic closure.
 
-Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result-slot, Never, exact numeric, source-identity and Wiring contracts.
+Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result slots, Never, exact numeric types, source identity and callback contracts.
 
 The declaring module proves a generic `-> !` body on its specialised template, whether or not anything calls it. Each generated concrete body passes through the same finaliser check again. Body proof never depends on type arguments. The module proof-cycle graph keys a dependency on a generated instance by its template path. A trait-bound Never call names the trait requirement in the template and the evidence method only in the generated instance, so the requester also checks one graph with exact call targets: its own concrete Never bodies plus every Never instance it materialises, each instance keyed by its generated identity because instance path spellings are local to one materialisation domain. A cycle that closes through a trait-bound call, such as an evidence method calling a generic that dispatches back to it, is rejected there with the same diagnostic at the requester's declaration. A cycle made only of generated instances is rejected earlier as recursive generic instantiation, and provider-only cycles are reported once a module instantiates them.
 
@@ -810,6 +831,10 @@ Contextual coercion remains separate from explicit casting. User-defined cast ta
 #### Templates and TIR
 
 AST owns all template semantics. Template IR (TIR) retains template structure while composition, formatting and folding are resolved. A view selects effective reads through module-owned override layers called overlays.
+
+The accepted redesign reserves TIR for structural work such as slot routing, wrappers and lazy control flow. A head applies at most one receiving wrapper. Explicit nesting directs each insert to its immediate receiver. Route whole contributions before splicing. Each slot key has one receiving type. Report conflicting uses at the declaration. A guard-only key takes its enclosing construction type. A supplied empty value suppresses the default, and repeated slot occurrences reuse the routed source under its existing evaluation rules. A child wrapper groups each direct child before the child's output is flattened.
+
+The phase and view contracts below describe the structural String path. The typed handoff also carries completed sequence values or neutral runtime collection operations. Open wrappers remain statically known declarations. Const calls return completed values. Generic materialisation preserves the declared contribution roles and exported wrapper contracts.
 
 One module AST build owns one `TemplateIrStore`. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store. All TIR IDs are module-local typed IDs.
 
@@ -923,35 +948,19 @@ Composition preserves pieces through assignment, copying, storage, interpolation
 
 A required compile-time observation of unresolved pieces is diagnosed. Partial symbolic equality, partial hashing and guessed URLs are invalid. Opportunistic Core constant evaluation may instead retain the runtime operation under its explicit refusal contract. Runtime semantics are ordinary string semantics because the selected physical variant materialises the pieces before execution observes them.
 
-Direct file values in templates become TIR Resource or SiteRoot nodes without intermediate text. They produce output and carry no Wiring dependency. Formatters treat them as opaque anchors. Every exact-view traversal, subtree copy and identity remap preserves their stable meaning. Local IDs may be reassigned, but an omitted structural case is a compiler bug.
+Direct file values in templates become TIR Resource or SiteRoot nodes without intermediate text. Formatters treat them as opaque anchors. Every exact-view traversal, subtree copy and identity remap preserves their stable meaning. Local IDs may be reassigned, but an omitted structural case is a compiler bug.
 
 The direct `.mtf` service has no containing output artefact or route. It returns owned structural content and resource-source facts. Plain-text extraction succeeds only when no unresolved piece remains. Frontend code never invents a URL context.
 
-#### Wiring boundary
+#### Constrained closures
 
-Wiring has two constrained parameter contracts. A **wire** preserves a binding instance's continuing identity. A **constructor route** records how future input completes a known choice constructor. These routes are unrelated to HTML URL routes. Messages remain ordinary choice values.
+The [closure reference](docs/closures/closures.mtf) owns the accepted source contract. A callback parameter or named struct field supplies a closure literal's signature. AST resolves the invocation parameters and lexical captures once and types the single body expression in return context.
 
-`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. `docs/docs/wiring/wiring.mtf` owns the exact Wiring source contract and its channel boundary.
+Public interfaces, trait conformance, fingerprints and generic materialisation preserve the full receiving signature. This includes invocation parameter names and access modes, zero or one result and any permitted retention destination. Imports rebuild these contracts from stable identities, including nominal types reachable only through the callback. Capture storage and local place IDs stay with their executable.
 
-A V1 `Wire of T` parameter accepts a named local binding or a compatible existing wire parameter. An ordinary local acquires identity only when a wire-receiving call needs it, with no `Wire()` constructor or call-site marker. Mutable and immutable locals are eligible. Projections, indexed places and fresh/computed expressions are not. An ordinary `T` receiver reads the current value under normal access rules. A compatible wire receiver forwards identity. An ordinary value parameter does not preserve its caller's identity merely because its body could use one.
+The compiler verifies non-suspension through the closure body, its callees and implicit child joins. An opaque callback invocation may fail implicitly, trap or use fast arithmetic. The ordinary error boundary handles recoverable failure at the invocation that ran the body. Forming or storing the closure does not execute it.
 
-Identity belongs to the binding instance, not its contents, address or source position. Reassignment preserves an eligible local's identity. Separate calls or loop executions create distinct instances where ordinary binding semantics do so. Assignment from a wire reads an ordinary value, not a new wire capability or a deep copy.
-
-A wire grants no exclusive authority and is not an active long-lived value borrow. Actual reads, captures and mutations obey ordinary borrow validation. Identity never proves storage outlives a consumer or legalises an escape.
-
-V1 constructor routes have zero or one future input. At an immediate route-receiving boundary, a direct choice variant/application may capture a contiguous leading payload prefix. Future input supplies the remaining trailing payload in declaration order. Captures are ordinary expressions evaluated once at formation, with normal evaluation, error and ownership rules. They are not saved expressions to rerun later. A fully supplied zero-input route retains ordinary complete-constructor argument rules.
-
-An unchanged compatible route parameter may be forwarded. Exact input/output types and ordinary concrete generic inference apply, without callable variance or first-class constructors. Outside this receiving boundary, incomplete construction remains an error. A route is neither a destination, an event registration nor an implicit send.
-
-Wire/Route capabilities are not ordinary stored or returned values. V1 capabilities have no field/choice-payload storage, collection/map storage, capability aliases, defaults, capability comparison, serialisation or channel transfer. Routes have no general application/composition, and a function name, closure or arbitrary expression cannot replace a direct constructor route. Returning an ordinary `T` read from a wire remains an ordinary value return.
-
-AST resolves parameter contracts, binding identity, constructor identity and capture semantics. HIR retains the minimal neutral facts and ordinary captured values. Public interfaces and generated materialisation preserve contract kinds and canonical underlying types. Target validation rejects a reachable contract it cannot realise rather than silently reducing it to value-only behaviour.
-
-The normal argument owner knows the immediate receiving parameter before validating constructor completeness. It never retries a failed ordinary constructor as a route. Capability arguments use the same typed expression, native result-slot and ordinary captured-value owners as other calls. Static expression IDs are not runtime binding-instance identities. Public signatures, fingerprints, imports and generic remapping preserve the distinction between an ordinary value parameter, a wire and a route without exporting local identities or capture storage.
-
-A resolved parameter carries its contract (value, wire, or route with an optional input type) beside its ordinary `TypeId`: the wire's underlying type, or the route's output choice. No capability type exists, so every walker that collects, projects or closes over parameter types visits a route input through the parameter's own type-traversal owner. Scope lookup distinguishes route parameters: ordinary reads, places and receivers receive a value reference that cannot represent one, and only the route-argument root accessor forwards it. Route formation is one AST operation and one HIR `RouteConstruct` reusing constructor field storage, typed by the output choice. HIR validation requires captures to fill the entire payload for a zero-input route, or every field except the trailing future-input field for a one-input route. Borrow analysis and Boracle treat captures as aggregate fields. Wire arguments lower as ordinary shared reads. JS emits a route as its tagged carrier with the captured fields, and HTML-Wasm target validation rejects reachable route formation before lowering.
-
-Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
+Borrow analysis checks captures against each other and the other arguments. A plain parameter permits use of the callback for the duration of the call. Each storing or forwarding path for a retained callback must respect its declared owner. Lifetime validation proves each shared referent, including nested references, stays valid while the owner can retain it. A stored field can release its old environment on replacement. An outstanding result borrow keeps its own sources live. Retained callbacks cannot capture an external place exclusively. Graph-copy checking rejects a stored callback even if it has no captures.
 
 #### Required const execution and deterministic eager folding
 
@@ -998,6 +1007,41 @@ remove an optional fold whose compiler cost and maintained complexity are unjust
 whole-function optimisation may occur only after semantic verification and only with a measured
 advantage over backend tools; it does not change accepted source or the validated HIR.
 
+#### Channels boundary
+
+`docs/docs/async/channels.mtf` owns accepted V1 source semantics. The
+compiler resolves contextual two-result channel construction, directional
+endpoint contracts, direct-call child dispatch, send/receive and expressionless
+`if {` readiness selection through the ordinary typed expression, callable and statement
+owners. Required const execution excludes these runtime effects. Ordinary
+runtime calls require no suspension annotation.
+
+HIR represents task dispatch and communication as explicit ordered operations
+and CFG outcomes, including successful transfer, recoverable error, suspension,
+selection commitment and internal cancellation/cleanup. Normal invocation
+completion includes joining its owned children. No source Future, task-result
+carrier or general callback ABI is introduced. Canonical suspension and child
+failure facts converge over direct, generated, recursive and imported targets
+before publication. Distinguish spawn edges from ordinary call edges, including
+implicit join effects. `$no_suspend` verifies proven absence using the existing
+constraint attachment and summary-verification infrastructure. Unknown
+foreign behavior cannot prove absence. The inferred facts feed lifetime/borrow
+analysis, link reachability and validated continuation lowering, not a second
+source type system.
+
+Stage 6 and lifetime analysis validate task argument/endpoint obligations,
+independent graph transfer and suspension-live access, including successful,
+failed, cancelled and losing-select paths. A logical endpoint release is a
+semantic lifecycle event independent of physical destruction. Link topology
+instantiates actual invocation, channel and approved host lifecycle owners
+without inventing an escape or relaxing single-owner legality. The compiler
+publishes backend-neutral continuation and cleanup requirements with the
+ordinary memory requirements. Backends consume those validated facts and the
+selected physical memory/target plan. The precise continuation representation
+and host ABI require the Channels architecture checkpoint and evidence;
+synchronous functions retain normal call lowering where no suspension is
+reachable. No profile-dependent semantic acceptance or optional GC proof.
+
 ### Stage 5: HIR and validation
 
 High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.
@@ -1016,7 +1060,7 @@ All visitors, remappers, validators, side tables and lowerers consume the same s
 
 #### Lowering boundary
 
-HIR owns explicit control flow, local/place access, lexical regions and terminators, stable source/binding calls, concrete generated targets, runtime template construction, slot accumulation, map operations, numeric/cast operations, external finite-float checks, Wiring argument/capture facts and function origins.
+HIR owns explicit control flow, local/place access, lexical regions and terminators, stable source/binding calls, concrete generated targets, runtime template construction, slot accumulation, map operations, numeric/cast operations, external finite-float checks, function origins and the operands of closure formation and invocation.
 
 HIR functions carry `HirFunctionReturnContract::Returns` or `HirFunctionReturnContract::Never`. Never is not encoded as missing results.
 
@@ -1030,8 +1074,7 @@ HIR explicitly distinguishes local definition from assignment to an existing
 place. Every execution of a definition establishes a new dynamic occurrence of
 that local, including re-entry through a loop. A static `LocalId` is not that
 dynamic source binding identity. Local-origin metadata keeps authored bindings
-separate from compiler temporaries, and a compiler definition does not itself
-make a local Wire-capable. Assignment through an existing mutable alias writes
+separate from compiler temporaries. Assignment through an existing mutable alias writes
 through to its referent rather than detaching it.
 
 An assignment from the same unprojected binding preserves its existing binding
@@ -1084,13 +1127,13 @@ An assertion message is an ordinary HIR value used only on the failure edge. Mes
 
 Assertions remain unrecoverable and checked in release. Allocation and stack exhaustion are outside `catch`; growable `push` remains infallible in source and fatal on allocation exhaustion.
 
-Validation, remapping, display, borrowing and reachability treat the message as an ordinary value use. It creates no assertion-specific ownership or Wiring category. HIR also carries the compiler-owned distinction between default/fully folded messages and messages requiring runtime construction. Target validation consumes it rather than inferring it from source.
+Validation, remapping, display, borrowing and reachability treat the message as an ordinary value use. HIR also carries the compiler-owned distinction between default/fully folded messages and messages requiring runtime construction. Target validation consumes it rather than inferring it from source.
 
 #### HIR validation
 
 The semantic compiler constructs and verifies HIR without an optimisation profile. Required constraint, borrow, lifetime and public-summary checks use profile-independent authored semantics. Debug/release physical lowering or future optional whole-function optimisation cannot erase a call before these checks or change the accepted source. Test mode is a separate explicit semantic input. A future post-verification optimiser may use derived executable representation without mutating semantic public interfaces or reopening source validity.
 
-Validation completes before borrow or target validation. It checks definition/type links, dense IDs and ranges, lexical regions, control-flow graph (CFG) shape, block ownership/terminators, locals/places, dominance, side-table mappings, function origins, constants, patterns, expressions and Wiring contracts/captures.
+Validation completes before borrow or target validation. It checks definition/type links, dense IDs and ranges, lexical regions, control-flow graph (CFG) shape, block ownership/terminators, locals/places, dominance, side-table mappings, function origins, constants, patterns and expressions, including closure captures and invocation operands.
 
 Call validation also checks result count, slot types, channel compatibility, Never versus ordinary contracts and edge-specific definitions. Finite binary-float values remain an invariant. `NaN`, infinity, a missing trusted local or malformed completed control flow are compiler bugs.
 
@@ -1125,7 +1168,9 @@ Target-specific check elision remains a lowerer responsibility; each backend con
 
 #### Call targets
 
-Executable source calls distinguish module-local functions, stable cross-module functions and stable binding-backed external functions. HIR stores no dependency alias, package spelling or backend runtime name as a call target.
+Direct calls distinguish module-local functions, stable cross-module functions and stable binding-backed external functions. HIR stores no dependency alias, package spelling or backend runtime name as a call target.
+
+Closure formation records a private executable identity and its resolved environment. Reachable formation brings the body and its private dependencies into the link graph. Invocation executes the body with that environment and the supplied arguments. HIR preserves authored argument evaluation order and follows ordinary success and failure continuations.
 
 Borrow validation resolves calls to access/effect summaries. Target validation and lowerers resolve executable targets through explicit graph, capability and link-plan inputs.
 
@@ -1165,7 +1210,7 @@ A `NeverCall` applies ordinary argument accesses, mutation and optional final-us
 
 Closed external profiles restrict transfer: WIT value-only and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the native ownership ABI. Donor-local type, allocation-family, region and counter IDs never enter public summaries, and REC is not source semantics.
 
-Wire identity is not a persistent value borrow. Ordinary reads, captures, mutations and their lifetimes still undergo normal validation. Fresh rvalues passed to mutable call slots become hidden locals before checking, without becoming legal mutable receivers merely because they were materialised.
+Fresh rvalues passed to mutable call slots become hidden locals before checking, without becoming legal mutable receivers merely because they were materialised.
 
 GC-native targets may ignore physical affine-cleanup facts but cannot skip access or lifetime-topology validation. Collector choice preserves these source-law decisions. Exact numeric operations are target-independent; unsupported reachable operations receive target diagnostics rather than different semantic widths.
 
@@ -1226,7 +1271,7 @@ Physical coalescing finishes before plan validation and fingerprinting. It may r
 
 ### Declared regions and backend handoff
 
-AST owns declared `name:` scopes, `into name` placement and freshness validation. The exact `_:` header is invalid. Declared-region identity is separate from type identity and lexical HIR regions. HIR records region metadata/exits and explicit recoverable failure control flow before memory analysis. It still does not decide exact lifetime topology.
+AST owns braced declared regions such as `request { ... }`, `into request` placement and freshness validation. An underscore cannot name a region. Declared-region identity is separate from type identity and lexical HIR regions. HIR records region metadata/exits and explicit recoverable failure control flow before memory analysis. It still does not decide exact lifetime topology.
 
 The declared-region and lifetime/escape references under the memory authority own the detailed source and analysis rules. `Backend-facing compiler handoff` defines the final input boundary. Borrow facts and topology remain validation context, not alternate authorities for physical cleanup or counting.
 
@@ -1236,15 +1281,16 @@ The compiler records backend-neutral facts for each source and generated functio
 
 - stable local/cross-module source calls and binding-backed calls
 - NeverCall edges as ordinary reachable calls with no successor
+- Channels dispatch edges, suspension/host wake requirements and task/channel runtime capabilities, distinct from ordinary calls
 - runtime helper and capability requirements
 - numeric/cast, map and other target-gated operations
-- required Wiring contracts/captures where execution needs a capability
+- closure bodies needed by reachable formations and any target requirements of reachable invocations
 - resource uses in deterministic source order and a separate site-root-use fact
 - per-function project-context provenance
 
 Generated-function requests accompany module link data as materialisation dependencies. They remain distinct from runtime-dependency fingerprint contents. Non-executable fragments, including named builder slot contributions, carry their own resource/site-root/provenance facts in the metadata lane.
 
-These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable call edges recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
+These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable calls and closure-body dependencies recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
 
 Module runtime-import candidates combine source-owned provider availability, builder runtime metadata and packages demanded by final executable external-call facts after summary convergence. Generated sidecars resolve their selected root's final demand before publication through the same canonical projection. Candidates remain availability, not entry liveness, and include no validation-only executable demand.
 
@@ -1284,7 +1330,7 @@ A lowerer receives only explicit validated inputs:
 
 `ValidatedMemoryPlan` is the sole authority for aggregate layouts, memory strategies, cleanup, inferred/declared-region operations, REC and concrete ownership/count transitions. Source and generated functions follow the same handoff. Missing compiler-owned boundary classifications or required plan facts are compiler bugs, not invitations to infer a fallback.
 
-Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or Wiring semantics. A target may elide a numeric predicate only when its paired proof establishes safety and the lowerer preserves evaluation order, failure semantics and required carriers. A lowerer consumes the selected numeric mode from validated HIR, preserves fast trap delivery and never reconstructs fast semantics from a proof table or target carrier.
+Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or callback invocation semantics. A target may elide a numeric predicate only when its paired proof establishes safety and the lowerer preserves evaluation order, failure semantics and required carriers. A lowerer consumes the selected numeric mode from validated HIR, preserves fast trap delivery and never reconstructs fast semantics from a proof table or target carrier.
 
 Lowerers are selected from the official native Wasm and browser JavaScript/Wasm implementations. They can specialise validated operations for those targets, including generated JavaScript-to-Wasm call glue, without exposing open-ended backend semantics or an LLVM-style native target SDK. The build system retains its constrained project-builder interface for composing supported targets and output policy.
 
@@ -1327,7 +1373,7 @@ MON is schema-directed literal data, not source inference. A prepared schema rec
 
 ### Publication and receiving contracts
 
-Document/value encoders share one writer. Strings encode as quoted data, never trusted raw MON fragments. The decoder validates the complete receiving schema and applies defaults only at missing fields. Optionality alone does not allow omission. Supplied `none` is not replaced and nested records do not deep-merge with defaults.
+Document/value encoders share one writer. Strings encode as quoted data, never trusted raw MON fragments. The accepted codec grammar reads bracketed sequences and keyed maps, with `[=]` for the empty map. The literal syntax identifies the container kind. The prepared schema checks element, key and value types and supplies validated field defaults. The decoder applies a validated default only to an omitted record or choice payload field. A qualifier must match its nominal schema. Wrappers, splices and calls never execute in MON. Optionality alone does not allow omission. Supplied `none` is not replaced and nested records do not deep-merge with defaults.
 
 Resource and site-root pieces must have final characters before conversion to MON data. Unresolved anchors fail conversion. The codec exposes no Resource value and never reconstructs dependencies from strings.
 

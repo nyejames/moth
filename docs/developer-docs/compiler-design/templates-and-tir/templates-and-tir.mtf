@@ -25,6 +25,14 @@ If the compiler treated the body as blind concatenation, it could still emit cha
 
 Structure earns its keep.
 
+In the accepted redesign, structural composition can also build a sequence.
+An ordinary sequence or map literal takes its cheap typed construction path.
+An open wrapper declares its output and one receiving type per slot key. Each
+bracket applies one receiving wrapper. A nested wrapper routes its own
+inserts. Route whole contributions before splicing their elements. Repeated
+uses of a slot share its routed source, and a supplied empty value suppresses
+the default. Raw body text needs a String context.
+
 ## TIR phases
 
 One module AST build owns one `TemplateIrStore`. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store.
@@ -95,7 +103,7 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
 ## Folded and runtime paths
 
-Classification happens in one place. `prepare_tir_view` validates structurally reachable TIR and classifies the whole value as foldable, runtime or helper. In `ConstRequired` mode, validation includes retained conditional and loop bodies even when a selector is statically false. AST finalisation then consumes exactly that preparation rather than deciding again:
+The current String template path classifies each view in one place. `prepare_tir_view` validates structurally reachable TIR and classifies the whole value as foldable, runtime or helper. In `ConstRequired` mode, validation includes retained conditional and loop bodies even when a selector is statically false. AST finalisation then consumes exactly that preparation rather than deciding again:
 
 - fully constant templates **fold into strings**
 - runtime conditional and loop bodies stay available for lazy lowering
@@ -148,8 +156,8 @@ TIR ownership must stay distinct from AST finalisation and HIR validation. Post-
 
 ## Roadmap and current status
 
-- **Accepted design:** TIR remains AST-local and hands off folded strings or neutral runtime data.
-- **Current implementation:** template support is tracked in the progress matrix; templates carry no Wire or Route capability.
+- **Accepted design:** TIR remains AST-local. Completed values preserve their resolved types. A typed runtime construction hands off ordinary values and control flow. Open wrappers cross module boundaries only as portable declarations with stable output and slot types.
+- **Current implementation:** the progress matrix tracks template support.
 - **Queued work:** `post-tir-template-parser-optimization-plan.md` for performance discussion, labelled queued or deferred as appropriate.
 - **Deferred or outside scope:** a general macro system or public TIR.
 

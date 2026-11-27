@@ -1,10 +1,5 @@
 Concrete generic instances are created with `of` in type position.
 
-`of` takes its meaning from the head before it. This reference owns ordinary
-generic application. Compiler-owned `Wire` and `Route` heads instead describe
-parameter capabilities under the @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring reference).
-They do not become ordinary type arguments or change generic nesting rules.
-
 ### Type application syntax
 
 [codeblock, $code "moth":
@@ -44,7 +39,7 @@ Work around the limit with an intermediate alias:
     value Box of StringIntPair = Box(Pair("count", 3))
 ]
 
-The collection element exception allows one inline `of` application inside a collection element annotation, such as `{Box of String}`. Nested `of` applications inside a collection element are rejected for the same reason as nested `of` in any other type position: use a named concrete alias.
+The collection element exception allows one inline `of` application inside a collection element annotation, such as `["[Box of String]"]`. Nested `of` applications inside a collection element are rejected for the same reason as nested `of` in any other type position: use a named concrete alias.
 
 ### Concrete generic aliases
 

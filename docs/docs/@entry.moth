@@ -1,4 +1,4 @@
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Documentation"]]
 [$in description:["Moth language, project and compiler documentation."]]
@@ -6,11 +6,13 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Documentation
 
-    Welcome to Moth. Start with the project tool, learn the core language in order and drop into the focused pages when you need a precise rule.
+    Start with @./language-overview (Language basics) to see how field lists, constructors, brackets and blocks fit together. The @./cheatsheet (cheatsheet) collects the same forms for reference.
+
+    These pages describe the syntax being introduced on this branch. Compiler and MON support for the new spellings is still pending.
 
     The @./progress (compiler progress matrix) tracks current language, compiler and backend coverage.
     The @./progress/packages-and-builders (packages and builders progress matrix) tracks first-party
@@ -26,17 +28,18 @@ init_docs_sidebar()!
     6. @./functions (Functions)
     7. @./branching (Branching)
     8. @./loops (Loops)
-    9. @./structs (Structs)
+    9. @./structs (Structs and methods)
     10. @./choices (Choices)
     11. @./errors (Errors, options and assertions)
     12. @./collections (Collections and maps)
     13. @./templates (Templates)
-    14. @./constants (Constants and compile-time behaviour)
-    15. @./aliases (Aliases)
-    16. @./generics (Generics)
-    17. @./traits (Traits)
-    18. @./wiring (Wiring)
-    19. @./memory (Memory and lifetimes)
+    14. @./template-directives (Template directives)
+    15. @./constants (Constants and compile-time behaviour)
+    16. @./aliases (Aliases)
+    17. @./generics (Generics)
+    18. @./traits (Traits)
+    19. @./closures (Closures, planned)
+    20. @./memory (Memory and lifetimes)
 
     ## Projects and content
 
@@ -67,8 +70,8 @@ init_docs_sidebar()!
     - @../developer-docs/memory-management (Memory management)
     - @../developer-docs/style-guide (Development standards)
 
-    ## Future design drafts
+    ## Tasks and native runtime design
 
-    - @./async (Async)
+    - @./async (Channels and tasks)
     - @./lappet (Lappet native runtime and package infrastructure)
 ]

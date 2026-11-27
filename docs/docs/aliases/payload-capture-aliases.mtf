@@ -3,10 +3,10 @@ A payload capture alias renames a choice payload field inside one match arm. It 
 ### Payload capture alias syntax
 
 [codeblock, $code "moth":
-    if response is:
-        Err(message as error_message) => io.line(error_message)
-        Success(value as body) => io.line(body)
-    ;
+    if response is {
+        case Err(message as error_message): io.line(error_message)
+        case Success(value as body): io.line(body)
+    }
 ]
 
 The name before `as` is the declared payload field name. The name after `as` is an arm-local binding.
@@ -32,10 +32,10 @@ Use a capture alias when the field name would collide with an existing variable 
 [codeblock, $code "moth":
     message = "outer message"
 
-    if response is:
-        Err(message as error_message) => io.line(error_message)
-        else => io.line(message)
-    ;
+    if response is {
+        case Err(message as error_message): io.line(error_message)
+        else: io.line(message)
+    }
 ]
 
 Inside the first arm, `error_message` holds the payload. In the `else` arm, `message` still refers to the outer binding.

@@ -1,5 +1,5 @@
 @html-assembly-and-output content as reference_content
-@docs_styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, sidebar, sync_navigation, sidebar_id
 @diagrams css as diagrams_css
 
 [$in title:["18. HTML assembly and output"]]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     The HTML builder assembles records into a document and owned output set, ending at the greeting fragment.

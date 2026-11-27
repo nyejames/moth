@@ -1,16 +1,8 @@
-This is an open design proposal. `$checked:` is the agreed future source-block
-spelling and direction; proof-tier semantics and implementation remain open.
+The proposed `$checked` directive would give the compiler a larger proof budget for a block. Its placement, limits and proof rules remain open.
 
 ### What it would do
 
-A checked proof-budget block would let the compiler spend much more time trying
-to prove difficult code safe:
-
-[codeblock, $code "moth":
-    $checked:
-        -- code that needs unusually deep analysis
-    ;
-]
+A checked block would give the compiler more time to prove a difficult alias relationship safe.
 
 The compiler would still run its normal fast analysis first. It would only use
 the expensive tier when the normal checker found a possible conflict it could
@@ -45,7 +37,7 @@ carefully about loop generations, specialise call summaries or prove that two
 indexes cannot refer to the same element.
 
 Boracle will research these proof techniques before Moth decides whether a
-future `$checked:` block can provide a sound, useful proof tier. The spelling
+future `$checked` block can provide a sound, useful proof tier. Naming the directive
 does not make the research obligations, deterministic limits or safety
 requirements implemented or fully accepted. The proposal should advance only
 if the deeper tier proves a useful class of safe programs that the normal

@@ -110,7 +110,7 @@ Implementation of this analysis is deferred. This leaf is the canonical design a
 
     [td:
         [: Declared region]
-        [: A source-declared hard lifetime region introduced by `name:`. It cannot be silently widened, membership is explicit through `into name`, and its owned allocations remain until declared-region exit.]
+        [: A source-declared hard lifetime region introduced by `name { ... }`. It cannot be silently widened, membership is explicit through `into name`, and its owned allocations remain until declared-region exit.]
     ]
 
     [td:
@@ -424,15 +424,16 @@ Last-use and future-use facts may prove that an edge is dead, that no source cap
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
 
-Captured values and builder-owned state must satisfy one lifetime owner and the stored-edge
-outlives rule whenever they retain Moth references. A Route capture follows these ordinary rules.
-A Wire binding identity creates no subscription or lifetime extension. The bounded parameter
-contracts do not imply persistent observation or asynchronous delivery.
+For each path that stores or forwards a retained callback, check its declared destination.
+Prove that every shared referent, including nested references, stays valid while the owner
+can retain it. Replacing the field removes that field's old edge. Reclamation still requires
+the ordinary cleanup proof, including any outstanding result loans. If an opaque invocation returns a borrow,
+every possible source in its arguments or environment, including nested references, must
+outlive an escaping result. An independent copy made while the sources are live can escape
+under its own lifetime.
 
 A collector-free path may use explicit builder-owned lifecycle regions. A GC path may represent
-the same already-proven topology with ordinary reachability. Future Wiring observation and event
-lifecycles need their own accepted contract before they contribute retained edges or lifecycle
-roots.
+the same proven topology with ordinary reachability.
 
 ## External lifetime boundaries
 
@@ -550,7 +551,7 @@ Conservative analysis may reject topology it cannot prove legal. That is a sourc
 - @../ (Memory management): top-level memory authority
 - @../access-and-aliasing (Access and aliasing): shared aliases, copies and aggregate storage
 - @../borrow-validation (Borrow validation): exclusivity and optional transfer safety
-- @../declared-regions (Declared regions): accepted deferred `name:` / `into name` surface and hard destination lifetimes
+- @../declared-regions (Declared regions): accepted deferred `name { ... }` / `into name` surface and hard destination lifetimes
 - @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility
 - @../retained-edge-counting (Retained Edge Counting): the counted strategy for runtime-many persistent edges
 - @../runtime-and-backend-lowering (Runtime and backend lowering): physical strategies, collector-free release and external profiles

@@ -1,7 +1,5 @@
 @template-basics content as template_basics
 @template-basics-basic content as template_basics_basic
-@template-directives content as template_directives
-@template-directives-basic content as template_directives_basic
 @template-slots content as template_slots
 @template-slots-basic content as template_slots_basic
 @child-wrappers content as child_wrappers
@@ -16,27 +14,29 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Templates"]]
-[$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
+[$in description:["Build Strings and typed sequences with template bodies, slots, child wrappers and control flow."]]
 [$in head:[language_theme_head]]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Templates
 
-    Templates form Moth's only string-composition system. Square brackets can
-    join short values, format Markdown or HTML and compose larger layouts with
-    slots, wrappers and control flow. Template `$` directives remain owned
-    here; the accepted general directive family is documented at
-    @../directives (Directives).
+    Use a template to put a name into a greeting, fill a card with content or
+    produce a list from a loop. Square brackets enclose the construction. A
+    colon opens its body. A text body produces a String.
 
-    Other languages often split this work across concatenation, interpolation
-    and a separate template language. Moth keeps one typed `String` result and
-    lets the compiler fold it when every input comes from compile time.
+    The Alpha compiler supports String templates. Typed sequence templates,
+    including sequence slots and child wrappers, belong to the bracket design
+    described in @../collections (Collections and maps).
+
+    @#template-directives Find every formatter and structural directive in
+    the @../template-directives (Template directives reference).
 ]
 
 [section:
@@ -46,16 +46,6 @@ init_docs_sidebar()!
         [$in advanced:[template_basics]]
 
         [template_basics_basic]
-    ]
-]
-
-[section:
-    [doc_level:
-        [$in key:template-directives]
-        [$in title:Template directives]
-        [$in advanced:[template_directives]]
-
-        [template_directives_basic]
     ]
 ]
 
@@ -103,7 +93,7 @@ init_docs_sidebar()!
     [doc_pager:
         [$in previous_path:../collections/]
         [$in previous_title:Collections and maps]
-        [$in next_path:../constants/]
-        [$in next_title:Constants and compile-time behaviour]
+        [$in next_path:../template-directives/]
+        [$in next_title:Template directives]
     ]
 ]

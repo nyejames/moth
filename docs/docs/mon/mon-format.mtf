@@ -60,9 +60,20 @@ a line comment cannot bridge the label to an `=` on a later line. This format
 tightening rejects missing `=` spacing and label-to-`=` line breaks that an
 earlier reader accepted.
 
-MON collections may contain different literal kinds and different record
-shapes. The receiving schema enforces its element type. Heterogeneous text
-changes no Moth collection typing rule and adds no `Any` type to Moth.
+Square brackets enclose literal sequences and maps. A MON sequence keeps one
+element per written item, including when all of its elements are Strings.
+Nested sequences keep their boundaries. The receiving schema checks each
+element. There is no source construction inference, splicing, interpolation,
+wrapper, directive or head/body form in MON.
+
+[codeblock, $code "text":
+    chapters = ["Introduction", "Installation"],
+    rows = [[1, 2], [3, 4]],
+    positions = ["intro" = 1, "install" = 2],
+]
+
+MON can read heterogeneous literal kinds and record shapes before validation.
+The schema enforces the collection element type.
 
 Maps preserve insertion order. Keys use the supported Moth map-key families:
 `String`, `Bool`, `Char`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
@@ -83,17 +94,14 @@ matches another. String and Char remain distinct, and Bool is not a numeric
 key. Record labels remain identifiers, while map keys are data: a
 string-keyed map does not become a record.
 
-The empty forms never change kind:
-
-- `{=}` is always an empty map and the spacing exception for non-empty map
-  entries; `{}` is always an empty collection.
-- A map schema rejects `{}` and a collection schema rejects `{=}`. Schema
-  context never changes a container's kind.
+An empty sequence uses `["[]"]` and an empty map uses `["[=]"]`.
+The schema checks the kind. It cannot reinterpret an empty sequence as text
+or a map. Quote an empty String as `""`.
 
 [codeblock, $code "text":
-    scores = {"Priya" = 10, "Rob" = 12},
-    empty_scores = {=},
-    empty_items = {},
+    scores = ["Priya" = 10, "Rob" = 12],
+    empty_scores = [=],
+    empty_items = [],
     empty_record = (),
 ]
 
@@ -227,11 +235,11 @@ Choice data uses Moth-shaped variants rather than an invented tagged-record
 mapping:
 
 [codeblock, $code "text":
-    widgets = {
+    widgets = [
         ::Text("Gold"),
         Widget::Progress(value = 0.4),
         ::Ready,
-    },
+    ],
 ]
 
 A unit variant has no parentheses and a payload variant requires them.
@@ -245,11 +253,23 @@ acceptance of payload openers after line breaks or comments.
 explicit `Widget` qualifier must name that same expected choice. An unknown
 or mismatching explicit name fails.
 
-Positional arguments precede named arguments. Target slots are routed once,
-every required slot is supplied exactly once, and unknown variants, duplicate
-payload fields, wrong arity and payload type mismatches fail. Choice payload
-fields have no defaults. Typed encoding checks any supplied qualifier before
-omitting it, and prefers unqualified named records with named choice payloads.
+Positional arguments precede named arguments and fill fields in declaration
+order. Each field accepts one value. Unknown variants, unknown labels,
+duplicate arguments, extra arguments and missing required fields fail.
+
+[codeblock, $code "text":
+    size = Size(width = 1280),
+    event = ::Resized(1280),
+    previous = WindowEvent::Opened,
+]
+
+Suppose the schema declares `Size` and the `Resized` variant of `WindowEvent`
+with a required `width I32` and a default `height I32 = 720`. Both supplied
+widths receive that validated height. A payload variant needs parentheses even
+when all its fields have defaults. A unit variant rejects them.
+
+Typed encoding checks an explicit qualifier before omitting it. It prefers
+unqualified named records and named choice payload fields.
 
 ### Schemas, defaults and options
 
@@ -272,7 +292,7 @@ predicate DSLs.
 Eligibility is derived transitively from the complete concrete schema. Every
 field, element, map entry and variant payload must have a supported mapping,
 and an unsupported member makes the enclosing shape ineligible even when the
-current instance does not use it. Functions, wires, routes, closures, live
+current instance does not use it. Functions, closures, live
 handles, unresolved resource pieces and deferred computations have no
 ordinary data encoding. A completed runtime-generated String is eligible. No
 mandatory serialisation trait, per-type marker, rename or skip attribute,

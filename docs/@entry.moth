@@ -1,4 +1,4 @@
-@docs_styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, highlight, sidebar, sync_navigation, sidebar_id
 @core/html img, div
 
 [$in title:["What is Moth?"]]
@@ -7,7 +7,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 
 [section, $md:

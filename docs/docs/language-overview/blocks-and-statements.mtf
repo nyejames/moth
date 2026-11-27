@@ -1,100 +1,41 @@
-Moth uses explicit block delimiters. A colon opens a block and a semicolon closes it.
+Braces enclose the body of a function, control-flow construct, trait or declared region. In a choice declaration they enclose a comma-separated list of alternatives. Statements in an executable body run in source order until control flow exits or redirects execution.
 
 [codeblock, $code "moth":
-    Status :: Ready, Busy;
+    Status = { Ready, Busy }
 
-    greet |name String| -> Bool: return name is "Priya";
-
-    label |ready Bool| -> String:
-        if ready:
-            return "Rob"
-        else return "Emmy";
-    ;
-
-    pick |status Status| -> String:
-        if status is:
-            Ready => return "Emmy"
-            else => return "Huw";
-    ;
+    report |status Status| {
+        if status is {
+            case Ready: io.line("ready")
+            case Busy: io.line("busy")
+        }
+    }
 ]
 
-### Contract
+### Branch scopes
 
-- `:` opens a function body, `if`/`else` or option-capture branch, match, loop, `catch` handler, value-producing block, trait, declared region or another block-form construct. `::` opens a choice declaration.
-- `;` closes the active block.
-- A semicolon closes a scope. It never terminates an ordinary statement.
-- Statements inside a block are evaluated in source order unless control flow exits or redirects the block.
-- Child blocks create child scopes.
-- Indentation is for readability. Explicit delimiters define block boundaries, and indentation never decides scope.
-- Blank lines and whitespace inside a block are legal. Empty inline and empty multiline blocks are also legal as source layout.
-- Opening punctuation inside expressions, types or templates is not a scope opener.
-- The language has no general authored lexical-block construct or control-flow labels.
-- Immediate `identifier:` headers in executable statement position are reserved for declared regions. Full declared-region semantics remain deferred.
-- Normal control-flow keywords remain ordinary language forms. Future compiler-owned directive blocks use `$async:` and `$checked:`; both spellings are deferred and are not declared regions.
-- Exact `_:` is invalid.
+An ordinary `if` encloses both branches in a single pair of braces. The optional bare `else` ends the first branch's scope and starts the second. A nested conditional closes before the enclosing one resumes. A missing closing brace belongs to its opener. A brace inside text cannot close a statement block. Each name declared in a branch stays local to that branch.
 
-### Physical placement
+A full match starts with `if subject is {`. Each `case` starts a logical line. A colon ends its pattern and optional Boolean guard. The arm's statements can start on the same line or continue on later lines. The next arm at the same depth or the match's closing brace ends its body. A final `else:` handles the remaining cases. A pattern capture belongs to its arm's guard and body.
 
-- At most one scope may open on a physical line. A scope opener cannot share a physical line with the opener of an enclosing scope that is still open.
-- A scope closes inline when its opening site and its `;` share a physical line.
-- Otherwise it is a multiline scope. Its `;` must stand alone on a later line, with only whitespace before it.
-- Only whitespace or a `--` comment may follow a closer on its line. No statement, declaration, second `;` or other code may follow it.
-- A comment cannot precede a closer on its line because `--` consumes the rest of that line.
-- Two independent block-form constructs cannot share a physical line. The first closer ends its line.
+An expressionless `if {` selects a ready channel operation. Its `case` headers offer sends or receives. A receive binding first becomes available inside the winning body. A final `else:` handles the case where no enabled operation is ready. See @../async (Channels and readiness) for the future runtime contract.
 
-### Branch exceptions
-
-The terminal `else` body of an `if` or the terminal match arm may close on the line that introduces it.
-
-- The terminal `else` body may close on the line that begins with `else`, as in `else io.line("waiting");`.
-- The terminal match arm may close on the line that contains its `=>`, as in `else => return "busy";`.
-
-One final `;` closes the whole `if`/`else` or match. The exception covers the terminal branch only. A `;` after an intermediate `then` statement or an intermediate match arm is invalid. An intermediate match arm keeps its dedicated match-arm delimiter diagnostic.
-
-Once a valid closer ends an `if` body, the `if` is complete. If an `else` follows that closer, it is outside an `if` and is rejected as an unexpected `else`.
-
-### Missing and misplaced closers
-
-`MOTH-SYNTAX-0041` reports a misplaced opener or closer. It covers a nested opener on one line, a multiline closer after code, code after a closer and a second closer on one line. The diagnostic points at the offending token and labels the opener or closer that explains it.
-
-`MOTH-SYNTAX-0042` reports a scope that never closes. It names the construct, labels its opener, asks for the missing `;` and labels any visible `;` that closed an inner scope instead.
-
-Indentation never decides scope. Recovery follows the authored scope structure, and no suggestion can insert a closer or change which scope a line belongs to.
-
-### Coming from statement-terminating semicolons
-
-If you are used to semicolons ending statements, read `;` as a closing brace instead. Do not add one at the end of each line inside a block. Add the single `;` that finishes a scope once its body has ended. A misplaced `;` closes its scope early, so the lines that follow belong outside that scope.
-
-### Rejected shapes
-
-Each shape below is invalid on its own.
+### Producing a result
 
 [codeblock, $code "moth":
-    -- Invalid: a nested opener cannot share the enclosing opener's line.
-    run ||: if true: io.line("ready");
-    ;
+    caption |ready Bool| -> String {
+        label = if ready {
+            then "Ready"
+        else
+            then "Waiting"
+        }
+        return label
+    }
 ]
 
-[codeblock, $code "moth":
-    -- Invalid: this `;` closes the function, not the assignment.
-    compute ||:
-        total = 1 + 2;
-    ;
-]
+`then` supplies the selected branch's value to the binding. The closing brace resumes execution in the function. `return` sends the result to the caller and exits the function. A brace by itself returns no value.
 
-[codeblock, $code "moth":
-    -- Invalid: code follows the `if` closer on its line.
-    report ||:
-        if true: io.line("ready"); io.line("after")
-        ;
-    ;
-]
+### Declaration and construction
 
-[codeblock, $code "moth":
-    -- Invalid: a second closer follows the `if` closer.
-    finish ||:
-        if true: io.line("ready");;
-    ;
-]
+A name followed by a braced body in executable code declares a lifetime region, as in `scratch { ... }`. See @../memory/#declared-regions (Declared regions) for placement with `into`. Moth has no standalone lexical block or control-flow label.
 
-Nested language features may add their own structural rules. Branching, loops, functions, declared regions and template control flow document those forms in detail.
+Square brackets construct values. In a template, a colon separates the head from the body. Braces, semicolons and arm-like words in template text, quoted strings or embedded languages remain literal content. A colon inside a nested template belongs to that template.

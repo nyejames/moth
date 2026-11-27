@@ -17,7 +17,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Errors, options and assertions"]]
 [$in description:["Recoverable errors, optional values, local recovery and assertions in Moth."]]
@@ -25,7 +26,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Errors, options and assertions
 

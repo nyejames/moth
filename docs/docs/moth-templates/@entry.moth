@@ -14,7 +14,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Moth template files"]]
 [$in description:["Moth-aware Markdown content files available under every project builder."]]
@@ -22,7 +23,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Moth template files
 

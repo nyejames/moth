@@ -15,21 +15,21 @@ The inline form also handles option capture:
 Use block form when a branch needs more room:
 
 [codeblock, $code "moth":
-    label = if ready:
+    label = if ready {
         then "ready"
     else
         then "waiting"
-    ;
+    }
 ]
 
 Block form also inspects a present option:
 
 [codeblock, $code "moth":
-    label = if maybe_name is |name|:
+    label = if maybe_name is |name| {
         then name
     else
         then "guest"
-    ;
+    }
 ]
 
 `then` provides the value for the surrounding assignment.

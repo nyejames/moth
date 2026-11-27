@@ -2,22 +2,11 @@
 
 ## Status
 
-This is an open design proposal. `$checked:` is the agreed future source-block
-spelling and compiler-owned direction, but proof-tier semantics, placement and
-implementation remain unresolved. It is not accepted source behaviour or a
-roadmap implementation commitment.
-
-The proposal is a lexical checked scope that could let the compiler use a much
-larger deterministic proof budget for difficult static analysis:
-
-[codeblock, $code "moth":
-    $checked:
-        -- difficult but safe value and alias relationships
-    ;
-]
-
-Current Boracle work should preserve the architectural option without
-implementing source syntax prematurely.
+The proposed `$checked` scope would give the compiler a larger deterministic
+budget for difficult static proofs. The exact source form after the syntax
+migration, placement and proof-tier semantics remain open. Current Boracle
+research preserves that option. The compiler has no implemented source
+feature or roadmap commitment for it.
 
 ## Core contract
 
@@ -227,7 +216,7 @@ Each consumer keeps its existing owner and contract. Checked scopes must not col
 
 ## Open design questions
 
-The `$checked:` spelling and compiler-owned direction are agreed. The proposal
+The proposed marker is compiler-owned. The proposal
 still needs evidence and decisions for:
 
 - block-only versus function-level placement
@@ -242,7 +231,7 @@ still needs evidence and decisions for:
 - interaction with incremental compilation and proof-result fingerprints
 
 Until those questions are resolved, compiler code should use internal effort or
-experiment vocabulary rather than implementing a source-visible `$checked:`
+experiment vocabulary rather than implementing a source-visible `$checked`
 semantic category.
 
 ## Hard boundaries

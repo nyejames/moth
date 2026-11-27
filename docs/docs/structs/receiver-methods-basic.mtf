@@ -1,25 +1,19 @@
-A receiver method attaches behaviour to a struct or choice declared in the
-same file.
-
-Its first parameter is named `this`:
+A method takes the value before the dot as its first parameter. Moth calls
+that value the *receiver*. Declare the method as a top-level function in the
+same file as the struct or choice and name its first parameter `this`.
 
 [codeblock, $code "moth":
-    Vector2 = |
-        x F64,
-        y F64,
-    |
+    Player = | name String, score I32 = 0 |
 
-    length_squared |this Vector2| -> F64:
-        return this.x * this.x + this.y * this.y
-    ;
+    qualifies |this Player, minimum I32| -> Bool {
+        return this.score >= minimum
+    }
 
-    vector = Vector2(3.0, 4.0)
-    length = vector.length_squared()
+    player = Player("Priya", score = 10)
+    can_enter = player.qualifies(8)
 ]
 
-Write the method as a normal top-level function in the same file as the type.
-
-Call it with `value.method()`, not `method(value)`.
-
-This keeps method ownership visible without placing functions inside the type
-declaration. Only values of the receiver type can call the method.
+In the call, `player` supplies `this` and 8 supplies `minimum`. The method
+reads the score and returns true. The shared receiver lets it read the player
+without changing it. Call receiver methods with a dot, even in the file that
+declares them.

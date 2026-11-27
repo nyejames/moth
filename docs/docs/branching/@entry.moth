@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Branching"]]
 [$in description:["If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."]]
@@ -20,16 +21,16 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Branching
 
     Use statement `if` for a Boolean decision. Use a full match when one value
     can take distinct literal, range, option or choice forms.
 
-    Unlike C-style `switch`, Moth never falls through between arms. `else =>`
-    alone marks the catch-all, and exhaustive matches can omit it when the
-    compiler can prove every case appears.
+    A full match runs the first arm whose pattern and guard succeed. A final `else:` catches the cases that remain. An exhaustive choice or option match can cover every case explicitly.
+
+    A third form, `if {`, selects a ready channel operation. See @../async (Channels and readiness) for its guards and fallback.
 ]
 
 [section:

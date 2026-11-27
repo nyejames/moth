@@ -5,9 +5,9 @@ until an exact receiving use resolves it within the same body.
 ### Inference from an argument
 
 [codeblock, $code "moth":
-    identity type A |value A| -> A:
+    identity type A |value A| -> A {
         return value
-    ;
+    }
 
     value = identity(42)
 ]
@@ -18,11 +18,11 @@ defaults to `I32`, so `A` resolves to `I32`.
 ### Inference from the result type
 
 [codeblock, $code "moth":
-    empty type A || -> {A}:
-        return {}
-    ;
+    empty type A || -> [A] {
+        return []
+    }
 
-    items {I32} = empty()
+    items [I32] = empty()
 ]
 
-The immediate receiving type says the result is `{I32}`, so `A` becomes `I32`.
+The immediate receiving type says the result is `["[I32]"]`, so `A` becomes `I32`.

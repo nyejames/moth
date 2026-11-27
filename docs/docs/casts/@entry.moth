@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Casts"]]
 [$in description:["Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."]]
@@ -20,15 +21,16 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Casts
 
-    `cast` converts a value for an immediate concrete typed destination. Its
-    target does not infer the source type, and constructor-like forms such as
-    `I32(value)` do not convert. Fallible casts follow ordinary error delivery;
-    `catch` handles a selected expression locally. See @../progress (Progress)
-    for current compiler and backend support.
+    With `cast`, the value supplies the source type and the place that
+    receives it supplies the target. For example, returning a cast from a
+    function with a `U16` result asks for a `U16`. When the conversion can
+    fail, use `catch` to handle it locally or let the enclosing function's
+    error contract deliver it. See @../progress (Progress) for compiler
+    and backend support.
 ]
 
 [section:

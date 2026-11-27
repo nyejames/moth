@@ -33,6 +33,18 @@ conflict checking consumes its `query_overlap` result.
 Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and
 analysis queries throughout the compiler's life.
 
+## Channels V1 research input
+
+The accepted deferred source contract is `docs/docs/async/channels.mtf`.
+The design and production foundation checkpoints must extend the normalized
+borrow input for dispatch, successful transfer, failed and unselected paths,
+suspension, endpoint release, joins and cancellation. Investigate these with
+the existing reference solver and bounded operational oracle, without
+changing their ownership or claiming concurrency coverage before delivery.
+Task/queue lifetimes and retained-edge proof remain the separate canonical
+lifetime-topology owner's responsibility. Runtime safety is mandatory;
+const execution keeps its independent bounded interpreter access contract.
+
 ## Core contract
 
 [table:
@@ -544,7 +556,7 @@ The result shares no mutable origin with the source. Existing source aliases rem
 Example:
 
 [codeblock, $code "moth":
-    items ~= {"Priya"}
+    items ~[String] = ["Priya"]
     shared = items
     snapshot ~= copy items
 
@@ -587,10 +599,10 @@ Loops make this harder because one definition site can execute many times:
 [codeblock, $code "moth":
     value ~= initial()
 
-    loop condition:
+    loop condition {
         previous = value
         ~value = next()
-    ;
+    }
 ]
 
 The first reference model may use one origin class per fresh definition site and carry that class around the loop fixed point. That is an abstraction, not a claim that every runtime iteration shares storage.
@@ -809,14 +821,14 @@ Boracle should exploit path separation whenever the source cannot observe confli
 Example:
 
 [codeblock, $code "moth":
-    items ~{String} = {"Priya"}
+    items ~[String] = ["Priya"]
     shared = items
 
-    if condition:
+    if condition {
         inspect(shared)
     else
         ~items.push("Rob")
-    ;
+    }
 ]
 
 The shared use and exclusive mutation occur on different paths. A reference solver should not reject them merely because both are textually after the alias issue.
@@ -833,7 +845,7 @@ conservatively keep such aliases active to scope exit.
 Boracle should investigate the stronger rule:
 
 [codeblock, $code "moth":
-    items ~= {"Priya"}
+    items ~[String] = ["Priya"]
     writer ~= items
 
     -- writer is never used
@@ -1018,11 +1030,12 @@ freshness or disjointness. Richer per-result borrow summaries remain a separate 
 
 A fallible failure path that does not store or return a value must not keep its success-only loan live.
 
-## Captures and legacy observation events
+## Callback captures
 
-Ordinary reads, mutations and Route capture evaluation obey the same borrow rules as other values.
-Wire binding identity creates no observer, mutation authority or lifetime extension. Builder
-lifecycle roots and final retained-capture lifetime ownership belong to later analysis.
+In the accepted closure design, the borrow problem includes shared or exclusive capture access
+and the possible sources of borrowed results. An opaque callback's captured environment can
+supply a result even when the invocation takes no arguments. Final lifetime ownership belongs
+to later analysis.
 
 ## Structured witnesses
 
@@ -1126,18 +1139,16 @@ Boracle and the future production design should exploit these facts:
 - no explicit move operator
 - no mandatory ordinary consuming parameters
 - no shadowing
-- no general closures or anonymous captured callables
 - no general function values
 - no trait objects or dynamic trait dispatch
 - no unsafe language escape hatch
 - no arbitrary user-defined builtin collection storage semantics
-- statically resolved calls
+- statically resolved named calls and explicit callback operands with declared signatures
 - concrete generated generics before borrow validation
 - closed external boundary profiles
-- no automatic observation or subscription semantics from Wire/Route parameter contracts
-- no current async suspension model in accepted borrow semantics
+- no implemented task suspension in the current borrow analysis
 
-These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, closure-capture, async-generator, trait-object, unsafe or drop-check machinery.
+These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, async-generator, trait-object, unsafe or drop-check machinery.
 
 It still needs precise CFG reasoning, aliases, projections, call summaries, loops, fallible paths and aggregate storage.
 

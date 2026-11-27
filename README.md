@@ -47,10 +47,16 @@ Web development is the current focus. The home-grown HTML project builder create
 
 </div>
 
-Templates are first-class language values in Moth.
-They are the main way you create strings, but are far more powerful than regular string formatters. 
+Square brackets construct text, collections and maps. A receiving type tells Moth when to keep individual Strings as elements.
 
-<img src="./docs/assets/code-snippet.png" width="800px"/>
+```moth
+names [String] = ["Priya", "Rob"]
+greetings [String] = [loop names |name|:
+    [: Hello, [name]!]
+]
+```
+
+Each iteration contributes one greeting. The inner brackets construct the String. The outer brackets collect both results. The [language basics](./docs/docs/language-overview/@entry.moth) and [cheatsheet](./docs/docs/cheatsheet/moth-language-cheatsheet.mtf) describe the target syntax on this branch.
 
 Moth's custom flavor of Markdown can live inside normal templates, so content can capture values, compose styles and fold straight into HTML at compile time.
 

@@ -14,7 +14,7 @@ The compiler constructs this structure directly from the token stream. It does n
 
 ### Exported declaration
 
-A `.mtf` file exposes exactly one generated constant: `content #String`. The content is compile-time folded HTML text. No other declaration is exported.
+A `.mtf` file exposes exactly one generated constant: `content #String`. The content is compile-time folded HTML text. A receiver in another file cannot change its type to a collection. No other declaration is exported.
 
 ### File is content-oriented
 

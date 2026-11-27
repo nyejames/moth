@@ -1,5 +1,5 @@
 @overview content as reference_content
-@docs_styles navbar, section, theme_css, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, theme_head, sidebar, sync_navigation, sidebar_id
 @diagrams css as diagrams_css
 
 [$in title:["Compiler design: source to page"]]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     This section explains compiler concepts in general alongside the Moth-specific ones.

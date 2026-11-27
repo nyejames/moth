@@ -1,0 +1,51 @@
+### Keep spaces with `$raw`
+
+Use `$raw` when the exact whitespace matters. You can still insert a value
+from the surrounding scope.
+
+[codeblock, $code "moth":
+    name = "Priya"
+    label = [$raw:  [name]]
+]
+
+The result starts with two spaces before `Priya`.
+
+### Write Markdown with `$md`
+
+[codeblock, $code "moth":
+    summary = [$md:Build **passed**.]
+]
+
+Moth emits a paragraph and puts `passed` in a `<strong>` element. See
+@../templates/#markdown-formatting (Markdown formatting) for headings, links
+and lists.
+
+### Write markup with `$html` or display it with `$escape_html`
+
+[codeblock, $code "moth":
+    markup = [$html:<b>Build</b>]
+    example = [$escape_html:<b>Build</b>]
+]
+
+In an HTML page, the first result displays **Build** in bold. The second
+displays the literal text `<b>Build</b>`, including its tags.
+
+### Check CSS with `$css`
+
+[codeblock, $code "moth":
+    rule = [$css:.notice { color: red; }]
+    property = [$css "inline":color: red;]
+]
+
+The first example checks a complete rule. Use the `"inline"` operand for
+declarations destined for an element's `style` attribute.
+
+### Show source with `$code`
+
+[codeblock, $code "moth":
+    snippet = [$code "moth":greeting = [:Hello]]
+]
+
+The result highlights the Moth source. The inner template appears in the
+listing with both brackets intact. Choose `$code "text"` for an unhighlighted
+listing.

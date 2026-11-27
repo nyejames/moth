@@ -1,0 +1,155 @@
+The accepted closure design follows the syntax migration. Compiler support is
+pending. See @../progress (Compiler progress).
+
+### Declaring and invoking a callback
+
+A callback parameter or a callback field on a named struct declares a
+signature. The closure supplied to that slot gets its argument types, access
+modes and result from the signature. A trait requirement can declare a method
+with a callback parameter under the same rules.
+
+[codeblock, $code "moth":
+    row_label |title String, format_label |text String| -> String| -> String {
+        return format_label(text = title)
+    }
+
+    prefix = "Action: "
+    label = row_label("Save", |caption| => [prefix, caption])
+]
+
+Here `label` holds `"Action: Save"`. The *invoker* names the argument
+`text` from the declaration. The *closure* calls the same argument
+`caption` and captures `prefix` from the surrounding scope. Its argument
+names obey the ordinary no-shadowing rule.
+
+After `=>`, write one expression. Moth checks it as a return expression.
+A callback can produce zero or one success value, including an optional value.
+Omit the result arrow for zero values. Call a named helper when the work needs
+statements. A closure literal requires an immediate receiving signature, even
+if it captures nothing. You can't bind a bare literal to a local or return a
+callback on its own. V1 provides no general function type, callable trait or
+const closure.
+
+### Capturing for the duration of a call
+
+A plain callback parameter is valid for the receiving call. The receiver can
+skip it, call it repeatedly or forward it to another plain parameter within
+that call. Forming a closure identifies the outer places it uses. Invoking it
+evaluates its body. Other arguments still evaluate in their written order.
+
+[codeblock, $code "moth":
+    increment |value ~I32| {
+        ~value += 1
+    }
+
+    twice |
+        step ||,
+    | {
+        step()
+        step()
+    }
+
+    count ~= 0
+    twice(|| => increment(~count))
+    io.line([:Count: [count]])
+]
+
+This prints `Count: 2`. Shared capture is the default. The `~count` argument
+requests exclusive access for `increment`. Conflicts depend on the places
+involved, including aliases. Passing another overlapping mutable argument to
+the same receiving call would fail. A callback must leave its captures usable
+for another invocation even if a particular receiver only calls it once.
+
+To take one snapshot, write `saved = copy items` before forming a closure
+that reads `saved`. Writing `copy items` inside the body takes a fresh copy on
+each invocation. The same timing applies to a fallible lookup or any other
+work you put in the body. See @../bindings/#explicit-copies (Explicit copies).
+
+### Keeping a handler in a component
+
+A callback parameter can grant permission to store or forward the callback
+into a particular owner. Every path that keeps it must use the declared
+destination.
+
+- `into this` permits storage in the writable receiver.
+- `into owner` permits storage in the writable parameter named `owner`.
+- `into return` permits storage in the single success owner the function returns.
+
+The owner may retain shared captures only when their storage and everything
+they reference live long enough. Within that lifetime you can call a stored
+field, replace it through writable access or lend it to a plain parameter.
+Replacing a handler removes the field's reference to the old handler. An
+outstanding result borrow keeps its own sources live. Extracting the field doesn't grant permission to keep it in
+another independent owner.
+
+A retained handler can't capture an outside place exclusively. To edit
+mutable state directly, lend it as an argument each time you call the handler.
+
+[codeblock, $code "moth":
+    Draft = | title String |
+    Editor = | on_edit |model ~Draft, text String| |
+
+    rename |document ~Draft, replacement String| {
+        ~document.title = replacement
+    }
+
+    editor = Editor(|target, entered| => rename(~target, entered))
+    current ~= Draft("Notes")
+    editor.on_edit(~current, "Minutes")
+    io.line(current.title)
+]
+
+The editor can live between edits. Only this invocation borrows `current`
+exclusively. The caller can read `Minutes` as soon as the call completes.
+
+### Copying a component or making its handler optional
+
+A stored callback is non-copyable, even with no captures. If `panel.row.on_edit`
+holds one, `copy panel` and `copy panel.row` both fail. You can copy an
+eligible data field such as `copy panel.row.title`. An ordinary binding or a
+legal return can still refer to the same owner.
+
+[codeblock, $code "moth":
+    Suggestion = | suggest || -> String? |
+
+    disabled Suggestion? = none
+    installed Suggestion? = Suggestion(|| => "Untitled")
+    no_suggestion = Suggestion(|| => none)
+]
+
+`disabled` has no handler. `installed` holds a handler that returns text.
+`no_suggestion` also has a handler, but calling `no_suggestion.suggest()`
+returns `none`. The `?` on `String?` belongs to the result. The field itself
+requires a callback, so `Suggestion(none)` is invalid.
+
+### Using a borrowed result
+
+An invocation can return a view into an argument or a capture. Even a
+zero-input reader such as `|| => task.title` can return borrowed text. When
+only the signature is known, account for every possible source, including
+references stored inside captured values. A drawing function can use the
+text while those sources are live. Keeping the result longer requires proof
+that each possible source outlives its destination, or an independent copy
+made while the view is valid. Where applicable, a declared region can supply
+the lifetime proof. See @../memory/#lifetimes-and-result-shapes (Lifetimes and result shapes).
+
+### Failure and suspension
+
+A callback runs synchronously. Its body, every reachable helper and any
+implicit child join must have proof that they can't suspend. An imported
+helper can qualify without a written `$no_suspend` when its effects prove
+this. A channel wait or an unknown foreign effect prevents that proof. The
+invoking function may wait between completed calls if its live borrows allow
+it. See @../async/#channel-reference (Channels and tasks).
+
+An invocation whose body is unknown may fail implicitly, trap or use fast
+arithmetic. For example, checked arithmetic in the body can raise a built-in
+failure. The code that invokes the callback owns that failure. Registration
+can observe a failure when it invokes the handler synchronously. A later
+invocation reports to its own caller. Storing the handler alone never executes
+the body, and a failure after a committed store doesn't undo the store.
+
+Private invokers can propagate implicit failure under the ordinary rules.
+Exported invokers must recover or expose a compatible error boundary.
+Callback signatures have no explicit error slot. Handle a named helper's
+custom error inside the closure. See @../errors/#catch-and-recovery (Catch and recovery).

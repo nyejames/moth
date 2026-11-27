@@ -1,35 +1,42 @@
-Call a function by writing its name followed by arguments.
+A function declares **parameters** between pipes. At the call site, you supply
+**arguments** in parentheses. Positional arguments fill parameters from left
+to right. A named argument identifies its parameter by name.
 
 [codeblock, $code "moth":
-    result = double(21)
+    describe |subject String, prefix String = "item"| -> String {
+        return [prefix, ": ", subject]
+    }
+
+    first = describe("apple")
+    second = describe("apple", prefix = "fruit")
 ]
 
-Arguments are positional by default. They can also name their parameter:
+The first call uses the default prefix and returns `"item: apple"`. The second
+overrides it and returns `"fruit: apple"`. Put positional arguments before
+named arguments. Struct and choice constructors use the same argument order.
+
+### Grant mutable access at the call
 
 [codeblock, $code "moth":
-    label = describe(subject = "apple")
-]
+    increment |value ~I32| {
+        ~value += 1
+    }
 
-Positional arguments come first. Named arguments come afterward.
-
-Mutable parameters need explicit access to an existing mutable value:
-
-[codeblock, $code "moth":
     count ~= 1
     increment(~count)
     increment(value = ~count)
 ]
 
-For a named argument, put `~` before the value. Fresh values and independent
-copies don't use `~`:
+Both calls change the existing `count`, which now holds 3. In the named form,
+`value` identifies the parameter and `~count` identifies the mutable place
+the caller grants it access to. A fresh value or an independent copy can
+satisfy the same parameter without granting access to `count`.
 
 [codeblock, $code "moth":
     increment(1)
     increment(copy count)
 ]
 
-Ordinary function calls keep their usual syntax, including empty `f()`. Directives
-share the call rules but reject an authored empty `()`; see @./ (Calls and access advanced).
-
-A `-> !` function can only be called as a statement. It cannot be assigned,
-passed as an argument or handled with `!`, `?` or `catch`.
+An ordinary function with no parameters still takes an empty argument list
+when you call it. A directive with no operands takes its bare name. A function
+that declares `-> !` can only appear as a statement. The Advanced view gives the access and argument rules for each kind of call.

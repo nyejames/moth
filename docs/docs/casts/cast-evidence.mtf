@@ -1,77 +1,46 @@
-Compiler-owned static traits prove source evidence for explicit casts. The
-compiler also registers builtin evidence for its supported source-target policies.
-
-### Source-authored target families
-
-Moth defines an infallible and a fallible evidence trait for each of fifteen
-targets: the eleven fixed numeric types, `Bool`, `String`, `Char` and `Error`.
-Each infallible trait requires a method returning its target. Each fallible
-trait requires a `try_to_*` method returning the target and builtin `Error!`.
-
-The @../traits/#core-cast-traits (Core cast traits) reference owns the complete
-fixed-target inventory and method signatures. A source implementation uses an
-ordinary lowercase `this` receiver with its concrete type.
+Moth checks whether the source and target types support a conversion before
+lowering the program. Builtin types have a fixed set of conversions. A
+struct or choice can supply its own conversion to one of the supported
+targets by declaring conformance to a core cast trait.
 
 ### Builtin evidence
 
-Builtin evidence follows the complete conversion policies, including the fixed
-numeric targets, `Byte` and the `Dec` family. A known value, folded result,
-proven range or optimiser fact never changes the evidence class. A safe value
-cannot make a fallible source-target pair infallible.
-
-`Byte` and `Dec` retain their builtin conversion policies but gain no
-source-authored evidence families.
+The complete pair of types determines whether a builtin conversion can
+fail. For example, `U16` to `U8` can fail even when the compiler knows
+the value fits. It can omit a redundant range check without changing the
+conversion's contract. Builtin conversions also cover `Byte` and the
+`Dec` family. See @./#cast-targets (Cast targets).
 
 ### Source-authored evidence
 
-A same-file nominal struct, choice or aligned generic nominal constructor can
-provide evidence for one supported target. It must define the required
-receiver method and declare explicit conformance:
+A same-file struct or choice can supply an infallible or fallible method.
+A generic struct or choice can declare the conversion for the whole
+constructor. The method needs explicit conformance. An infallible method
+must handle any inferred failure before it escapes. A fallible method
+declares a builtin `Error!` slot.
 
 [codeblock, $code "moth":
-    Label = |
-        text String,
-    |
+    Digits = | text String |
 
-    to_string |this Label| -> String:
-        return this.text
-    ;
+    try_to_i32 |this Digits| -> I32, Error! {
+        return cast this.text
+    }
 
-    Label must CASTABLE_TO_STRING
+    Digits must TRY_CASTABLE_TO_I32
 
-    label = Label("hello")
-    text String = cast label
+    count I32 = cast Digits("42") catch then 0
 ]
 
-Fallible evidence declares its actual typed route:
+The return type of `try_to_i32` sets the target for the builtin cast of
+the text. If parsing fails, that implicit failure can leave the method
+through its declared `Error!` slot. The outer cast uses the method and
+its caller can recover with an ordinary `catch`.
 
-[codeblock, $code "moth":
-    try_to_i32 |this Label| -> I32, Error!:
-        value I32 = cast this.text
-        return value
-    ;
-
-    Label must TRY_CASTABLE_TO_I32
-
-    parsed I32 = cast Label("42") catch then 0
-]
-
-The cast uses the ordinary failure rules. Builtin conversion failures enter
-implicit failure. A fallible source method exposes its declared `Error!`
-outcome. An eligible catch or compatible function boundary handles the actual
-failure; the cast syntax does not select a separate propagation route.
-
-### Contract
-
-- Core cast traits resolve without dependency clauses.
-- They cannot be redeclared, imported, exported, aliased or shadowed.
-- Traits are static contracts, not value types.
-- Matching method shape alone is not evidence. Explicit conformance is required.
-- Same-file nominal types and aligned generic nominal instances may provide source evidence.
-- Infallible and fallible evidence for the same source type and target are mutually exclusive.
-- Evidence resolves before HIR and follows the complete static source and target types.
-- Infallible evidence implementations cannot acquire an inferred failure contract.
-- The traits prove source evidence only. They add no user-defined target types or general conversion framework.
+@../traits/#core-cast-traits (Core cast traits) lists all fifteen targets
+and the required method signatures. The compiler owns those trait names.
+Use them without an import. A type can claim only one of the two traits
+for a given target. The traits provide source conversions to those
+targets only.
 
 ### Outside cast design scope
 

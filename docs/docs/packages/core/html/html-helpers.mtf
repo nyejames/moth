@@ -27,7 +27,18 @@ A qualified selection introduces no local binding, so it never collides with a p
 
 ### Exported constants
 
-All helpers are compile-time `#String` constants that produce HTML strings. They fold at compile time and produce no runtime code.
+The package declares its HTML helpers at compile time. A wrapper such as `h1` keeps its slots open until you apply it. An application whose inputs are known can fold to a String. A runtime fill can produce that String when the page runs.
+
+[codeblock, $code "moth":
+    @core/html h1, bold
+    @core/css center, larger
+
+    simple = [h1, center, larger:Build status]
+    heading_style #= [$in style, $css "inline": text-align: center; font-size: larger;]
+    heading = [h1, heading_style:[bold:Build status]]
+]
+
+The outer bracket applies one heading wrapper. In `simple`, the two style inserts supply its style slot in order. In `heading`, a reusable named insert supplies the same style. The inner bracket wraps the text in bold. Put a receiving element in its own bracket when another wrapper needs to contain it. See @../../../patterns/components/ (HTML components) for reusable style inserts and runtime fills.
 
 #### HTML tags
 
@@ -166,9 +177,9 @@ Supported aliases:
 
 [codeblock, $code "moth":
 [codeblock, $code "moth":
-    render |name String| -> String:
+    render |name String| -> String {
         return ["Hello, ", name]
-    ;
+    }
 ]
 ]
 

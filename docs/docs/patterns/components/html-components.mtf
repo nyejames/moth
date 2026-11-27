@@ -1,73 +1,59 @@
-A component abstraction should stay **ordinary Moth data**. Its author chooses
-the public type and const functions. A page decides where that data becomes
-output.
+A component author chooses where representation matters. A slot can collect
+text, a sequence can collect node descriptions and an ordinary function can
+turn those descriptions into an HTML String for an entry.
 
-### A deliberately small result type
-
-This is an illustrative source-backed `@core/html` design, not a committed
-constructor or public signature:
+### Reuse a group of inline styles
 
 [codeblock, $code "moth":
-    HtmlPart = |
-        body String = "",
-        stylesheets String = "",
-    |
+    heading #= [$html:<h2 style="[$slot style]">[$slot]</h2>]
+    label #= [$html:<span style="[$slot style]">[$slot]</span>]
+    heavy #= [$in style:font-weight: 700;]
+    red #= [$in style:color: red;]
 
-    html_page #|parts {HtmlPart}| -> HtmlPart:
-        body ~= ""
-        stylesheets ~= ""
+    style_text #= [:[$slot style]]
+    warning #= [$in style:[style_text, heavy, red]]
 
-        loop parts |part|:
-            ~body = [body, part.body]
-            ~stylesheets = [stylesheets, part.stylesheets]
-        ;
-
-        return HtmlPart(
-            body = body,
-            stylesheets = stylesheets
-        )
-    ;
+    [heading, warning:Breaking change]
+    [label, warning:Deprecated]
 ]
 
-A template is the normal way to concatenate Strings in Moth. The composite
-result carries HTML and a structural String of stylesheet references. It holds
-no hidden page registration, renderer instance or component lifecycle.
+`style_text` collects the named style inserts, then `warning` targets the
+immediate element's `style` slot with the resulting declarations. A function
+returning a String can also build CSS, but its caller has to name the target
+slot. An insert cannot travel through a function result or search an ancestor.
 
-A real library will also need a way to carry independent `head` contributions.
-That representation remains an API decision. Concatenating head snippets into
-one String loses the boundaries the builder needs to deduplicate them
-individually, so treat `HtmlPart` as a starting shape rather than a finished
-contract.
+### Collect typed children
 
-### Keep local slots local
+Suppose your package defines `HtmlNode` plus `link`, `aside` and `render_html`.
+The signature of `aside` takes a sequence of nodes and returns one node.
+That parameter supplies the bracket construction's element type.
 
-The Basic example's `card` owns its named `title` slot. An imported or reused
-card cannot reach an enclosing page's builder slots. That parent-only routing
-rule keeps deep composition predictable and stops an intermediate component
-from silently changing where inserts go.
+[codeblock, $code "moth":
+    sidebar = aside([:
+        [link("Home", "/")]
+        [loop pages |page|:
+            [link(page.title, page.url)]
+        ]
+    ])
+    html = render_html(sidebar)
+]
 
-Const functions compose finished `HtmlPart` values across file and module
-boundaries. They run under the compiler's constant rules, never call runtime DOM
-functions and cannot invent new declarations or source code.
+Each iteration contributes one link node. The ordinary `aside` call constructs
+the parent and `render_html` supplies the String. A wrapper named `aside`
+would instead receive only the slots it declared. The language and HTML builder
+give these package-defined node types no special treatment.
 
-### Carry resources, not generated URLs
+### Keep resource contributions separate
 
-A component's `stylesheets` field can come from file values such as
-`@sidebar.css`. Composition preserves the resource origin inside the String.
-The builder later resolves URLs for the destination document and deduplicates
-stylesheets by stable origin, keeping first-use order.
+The Basic page's `HtmlPart` carries one tracked stylesheet beside its body.
+The entry explicitly forwards each resource to its own direct `stylesheets`
+insert. The builder resolves its URL and deduplicates by stable origin. For
+shared selectors or responsive rules, use a CSS file. An inline `$css`
+declaration suits an instance-specific value.
 
-One builder contract still needs implementation. Today's `stylesheets` slot
-accepts exactly **one** CSS resource per direct insert. The composed
-multi-resource String on the Basic page describes an intended extension under
-investigation, not what the current slot validator accepts. That validator must
-keep each CSS origin and refuse stray text, site-root pieces and non-CSS
-resources.
-
-Don't compare resource strings to test whether two components use the same
-file. A URL depends on the output context. CSS rules shared by every instance
-belong in a separate resource. Inline `$css` suits one instance's small value,
-such as a CSS custom property.
+The `head` destination deduplicates each complete rendered contribution.
+Combining several head snippets into one String changes that boundary, so
+keep independent snippets in separate direct inserts.
 
 ### Types and boundaries keep reuse safe
 

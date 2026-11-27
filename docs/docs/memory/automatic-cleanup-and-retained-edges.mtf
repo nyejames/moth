@@ -80,9 +80,9 @@ Use a region when a whole retention domain can end at one known frontier:
 [codeblock, $code "moth":
     blob = load_blob()!
 
-    loop names |name|:
+    loop names |name| {
         ~index.set(name, blob)!
-    ;
+    }
 
     use(index)
     ~index.clear()
@@ -100,10 +100,10 @@ Use a count only when stored edges disappear independently and a single region
 would keep too much storage alive:
 
 [codeblock, $code "moth":
-    loop keys_to_remove |key|:
-        ~index.remove(key) catch:
-        ;
-    ;
+    loop keys_to_remove |key| {
+        ~index.remove(key) catch {
+        }
+    }
 ]
 
 Runtime execution decides which entry disappears and which removal leaves the

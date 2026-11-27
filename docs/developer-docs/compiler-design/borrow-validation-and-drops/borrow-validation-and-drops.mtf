@@ -259,10 +259,9 @@ Debug and GC-native representations may erase individual cleanup operations when
 ## Builder lifecycle roots
 
 Page, mount, request, frame and arena roots are accepted future inputs to lifetime topology. They
-must be explicit when a builder-owned consumer retains Moth values. Wire and Route parameters by
-themselves create no observer, retained consumer or lifetime extension. Any future observation or
-event lifecycle needs its own accepted contract before borrow and lifetime analyses receive facts
-for it.
+must be explicit when a builder-owned consumer retains Moth values. Storing a callback in a Moth
+owner creates ordinary retained edges to its shared captures. Event registration and teardown
+belong to the consumer.
 
 ## Future-concurrency context
 

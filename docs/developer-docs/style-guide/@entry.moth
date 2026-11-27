@@ -1,7 +1,7 @@
 @style-guide content as style_content
 @testing content as testing_content
 @validation content as validation_content
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Codebase development standards"]]
 [$in description:["Rust code style, testing strategy and validation gates for Moth compiler work."]]
@@ -9,7 +9,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Codebase development standards

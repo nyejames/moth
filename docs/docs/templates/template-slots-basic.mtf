@@ -1,28 +1,24 @@
-A slot is a place where another template supplies content.
+A wrapper leaves room for its caller to supply content. Mark that place with
+`$slot`, then put the wrapper in the head of a new template.
 
 [codeblock, $code "moth":
-    card = [:
-        <h1>[$slot title = "Untitled"]</h1>
-        <section>[$slot]</section>
-    ]
-
-    [card:
-        [$in title:Welcome]
-        This is the card body.
-    ]
+    card #= [$html:<article>[$slot]</article>]
+    notice = [card:All tests passed.]
 ]
 
-The named `title` slot receives `Welcome`.
+The default slot receives the body. Here `notice` contains
+`<article>All tests passed.</article>`.
 
-The default slot receives the body text.
+Give a slot a name when the caller has more than one kind of content to
+supply. Use `$in` to send content to that name.
 
-Without an insert, `title` shows its `Untitled` default while an empty default
-slot renders nothing. Each slot occurrence owns its own compile-time `String`
-default, and an explicitly empty insert still suppresses it.
+[codeblock, $code "moth":
+    panel #= [$html:<h2>[$slot title = "Draft"]</h2><section>[$slot]</section>]
+    report = [panel:[$in title:Build]All tests passed.]
+]
 
-Positional slots use `$slot 1` and are filled by loose head contributions. `$in`
-targets a named slot only and has no positional form. Slots that receive no
-content and have no default become empty strings.
-
-See @../templates/#template-slots (Template slots) for declaration forms,
-positional routing, stored inserts and runtime contributions.
+`Build` appears in the heading and the sentence appears in the section.
+If you omit the title insert, the heading uses `Draft`. An explicitly empty
+insert leaves the heading empty. A numbered slot such as `$slot 1` receives
+a loose contribution by position. See @../template-directives/#slot-directives
+(Slots and inserts) for a positional example and presence guards.

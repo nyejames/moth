@@ -7,9 +7,9 @@ A conformance declaration states that a type implements one or more traits. Matc
         text String,
     |
 
-    display |this Label| -> String:
+    display |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must DISPLAY_TEXT
 ]
@@ -20,7 +20,7 @@ A conformance declaration states that a type implements one or more traits. Matc
 - A matching method without `Type must TRAIT` is not conformance.
 - A conformance declaration is top-level.
 - It is bodyless.
-- It is newline-terminated and has no semicolon.
+- The declaration occupies its own line.
 - Several traits may be listed with commas.
 - Every requirement must resolve to a method with exact:
   - receiver mutability
@@ -61,13 +61,13 @@ A generic type declared in the same file may declare conformance. The trait requ
         value A,
     |
 
-    DISPLAY_TEXT must:
+    DISPLAY_TEXT must {
         display |This| -> String
-    ;
+    }
 
-    display type A |this Box of A| -> String:
+    display type A |this Box of A| -> String {
         return [: box]
-    ;
+    }
 
     Box must DISPLAY_TEXT
 ]

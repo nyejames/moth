@@ -2,7 +2,7 @@
 
 [codeblock, $code "moth":
     count ~= 0
-    names ~{String} = {}
+    names ~[String] = []
 ]
 
 ### Declaration and reassignment
@@ -24,14 +24,14 @@ the same binding a second type.
 
 ### Exclusive access
 
-Declaration mutability and call-site exclusive access are separate operations. The exclusive-access rules here describe runtime code. Const functions retain mutation permissions and the same markers, but permit overlapping mutable aliases and dynamically diagnose uses of invalidated immutable references. See @../functions/function-declarations (Function declarations).
+Declaration mutability and call-site exclusive access are separate operations. The exclusive-access rules here describe runtime code. Const functions retain mutation permissions and the same markers, but permit overlapping mutable aliases and dynamically diagnose uses of invalidated immutable references. See @../functions/#function-declarations (Function declarations).
 
 [codeblock, $code "moth":
-    add_name |names ~{String}, name String|:
+    add_name |names ~[String], name String| {
         ~names.push(name)
-    ;
+    }
 
-    names ~{String} = {}
+    names ~[String] = []
     add_name(~names, "Priya")
 ]
 

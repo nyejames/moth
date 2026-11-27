@@ -12,7 +12,8 @@
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Choices"]]
 [$in description:["Choice declarations, variants, payload patterns and structural equality in Moth."]]
@@ -20,7 +21,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Choices
 
@@ -74,7 +75,7 @@ init_docs_sidebar()!
 [section:
     [doc_pager:
         [$in previous_path:../structs/]
-        [$in previous_title:Structs]
+        [$in previous_title:Structs and methods]
         [$in next_path:../errors/]
         [$in next_title:Errors, options and assertions]
     ]

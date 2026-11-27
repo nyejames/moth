@@ -1,9 +1,9 @@
 `return` produces the success values declared by a function.
 
 [codeblock, $code "moth":
-    double |value I32| -> I32:
+    double |value I32| -> I32 {
         return value * 2
-    ;
+    }
 ]
 
 ### Success returns
@@ -34,17 +34,17 @@ Three contracts are distinct:
 - Write `-> !` only when the callable never returns control normally.
 
 [codeblock, $code "moth":
-    greet |name String|:
+    greet |name String| {
         io.line([: Hello, [name]])
-    ;
+    }
 
-    load_name || -> String:
+    load_name || -> String {
         assert(false, "not implemented")
-    ;
+    }
 
-    fatal |message String| -> !:
+    fatal |message String| -> ! {
         assert(false, message)
-    ;
+    }
 ]
 
 Only the explicit `-> !` contract propagates divergence across a call.
@@ -57,9 +57,9 @@ Callers of `load_name` still see an ordinary `String` result. See
 A function may declare and return more than one success value.
 
 [codeblock, $code "moth":
-    pair || -> String, I32:
+    pair || -> String, I32 {
         return "Priya", 2
-    ;
+    }
 
     name, count = pair()
 ]
@@ -70,9 +70,9 @@ Each target independently declares a new binding or updates an existing place.
 An update requires a leading `~` on that target:
 
 [codeblock, $code "moth":
-    next || -> I32, String:
+    next || -> I32, String {
         return 1, "ready"
-    ;
+    }
 
     count ~= 0
     ~count, message = next()
@@ -114,13 +114,13 @@ A function signature may contain at most one error-channel slot marked with
 That slot must be last.
 
 [codeblock, $code "moth":
-    load |id String| -> String, Error!:
-        if id is "":
+    load |id String| -> String, Error! {
+        if id is "" {
             return! Error("Missing id")
-        ;
+        }
 
         return "value"
-    ;
+    }
 ]
 
 `return!`, postfix propagation and `catch` are documented by

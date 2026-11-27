@@ -1,14 +1,16 @@
 Pattern matching inspects choice payloads.
 
 [codeblock, $code "moth":
-    if status is:
-        Ready => io.line("ready")
-        Waiting => io.line("waiting")
-        Failed(message) => io.line(message)
-    ;
+    event = WindowEvent::Resized(1280)
+
+    if event is {
+        case Resized(width, height) if width > 1920: io.line("wide")
+        case Resized(width, height): io.line([: [width] x [height]])
+        else: io.line("no size")
+    }
 ]
 
-Qualified patterns such as `Status::Ready` use the same lexical header rule:
+Qualified patterns such as `WindowEvent::Opened` use the same lexical header rule:
 no whitespace, line break or comment may appear on either side of `::`.
 
 ### Capture contract
@@ -19,34 +21,37 @@ no whitespace, line break or comment may appear on either side of `::`.
 - `as local_name` renames only the arm-local binding.
 - Duplicate local binding names are invalid.
 - Payload captures are immutable arm-local bindings.
-- A valid payload arm covers the complete variant regardless of payload values.
+- An unguarded payload arm covers the complete variant. A guarded arm covers only values for which the guard succeeds.
+- The guard and body see every capture, including fields the constructor filled from defaults. Other arms have their own scope.
 
 [codeblock, $code "moth":
-    Response ::
+    Response = {
         Pending |
-            retry_count I32,
+            retry_count I32 = 0,
             message String,
         |,
         Complete,
-    ;
+    }
 
-    if response is:
-        Pending(retry_count, message as pending_message) =>
+    response = Response::Pending(message = "waiting")
+
+    if response is {
+        case Pending(retry_count, message as pending_message):
             io.line(pending_message)
-        Complete => io.line("done")
-    ;
+        case Complete: io.line("done")
+    }
 ]
 
 Payload captures also work in inline and block single-predicate value matches:
 
 [codeblock, $code "moth":
-    message = if response is Failed(message) then message else "ok"
+    message = if response is Pending(retry_count, message) then message else "ok"
 
-    message = if response is Failed(message):
+    message = if response is Pending(retry_count, message) {
         then message
     else
         then "ok"
-    ;
+    }
 ]
 
 ### Deferred and rejected forms
@@ -64,7 +69,7 @@ Wildcard payload captures are not supported.
 Named assignment is not match syntax:
 
 [codeblock, $code "moth":
-    Failed(message = text) => io.line(text)
+    case Pending(retry_count, message = text): io.line(text)
 ]
 
 Nested payload patterns and nested exhaustiveness are deferred.

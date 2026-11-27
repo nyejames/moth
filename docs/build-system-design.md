@@ -202,6 +202,8 @@ Project settings and builder slot values have distinct shapes. Their explicit do
 
 HTML document metadata is not a root directive. The active builder registers a read-only set of named destinations. A bare direct top-level `[$in name: ...]` in `@entry.moth` is const-required and contributes to one registered destination. The compiler validates the name, folds its structural String and records the destination, authored span and runtime insertion index in the existing fragment handoff. Other bare direct `[...]` templates must likewise fold into static body fragments. Only explicit `~[...]` forms produce runtime body fragments, even when foldable. `~[$in name: ...]` is invalid. The removed direct `#[...]` spelling has no alias. The builder does not interpret source annotations or know their compiler-owned documentation identity. Nested or aliased inserts remain ordinary template composition.
 
+The HTML body and each registered destination supply String evidence at their direct bracket. A numeric head can therefore render text there. An existing typed sequence or package-defined node needs an explicit rendering call that returns String. A nested slot never receives the root destination implicitly. The `.mtf` adapter also fixes its output as String independently of the importer.
+
 The HTML builder interprets `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`; the default body destination stays on the ordinary fragment lane. Scalar contributions concatenate in source order, and an explicit empty value counts as supplied. An absent title falls back through the route and then the project name with the configured prefix and postfix. An absent description emits no element, while absent language, favicon and body style use builder settings. Title text and attribute values are escaped. Each `stylesheets` contribution must identify exactly one tracked CSS origin, and the builder keeps the first contribution for each stable origin. Complete `head` contributions deduplicate after URL rendering and are inserted after built-in head content. Explicit `~[...]` runtime top-level templates contribute only to the body; runtime named builder slots remain unsupported.
 
 No root-purpose directive exists. Entry eligibility is a source-structural fact: a directory containing `@entry.moth` is an entry module. Empty, static-only and metadata-only entries count. `@mod.moth` and `@package.moth` never become entries. Importing a module or package never activates its entry. HTML V1 selects at most one directory-derived route per `@entry` directory and derives it from directory position, never from source activity, rendered length, a direct `$in`, a special page filename or non-empty HIR. A project needs no homepage, and descendant-only entries are valid.
@@ -590,13 +592,15 @@ Callers own input IO and supply complete text or values plus a prepared exact sc
 
 A `.mon` file is literal data, not a compilable Moth source kind or semantic provider. It may be referenced as an ordinary resource under the explicit-extension resource rules. Parsing MON never discovers dependencies from its strings.
 
+The migration changes the literal-data format for both the reader and the writer. The codec and its consumers follow the existing format and package compatibility policy.
+
 The accepted static MON builder direction consumes the standalone codec and emits compile-time-known assets through ordinary resource planning, output records and manifest ownership. Exact command/directive and Moth-native integration contracts remain open. This direction creates no alternate parser, resource registry or output-writing path.
 
 ## Generated-function boundary
 
 Each module receives an immutable view of published generated identities/summaries. The compiler returns its completed generated delta atomically with the module result. Build code publishes, stores, places and reuses complete sidecars without mutating base/generated HIR or installing summaries.
 
-The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. Canonical parameter contracts distinguish ordinary values, wires and constructor routes across publication. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
+The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. The compiler publishes callback signatures and retention destinations using stable identities. Linking consumes the compiler's dependencies for reachable closure bodies. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
 
 Nested requests converge within the compiler transaction. They create no extra source jobs or wave edges. Cross-package instances belong to the consuming boundary and retain concrete canonical numeric types, evidence and applicable ABI/language compatibility. Active-request selection, semantic deduplication and diagnosed transaction rollback follow the compiler authority, not a build-side post-filter.
 
@@ -648,7 +652,7 @@ For each selected entry, the builder plans:
 
 The builder slot plan interprets the registered named fragments once. It produces scalar metadata, deduplicated stylesheet `href` values in first-origin order and deduplicated complete `head` HTML. The JavaScript and HTML-Wasm document paths consume the same plan, so metadata, link order and body output stay equivalent.
 
-This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. Templates produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
+This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. HTML entry fragments produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Event registration, delivery and teardown belong to the consuming library or runtime.
 
 The generated caller branches on the entry's typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
 
@@ -767,7 +771,7 @@ Each entry physical variant has a JavaScript companion facade. Its selected Wasm
 
 Link analysis instantiates local summaries with builder lifecycle roots before target assignment. It carries shared validated topology and backend-neutral requirements, not one project-global physical memory plan. Linking does not reopen source or mutate HIR.
 
-Page, mount, request, frame and arena roots are lifecycle inputs when a consumer contract defines them, not exceptions to source memory law. They let storage outlive a lexical function only when the ordinary single-owner and retained-edge outlives rules hold. The existence of a lifecycle category does not imply a Wiring observer or UI runtime.
+Page, mount, request, frame and arena roots are lifecycle inputs when a consumer contract defines them, not exceptions to source memory law. They let storage outlive a lexical function only when the ordinary single-owner and retained-edge outlives rules hold.
 
 Caller/link analysis derives concrete cleanup frontiers from exported effects, aliases, retention domains, future edges and lifecycle roots. Exported summaries stay canonical and carry no donor-local family/region/counter/frontier IDs. Topology-relevant implementation/link changes invalidate affected assemblies.
 
@@ -784,6 +788,27 @@ A backend declares whether it supports collector-free release lowering. This is 
 A full-control release backend realises every topology accepted by semantic and target validation without a tracing/reachability collector. Physical-planning imprecision cannot become another source rejection or collector fallback. Debug/development may use GC for simpler lowering or instrumentation. GC-native targets may use their host collector in any profile. These choices preserve mandatory access/lifetime legality. Exact numeric semantics are common across backends; reachable-operation capability validation independently rejects unsupported operations without selecting different widths or changing source legality.
 
 After lowering, a builder may verify that an artefact contains no tracing runtime. That reports an output property without changing source legality or behaviour.
+
+### Structured task execution
+
+Channels V1 uses builder-owned execution lifecycle roots, one cooperative
+scheduler per execution instance and compiler-validated task, channel and
+host-registration requirements. The builder supplies capabilities and lifecycle
+inputs, not source suspension or ownership decisions. Target validation checks
+reachable suspendable calls, dispatch targets and cross-target edges before
+physical planning. A host callback publishes a bounded completion or independent
+value and schedules a wakeup without re-entering an active guest. Stale or
+cancelled completion identities cannot resume a destroyed instance.
+
+The HTML entry remains active until its invocation and owned descendants settle.
+Normal return joins; failure cancels and joins before delivery. Existing
+success-only runtime fragment publication applies to the complete invocation,
+not each suspension. Explicit live host IO is not rolled back. Long-lived page
+execution and host teardown use actual builder roots and explicit registration
+cancellation, never an invented global lifetime. Synchronous-only entries do not
+require a scheduler. The Channels source reference and compiler/memory handoffs
+own semantics; precise portable continuation and host ABI details are settled
+at the implementation architecture checkpoint before full Wasm lowering.
 
 ### Runtime and memory
 
@@ -906,6 +931,8 @@ URL maps and site-root policies follow the same physical/output separation. Reso
 ### Persistent compatibility
 
 Persisted modules, packages and generated artefacts preserve the same semantic boundaries. Reuse requires compatible compiler artefact/language versions, stable project/package identity, source/config fingerprints containing their exact typed facts, dependency interface fingerprints, used Core/Builder capabilities, frontend feature selection, relevant ABI/layout policy and generated request identity where applicable.
+
+A grammar cutover changes language compatibility. Changes to an exported typed wrapper or constructor default change the public semantic fingerprint used by consumers.
 
 Persisted physical variants also require the complete validated physical identity, including memory-plan and applicable URL-map/site-root fingerprints. Process-local IDs and absolute paths are not compatibility keys. Canonical identities and self-contained or remappable lookup data preserve meaning across processes.
 

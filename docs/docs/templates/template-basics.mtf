@@ -1,11 +1,7 @@
-**Entries and page fragments.** HTML pages come from directories that contain
-`@entry.moth`. A bare direct top-level [$html:<code>&#91;...&#93;</code>] must fold into static page output, while
-[$html:<code>~&#91;...&#93;</code>] deliberately publishes a runtime body fragment.
-Direct const root `$in` inserts supply builder metadata. See @../project-structure/#entry-config (Entry metadata and builder slots) for their rules.
-
-Templates create owned `String` values.
-
-They use square brackets. Collections and maps use braces.
+Square brackets construct text or sequences and can compose contributions
+through slots, wrappers and control flow. A non-empty text body establishes
+String. A concrete receiver or formatter can establish the type before the
+compiler checks a contribution.
 
 [codeblock, $code "moth":
     name = "Priya"
@@ -26,7 +22,8 @@ A colon separates the template head from its body.
 The head separates each meaningful item with a comma, including directives.
 Source directives use separate attachment rules. The head may contain:
 
-- a value or helper template
+- ordinary expressions, including nested constructions
+- one receiving wrapper and any compatible named insert helpers
 - directives
 - slot declarations and insert contributions
 - final `if` or `loop` control-flow suffixes
@@ -36,12 +33,34 @@ present option capture. The final `loop` suffix repeats its body with an
 ordinary loop header. Template control flow excludes `else`, `else if`,
 `break` and `continue`. Use ordinary Moth code for richer decisions.
 
-The body contains authored text and nested templates.
+In a String body, authored text and nested contributions produce text. In a
+sequence body, write child constructions. Formatting whitespace between them
+contributes nothing. A raw word in a sequence body is an error.
 
 Authored `.moth` templates must close with a closing square bracket.
 
 Truncated heads, bodies, nested children and directive-argument templates are
 syntax errors.
+
+### Applying wrappers
+
+A receiving wrapper declares slots. A bracket may apply one such wrapper.
+Head output before the receiver stays outside it. Positional values or named
+inserts after the receiver route into its own slots. A named insert cannot
+precede a receiving wrapper in the same head.
+
+[codeblock, $code "moth":
+    strong #= [$html:<strong>[$slot]</strong>]
+    paragraph #= [$html:<p>[$slot]</p>]
+
+    notice = [paragraph:[strong:Build complete]]
+    optional_notice String = [if visible:[paragraph:[strong:Build complete]]]
+]
+
+The first result places a strong element inside one paragraph. In the second,
+the condition governs the paragraph itself. Moving it into the innermost body
+would leave the paragraph present when the message is hidden. A formatter or
+named style insert can share a head with its one receiver.
 
 ### Capture and text
 
@@ -68,14 +87,21 @@ Use string insertion when a template needs literal square brackets.
 
 ### Compile-time and runtime forms
 
-A template may:
+A completed construction produces an ordinary value. The same String or
+sequence can be built at compile time or runtime when its inputs permit.
+An open wrapper declares how to route and type its slots. A head with non-String
+values followed by raw body text needs explicit, compatible String evidence.
+The colon by itself supplies neither a receiving type nor a conversion.
 
-- fully fold to a compile-time string
-- remain as runtime string construction
+[codeblock, $code "moth":
+    label String = [42]
+    codes [Byte] = [42]
+    rows [[String]] = [["Build", "Test"], ["Publish"]]
+]
 
-The source-level result stays an owned `String`.
-
-Templates do not become source-visible function values.
+A String receiver formats 42 as text. A sequence receiver stores it as one
+byte. A nested head preserves the inner collection. For splicing, empties
+and the full inference rules, see @../collections/#collection-literals (Collection literals).
 
 Runtime fixed binary-float interpolation and compile-time folding use the same
 Moth formatter.
@@ -93,8 +119,8 @@ A direct top-level template contributes output only in `@entry.moth`.
 - a bare direct fragment with runtime-dependent content is an error rather than an implicit runtime fallback
 - a direct bare [$html:<code>&#91;$in name: ...&#93;</code>] insert routes to a builder-registered destination; a runtime-marked named insert is invalid
 - ordinary direct const fragments and runtime body fragments render into the page body
-- a template assigned to a binding or returned from a function remains a `String`
-  value and does not become a page fragment by itself
+- an assigned or returned construction retains its resolved type
+- a direct HTML fragment supplies a String receiver. Render a typed sequence explicitly before emitting it
 
 Only a direct root insert reaches builder routing. A nested or stored insert stays
 ordinary template composition. Runtime top-level named builder inserts are not

@@ -1,0 +1,40 @@
+### Declare a slot with `$slot` and fill it with `$in`
+
+A wrapper can give part of its content a name. Declare that part with `$slot`
+and supply it from the caller with `$in`. A slot without a name receives the
+remaining content.
+
+[codeblock, $code "moth":
+    card #= [$html:<h2>[$slot title = "Draft"]</h2><p>[$slot]</p>]
+    notice = [card:[$in title:Build]All tests passed.]
+]
+
+The result contains `<h2>Build</h2><p>All tests passed.</p>`. If you leave
+out the title insert, the heading reads `Draft`. An explicitly empty title
+insert leaves the heading empty.
+
+### Test for a contribution with `$supplied`
+
+Use a presence guard when a caller can choose whether a piece of output
+appears. The guard can test a name even when no slot prints its value.
+
+[codeblock, $code "moth":
+    button #= [$html:<button[$supplied disabled:[" disabled"]]>[$slot]</button>]
+    active = [button:Save]
+    inactive = [button:[$in disabled:]Save]
+]
+
+Both buttons read `Save`. Only the second has the `disabled` attribute.
+Its empty insert still counts. The guard body supplies the leading space
+before the attribute name.
+
+### Supply an HTML page title
+
+A direct insert at the top of an active `@entry.moth` sends a compile-time
+value to the selected builder. The HTML builder accepts a `title` destination.
+
+[codeblock, $code "moth":
+    [$in title:Build report]
+]
+
+Inside a card, `title` names the card's slot. Here it sets the page title.

@@ -1,4 +1,4 @@
-// Desktop docs sidebar geometry. init_docs_sidebar() owns link marking, this only reads its result.
+// Desktop docs sidebar geometry. The page package owns link marking, this only reads its result.
 const desktop = matchMedia("(min-width: 961px)");
 const navbar = document.querySelector('nav[aria-label="Primary"]');
 const sidebar = document.getElementById("docs-sidebar");

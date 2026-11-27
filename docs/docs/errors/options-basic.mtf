@@ -15,10 +15,10 @@ Inspect a present value with `is |name|`:
 Use postfix `?` inside a function that also returns an optional value:
 
 [codeblock, $code "moth":
-    get_display_name |id String| -> String?:
+    get_display_name |id String| -> String? {
         user = find_user(id)?
         return user.name
-    ;
+    }
 ]
 
 If `find_user` returns `none`, the current function returns `none` too.

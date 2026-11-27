@@ -1,18 +1,24 @@
 Match a payload variant to use its fields.
 
 [codeblock, $code "moth":
-    if status is:
-        Ready => io.line("ready")
-        Failed(message) => io.line(message)
-    ;
+    Status = {
+        Ready,
+        Failed | message String = "unknown error" |,
+    }
+
+    status = Status::Failed()
+    if status is {
+        case Ready: io.line("ready")
+        case Failed(message): io.line(message)
+    }
 ]
 
-The capture name matches the field name.
+The capture name matches the field name. Here it reads the default message.
 
 Use `as` when the local name should be clearer:
 
 [codeblock, $code "moth":
-    Failed(message as error_text) => io.line(error_text)
+    case Failed(message as error_text): io.line(error_text)
 ]
 
 Payload values are immutable. Pattern matching reads them without exposing

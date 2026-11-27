@@ -30,11 +30,10 @@ STATUS: documentation slice complete. Milestone A is closed after the final mult
   remains deferred and no phase is active.
 CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 through 18 are
   deferred implementation work awaiting explicit activation.
-NEXT_ACTION: Phase 0, the reopened Phase 1 consistency passes and the final memory model
-  consistency closure are complete. Do not begin Phase 2 until the borrow and last-use
-  implementation slice is explicitly activated on the roadmap.
-BLOCKERS: none for the documentation slice; implementation phases require delivered dense HIR,
-  native result channels and explicit roadmap activation in addition to their own semantic prerequisites.
+NEXT_ACTION: complete the pre-Channels final design/compatibility brief before activating
+  production borrow and lifetime foundations. Reconcile the remaining plan phases at that checkpoint.
+BLOCKERS: implementation requires the delivered runtime/const semantic separation, dense HIR,
+  native result channels, the accepted memory compatibility brief and explicit roadmap activation.
 ```
 
 ## Compiler foundation handoff
@@ -57,6 +56,62 @@ HIR indexes. Separate success slots do not prove separate allocations: result-to
 parameter aliases and unknown provenance stay conservative until the owning analysis proves more.
 
 ---
+
+## Pre-Channels design and safety foundation checkpoint
+
+The serial roadmap now splits memory delivery around Channels V1. The
+canonical Channels design is `docs/docs/async/channels.mtf`. These are two
+checkpoints in the same memory implementation ownership, not a second memory
+model. No implementation phase is activated by this documentation change.
+
+### First: final memory design and Channels compatibility brief
+
+- [ ] Refresh the current production and Boracle inventory against the
+  delivered runtime/const semantic separation and dense HIR/result-slot
+  contracts. Research activation remains explicit.
+- [ ] Reconcile the canonical lifetime, access, retained-edge, REC, cleanup,
+  compiler and build references with function-owned tasks, endpoint leases,
+  successful-send and failed-send/losing-select paths, suspension-live
+  values, cancel/join edges, host registration lifecycles and task/queue
+  ownership. Establish one legal topology without lateral promotion or
+  arbitrary cross-task sharing. Confirm how ordinary wrappers propagate
+  mandatory send transfer effects and how dispatch arguments are proven.
+- [ ] Consolidate the two remaining memory work items as required by the
+  roadmap and record the precise early/late split. Reuse the production
+  borrow/Boracle tracker for Stage 6 status. The brief must name delivered
+  capabilities rather than create another temporary semantic owner.
+- [ ] Freeze the minimum pre-Channels proof and validated JS memory-plan
+  handoff, including logical release and cleanup obligations independent
+  of host GC. Specify the portable physical-memory requirements that
+  Channels will publish and later memory/Wasm work consumes.
+- [ ] Review the brief before implementing the foundations. Do not invent
+  or weaken memory semantics merely to make the Channels runtime executable.
+
+### Second: deliver memory safety foundations
+
+- [ ] Deliver Phases 2 through 5 below (or their reconciled equivalent),
+  using production borrow and last-use analysis, complete local and
+  published provenance/retention summaries, local allocation-family facts,
+  mandatory local/link topology validation and real lifecycle roots.
+  Include any mandatory parts of later phases needed for safe cleanup and
+  the conservative GC-native `ValidatedMemoryPlan` handoff.
+- [ ] Validate all supported runtime source under the same legality rules
+  in every profile. Required const execution retains its separate bounded
+  dynamic access contract. Do not build a temporary Channels-specific
+  checker or treat GC as proof. A missing mandatory fact blocks activation.
+- [ ] Run production/Boracle differential, operational and integration
+  evidence and the appropriate architecture/correctness/validation gates.
+  Approve the delivered foundation before starting Channels implementation.
+
+### After Channels
+
+Review the delivered scheduler, host ingress, endpoint release and
+continuation/queue storage and cleanup facts. Consume them in the remaining
+phases, including collector-free verification. Do not redo the early
+analysis or treat Channels compatibility as a deferred documentation-only
+exercise. Physical memory strategies, REC, region reclamation, full-control
+lowering and precision work remain after Channels. Full Wasm execution
+consumes both completed contracts.
 
 ## 1. Final model summary
 
@@ -316,10 +371,10 @@ Keeping builtin destructive operations narrow is an intentional language-design 
 
 ### 2.14 Channels and future async
 
-1. Channels remain deferred until the memory model is implemented and hardened.
+1. Channels require final memory design closure and the delivered production memory safety foundations, not completion of physical memory management. See the pre-Channels checkpoint above and the canonical Channels reference (`docs/docs/async/channels.mtf`).
 2. Channel send is a mandatory affine cleanup-responsibility transfer boundary for ordinary heap graphs.
 3. A successful send moves responsibility to the channel or receiver lifecycle.
-4. A failed send preserves or returns responsibility to the sender.
+4. A failed or unselected send preserves or returns responsibility to the sender. Successful send forbids later use of the transferred graph; failure-only recovery remains legal. Ordinary scalar value semantics remain unchanged.
 5. Queued values belong to a statically bounded channel or task lifecycle.
 6. Arbitrary shared Moth reference graphs do not cross task boundaries.
 7. Declared-region-owned values do not cross independently and require an independent copy or fresh message.
@@ -335,7 +390,7 @@ Keeping builtin destructive operations narrow is an intentional language-design 
 4. REC does not create a foreign retain and release protocol.
 5. Observable external resources use explicit close or teardown operations.
 6. Object cleanup timing is not source-observable.
-7. This permits debug GC and release static cleanup to preserve identical behavior.
+7. This permits debug GC and release static cleanup to preserve identical behavior. Channels add observable logical endpoint release and scoped host/task cleanup, which are explicit semantic events independent of physical object destruction.
 
 ---
 
@@ -933,8 +988,8 @@ Declared regions are the explicit source escape hatch for deliberate shared life
 
 ### Tasks
 
-- [ ] Replace the current deferred `identifier:` diagnostic with real declared-region body parsing.
-- [ ] Keep exact `_:` rejected and validate declared-region name collisions against visible names and active declared regions.
+- [ ] Implement braced declared-region headers in the executable-body parser and replace the deferred-feature diagnostic.
+- [ ] Reject an underscore as a region name and validate declared-region name collisions against visible names and active declared regions.
 - [ ] Implement declaration-site `into region_name` placement.
 - [ ] Enforce current and ancestor placement only.
 - [ ] Enforce destination-scope visibility and collision rules.
@@ -1224,9 +1279,8 @@ automatic observation, subscriptions, event delivery or a replacement scheduler.
 
 - [ ] Define builder-owned lifecycle root metadata.
 - [ ] Instantiate the page, mount, request, frame or render-generation roots required by supported builder operations. Do not invent a root solely to legalise an otherwise invalid escape.
-- [ ] Attach retained state and captures to their actual lifecycle owners. A Route capture follows ordinary provenance, access and outlives rules. A Wire binding identity adds no observer or storage lifetime.
+- [ ] Attach retained state to its actual lifecycle owner. For a supported callback field, trace retained shared captures through its declared destination. Check replacement and owner teardown against any live borrow of an invocation result. A plain callback only borrows its environment for the receiving call. See [Closures V1](../../docs/closures/closures.mtf).
 - [ ] End each supported lifecycle region at its explicit teardown or final cleanup frontier.
-- [ ] Keep future Wiring observation and event lifecycles deferred until their own accepted contract exists. Do not migrate V1 subscription facts into a renamed runtime mechanism.
 - [ ] Preserve outgoing REC obligations at lifecycle teardown.
 - [ ] Keep builder lifecycles unable to change source legality.
 - [ ] Integrate the final topology with HTML JavaScript and Wasm partitioning.
@@ -1234,39 +1288,31 @@ automatic observation, subscriptions, event delivery or a replacement scheduler.
 ### Audit and validation
 
 - [ ] No retained state is freed while a supported capture or builder lifecycle can still access it.
-- [ ] No hidden closure-like retention graph is introduced.
+- [ ] Callback environment references are visible to the existing topology and cleanup checks.
 - [ ] JavaScript GC and collector-free Wasm accept the same source.
 - [ ] Run `just validate`.
 
 ---
 
-## Phase 15: Harden the deferred channel design against the final memory model
+## Phase 15: Integrate delivered Channels with physical memory management
 
-### Summary and reasoning
+This work consumes the already delivered Channels semantic/runtime contract.
+The pre-Channels checkpoint owns prior design closure and semantic proof.
 
-Channel semantics must be constrained before any async implementation starts.
-
-### Tasks
-
-- [ ] Update `docs/docs/async/@entry.moth` to make send a mandatory affine transfer.
-- [ ] Define the successful-send responsibility commit point.
-- [ ] Define failed-send responsibility preservation.
-- [ ] Define queue and receiver lifecycle ownership.
-- [ ] Forbid arbitrary shared Moth reference graphs across tasks.
-- [ ] Forbid independent transfer of declared-region-owned values.
-- [ ] Require `copy` or fresh message construction when the sender retains its graph.
-- [ ] Preserve non-atomic REC by forbidding cross-task shared REC families.
-- [ ] Define cancellation and channel destruction as deterministic cleanup obligations before implementation.
-- [ ] Keep syntax, scheduling and buffering details deferred.
-- [ ] Mark channels blocked on the memory-model implementation in the roadmap and progress matrix.
-
-### Audit and validation
-
-- [ ] The channel design introduces no exception to lifetime topology.
-- [ ] Send responsibility never duplicates.
-- [ ] No task can outlive its structured lifecycle root.
-- [ ] This phase remains documentation-only unless a separate channel implementation plan is approved.
-- [ ] Run the documentation-only release-build gate.
+- [ ] Revalidate every task-frame, pending operation, queue, transferred
+  message and host-registration family against the canonical topology.
+- [ ] Consume validated suspension-live storage, semantic commit and logical
+  release events. Plan concrete cleanup/count obligations on all normal,
+  error, cancelled and selected/losing paths. Preserve the parent join
+  frontier and the independently observable logical endpoint release.
+- [ ] Verify collector-free physical strategies cover async storage without
+  changing source legality, closure timing, error or cancellation semantics.
+  REC stays non-atomic and is not the endpoint lease counter.
+- [ ] Retain actual JS behavior as a parity reference for the later Wasm
+  backend and include Channels in the memory validation/benchmark matrix.
+- [ ] Update canonical memory/compiler/build contracts for approved physical
+  findings, without reopening accepted source semantics by implementation.
+- [ ] Run the affected validation and independent memory/async review.
 
 ---
 
@@ -1318,7 +1364,7 @@ Phase 1 records accepted design. This phase records what actually landed and rem
 - [ ] Remove GC-fallback migration-debt notes only when the corresponding paths are deleted.
 - [ ] Update current Wasm and JavaScript target coverage.
 - [ ] Update collection operation support.
-- [ ] Update channel prerequisites without claiming channel implementation.
+- [ ] Record actual Channels integration and physical-memory support without claiming unimplemented Wasm parity.
 - [ ] Update README and cheatsheet status wording.
 - [ ] Update roadmap activation and completion state.
 - [ ] Rebuild `docs/release/**` through the normal docs build.
@@ -1436,7 +1482,7 @@ The final progress matrix should make these distinctions explicit.
 | Builder lifecycle regions | Deferred | page, mount, request and render roots implemented |
 | Collector-free release verification | Deferred | capable backend proves no tracing runtime remains |
 | Debug or GC-native representation | Supported where target supports it | same source legality and behavior as collector-free paths |
-| Channels | Deferred | final memory prerequisites and separate implementation plan accepted |
+| Channels | Deferred | memory safety foundations, delivered Channels V1 and subsequent physical memory/Wasm parity as separately tracked |
 
 Do not collapse these rows into one generic "memory management" status.
 
@@ -1459,7 +1505,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/build-system-design.md` | lifecycle instantiation, strategy plans and capability verification |
 | `docs/docs/collections/**` | trusted builtin effects and collection `clear()` |
 | `docs/docs/design-scope/**` | remove GC baseline and preserve exclusions |
-| `docs/docs/async/@entry.moth` | mandatory send transfer and memory prerequisites |
+| `docs/docs/async/channels.mtf` | mandatory send transfer, task ownership and memory prerequisites |
 | `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` | concise user-facing final model only |
 | `docs/docs/progress/@entry.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no superseded collector-first wording |
@@ -1505,7 +1551,6 @@ Accepted but implementation-deferred:
 - expression-site placement
 - declared-region-local graph construction and publication
 - direct source construction of reference cycles inside one declared region
-- lifecycle integration for future Wiring observation, after its separate accepted contract
 
 Final-use interior projection detachment from an allocation family is not accepted
 design. Before it could become accepted architecture, a separate design must define partially moved

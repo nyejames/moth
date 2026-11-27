@@ -215,11 +215,11 @@ Maps retain both stored keys and stored values. Replacing an existing key keeps 
 
 Consider a map whose key and value point to the same allocation family:
 
-Source `{=}` is accepted empty-map syntax but is not implemented yet; see @../../../docs/progress (Progress matrix) for current support.
+Source `["[=]"]` is accepted empty-map syntax but is not implemented yet; see @../../../docs/progress (Progress matrix) for current support.
 
 [codeblock, $code "moth":
     text = [: large value]
-    values ~{String = String} = {=}
+    values ~[String = String] = [=]
 
     ~values.set(text, text)! -- final use of text
     removed = ~values.remove("large value")!
@@ -252,10 +252,10 @@ The lookup string passed to `remove` is a temporary borrowed alias. It is not an
 The compiler does not recognise user methods by name. A user abstraction earns an equivalent summary by composing builtin effects, and only when analysis proves every relevant edge is killed on every path.
 
 [codeblock, $code "moth":
-    clear |this ~UserIndex|:
+    clear |this ~UserIndex| {
         ~this.values.clear()
         ~this.count = 0
-    ;
+    }
 ]
 
 If `values` is the only field retaining indexed elements, the compiler may infer that this method kills the whole element-retention domain. A handwritten slot-clearing loop remains valid source, but it receives the strong summary only when the proof succeeds.

@@ -3,7 +3,7 @@ Existing values use shared read-only access by default.
 Binding an existing value to another name doesn't silently copy it.
 
 [codeblock, $code "moth":
-    items ~= {"a", "b"}
+    items ~[String] = ["a", "b"]
     shared_items = items
 ]
 
@@ -25,7 +25,7 @@ it can proceed.
 A later use of a shared alias can prevent overlapping mutation:
 
 [codeblock, $code "moth":
-    items ~= {"a", "b"}
+    items ~[String] = ["a", "b"]
     shared_items = items
 
     -- Invalid because shared_items is used again after the mutation.

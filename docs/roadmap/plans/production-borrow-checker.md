@@ -97,7 +97,7 @@ another feasible exit on the lane lacks provenance.
 
 The original C4 blockers are unsoundness cases. After receiving `Box(items), items` from a const result, a mutation through the writable `items` binding must conflict with a live observer of the same allocation through `box.items`. It must still conflict after ordinary `retain |items {I32}| -> Box: return Box(items);`, whole-value forwarding or a runtime join that retires the branch's local names but not the shared children. A fresh box is not a fresh collection.
 
-The prototype adds pairwise view links beside the local root sets and groups return links by exit. It accepts a direct `select` call but rejects the forwarded shape after it flattens those groups in `collect_call_results`. The original source probe put `selected.left` in a new writable box and mutated that retained referent. Baseline acceptance is not proof that this mutation is legal: it can exercise the independent read-only permission bypass. Use an explicit graph copy as the positive control instead:
+The prototype adds pairwise view links beside the local root sets and groups return links by exit. It accepts a direct `select` call but rejects the forwarded shape after it flattens those groups in `collect_call_results`. The original source probe put `selected.left` in a new writable box and mutated that retained referent. Baseline acceptance is not proof that this mutation is legal: it can exercise the independent read-only permission bypass. The following positive control uses an explicit graph copy. The spelling and diagnostic observations refer to the Alpha compilers used in this investigation.
 
 ```moth
 Pair = |left {I32}, right {I32}|
@@ -731,7 +731,7 @@ has approval for implementation.
 
 For the older replay failures, the historical reproducer was `cargo run --features boracle -- boracle <source> --dump problem`. Its result was tied to an earlier source corpus. Do not claim those exact failures persist on a later branch without rerunning it. Resolve the reference acceptance gap before using that case as supporting evidence for a production precision change. The `BR-01` counterexample is a **known reference-model issue** and must remain visible to the differential campaign until resolved. A bounded oracle is not a replacement for a proof of universal correctness.
 
-The proposed `$checked:` deeper proof-budget surface remains a separate design/research question. It is not implementation-ready and must not alter the ordinary source safety rules. Production compilation retains no developer-visible reference/experimental mode switch.
+The proposed `$checked` deeper proof-budget surface remains a separate design/research question. It is not implementation-ready and must not alter the ordinary source safety rules. Production compilation retains no developer-visible reference/experimental mode switch.
 
 ## Working and closeout rules
 
@@ -743,3 +743,17 @@ The proposed `$checked:` deeper proof-budget surface remains a separate design/r
 6. **Respect owners.** Canonical memory/compiler docs define semantics and stage boundaries. Boracle docs define reference and oracle behaviour. This companion owns live production progress, implementation choices, follow-ups and the handoff from research. The main roadmap owns only the combined parallel entry and prerequisites. The progress matrix links here instead of repeating this inventory.
 
 The document is intentionally permanent. Finishing an individual patch does not complete or delete the tracker. Keep only the current small queue and accepted decisions after closeout. Git records detailed historical implementation steps.
+
+## Channels V1 research input
+
+Before restarting concurrency-related Boracle or memory-model research, read
+`docs/docs/async/channels.mtf` and the canonical memory authorities. The accepted
+model requires explicit task dispatch and semantic send commits, independent
+message graphs, failure-only send recovery, implicit suspension and joins,
+logical endpoint leases, selection winner/loser effects and cancellation
+cleanup. These extend the normalized runtime borrow problem and lifetime
+requirements, not the separate const interpreter access model. The memory design
+closure must establish the production prerequisites and partition early proof
+from later physical planning. Research may investigate the new operations under
+explicit activation; no change to accepted borrow rules or production solver
+activation is implied by this documentation update.

@@ -3,18 +3,18 @@ Generics form declaration-site type abstractions for top-level structs, choices 
 ### Generic declaration syntax
 
 [codeblock, $code "moth":
-    identity type A |value A| -> A:
+    identity type A |value A| -> A {
         return value
-    ;
+    }
 
     Box type A = |
         value A,
     |
 
-    Maybe type A ::
+    Maybe type A = {
         Some | value A |,
         Empty,
-    ;
+    }
 ]
 
 Generic parameters follow the declaration name after `type`. Multiple parameters are separated by commas.
@@ -51,9 +51,9 @@ A generic parameter must be used in the public type shape of the declaration. An
 
 [codeblock, $code "moth":
     -- Error: parameter 'A' is declared but never used
-    identity type A |value String| -> String:
+    identity type A |value String| -> String {
         return value
-    ;
+    }
 ]
 
 ### No inline parameter sugar
@@ -62,9 +62,9 @@ Generic parameters belong in the declaration header, not inside ordinary paramet
 
 [codeblock, $code "moth":
     -- Error
-    identity |value type A| -> A:
+    identity |value type A| -> A {
         return value
-    ;
+    }
 ]
 
 ### Compiler stage note

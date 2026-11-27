@@ -82,15 +82,15 @@ A resource file value is a normal `String`, so ordinary string rules apply.
 [codeblock, $code "moth":
     logo = @assets/logo.svg
 
-    logo_for |name String| -> String:
-        if name is "main":
+    logo_for |name String| -> String {
+        if name is "main" {
             return @assets/main.svg
         else
             return @assets/fallback.svg
-        ;
-    ;
+        }
+    }
 
-    logos {String} = { @assets/main.svg, @assets/fallback.svg }
+    logos [String] = [ @assets/main.svg, @assets/fallback.svg ]
 ]
 
 It may be mutable, a parameter, a return, an optional, a collection element, a map value, an exported constant or a runtime value. Nothing is rejected merely because a string names a resource.

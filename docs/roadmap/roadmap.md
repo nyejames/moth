@@ -30,7 +30,13 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 ## Sequenced work
 
 
-- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE, next priority.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. Match and multi-result phases and independent corrections are complete. The owner-approved corrective checkpoint replaces live alias refresh with bounded interpreter storage and projection-aware generational access validation. Runtime static borrow checking is not applied to const bodies. Close the checkpoint before immutable const-method support, stepped-loop investigation and final integration.
+- [Hard removal of Wiring and Routes](./plans/remove-wiring.md) - **First on this branch.** Record the runnable behaviour, then remove the special parameter contracts and their compiler paths. The pre-release interval before closures uses ordinary functions and choice constructors.
+
+- [Const-function profile-independent semantic foundation and evaluation](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - **ACTIVE.** Foundation gates complete: release-only ordinary-call speculation is deleted, the frontend takes no build profile and a permanent debug/release parity test guards the backend handoff. Match and multi-result phases and independent corrections are complete. The owner-approved corrective checkpoint replaces live alias refresh with bounded interpreter storage and projection-aware generational access validation. Runtime static borrow checking is not applied to const bodies. Close the checkpoint before immutable const-method support, stepped-loop investigation and final integration.
+
+- [Moth syntax migration](./plans/moth-new-syntax-implementation-plan.md) - Requires the completed Wiring removal and the existing profile-independent const publication and access contracts. Coordinate bracket construction, blocks, choices and MON in one source cutover.
+
+- [Constrained closures](./plans/constrained-closures.md) - Queued after the syntax migration. Add call-bounded callbacks and owner-retained handlers against the verified retirement baseline. Exposing either form requires validated call effects and borrow evidence. Retention also requires verified lifetime and cleanup across module boundaries.
 
 - [Resource-only roots](./plans/resource-only-roots-plan.md) - Queued after the profile-independent semantic foundation gates: Add comment-only `@resources.moth` markers that expose scoped, explicitly extended file resources without a package facade, preserving source ownership and the existing resource pipeline.
 
@@ -44,7 +50,15 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 
-- [Memory management implementation](../developer-docs/memory-management) - Collector free memory implementation (see below for more notes). Should have its initial implementation here before Wasm backend implementation.
+- [Final memory design and Channels compatibility brief](./plans/final-memory-management-redesign-and-implementation-plan.md#pre-channels-design-and-safety-foundation-checkpoint) - Reconcile the canonical memory model with accepted Channels V1, consolidate the memory work items and freeze the production semantic/physical handoff before implementation.
+
+- [Memory safety foundations](./plans/final-memory-management-redesign-and-implementation-plan.md#pre-channels-design-and-safety-foundation-checkpoint) - Deliver production borrow/last-use, provenance, retention and mandatory local/link lifetime topology proof plus the conservative validated JS memory handoff. Review and validate before Channels activation. Boracle research informs this work; no alternate channel checker.
+
+- [Repeated option-capture loops](./plans/repeated-option-capture-loops-plan.md) - Prerequisite for Channels V1 stream draining. A statement loop reevaluates a `T?` expression once per attempt, binds the present payload in its body and exits on `none`.
+
+- [Channels V1](./plans/channels-v1-implementation-plan.md) - Deliver structured function-owned tasks, inferred suspension, typed channels, bounded buffering, selection, cancellation, error propagation, host-integrated HTML-JS and a validated portable Wasm handoff. Consume the delivered repeated statement option-capture loop. Consume the delivered memory safety foundations. No full-control collector-free or full Wasm implementation prerequisite.
+
+- [Memory management implementation](../developer-docs/memory-management) - Review the delivered Channels runtime and its lifetime/cleanup facts, then complete physical memory planning, region and REC lowering, precision and collector-free verification before full Wasm backend implementation. Reuse the completed memory safety foundations.
 
 - Large review and tidy up of the core documentation. Reduction of bloat, repetition and redundant or verbose terminology to tighten them up. This is sequenced here due to a large number of features having been implemented that are close to the final feature set for Moth, and its worth trimming the compiler design and build system design docs down particularly around that hardened design state. The Cheatsheet and advanced user facing language docs also need attention.
 
@@ -52,9 +66,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
-
-- [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. The syntax migration owns coordinated source and codec support for the empty map `[=]`. Complete remaining source parity for Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
 
 - [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `@package.moth` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
@@ -85,6 +97,10 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
 
+## Immutable collection results from statement loops
+
+Typed bracket loops collect ordered output. Full statement loops can build a collection with ordinary mutation and early exits. An immutable collection result from a full statement loop remains an unaccepted design question. Reopen it only with a concrete case that needs statement-level control flow and cannot be expressed clearly by either form.
+
 ## Never return proof follow-ups
 
 Accepted `-> !` body proof covers false assertions, explicit Never calls,
@@ -107,7 +123,7 @@ routes direct const root inserts only; it does not register runtime resources.
 `$required` is a much later candidate whose value and exact behaviour need
 reconsideration; `$unique` is also deferred. Neither is accepted or implemented.
 Loop-level uniqueness is excluded, and const-function implementation is outside
-the builder slots work.
+the builder slots work. A typed component tree reaches an HTML entry only through explicit rendering to String. A stylesheet insert still contributes one tracked CSS origin, and head deduplication compares each complete rendered contribution. Arbitrary typed builder output, multi-resource stylesheet inserts and finer head deduplication need separate design.
 
 ## Compiler data-layout follow-ups
 
@@ -145,7 +161,7 @@ validation before unreachable executable work disappears. Consume the same
 
 Canonical memory design lives under [the memory management design docs](../developer-docs/memory-management).
 
-Two temporary implementation plans remain in the tree. They are work items awaiting consolidation into one replacement implementation plan, not design authorities:
+Two temporary memory implementation plans remain in the tree. The pre-Channels design closure consolidates their remaining work and divides semantic safety foundations from later physical memory planning. They are work items, not design authorities:
 
 - [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) - temporary implementation plan covering analysis, region and planning sequencing
 - [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) - temporary implementation plan covering REC analysis, the two-bit handle ABI, counters and lowering sequencing
@@ -191,7 +207,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
 - direct normal-sibling dependencies if real project evidence justifies them
-- later Wiring observation, route application and UI/runtime design beyond the bounded foundation
+- UI event delivery, subscription teardown and redraw scheduling beyond the constrained callback surface
 - additional builder compositions and capability surfaces within the official native-Wasm and browser JavaScript/Wasm execution families
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
@@ -200,13 +216,9 @@ performs semantic symbol resolution or syntax diagnostics.
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 
-## Wiring follow-ups
+## UI event delivery
 
-Wiring replaces Reactivity V1. The compiler implements the bounded foundation: Wire and Route
-parameter contracts, Wire identity forwarding and contextual constructor routes. Later
-observation, route application and UI runtime work require their own accepted contracts. The
-former reactivity follow-up list does not authorise restoring `$bind`, reactive binding modes or
-subscription expansion.
+Constrained closures cover explicit reads and synchronous callback invocation after the syntax migration. Browser event delivery, cancellation and redraw scheduling belong to the consuming runtime or library. A closure that returns a message supplies an ordinary value for that consumer.
 
 ## Hash map follow-ups
 
@@ -245,7 +257,7 @@ After the first `@core/time` JavaScript slice:
 - Temporal-backed JS calendar behaviour once runtime and polyfill policy is clear
 - locale-aware formatting and parsing
 - local time-zone lookup
-- async timers, sleep and intervals after async and task design exists
+- timers, sleep and intervals after the Channels V1 task runtime is available
 - browser animation-frame integration in a web-specific package rather than `@core/time`
 - Wasm and native lowerings
 - higher-precision or nanosecond timestamp representation only after its own package contract is accepted. Fixed-width numeric support alone does not change Duration or Timestamp representation

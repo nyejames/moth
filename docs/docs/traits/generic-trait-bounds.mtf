@@ -3,13 +3,13 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 ### Generic trait bound syntax
 
 [codeblock, $code "moth":
-    DISPLAY_TEXT must:
+    DISPLAY_TEXT must {
         display |This| -> String
-    ;
+    }
 
-    render type Item is DISPLAY_TEXT |item Item| -> String:
+    render type Item is DISPLAY_TEXT |item Item| -> String {
         return item.display()
-    ;
+    }
 ]
 
 ### Exact generic trait bound contract
@@ -39,21 +39,21 @@ exposed method must discharge that failure at the declared boundary. See
 ### Multiple bounds on one parameter
 
 [codeblock, $code "moth":
-    NAMED must:
+    NAMED must {
         name |This| -> String
-    ;
+    }
 
-    render_named type Item is DISPLAY_TEXT and NAMED |item Item| -> String:
+    render_named type Item is DISPLAY_TEXT and NAMED |item Item| -> String {
         return item.display()
-    ;
+    }
 ]
 
 ### Multiple parameters with bounds
 
 [codeblock, $code "moth":
-    render_pair type A is DISPLAY_TEXT, B is DISPLAY_TEXT |left A, right B| -> String:
+    render_pair type A is DISPLAY_TEXT, B is DISPLAY_TEXT |left A, right B| -> String {
         return [left.display(), right.display()]
-    ;
+    }
 ]
 
 ### Evidence travels with values @#evidence-travels-with-values
@@ -67,9 +67,9 @@ Compiler-owned evidence also exists for the builtin cast table.
         text String,
     |
 
-    display |this Label| -> String:
+    display |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must DISPLAY_TEXT
 

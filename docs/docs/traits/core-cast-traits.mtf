@@ -1,93 +1,72 @@
-The compiler owns a closed set of static cast traits. They provide source
-evidence for the plain `cast` expression.
+A core cast trait connects a source type to one builtin target. Choose the
+infallible trait when every value of your type can convert. Choose the
+fallible trait when the conversion can reject a value.
 
-### Trait families
+### Two targets for one type
 
-Each of fifteen target families has an infallible and a fallible trait. The
-targets comprise all eleven fixed numeric types plus `Bool`, `String`, `Char`
-and `Error`:
-
-- `I8`: `CASTABLE_TO_I8` requires `to_i8 |This| -> I8`. `TRY_CASTABLE_TO_I8` requires `try_to_i8 |This| -> I8, Error!`.
-- `I16`: `CASTABLE_TO_I16` requires `to_i16 |This| -> I16`. `TRY_CASTABLE_TO_I16` requires `try_to_i16 |This| -> I16, Error!`.
-- `I32`: `CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
-- `I64`: `CASTABLE_TO_I64` requires `to_i64 |This| -> I64`. `TRY_CASTABLE_TO_I64` requires `try_to_i64 |This| -> I64, Error!`.
-- `U8`: `CASTABLE_TO_U8` requires `to_u8 |This| -> U8`. `TRY_CASTABLE_TO_U8` requires `try_to_u8 |This| -> U8, Error!`.
-- `U16`: `CASTABLE_TO_U16` requires `to_u16 |This| -> U16`. `TRY_CASTABLE_TO_U16` requires `try_to_u16 |This| -> U16, Error!`.
-- `U32`: `CASTABLE_TO_U32` requires `to_u32 |This| -> U32`. `TRY_CASTABLE_TO_U32` requires `try_to_u32 |This| -> U32, Error!`.
-- `U64`: `CASTABLE_TO_U64` requires `to_u64 |This| -> U64`. `TRY_CASTABLE_TO_U64` requires `try_to_u64 |This| -> U64, Error!`.
-- `F16`: `CASTABLE_TO_F16` requires `to_f16 |This| -> F16`. `TRY_CASTABLE_TO_F16` requires `try_to_f16 |This| -> F16, Error!`.
-- `F32`: `CASTABLE_TO_F32` requires `to_f32 |This| -> F32`. `TRY_CASTABLE_TO_F32` requires `try_to_f32 |This| -> F32, Error!`.
-- `F64`: `CASTABLE_TO_F64` requires `to_f64 |This| -> F64`. `TRY_CASTABLE_TO_F64` requires `try_to_f64 |This| -> F64, Error!`.
-- `Bool`: `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`. `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`.
-- `String`: `CASTABLE_TO_STRING` requires `to_string |This| -> String`. `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`.
-- `Char`: `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`. `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`.
-- `Error`: `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`. `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`.
-
-The list gives requirement signatures. A source implementation uses an
-ordinary lowercase `this` receiver and its concrete type.
-
-### Contract
-
-- These traits resolve without dependency clauses.
-- They cannot be redeclared, imported, exported, aliased or shadowed, and they cannot be used as values.
-- The compiler registers builtin conversion evidence, including for `Byte` and the `Dec` family.
-- Source-authored traits cover only the fifteen targets above. `Byte` and `Dec` have no source-authored trait families.
-- Same-file nominal source types and aligned generic nominal constructors can provide evidence with explicit conformance.
-- Matching method shape alone does not prove conformance.
-- Infallible and fallible evidence for the same source type and target are mutually exclusive.
-- Infallible methods return the target. Fallible methods return the target and builtin `Error!`.
-- Evidence follows the complete static source and target types, not known values or optimiser proofs.
-- Evidence resolves before HIR. The traits prove source evidence only and add no general conversion framework.
-
-### Infallible evidence
+Suppose a configuration file supplies a port as text. You can always keep
+its original spelling, but reading a port number requires a valid `U16`.
+Define both methods in the same file as the struct.
 
 [codeblock, $code "moth":
-    Label = |
-        text String,
-    |
+    PortSetting = | text String |
 
-    to_string |this Label| -> String:
+    to_string |this PortSetting| -> String {
         return this.text
-    ;
+    }
 
-    Label must CASTABLE_TO_STRING
+    try_to_u16 |this PortSetting| -> U16, Error! {
+        return cast this.text
+    }
 
-    value String = cast Label("docs")
+    PortSetting must CASTABLE_TO_STRING, TRY_CASTABLE_TO_U16
+
+    setting = PortSetting("443")
+    spelling String = cast setting
+    port U16 = cast setting catch then 8080
+    fallback U16 = cast PortSetting("auto") catch then 8080
 ]
 
-The compiler checks that an infallible evidence method does not acquire a
-failure contract.
+The first cast returns the text `"443"`. The second calls `try_to_u16`.
+Inside that method the declared return type supplies the target for the
+builtin cast from String. It succeeds with 443. In the last call the text
+can't parse as a number, so the method's `Error!` result reaches the
+caller's handler and `fallback` takes the value 8080.
 
-### Fallible evidence
+The same source type can provide conversions to different targets. For any
+one target, its infallible and fallible traits are mutually exclusive. Moth
+uses the complete source and target types to select the method. Knowing
+that one particular string contains digits doesn't change that selection.
 
-A fallible method returns through builtin `Error!`. Its caller uses the same
-plain `cast` syntax:
+### Supported targets and signatures
 
-[codeblock, $code "moth":
-    Label = |
-        text String,
-    |
+All fifteen targets follow the naming pattern in the example. For an
+infallible conversion, append the uppercase target name to `CASTABLE_TO_`
+and its lowercase name to `to_`. The method takes only a shared receiver
+and returns the target. For a fallible conversion, use `TRY_CASTABLE_TO_`
+and `try_to_` and add builtin `Error!` after the success type. Even when
+the success type itself is `Error`, the final slot still carries failure.
 
-    try_to_i32 |this Label| -> I32, Error!:
-        value I32 = cast this.text
-        return value
-    ;
+The numeric targets cover signed (`I`) and unsigned (`U`) integers at
+8, 16, 32 and 64 bits and binary floats (`F`) at 16, 32 and 64 bits.
+The four other targets are `Bool`, `String`, `Char` and `Error`.
+`Byte` and the `Dec` family have builtin conversions only. See
+@../casts/#cast-targets (Cast targets) for the supported pairs.
 
-    Label must TRY_CASTABLE_TO_I32
+### Conformance and failure
 
-    parsed I32 = cast Label("42") catch |err|:
-        then 0
-    ;
-]
+Moth supplies the core trait names. Use them directly in a conformance
+declaration or a generic bound. They can't serve as values and you can't
+redeclare, import, export, alias or shadow them. A matching method needs
+an explicit conformance declaration before `cast` can select it.
 
-The method's typed error follows ordinary call and catch compatibility rules.
-Builtin conversion failures use implicit failure. A custom error still needs
-explicit mapping where the destination expects builtin `Error`.
+A same-file struct or choice can declare conformance. A generic struct or
+choice can do so for its whole constructor when the method's type
+parameters match the declaration. See @#conformance (Conformance).
 
-There is no cast-specific propagation marker. Postfix `!` remains the normal
-propagation form for a fallible call, not a cast.
-
-### Concepts related to core cast traits
-
-- For cast targets and conversion rules see @../casts (Casts).
-- For trait incompatibility see @#trait-incompatibility (Trait incompatibility).
+An infallible method must handle any operation that could let failure
+escape, including inferred failure. A fallible method reports a builtin
+`Error`. A custom error needs an explicit mapping to that type. The cast
+uses ordinary error handling. Only an ordinary fallible call takes the
+postfix propagation marker. Moth resolves cast evidence during type
+checking, before lowering. These traits can't introduce new cast targets.

@@ -1,4 +1,4 @@
-@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Compiler-facing language reference"]]
 [$in description:["Canonical language references and related compiler design documentation."]]
@@ -6,7 +6,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Compiler-facing language reference
@@ -31,16 +31,19 @@ init_docs_sidebar()!
     Functions and control flow:
 
     - @../../docs/functions (Functions)
+    - @../../docs/closures (Constrained closures)
+    - @../../docs/async (Channels and readiness)
     - @../../docs/branching (Branching)
     - @../../docs/loops (Loops)
     - @../../docs/errors (Errors, options and assertions)
 
     Data and compile-time construction:
 
-    - @../../docs/structs (Structs)
+    - @../../docs/structs (Structs and methods)
     - @../../docs/choices (Choices)
     - @../../docs/collections (Collections and maps)
     - @../../docs/templates (Templates)
+    - @../../docs/template-directives (Template directives)
     - @../../docs/constants (Constants and compile-time behaviour)
 
     Names and static abstraction:
@@ -48,10 +51,6 @@ init_docs_sidebar()!
     - @../../docs/aliases (Aliases)
     - @../../docs/generics (Generics)
     - @../../docs/traits (Traits)
-
-    Parameter capabilities and future channels:
-
-    - @../../docs/wiring (Wiring)
 
     Projects and imported content:
 

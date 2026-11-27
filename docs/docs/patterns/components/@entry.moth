@@ -1,6 +1,6 @@
 @html-components-basic content as components_basic
 @html-components content as components_advanced
-@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, sync_navigation, sidebar_id
 
 [$in title:HTML components]
 [$in description:Compose reusable HTML, styles and dependencies using ordinary Moth values.]
@@ -8,7 +8,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # HTML components
@@ -18,8 +18,8 @@ init_docs_sidebar()!
     A const function can construct the value, and the entry can compose
     several components into a page.
 
-    This guide describes the intended `@core/html` component layer, including
-    APIs not yet implemented. See the @../../progress (progress matrix)
+    The examples define package-level component helpers. A description of an
+    HTML node can live entirely in ordinary Moth data. See the @../../progress (progress matrix)
     for the currently available language and package surface.
 ]
 

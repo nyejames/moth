@@ -1,19 +1,36 @@
-This cheatsheet covers the accepted final Moth language design, including features beyond current compiler support.
-See the @../progress (progress matrix) and @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (roadmap) for implementation status.
-Follow the linked references for ambiguous or detailed rules.
+This cheatsheet describes Moth's target syntax. The @../progress (progress matrix) lists the forms the current compiler accepts. For a first reading, start with @../language-overview (Language basics).
 
-## Syntax and names
+## Read the building blocks
 
-`:` opens a block and `;` closes it. Semicolons don't end statements. An inline block closes on its opening line, and a multiline block closes with `;` alone on its own line. Indentation aids reading but doesn't define scope.
-Statements run in source order.
+Moth reuses a few forms so you can work out what code does from the surrounding declaration, the call or the arm you are reading. Follow the width and height through this example.
 
 [codeblock, $code "moth":
-    if ready:
-        io.line("ready")
-    else
-        io.line("waiting")
-    ;
+    Size = | width I32, height I32 = 720 |
+
+    WindowEvent = {
+        Opened,
+        Resized | width I32, height I32 = 720 |,
+    }
+
+    describe |event WindowEvent| -> String {
+        return if event is {
+            case Opened: then "opened"
+            case Resized(width, height): then [:[width] x [height]]
+        }
+    }
+
+    size = Size(1280)
+    label = describe(WindowEvent::Resized(1280))
 ]
+
+- **Parameter brackets.** `|...|` declares typed parameters in a signature or fields in a struct or choice variant. A loop, option test or `catch` uses the brackets to give supplied values local names. After the syntax migration, closures follow this rule too. A callback declares `|item I32| -> I32` and a closure such as `|n| => n + offset` names its argument and captures the outer `offset`.
+- **Constructors and calls.** Parentheses supply arguments. Both constructors in the example use the declared height of 720. A named argument selects a field or parameter. Parentheses containing named entries can also construct an anonymous record. MON uses this constructor syntax for literal data.
+- **Choices and patterns.** `WindowEvent::Resized(1280)` selects a variant and constructs a value. In the match, `Resized(width, height)` gives the stored fields names for that arm.
+- **Brackets.** A bracket construction can produce a String, a collection or a map. Here the colon introduces a text body and the nested brackets insert its values. The call returns `"1280 x 720"`.
+- **Blocks and branches.** Braces mark the boundaries of a body. The choice body lists alternatives. The function body contains statements. One match block holds both arm scopes. Each line-initial `case` starts an arm and its colon ends the header. A Boolean conditional uses bare `else`, while a match or channel readiness fallback uses `else:`.
+- **Results.** `then` supplies a result to the enclosing value-producing construct. `return` exits the function.
+
+## Names and statements
 
 - `--` starts a line comment in code. In template bodies it is text. To discard template content, use `$note` as a child of a template body.
 - Names never shadow visible values, types, aliases, dependencies or builtins, including in parameters and child scopes.
@@ -23,7 +40,7 @@ Statements run in source order.
   Leading underscores and changes of case can't escape reserved names, including `none`/`None`.
 - Ordinary names such as `config`, `Config`, `project`, `block`, `group` and `region` are not keywords.
   `$config` and `@project` have their own meanings.
-- There is no general bare lexical block or control-flow label. A `name:` statement opens a declared region. Exact `_:` is invalid.
+- There is no general bare lexical block or control-flow label. A named braced body in executable code declares a lifetime region. The single underscore cannot name a region.
 
 Symbolic binary operators and assignment require spaces on both sides. Keep compound tokens together:
 
@@ -44,7 +61,7 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
     letter Char = 'm'
 
     count ~= 0            -- mutable
-    names ~{String} = {}  -- mutable collection
+    names ~[String] = []  -- mutable collection
     ~count = 1            -- reassignment, not a new binding
 
     site_name #= "Moth"  -- compile-time constant
@@ -57,7 +74,7 @@ without forward references or cycles.
 
 ### Strings and characters
 
-Quoted text and templates share the `String` type. Use templates for interpolation and concatenation, rather than `String + String`:
+Quoted text and String templates share the `String` type. Use templates for interpolation and concatenation, rather than `String + String`:
 
 [codeblock, $code "moth":
     escaped = "Hello\nworld"
@@ -83,36 +100,36 @@ Strings have no ordering, indexing or in-place character mutation. `Char` suppor
 A const record is a compile-time group of named, folded values. Fields have unique labels with explicit values and don't see preceding field labels
 as bindings. Runtime code may read its ordinary fields but can't pass, return or store the whole record or call methods on it.
 
-Core functions with an explicit constant-evaluation contract and declared const functions can fold calls. Ordinary function calls stay runtime calls in every build profile. MON shares record syntax but is a separate data format.
+Core functions with an explicit constant-evaluation contract and declared const functions can fold calls. Ordinary function calls stay runtime calls in every build profile. MON shares constructor syntax and decodes literal data against a receiving schema.
 
 ## References, copies and lifetimes
 
 Existing values use shared read-only access when bound, passed, returned or stored. In runtime code a live shared alias blocks overlapping mutation. The compiler follows the *last use*, not just lexical scope.
 
 [codeblock, $code "moth":
-    items ~= {1, 2}
+    items ~= [1, 2]
     view = items    -- shared read-only alias
     size = view.length()
     ~items.push(3)  -- valid: view is no longer used
 
     independent ~= copy items  -- independent deep copy
-    outer = {items}            -- new collection, shared inner storage
+    members = [items]          -- new collection with the same elements
 ]
 
 A mutable declaration from an existing mutable *place* creates a write-through alias.
 A value returned from a function gets a separate caller binding, even if it shares storage:
 
 [codeblock, $code "moth":
-    same_items |value {I32}| -> {I32}:
+    same_items |value [I32]| -> [I32] {
         return value
-    ;
+    }
 
-    original ~= {1}
+    original ~= [1]
     writer ~= original
-    ~writer = {2}  -- also changes original
+    ~writer = [2]  -- also changes original
 
     returned ~= same_items(original)
-    ~returned = {3}  -- original still holds {2}
+    ~returned = [3]  -- original still holds [2]
 ]
 
 `copy` deep-copies a binding, field or parenthesised place. It preserves internal sharing but shares no storage with the source.
@@ -143,8 +160,8 @@ Annotations, parameters, return types, fields and writes can constrain them befo
 Unlike Rust's broader inference, later uses can't retype a completed Moth expression.
 
 [codeblock, $code "moth":
-    accept_u64 |value U64|:
-    ;
+    accept_u64 |value U64| {
+    }
 
     count = 4_294_967_296
     accept_u64(count)  -- this later use resolves count as U64
@@ -152,7 +169,7 @@ Unlike Rust's broader inference, later uses can't retype a completed Moth expres
     base I32 = 10
     total I64 = base + 1      -- base stays I32, raw 1 receives I64
     small U8 = 200
-    samples {F32} = {1, 2.5}  -- raw mixed literals receive F32
+    samples [F32] = [1, 2.5]  -- raw mixed literals receive F32
     ordinary = 42             -- I32
     fraction = 0.5            -- F64
 
@@ -218,10 +235,10 @@ The operand keeps its own type. An untyped declaration or later use can't supply
     count U64 = cast octet  -- infallible widening
     label String = cast count
 
-    narrow_sum |left U32, right U32| -> U8:
+    narrow_sum |left U32, right U32| -> U8 {
         value U8 = cast (left + right) catch then 0
         return value
-    ;
+    }
 ]
 
 The `catch` above covers both addition overflow and narrowing failure. A cast of the *result* can't prevent earlier arithmetic from failing.
@@ -243,12 +260,12 @@ Custom conversions use explicit trait conformance (see **Custom cast conformance
 A `T?` cast target casts into `T` then wraps the result. Its handler must supply `T`, not `none`:
 
 [codeblock, $code "moth":
-    parse_optional |text String| -> I32?:
-        value I32 = cast text catch:
+    parse_optional |text String| -> I32? {
+        value I32 = cast text catch {
             return none
-        ;
+        }
         return value
-    ;
+    }
 ]
 
 Fallible casts follow ordinary implicit failure rules: handle them with `catch` or builtin `Error!`.
@@ -257,9 +274,9 @@ Custom error types need explicit recovery or mapping. Postfix `!` is for declare
 ## Functions and calls
 
 [codeblock, $code "moth":
-    describe |prefix String = "item", subject String| -> String:
+    describe |prefix String = "item", subject String| -> String {
         return [: [prefix]: [subject]]
-    ;
+    }
 
     label = describe(subject = "apple")
     other_label = describe("fruit", subject = "pear")
@@ -271,23 +288,23 @@ Builtin and host calls use positional arguments. Omit `->` for no success or err
 A const function writes `#` between its name and parameter list. Every call must receive compile-time constants and is executed by the compiler:
 
 [codeblock, $code "moth":
-    double #|value I32| -> I32:
+    double #|value I32| -> I32 {
         return value * 2
-    ;
+    }
 
     label #= [: result [double(21)]]
 ]
 
-Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots. Their reference and copy semantics remain the same, but multiple mutable aliases may coexist inside const execution. A successful overlapping mutation invalidates existing immutable references. Later use of a stale reference is a compilation error on the executed path. Unused references need no lifetime proof, and unexecuted paths have no dynamic access verdict. Mutation permissions still apply. No IO, async or external mutable state is allowed. A required const call that cannot execute is a source error, not a runtime fallback. See @../functions/function-declarations (Function declarations) for the full contract and @../progress (Progress) for support.
+Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots. Their reference and copy semantics remain the same, but multiple mutable aliases may coexist inside const execution. A successful overlapping mutation invalidates existing immutable references. Later use of a stale reference is a compilation error on the executed path. Unused references need no lifetime proof, and unexecuted paths have no dynamic access verdict. Mutation permissions still apply. No IO, async or external mutable state is allowed. A required const call that cannot execute is a source error, not a runtime fallback. See @../functions/#function-declarations (Function declarations) for the full contract and @../progress (Progress) for support.
 Ordinary function calls stay runtime calls in every build profile, even with constant arguments.
 
 
 Mutable parameters require `~place` for existing mutable storage, including named arguments. Fresh values and explicit copies stay unmarked:
 
 [codeblock, $code "moth":
-    increment |value ~I32|:
+    increment |value ~I32| {
         ~value += 1
-    ;
+    }
 
     count ~= 1
     increment(~count)
@@ -301,9 +318,9 @@ Shared parameters reject `~`. Mutable receiver calls require `~` on an existing 
 Multiple return slots remain **separate results, not a tuple**:
 
 [codeblock, $code "moth":
-    pair || -> String, I32:
+    pair || -> String, I32 {
         return "Priya", 2
-    ;
+    }
 
     name, count = pair()
 ]
@@ -316,18 +333,18 @@ There is no `Void` type and a no-success function may fall through.
 ### Never-returning calls: `-> !`
 
 [codeblock, $code "moth":
-    fatal |message String| -> !:
+    fatal |message String| -> ! {
         assert(false, message)
-    ;
+    }
 
-    require_name |ready Bool| -> String:
-        name = if ready:
+    require_name |ready Bool| -> String {
+        name = if ready {
             then "Priya"
         else
             fatal("name unavailable")
-        ;
+        }
         return name
-    ;
+    }
 ]
 
 `-> !` is a whole callable contract, not a value type or a suffix on a type.
@@ -342,17 +359,17 @@ their statement or branch and can't be received as values or handled with `!`,
 Optional values never unwrap implicitly.
 
 [codeblock, $code "moth":
-    find_name |id String| -> String?:
-        if id is "":
+    find_name |id String| -> String? {
+        if id is "" {
             return none
-        ;
+        }
         return "Priya"
-    ;
+    }
 
-    load_label |id String| -> String?:
+    load_label |id String| -> String? {
         name = find_name(id)?  -- absent: return none immediately
         return [: User: [name]]
-    ;
+    }
 ]
 
 Postfix `?` unwraps or propagates absence. Its function needs exactly one compatible optional success slot. It can't combine with `catch`.
@@ -362,15 +379,15 @@ Inspect or capture a present value with `is`:
     maybe_name String? = "Priya"
     label = if maybe_name is |name| then name else "guest"
 
-    if maybe_name is none:
+    if maybe_name is none {
         io.line("missing")
-    ;
+    }
 
-    if maybe_name is:
-        "Priya" => io.line("admin")
-        |name| => io.line(name)
-        none => io.line("guest")
-    ;
+    if maybe_name is {
+        case "Priya": io.line("admin")
+        case |name|: io.line(name)
+        case none: io.line("guest")
+    }
 ]
 
 Options support equality when their inner type does, but no ordering. There is no general fallback operator. Use a producing `if` or match.
@@ -380,22 +397,22 @@ Options support equality when their inner type does, but no ordering. There is n
 A final `E!` result slot declares typed failure. `return!` returns an error, postfix `!` propagates a compatible error and `catch` handles it.
 
 [codeblock, $code "moth":
-    load_user |id String| -> String, F64, Error!:
-        if id is "":
+    load_user |id String| -> String, F64, Error! {
+        if id is "" {
             return! Error("Missing id", 404)
-        ;
+        }
         return "Priya", 1.0
-    ;
+    }
 
-    load_summary |id String| -> String, Error!:
+    load_summary |id String| -> String, Error! {
         name, score = load_user(id)!
         return [: [name]: [score]]
-    ;
+    }
 
-    name, score = load_user("") catch |err|:
+    name, score = load_user("") catch |err| {
         io.warn(err.message)
         then "guest", 0.0
-    ;
+    }
 ]
 
 `Error` has `message String` and `code U32 = 0`. Code `0` is still an error. Custom error types are ordinary nominal types.
@@ -410,35 +427,35 @@ A builtin `Error!` boundary turns them into `Error`. An exported function withou
 while a custom `E!` requires local recovery or explicit mapping.
 
 [codeblock, $code "moth":
-    product |left I32, right I32| -> I32:
+    product |left I32, right I32| -> I32 {
         return left * right  -- implicit failure can travel through private calls
-    ;
+    }
 
     $export
-    checked_product |left I32, right I32| -> I32, Error!:
+    checked_product |left I32, right I32| -> I32, Error! {
         return product(left, right)
-    ;
+    }
 
     $export
-    product_or_zero |left I32, right I32| -> I32:
+    product_or_zero |left I32, right I32| -> I32 {
         return product(left, right) catch then 0
-    ;
+    }
 ]
 
 These boundaries also apply to methods, generic functions and re-exports. Ordinary top-level entry work has a builtin `Error!` contract.
 A transparent alias of `Error` retains builtin behaviour, but a custom wrapper doesn't.
 
 [codeblock, $code "moth":
-    GeometryError ::
+    GeometryError = {
         InvalidDimensions,
-    ;
+    }
 
-    area |width I32, height I32| -> I32, GeometryError!:
-        result = width * height catch:
+    area |width I32, height I32| -> I32, GeometryError! {
+        result = width * height catch {
             return! GeometryError::InvalidDimensions
-        ;
+        }
         return result
-    ;
+    }
 ]
 
 ### Whole-expression catch
@@ -447,16 +464,16 @@ A transparent alias of `Error` retains builtin behaviour, but a custom wrapper d
 It evaluates work once, stops at the first failure and preserves earlier side effects. A handler's own failure propagates outward.
 
 [codeblock, $code "moth":
-    increment_or_zero |value I8| -> I8:
+    increment_or_zero |value I8| -> I8 {
         return value + 1 catch then 0
-    ;
+    }
 ]
 
 `catch` is valid for casts, arithmetic, actual recoverable failures and expressions containing at least two calls at the selected level.
 For example, `source.first().second()` qualifies, while `outer(inner())` needs an actually fallible call.
 The compiler may still prove an eligible expression infallible.
 
-Use `catch then value`, `catch |err| then value`, `catch:` or `catch |err|:`.
+Use `catch then value`, `catch |err| then value`, `catch { ... }` or `catch |err| { ... }`.
 Handlers supply matching values, return or diverge. Their error binding is immutable and local.
 `catch` handles compatible errors, not assertions, allocation exhaustion or unexpected host faults.
 
@@ -480,34 +497,34 @@ Handle failing message expressions first. Assertion messages can't propagate err
 ## Branching and value-producing blocks
 
 Conditions use `Bool`. A statement `else` is optional. Nest an `if` or use matching instead of `else if`.
-The terminal `else` body may close on the `else` line, and a match's terminal arm may close on its `=>` line.
+A single brace pair encloses both branches, and the bare `else` starts a sibling scope.
 
 [codeblock, $code "moth":
     label = if ready then "ready" else "waiting"
 
-    score_label = if score is:
-        < 0 => then "invalid"
-        0 => then "zero"
-        >= 90 => then "excellent"
-        else => then "other"
-    ;
+    score_label = if score is {
+        case < 0: then "invalid"
+        case 0: then "zero"
+        case >= 90: then "excellent"
+        else: then "other"
+    }
 
-    label, score = if ready:
+    label, score = if ready {
         then "ready", 1
     else
         io.warn("waiting")
         then "waiting", 0
-    ;
+    }
 ]
 
 `then` supplies results to an immediate declaration, assignment or return, including multiple slots.
 Value-producing blocks can't appear inside calls, collections or other expressions. Every reachable path must produce matching results or terminate.
 A producing `if` needs an `else`. Inline `then ... else ...` stays on one logical line.
 
-A full match uses `if value is:` with `pattern =>` arms, optionally guarded by `if condition`. `else =>` is the catch-all.
-A bodyless `else =>` ignores remaining cases in a statement match.
+A full match starts with `if value is {`. It evaluates the subject once, then checks the arms in source order. Each `case pattern:` starts a logical line. A guard goes before the colon and can use the pattern captures. The final `else:` handles remaining cases.
+A bodyless `else:` ignores remaining cases in a statement match.
 
-- Ordinary matches need `else =>`. A choice match may omit it when all variants appear unguarded. A guarded arm requires `else =>`.
+- Ordinary matches need `else:`. A choice match may omit it when all variants appear unguarded. A guarded arm requires `else:`.
 - An option match may omit it with both unguarded `none` and `|name|` arms. Literal matches alone don't cover every present value.
 - Relational patterns work with numbers, `Byte` and `Char`, not `String`. Patterns match the subject's type.
 
@@ -517,19 +534,19 @@ A compile-time-known `if` selects its branch only after both sides have been che
 
 [codeblock, $code "moth":
     count ~= 0
-    names = {"Priya", "Rob"}
+    names [String] = ["Priya", "Rob"]
 
-    loop count < 3:  -- condition checked before each iteration
+    loop count < 3 {  -- condition checked before each iteration
         ~count += 1
-    ;
+    }
 
-    loop names |name, index|:  -- read-only element and optional I32 source index
+    loop names |name, index| {  -- read-only element and optional I32 source index
         io.line([: [index]: [name]])
-    ;
+    }
 
-    loop 0 to 10 by 2 |value|:
+    loop 0 to 10 by 2 |value| {
         io.line([: [value]])
-    ;
+    }
 ]
 
 Collection loops capture their source and length once, then evaluate an optional signed step once. The item binding is immutable, the optional second binding is the actual `I32` source index and a map is not a collection-loop source.
@@ -543,42 +560,38 @@ Inclusive endpoints and descending ranges stop without overflowing. `Byte` and `
 ### Repeated option capture
 
 [codeblock, $code "moth":
-    loop ~scanner.next_token() is |token|:
+    loop ~scanner.next_token() is |token| {
         inspect(token)
-    ;
+    }
 ]
 
 An option-producing header runs before every attempted iteration, binding one immutable present payload or exiting on `none`.
 `continue` reevaluates the header, while `break` doesn't. It implies no special `next` method or consumption rule.
 
-### Collection-producing loops
+### Constructing a collection with a loop
 
 [codeblock, $code "moth":
-    positives {I32} = loop {-2, 1, 3} |item|:
-        if item > 0:
-            then item
-        ;
-    ;
+    greetings |names [String]| -> [String] {
+        return [loop names |name|:
+            [: Hello, [name]!]
+        ]
+    }
 ]
 
-Any ordinary loop can eagerly produce `{T}` for a declaration, assignment or single-value return.
-`then value` appends once and ends that iteration. `continue` and fallthrough append nothing. `break` returns the partial collection.
-At least one reachable `then` is required. An explicit `{T}` supplies element type context.
-
-A nested ordinary loop blocks the outer production target. A nested producing loop has its own. Templates don't have collection-producing loops.
+The loop body contributes a String for each name. A conditional child can skip a contribution and several children can contribute during one iteration. Layout whitespace between children contributes nothing to a sequence. Put raw text inside a String child. Use a braced statement loop for mutation, `break` or `continue`.
 
 ## Structs and receiver methods
 
 [codeblock, $code "moth":
     Person = | name String, age I32 = 0 |
 
-    birthday |this ~Person|:
+    birthday |this ~Person| {
         ~this.age += 1
-    ;
+    }
 
-    display_name |this Person| -> String:
+    display_name |this Person| -> String {
         return this.name
-    ;
+    }
 
     person ~= Person(name = "Priya", age = 30)
     ~person.age += 1
@@ -586,7 +599,7 @@ A nested ordinary loop blocks the outer production target. A nested producing lo
     person_name = person.display_name()
 ]
 
-Fields have explicit types. Defaults must fold and omitted non-default fields are errors. Constructors use normal arguments.
+Each field declares a type. A constructor uses its field default when the caller omits that argument. Each default must evaluate at compile time. The caller supplies every field without a default.
 Identical fields don't make distinct structs compatible. Field mutation requires mutable access.
 
 Receiver methods are top-level functions starting with `this T` or `this ~T`, defined in the receiver type's file.
@@ -596,7 +609,7 @@ Mutable methods need `~place.method(...)`.
 ### Runtime anonymous records
 
 [codeblock, $code "moth":
-    show_state |title String|:
+    show_state |title String| {
         child = (count = 3)
         state ~= (
             title = title,
@@ -606,7 +619,7 @@ Mutable methods need `~place.method(...)`.
         ~state.fresh.enabled = false
         independent = copy state
         count = independent.saved.count
-    ;
+    }
 ]
 
 Runtime records use non-empty named fields, evaluated once in source order.
@@ -621,24 +634,24 @@ Extracted ordinary fields retain their usual types.
 ## Choices
 
 [codeblock, $code "moth":
-    Status ::
+    Status = {
         Ready,
         Loading | progress F64 |,
-        Failed | message String, code I32 |,
-    ;
+        Failed | message String, code I32 = 503 |,
+    }
 
     ready = Status::Ready
-    failed Status = ::Failed(message = "offline", code = 503)
+    failed Status = ::Failed(message = "offline")
 
-    if failed is:
-        Ready => io.line("ready")
-        Loading(progress) => io.line([: [progress]%])
-        Failed(message as reason, code) => io.error([: [code]: [reason]])
-    ;
+    if failed is {
+        case Ready: io.line("ready")
+        case Loading(progress): io.line([: [progress]%])
+        case Failed(message as reason, code): io.error([: [code]: [reason]])
+    }
 ]
 
-A choice needs at least one variant. Unit variants omit `()`. Payloads need non-empty, explicitly typed immutable fields, without defaults.
-Construction supplies every field through normal argument routing. Known expected choice types permit `::Variant(...)`, otherwise qualify it.
+A choice declares one or more named variants. Even a single variant keeps its qualified name. A fieldless variant takes no parentheses. A variant with fields takes parentheses even when every field has a default.
+A struct or choice payload field can declare a compile-time default of its type. An omitted field uses that default. An optional field without a default requires an argument and an explicitly supplied `none` stays absent. Positional arguments precede named ones. When the receiver specifies the choice type, `::Variant(...)` can omit the type name.
 Write `Choice::Variant` with no whitespace around `::`.
 
 Patterns capture every exact field name in declaration order. `as` renames the immutable arm-local binding.
@@ -652,7 +665,7 @@ One unsupported field disables whole-choice equality, including unit variants. C
 
 [codeblock, $code "moth":
     UserId as I32
-    Names as {String}
+    Names as [String]
     MaybeName as String?
     User = | id I32 |
 ]
@@ -661,36 +674,36 @@ Aliases are transparent (`UserId` is `I32`). Named structs and choices have thei
 Aliases may chain but not cycle and they create no new constructors.
 
 [codeblock, $code "moth":
-    identity type A |value A| -> A:
+    identity type A |value A| -> A {
         return value
-    ;
+    }
 
     Box type A = | value A |
-    Maybe type A ::
+    Maybe type A = {
         Some | value A |,
         Empty,
-    ;
+    }
 
-    get type A |this Box of A| -> A:
+    get type A |this Box of A| -> A {
         return this.value
-    ;
+    }
 
-    empty type A || -> {A}:
-        return {}
-    ;
+    empty type A || -> [A] {
+        return []
+    }
 
-    accept_u64 |value U64|:
-    ;
+    accept_u64 |value U64| {
+    }
 
     box Box of String = Box("Moth")
     value = identity(1)
     accept_u64(value)      -- later use resolves an existing numeric origin
-    items {I32} = empty()  -- immediate receiver supplies the generic result
+    items [I32] = empty()  -- immediate receiver supplies the generic result
     missing Maybe of String = Maybe::Empty
 ]
 
 Generics apply to top-level structs, choices and free functions.
-Function type arguments come from call arguments or an immediately expected result, such as `items {I32} = empty()`.
+Function type arguments come from call arguments or an immediately expected result, such as `["items [I32] = empty()"]`.
 As with ordinary numeric inference, an unresolved numeric literal can gain its type from later uses when the signature preserves it.
 Generic inference uses the declared signature, rather than the callee's body.
 
@@ -702,13 +715,13 @@ Use `of` to name concrete generic types. Nested `of` applications need an alias:
     paired Box of StringIntPair = Box(Pair("count", 3))
 ]
 
-`{Box of String}` is valid with a single `of` application. Generic receiver methods use their type's generic parameters.
+`["[Box of String]"]` is valid with a single `of` application. Generic receiver methods use their type's generic parameters.
 Generic values can be passed, stored and returned without bounds:
 
 [codeblock, $code "moth":
-    make_box type A |value A| -> Box of A:
+    make_box type A |value A| -> Box of A {
         return Box(value)
-    ;
+    }
 
     boxed Box of String = make_box("hello")
 ]
@@ -718,21 +731,21 @@ Operations that depend on `A`, such as comparing or displaying it, need trait bo
 ## Traits and conformance
 
 [codeblock, $code "moth":
-    DISPLAY_TEXT must:
+    DISPLAY_TEXT must {
         display |This| -> String
-    ;
+    }
 
     Label = | text String |
 
-    display |this Label| -> String:
+    display |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must DISPLAY_TEXT
 
-    render type Item is DISPLAY_TEXT |item Item| -> String:
+    render type Item is DISPLAY_TEXT |item Item| -> String {
         return item.display()
-    ;
+    }
 ]
 
 Traits are **compile-time contracts**. A type conforms with `Type must TRAIT` beside its declaration and matching methods.
@@ -747,12 +760,14 @@ Traits are resolved statically. Use choices to represent runtime alternatives be
 
 ### Custom cast conformance
 
-A method alone doesn't enable a user-defined cast. The source type must explicitly conform to a built-in cast trait:
+A source type opts into a user-defined cast by declaring conformance to a Core cast trait and implementing its required method.
 
 [codeblock, $code "moth":
-    to_string |this Label| -> String:
+    Label = | text String |
+
+    to_string |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must CASTABLE_TO_STRING
 
@@ -760,18 +775,18 @@ A method alone doesn't enable a user-defined cast. The source type must explicit
     text String = cast label
 ]
 
-`CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
+For an I32 conversion, the infallible method returns an I32. The fallible method also declares an error slot. See @../traits/#core-cast-traits (Core cast traits) for the supported targets and worked examples.
 Other fixed numeric targets follow the same pattern, alongside supported `Bool`, `String`, `Char` and `Error` casts.
 A source/target pair can conform to only one of the infallible or fallible variants. `Byte` and `Dec` have no custom numeric casts.
 
 ## Collections
 
 [codeblock, $code "moth":
-    names ~= {"Priya", "Rob"}       -- growable {String}
-    empty ~{I32} = {}               -- typed empty collection
-    fixed ~{3 I32} = {10, 20}       -- capacity 3
+    names ~[String] = ["Priya", "Rob"]   -- growable collection of strings
+    empty ~[I32] = []               -- typed empty collection
+    fixed ~[3 I32] = [10, 20]       -- capacity 3
     capacity #I32 = 4
-    labels {capacity} = {"a", "b"}  -- fixed capacity, inferred element type
+    labels [capacity String] = ["a", "b"]
 
     size = names.length()
     ~names.push("Emmy")
@@ -781,11 +796,30 @@ A source/target pair can conform to only one of the infallible or fallible varia
     ~names.clear()
 ]
 
-`{T}` grows dynamically. `{N T}` has fixed maximum capacity `N`, which is part of its type. `N` is a positive `I32` literal or bare `#I32` constant.
+`["[T]"]` grows dynamically. `["[N T]"]` has fixed maximum capacity `N`, which is part of its type. `N` is a positive `I32` literal or bare `#I32` constant.
 Length, capacity and indexes use `I32`. Collections have no [$html:<code>&#91;&#93;</code>] indexing or builtin equality.
 
-Non-empty literals have one element type. Raw numeric literals can receive that type from context.
-A collection can't promote already typed elements to a new storage type. Empty collections require an explicit type at declaration or field default.
+A fixed type names both the capacity and element type. The compiler needs a sound upper bound for all contributions before it accepts fixed-capacity construction.
+
+[codeblock, $code "moth":
+    title = ["Build", " log"]                  -- String
+    tags [String] = ["Build", "log"]          -- two String elements
+    raw_bytes [Byte] = [77, 79, 84, 72]
+    first = [1, 2]
+    second = [3, 4]
+    flat = [first, second]                    -- four integers
+    rows = [[first], [second]]                -- two fresh rows
+    blank String = []
+    one_empty_row [[I32]] = [[]]
+]
+
+A receiver, compatible wrapper or type-specific directive can establish the construction type. Without stronger evidence, an all-String head joins text and a homogeneous non-String head builds a sequence. A direct keyed entry establishes a map. A mixed head such as `["[1, \"log\"]"]` needs compatible receiving evidence. An existing typed value keeps its type.
+
+In concrete code, a compatible sequence splices its elements once in order. A direct nested bracket in the head constructs a fresh row, whose reference-valued elements keep their normal sharing. To store an existing row with its identity, insert it with `push`. Contributions evaluate once in written order and capture their value where written.
+
+A generic body fixes each contribution's role before specialisation. In a collection of T, a parameter declared as T stores one element even if T later becomes a collection. A parameter declared as a collection of T splices its elements.
+
+Empty constructions need type evidence. For example, a typed binding can receive an empty String, sequence or nested row. A non-empty sibling row can supply the element type of an empty row in either order. An empty map uses its own marker and needs key and value type evidence.
 
 `get` returns a shared element. `set` replaces, `push` appends, `remove` returns and shifts elements and `clear` empties the collection.
 Invalid indexes fail without changing contents. Fixed `push` fails when full. Growable `push` only fails fatally on allocation exhaustion.
@@ -794,17 +828,17 @@ Use normal `Error!` handling for recoverable collection failures. Live element a
 ## Hash maps
 
 [codeblock, $code "moth":
-    scores ~{String = I32} = {"Priya" = 10, "Rob" = 8}
-    empty_scores ~{String = I32} = {=}
+    scores ~[String = I32] = ["Priya" = 10, "Rob" = 8]
+    empty_scores ~[String = I32] = [=]
 
     found = scores.contains("Priya")
     score = scores.get("Priya") catch then 0
-    ~scores.set("Emmy", 5) catch:
+    ~scores.set("Emmy", 5) catch {
         io.warn("update failed")
-    ;
+    }
 ]
 
-`{Key = Value}` uses one key/value form throughout. `{}` is a collection and `{=}` is an empty map.
+`["[Key = Value]"]` uses one key/value form throughout. Direct head entries associate one key with one value. Use `["[=]"]` for an empty map with a known key and value type. Maps accept neither sequence splices nor template bodies.
 Keys may be `String`, `Bool`, `Char`, `Byte` or a fixed-width integer, but not floats, `Dec` or user-defined types.
 Types are exact. Numeric promotion can't change an existing key or value type.
 
@@ -821,14 +855,14 @@ Most lifetimes are inferred. Declare a region when allocations need an explicit 
 Only `into name` places newly created storage in a region. Being lexically inside one is not enough.
 
 [codeblock, $code "moth":
-    request:
-        scratch:
+    request {
+        scratch {
             temporary String into scratch = [: temporary]
             saved String into request = copy temporary
-        ;
+        }
 
         io.line(saved)
-    ;
+    }
 ]
 
 `into` targets the current or an enclosing region and places fresh storage or an independent `copy`.
@@ -843,8 +877,7 @@ Regions are neither values nor types. See @../memory (Memory) for full placement
 
 ## Templates
 
-Templates produce `String` values. Static content folds at compile time. Dynamic interpolations evaluate at runtime.
-A `:` separates the head from the body.
+A template builds String or sequence output from a head and optional body. A colon separates the head from the body. Text formatters and raw text require a String construction. In a sequence body, child constructions contribute typed values. Dynamic interpolations evaluate at runtime.
 
 [codeblock, $code "moth":
     content = [$md:
@@ -889,12 +922,12 @@ Formatters apply to their own templates, and incompatible formatters can't share
     [list: [: one] [$fresh: [: two]]]
 ]
 
-`$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
+`$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each key has one receiving type, and each occurrence may carry a completed compile-time default of that type. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
 `$supplied name:` renders its body once when routing supplied that key, counts an explicitly empty insert, ignores occurrence defaults and never evaluates a payload that only guards consume. Its key uses the `$slot` named, positional and default targets, and only a formatter may share its head.
-A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
-An application with content closes its own unfilled defaults; a head-only reference stays open for later composition.
-`$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
-Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
+A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content without reevaluating a contribution, multiple contributions keep their order and unassigned loose content is an error.
+An application with routed content closes its own slots. A head-only reference can stay open for later composition. Each bracket applies at most one receiving wrapper. Nest wrappers to compose them.
+`$before` and `$after` take one bare operand and wrap direct children with compatible output. Their operands may contain named slots only. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty result is wrapped.
+At the top level of an active entry root, a direct const `$in` supplies a builder slot. See @../template-directives/ (Template directives) for the individual directives, their operands and where you can use them.
 
 ### Template control flow
 
@@ -911,7 +944,7 @@ Templates support a single-body `if` and `loop`, written last in the head. More 
 ]
 
 An `if` body renders when its condition is true or its option is present, with a captured value available only in that body.
-Loops concatenate iteration bodies in order, using conditional, collection or range headers. The optional second binding is the actual collection source index or the range iteration ordinal.
+Loops contribute their bodies in order, concatenating text or adding sequence elements according to the receiver. The optional second binding is the actual collection source index or the range iteration ordinal.
 Template control flow supports `if` and `loop` only, without `else`, `break` or `continue`.
 
 A loop-head wrapper wraps the whole loop once. Place per-item wrappers inside the body.
@@ -938,74 +971,45 @@ Link targets don't themselves create file dependencies.
 
 See @../templates (Templates).
 
-## Wiring
+## Channels and readiness
 
-`Wire` passes the identity of a named binding. `Route` captures a choice constructor for a later input or event.
-Both are parameter contracts, so a UI or other consumer can decide how to use them.
-
-### Wires
+Channels V1 is accepted design awaiting compiler and runtime support.
 
 [codeblock, $code "moth":
-    read_name |value Wire of String| -> String:
-        return value
-    ;
+    reader, writer Channel of String = Channel()
+    >> produce(writer)
 
-    forward_name |value Wire of String| -> String:
-        return read_name(value)
-    ;
-
-    name ~= "Priya"
-    label = forward_name(name)
+    if {
+        case message = << reader if listening: handle(message)
+        case pending >> writer: io.line("sent")
+        else: io.line("nothing ready")
+    }
 ]
 
-`Wire of T` accepts a named immutable/mutable local or compatible wire parameter and preserves its identity through reassignment.
-Reading it as `T` uses ordinary **shared read-only** access. Only whole named bindings can form wires.
+Prefix `>>` dispatches a direct call as a child task. Infix `>>` sends a value, and prefix `<<` receives an optional result. Ordinary calls remain on the current task and can suspend. Each invocation joins its children on exit.
 
-### Routes
+An expressionless `if` offers channel operations. Guards enable candidates. A receive binding belongs only to the winning body. One fair selection commits at most one operation. Losing arms leave their channels alone. A final `else:` runs immediately if none is ready. Omit it to wait. After the last writer closes and the buffer drains, receives stay ready with `none`. See @../async (Channels and readiness) for endpoint release, failed sends and task lifetimes.
 
-A route allows a consumer to turn input into an ordinary choice message. This example shows the parameter interface a UI builder might expose.
-The `text_input` and `button` functions below stand in for UI components. They show route formation, not a built-in event runtime.
+## Closures
+
+Constrained closures are planned after the syntax migration. Declare the
+callback's signature on a parameter or named struct field. At the call site,
+name its arguments between pipes and write one expression after `=>`.
 
 [codeblock, $code "moth":
-    TodoMessage ::
-        Rename | id I32, text String |,
-        Delete | id I32 |,
-    ;
+    label |caption String, format |text String| -> String| -> String {
+        return format(caption)
+    }
 
-    text_input |value Wire of String, on_change Route of String -> TodoMessage|:
-        io.line(value)  -- illustrative UI component
-    ;
-
-    button |label String, on_click Route of TodoMessage|:
-        io.line(label)  -- illustrative UI component
-    ;
-
-    update_title |current String, message TodoMessage| -> String:
-        return if message is:
-            Rename(id, text) => then text
-            Delete(id) => then ""
-        ;
-    ;
-
-    todo_id = 42
-    title ~= "Draft"
-    text_input(title, TodoMessage::Rename(todo_id))
-    button("Delete", TodoMessage::Delete(todo_id))
-
-    -- When the text input supplies "Revised", the route produces this message:
-    changed = TodoMessage::Rename(42, "Revised")
-    ~title = update_title(title, changed)
+    prefix = "Action: "
+    save = label("Save", |name| => [prefix, name])
 ]
 
-`Route of String -> TodoMessage` captures `todo_id` once. The future `String` fills the remaining `text` field.
-The resulting message can be handled by ordinary Moth code, as `update_title` demonstrates.
-`Route of TodoMessage` captures a complete constructor, so the Delete action needs no future input.
-Compatible route parameters can forward routes unchanged.
-
-Wires and routes can only appear as parameter capabilities. Their reads and captures follow ordinary access and lifetime rules.
-UI event delivery needs a builder or library that implements it.
-
-See @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring contract).
+`save` contains `"Action: Save"`. The closure reads `prefix` from its
+surrounding scope and receives `name` on each invocation. A plain callback
+parameter lasts for the call. A factory can use `into return` to keep a
+handler in the component it returns. See @../closures/#closures-reference (Closures)
+for the row editor example, retention destinations and access rules.
 
 ## Dependencies and aliases
 
@@ -1071,9 +1075,9 @@ Helpers in ordinary `.moth` files are shared by every root, while each root keep
     greeting #= "Hello"
 
     $export
-    render || -> String:
+    render || -> String {
         return [: [greeting], [private_label]]
-    ;
+    }
 
     $export
     @core/math PI
@@ -1259,7 +1263,7 @@ For an HTML page:
 ]
 
 Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
-Ordinary const and runtime fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
+The HTML body receives String output. A sequence, map or nominal node needs explicit rendering to become page text. Ordinary const and runtime String fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
 Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
 Helpers, `@mod.moth` and `@package.moth` facades and `@config.moth` cannot supply entry contributions.
 
@@ -1301,9 +1305,9 @@ Foreign packages depend on the selected builder and target. For example, the HTM
 [codeblock, $code "moth":
     @vendor/format.js emphasize
 
-    label |text String| -> String:
+    label |text String| -> String {
         return emphasize(text)
-    ;
+    }
 ]
 
 Annotations declare typed Moth functions independently of JavaScript export names.

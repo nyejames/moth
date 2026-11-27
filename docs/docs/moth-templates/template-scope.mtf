@@ -126,7 +126,7 @@ Content helpers such as `codeblock` come from the fixed `@core/html` prelude abo
 
 ### Concepts related to template scope
 
-- For the full template directive list see @../templates/#template-directives (Template directives).
+- For the full template directive list see @../template-directives/ (Template directives).
 - For `$md` formatting see @../templates/#markdown-formatting (Markdown formatting).
 - For the `.mtf` content constant see @#content-dependencies (Content dependencies).
 - For limitations see @#moth-template-files-limits (Moth template limits).

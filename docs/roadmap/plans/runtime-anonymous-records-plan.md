@@ -52,7 +52,7 @@ Use the canonical runtime reference for construction, hidden identity, recursive
 - Authored field names and constructed children establish the record shape. Numeric inference may refine eligible leaves inside that known shape, but later shape matching, shape unification and field inference remain excluded.
 - Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
 - Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
-- Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
+- Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. A closure literal needs a declared callback slot. An inferred anonymous field cannot receive it. An ordinary named struct containing a handler keeps its capture lifetimes and V1 copy restrictions when stored as a child.
 - Numeric leaves retain exact canonical identities. Extracting a `U8` field yields `U8`; `U8 + U8` remains `U8` and checks at that width. An `F16` field likewise keeps its type and each eligible operation completes at `F16`. A physical I32 or F32 carrier does not retype the field, widen its operation or choose its layout. `I*`, `U*` and `F*` fields have no profile-selected alternatives. `Byte` gains no arithmetic from being stored in a record.
 
 The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.

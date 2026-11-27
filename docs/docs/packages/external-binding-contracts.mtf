@@ -6,8 +6,8 @@ foreign implementations are untrusted for `$safe_math` and `$infallible`
 proofs. Compiler-maintained packages or approved vendored Rust libraries can have
 compiler-authorised, per-callable constraint evidence. A trusted package does
 not make each of its functions infallible or free of fast numeric behaviour.
-See @./package-origins-and-backing (Package origins and backing) and
-@../directives/constraints (Constraints).
+See @#package-origins-and-backing (Package origins and backing) and
+@../directives/#constraints (Constraints).
 
 ### Annotated JavaScript dependencies
 

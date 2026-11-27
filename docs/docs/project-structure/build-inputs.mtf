@@ -135,9 +135,9 @@ Ordinary `if` is the only conditional source form. There is no `$config if`.
     $config
     analytics #Bool = false
 
-    if analytics:
+    if analytics {
         send_analytics()
-    ;
+    }
 ]
 
 Both branches remain valid Moth source and complete frontend validation, including unknown directives. A known Bool selects the executable branch before HIR. This does not condition imports, declarations, exports or package topology. Future `$feature` is a separate pre-graph structural-selection contract.

@@ -1,4 +1,4 @@
-@docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, codeblock, sidebar, sync_navigation, sidebar_id
 
 [$in title:["Memory management"]]
 [$in description:["Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."]]
@@ -6,7 +6,7 @@
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 
 [section, $md:
     # Memory management
@@ -28,7 +28,7 @@ init_docs_sidebar()!
     Shared aliases use last-potential-use activity, not pure lexical lifetime. After the final potential use of a shared alias, later mutation may proceed.
 
     [codeblock, $code "moth":
-        items ~= {"a", "b"}
+        items ~[String] = ["a", "b"]
         shared_items = items
 
         change(~items)       -- invalid: shared_items is used again
@@ -36,7 +36,7 @@ init_docs_sidebar()!
     ]
 
     [codeblock, $code "moth":
-        items ~= {"a", "b"}
+        items ~[String] = ["a", "b"]
         shared_items = items
         inspect(shared_items)
 
@@ -44,7 +44,7 @@ init_docs_sidebar()!
     ]
 
     [codeblock, $code "moth":
-        items ~= {"a", "b"}
+        items ~[String] = ["a", "b"]
         copied_items = copy items
 
         change(~items)
@@ -58,7 +58,7 @@ init_docs_sidebar()!
     Prefix an existing-place write with `~`, as in `~count = 1`. An existing mutable place passed to a mutable parameter also needs `~`, including in a named argument. Mutable receivers use `~items.push(value)` and require an existing mutable place. Fresh values and `copy place` satisfy ordinary mutable parameters without `~`. A mutable alias uses `writer ~= original` with an unmarked source. `~` isn't a move marker or a type identity.
 
     [codeblock, $code "moth":
-        change({"fresh"})
+        change(["fresh"])
     ]
 ]
 
@@ -73,7 +73,7 @@ init_docs_sidebar()!
 
     The compiler rejects illegal sibling sharing and cross-region cycles on every backend. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.
 
-    Declared `name:` / `into name` syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See @./declared-regions (Declared regions) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
+    Declared `name { ... }` / `into name` syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See @./declared-regions (Declared regions) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
 ]
 
 [section, $md:
@@ -106,7 +106,7 @@ init_docs_sidebar()!
     - @./boracle (Boracle): the developer-facing reference borrow model, its borrow-analysis laboratory and the bounded operational oracle it is compared against
     - @./checked-proof-budget-research (Checked proof-budget research): future opt-in deep analysis that trades compile time for proof precision without changing safety rules
     - @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes
-    - @./declared-regions (Declared regions): accepted deferred `name:` / `into name` semantics and hard bulk lifetimes
+    - @./declared-regions (Declared regions): accepted deferred `name { ... }` / `into name` semantics and hard bulk lifetimes
     - @./retained-edge-counting (Retained Edge Counting): the narrow counted strategy for runtime-many persistent retained edges
     - @./ownership-and-drops (Affine ownership and drops): affine cleanup responsibility, the ownership ABI and conditional destruction
     - @./runtime-and-backend-lowering (Runtime and backend lowering): physical strategies and the collector-free release guarantee

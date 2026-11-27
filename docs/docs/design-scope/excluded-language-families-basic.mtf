@@ -7,11 +7,12 @@ language inside your code. Compiler-known directives may provide constrained
 structure, templates or metadata, but they are not a user-extensible macro
 system.
 
-### No general closures or higher-order function values
+### Function values
 
-General closures and higher-order function values add complexity to the type
-system and make code harder to follow. Constrained template and builder
-contracts cover explicit integration without general function values.
+A library can declare the callback it needs, and a caller can supply a
+closure there. This planned feature keeps the signature visible at the
+parameter or named struct field. Passing functions around as ordinary values
+falls outside Moth's design. See @../closures/ (Closures).
 
 ### No dynamic trait values
 
@@ -54,8 +55,8 @@ annotations.
 
 Structured control flow introduces scope. Moth has no dedicated general
 lexical-block construct, statement labels, labelled loop exits or `goto`.
-`block` is an ordinary identifier, so `block:` declares a region like any other
-valid `name:` header. Exact `_:` is invalid.
+`block` is an ordinary identifier, so `block { ... }` declares a region like any other
+valid `name { ... }` header. Exact `_ { ... }` is invalid.
 
 ### The pattern
 

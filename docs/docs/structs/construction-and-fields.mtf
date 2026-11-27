@@ -1,5 +1,5 @@
-A struct constructor uses the struct name and supplies its fields through
-@../language-overview/#mon-syntax (MON syntax).
+A constructor creates a fresh instance of a named struct. Its arguments
+supply values for the fields in the declaration.
 
 [codeblock, $code "moth":
     Point = |
@@ -11,25 +11,26 @@ A struct constructor uses the struct name and supplies its fields through
     second = Point(x = 10, y = 20)
 ]
 
-### Constructor routing
+### Constructor arguments
 
-- Positional arguments fill fields in declaration order.
-- Positional arguments must come before named arguments.
-- A named argument must match a real field.
-- Each field may be supplied once.
-- Omitted fields use their declared defaults.
-- Every field without a default is required.
-- Extra arguments are invalid.
-- Values are checked and contextually coerced against field types.
+Positional arguments fill fields in declaration order. After the first named
+argument, name each remaining argument. Each argument must identify a field
+and you can supply each field only once. A named argument can skip an earlier
+field with a default.
 
-An exact field type can receive a raw numeric literal directly. An already
-typed value must match the field type; construction does not widen or retag it.
+Supply every field that lacks a default, including an optional field.
+Omitting a defaulted field uses its default. Supplying `none` to an optional
+field keeps it absent even if that field declares a default.
 
-A constructor creates a fresh value.
+The declared field type checks each argument. In this example the fields
+give the raw numeric literals their `I32` type. An already typed numeric
+value must match the field type. For the shared notation, see
+@../language-overview/#mon-syntax (Constructor syntax).
 
-### Explicit nested construction
+### Nested construction
 
-Construct a named child at its field's receiving boundary:
+When a field holds a named struct, use the child's constructor inside the
+parent's argument list.
 
 [codeblock, $code "moth":
     Size = | width I32, height I32 |
@@ -38,40 +39,30 @@ Construct a named child at its field's receiving boundary:
     window = Window(size = Size(width = 1280, height = 720))
 ]
 
-An anonymous `(width = 1280, height = 720)` does not become a `Size` because the
-fields match. MON syntax adds no implicit nominal construction or structural
-conversion. Named type declarations remain separate, flat declarations.
+The inner constructor supplies a `Size` to the outer constructor. An
+anonymous record with matching field names can't fill that field. Nested
+construction still uses separate, top-level type declarations.
 
-### MON data boundary
+### MON data
 
-Source construction above is unchanged: an anonymous record never becomes a nominal struct because the fields match. MON literal struct data documents both anonymous `(...)` and one exact `Name(...)` qualifier by reference. An explicit qualifier is a checked assertion against the receiving schema, never implicit conversion and never user-code invocation. That contract is Rust-only serialised-data documentation; source behaviour is unchanged. See @../mon/#mon-format (MON format).
+A MON reader can decode named literal entries into a struct because its
+schema supplies the type and any omitted defaults. A qualifier such as
+`Size` must match that schema. See @../mon/#mon-format (MON format).
 
-### Field reads
+### Field reads and writes
 
-Use `.` to read a field.
-
-[codeblock, $code "moth":
-    point = Point(10, 20)
-    horizontal = point.x
-]
-
-A field read uses normal shared access.
-
-### Field writes
-
-The root value must be a mutable place. Prefix the whole field target with `~`.
+Use a dot to read a field. To write one, start from a mutable place and
+prefix the whole field access with `~`.
 
 [codeblock, $code "moth":
     point ~= Point(10, 20)
     ~point.x = 30
+    horizontal = point.x
 ]
 
-A field of an immutable binding cannot be assigned.
+Reading a field takes shared access. Writing requires mutable access to the
+root. The field's declared type stays the same in either case.
 
-Field mutability is controlled by the root place and the current access. It is
-not a separate field type.
-
-Const records use struct-shaped compile-time data but have additional
-restrictions owned by Constants and compile-time behaviour.
-@#anonymous-records (Runtime anonymous records) describes the separate deferred
-local hidden-struct feature.
+@../constants/#const-records (Const records) describes compile-time field
+groups. @#anonymous-records (Runtime anonymous records) describes planned
+local records with hidden types.

@@ -23,9 +23,9 @@ compiler_walkthrough/
 [codeblock, $code "moth":
 greeting_prefix #= "Hello"
 
-greet |name String| -> String:
+greet |name String| -> String {
     return [: [greeting_prefix], [name]!]
-;
+}
 ]
 
 

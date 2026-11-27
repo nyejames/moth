@@ -16,10 +16,10 @@ A concrete generic instance substitutes the generic parameters with concrete typ
 ### Generic choices
 
 [codeblock, $code "moth":
-    Maybe type A ::
+    Maybe type A = {
         Some | value A |,
         Empty,
-    ;
+    }
 
     name Maybe of String = Maybe::Some("Priya")
     missing Maybe of String = Maybe::Empty
@@ -66,9 +66,9 @@ A receiver method may be declared on a generic type when the method's generic pa
         value A,
     |
 
-    get type A |this Box of A| -> A:
+    get type A |this Box of A| -> A {
         return this.value
-    ;
+    }
 
     box Box of I32 = Box(42)
     value = box.get()

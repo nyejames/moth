@@ -1,0 +1,31 @@
+Each `$before` or `$after` takes one compatible compile-time operand. In a
+String construction, use a String or a constant template. In a sequence
+construction the prefix and suffix contribute compatible elements. The wrapper
+applies once to each direct child construction in prefix, child, suffix order.
+Literal text in the parent body and nested children inside that child do not
+get a separate wrapper.
+
+Only named slots can occur in a prefix or suffix, including inside nested
+templates. The child insertion point is implicit. A named slot in a prefix
+or suffix takes its contributions from the enclosing application. Its own
+default applies when the caller supplies nothing.
+
+[codeblock, $code "moth":
+    open_row #= [$html:<tr class="[$slot row_class = "normal"]">]
+    rows #= [$before open_row, $after "</tr>":[$slot]]
+    result = [rows:[$in row_class:summary][:<td>Total</td>]]
+]
+
+The `row_class` insert fills the prefix. The direct child supplies the cell,
+so the result is `<tr class="summary"><td>Total</td></tr>`.
+
+A false condition, absent option or zero-iteration loop has no output to wrap.
+A selected empty String or sequence gets its prefix and suffix. A splice or a
+loop counts as one direct child even when it contributes several items. Move
+the wrapper inside the loop body to wrap each iteration.
+
+`$fresh` takes no operand. It skips one immediate parent's child wrapper.
+Siblings and wrappers declared inside that child retain their usual behaviour.
+These rules also apply to compiled constants, runtime constructions and
+wrappers imported through a facade. See @../templates/#child-wrappers (Child
+wrappers) for more examples.

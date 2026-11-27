@@ -1,30 +1,29 @@
-A mutable receiver method declares `this ~Type`.
+A mutable receiver borrows an existing place for exclusive access. Put the
+tilde before the type in the parameter list and before the receiver at the
+call site.
 
 [codeblock, $code "moth":
-    Vector2 = |
-        x F64,
-        y F64,
-    |
+    Vector2 = | x F64, y F64 |
 
-    reset |this ~Vector2|:
+    reset |this ~Vector2| {
         ~this.x = 0.0
         ~this.y = 0.0
-    ;
+    }
 
     vector ~= Vector2(3.0, 4.0)
     ~vector.reset()
 ]
 
-### Contract for mutable receivers
+The two writes change the caller's vector. Mark the whole field access
+with `~` when writing through `this`. You can change the fields but can't
+replace `this` itself.
 
-- The receiver root must be a mutable place.
-- The call uses `~receiver.method(...)`.
-- Omitting `~` for a mutable receiver method is invalid.
-- Adding `~` to a shared receiver method is invalid.
-- A temporary or computed rvalue cannot receive a mutable receiver call.
-- Field writes inside the method prefix the whole target, as in `~this.x = 0.0`. Replacing `this` itself with `~this =` is invalid.
-- `~` requests exclusive access for the call. It is not move syntax and is not part of type identity.
+A mutable receiver requires a writable place, such as the mutable binding
+above. An immutable binding or the temporary result of a constructor can't
+grant that access. An ordinary mutable function parameter can accept a
+fresh value directly. To call a mutable method on a fresh value, bind it to
+a mutable name first.
 
-This differs from a fresh rvalue passed to a mutable free-function parameter.
-The compiler may materialise that free-function argument into a hidden local.
-A mutable receiver call still requires an authored mutable place.
+The call marker follows the declared receiver. A shared method rejects the
+tilde and a mutable method requires it. The marker grants access for this
+call without moving the value or changing its type.

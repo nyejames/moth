@@ -1,20 +1,18 @@
-A method that changes its receiver uses `this ~Type`.
+Give a method a mutable receiver when it needs to change a field.
+For example, a new round can reset a player's score.
 
 [codeblock, $code "moth":
-    reset |this ~Vector2|:
-        ~this.x = 0.0
-        ~this.y = 0.0
-    ;
+    Player = | name String, score I32 = 0 |
+
+    reset_score |this ~Player| {
+        ~this.score = 0
+    }
+
+    player ~= Player("Priya", score = 10)
+    ~player.reset_score()
 ]
 
-The value must be stored in a mutable binding:
-
-[codeblock, $code "moth":
-    vector ~= Vector2(3.0, 4.0)
-    ~vector.reset()
-]
-
-The first `~` makes the binding mutable. The second requests exclusive access
-for this method call.
-
-A shared method is called without `~`.
+The declaration gives `this` permission to write. The caller creates a
+mutable binding with `~=` and grants the method exclusive access by writing
+`~` before `player` at the call. When the method returns, the same player's
+score reads zero.

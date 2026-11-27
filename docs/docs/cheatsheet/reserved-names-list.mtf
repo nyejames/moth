@@ -9,8 +9,7 @@ reclaim reserved words by changing ASCII case or adding leading underscores.
 - **Word operators:** `is`, `not`, `and`, `or`
 - **Literals:** `true`, `false`, `none`
 
-`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places
-allocations in declared regions, although it isn't yet in the compiler's shared reserved-word inventory.
+`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions and names a retention destination on a planned callback parameter. See @../closures/ (Closures). A line-initial `case` introduces a match or readiness arm. Whether `case` is reserved outside arm headers, including in MON field names, remains open.
 
 ### Builtin types
 
@@ -24,7 +23,6 @@ All spellings of `Dec` followed by ASCII digits are reserved, even invalid types
 ### Other compiler-owned names
 
 - `Error` - builtin error type.
-- `Wire`, `Route` - function parameter-contract heads.
 - `io` - prelude namespace for `@core/io`.
 - `CASTABLE_TO_T`, `TRY_CASTABLE_TO_T` - builtin cast-trait families, replacing `T` with one of:
   `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `BOOL`, `STRING`, `CHAR`, `ERROR`.
@@ -39,8 +37,9 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 
 - `$before`, `$after` - prefix and suffix each direct child.
 - `$fresh` - bypass the parent's child wrapper.
-- `$slot` - declare a default, named or positional slot, with an optional compile-time String default.
+- `$slot` - declare a default, named or positional slot, with an optional compile-time default of its receiving type.
 - `$in` - contribute to one named slot.
+- `$supplied` - include the guard body when the caller supplied the selected slot, even if the supplied content is empty.
 - `$note` - discard a balanced comment template in a template body.
 - `$raw` - preserve unformatted template content.
 - `$md` - format Moth Markdown.
@@ -53,9 +52,9 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 
 - `$export` - marks one public declaration or direct-selection re-export in `@mod.moth` or `@package.moth`.
 - `$config` - marks one explicitly typed top-level compile-time `#` binding as a build input.
-
 - `$doc` - attach one compile-time String as documentation to a following declaration.
 - `$todo` - annotate a following declaration or executable statement with one compile-time String, with no runtime effect.
+- `$fast_math`, `$safe_math` and `$infallible` - select numeric behaviour or require a proof about arithmetic or escaping failure. See @../directives/#constraints (Numeric constraints) for the rules.
 
 `$config` takes no operand. `$export` takes no operand or one bare `@route`
 path. Source directives may share a line or occupy consecutive lines without
@@ -69,4 +68,4 @@ No `$project`, `$builder` or `$html_builder` directive exists. Project and build
 
 The former `$page` design is superseded and there is no `$entry` directive. Entry eligibility comes from the `@entry.moth` file role. HTML metadata uses direct top-level const `$in` builder slots in that entry.
 
-See @../directives (Directives) and @../templates/#template-directives (Template directives) for their syntax and use.
+See @../directives (Directives) and @../template-directives/ (Template directives) for their syntax and use.

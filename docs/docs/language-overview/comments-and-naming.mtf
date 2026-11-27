@@ -31,9 +31,9 @@ declarations. See @../directives (Directives).
 [codeblock, $code "moth":
     retry_count = 3
 
-    load_profile |user_id String| -> String:
+    load_profile |user_id String| -> String {
         return "profile"
-    ;
+    }
 
     UserProfile = |
         display_name String,
@@ -102,4 +102,4 @@ and leading-underscore variants. This also applies to MON names.
 
 Ordinary dependency clauses do not use an `import` keyword.
 
-`block`, `group` and `region` are not keywords. They follow ordinary identifier policy. In executable statement position, each corresponding `name:` header has the same reserved declared-region shape as any other valid identifier.
+`block`, `group` and `region` are not keywords. They follow ordinary identifier policy. In executable statement position, a name followed by a braced body declares a region.

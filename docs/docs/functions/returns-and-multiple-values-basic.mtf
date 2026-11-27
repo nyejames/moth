@@ -1,25 +1,32 @@
 Use `return` to send a value back to the caller.
 
 [codeblock, $code "moth":
-    double |value I32| -> I32:
+    double |value I32| -> I32 {
         return value * 2
-    ;
+    }
 ]
 
 A function can return more than one success value:
 
 [codeblock, $code "moth":
-    pair || -> String, I32:
+    pair || -> String, I32 {
         return "Priya", 2
-    ;
+    }
 
     name, count = pair()
 ]
 
 The number of receiving names must match the number of returned success values.
 
-Prefix a receiving name with `~` to update an existing mutable binding. Leave
-new receiving names unmarked, for example `~count, message = next()`.
+A call can update an existing binding and create another in the same step.
+
+[codeblock, $code "moth":
+    total ~= 0
+    name_again, ~total = pair()
+]
+
+`name_again` receives a new String binding. The `~` on `total` updates the
+existing binding to 2.
 
 A function with no success values may fall through. That is not the same as
 `-> !`, which means the function never returns at all.

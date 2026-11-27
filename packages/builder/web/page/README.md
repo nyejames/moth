@@ -31,4 +31,4 @@ Each getter reads the browser on every call. `sync_navigation` requires `data-pa
 
 `src/projects/html_project/binding_packages/web/tests/page_tests.rs` runs `page.js` in Node against a minimal fake DOM and owns getter and `sync_navigation` behaviour. The `tests/cases/web_page_reachable`, `web_page_unused` and `web_page_missing_import_rejected` cases own compiled callers, runtime asset emission and the missing-import boundary. Generic I32 result validation belongs to the external binding glue tests, and F64 finiteness to the HIR binary-float boundary.
 
-Event subscriptions, reactive state, general DOM access and Wiring are deferred.
+The page package exposes synchronous getters. Browser event subscriptions and general DOM access require separate host APIs.

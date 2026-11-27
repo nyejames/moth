@@ -1,26 +1,22 @@
-`@core/text` gives you helper functions for `String` values. Bind it when you need to check length, emptiness or substrings.
-
-### Binding
-
-Bind the functions you need with a direct-selection clause.
+Use `@core/text` to ask questions about a String. Select the functions you
+need from the package. For example, you might want to recognise template
+files by their names:
 
 [codeblock, $code "moth":
-    @core/text length, contains
+    @core/text length, is_empty, contains, starts_with, ends_with
 
-    name = "Priya"
-    count = length(name)
-    has_stalk = contains(name, "stalk")
-
-    io.line([:count=[count] has_stalk=[has_stalk]])
+    file_name = "report.mtf"
+    size = length(file_name)
+    blank = is_empty(file_name)
+    has_dot = contains(file_name, ".")
+    hidden = starts_with(file_name, ".")
+    template_file = ends_with(file_name, ".mtf")
 ]
 
-### Available functions
+`length` counts Unicode scalar values and returns an I32. Here `size` holds
+10. The other functions return a Bool. The name contains a dot and ends in
+`.mtf`, so `has_dot` and `template_file` are true. The name has text and
+starts with a letter, so `blank` and `hidden` are false.
 
-- `length(text)` returns the number of Unicode scalar values as `I32`
-- `is_empty(text)` returns `Bool`
-- `contains(text, substring)` returns `Bool`
-- `starts_with(text, prefix)` returns `Bool`
-- `ends_with(text, suffix)` returns `Bool`
-
-All functions take `String` values and return `I32` or `Bool`.
-For the full function contract, backend behaviour and deferred surfaces, see @./ (Core text advanced).
+Pass arguments by position. The Advanced view describes compile-time
+evaluation and target support.

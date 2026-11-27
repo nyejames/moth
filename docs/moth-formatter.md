@@ -92,6 +92,8 @@ For valid Moth source, formatting preserves program semantics. The formatter mus
 
 Formatting must be deterministic and idempotent. After one successful run, another run with the same settings produces no further changes. Input alternatives always produce the same canonical result as typing the canonical character directly.
 
+In the accepted grammar, a Boolean conditional keeps its bare `else` inside one brace pair. A match or channel selection keeps `case` and `else:` at the owning arm-list depth. A bracket-body colon belongs to its construction. Preserve literal braces and semicolons in strings, raw bodies and embedded languages. Inline arm layout and brace placement remain open.
+
 These requirements constrain future style decisions without choosing a particular line width, indentation scheme, blank-line policy or comment-reflow policy now.
 
 ### Compiler infrastructure reuse

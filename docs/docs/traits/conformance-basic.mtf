@@ -3,17 +3,17 @@ A type does not satisfy a trait because it happens to have the right methods. It
 ### Method plus conformance
 
 [codeblock, $code "moth":
-    DISPLAY_TEXT must:
+    DISPLAY_TEXT must {
         display |This| -> String
-    ;
+    }
 
     Label = |
         text String,
     |
 
-    display |this Label| -> String:
+    display |this Label| -> String {
         return this.text
-    ;
+    }
 
     Label must DISPLAY_TEXT
 ]

@@ -4,7 +4,7 @@ A type alias is a compile-time name for an existing type. It introduces no runti
 
 [codeblock, $code "moth":
     UserId as I32
-    Names as {String}
+    Names as [String]
     MaybeName as String?
     StringBox as Box of String
 ]
@@ -28,9 +28,9 @@ An alias target may be:
 - a builtin scalar such as `I32`, `U32`, `F64`, `Bool`, `Char` or `String`
 - a struct or choice declared in the same file
 - an option such as `String?`
-- a growable collection such as `{String}`
-- a fixed collection such as `{4 I32}`
-- a hashmap such as `{String = I32}`
+- a growable collection such as `["[String]"]`
+- a fixed collection such as `["[4 I32]"]`
+- a hashmap such as `["[String = I32]"]`
 - a fully concrete generic instance such as `Box of String`
 - a dependency-bound type, dependency-bound type alias or external package type
 
@@ -77,9 +77,9 @@ Aliases may target externally provided types when those types are valid in type 
 An alias can provide the explicit element type needed by an empty collection or map literal.
 
 [codeblock, $code "moth":
-    Names as {String}
+    Names as [String]
 
-    names Names = {}
+    names Names = []
 ]
 
 ### Alias chains
@@ -88,9 +88,9 @@ Aliases may chain through other aliases. The chain remains transparent and resol
 
 [codeblock, $code "moth":
     Name as String
-    Names as {Name}
+    Names as [Name]
 
-    names Names = {"Priya"}
+    names Names = ["Priya"]
 ]
 
 ### Cycles
@@ -120,10 +120,10 @@ For struct aliases, only the struct's canonical name constructs:
 For choice aliases, only the choice's canonical name constructs variants:
 
 [codeblock, $code "moth":
-    Status ::
+    Status = {
         Ready,
         Failed | message String |,
-    ;
+    }
 
     State as Status
 

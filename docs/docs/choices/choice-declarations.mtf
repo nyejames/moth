@@ -1,69 +1,38 @@
-A choice forms a nominal tagged union.
-
-Each value contains one declared variant.
+A choice declares a nominal type whose values each carry one named variant.
 
 [codeblock, $code "moth":
-    Status ::
-        Ready,
-        Waiting,
-        Failed | message String |,
-    ;
+    WindowEvent = {
+        Opened,
+        Resized | width I32, height I32 = 720 |,
+        Closed,
+    }
 ]
 
-### Variant forms
+`Opened` and `Closed` are unit variants. `Resized` declares a payload with the
+same typed field-list syntax as a struct. Its required `width` and defaulted
+`height` both hold an `I32`.
 
-A unit variant has no payload:
+### Declaration rules
 
-[codeblock, $code "moth":
-    Ready
-]
+- Write `Name = { ... }` with one or more comma-separated variants and an optional trailing comma.
+- Use `PascalCase` for the choice and variant names. Each variant name must be unique within the choice.
+- A unit variant carries no field list. A payload field list contains at least one field. Give each field a unique name, an explicit type and an optional default.
+- A default must fully evaluate at compile time against the field's declared type. An optional type still requires a value unless the field declares a default.
+- Payload fields are immutable. Inspect them with a pattern.
+- A choice retains its own identity even when another choice has identical variants. A single-variant choice still uses its variant name.
 
-A payload variant uses a record body:
-
-[codeblock, $code "moth":
-    Failed | message String |
-]
-
-### Contract
-
-- The declaration form is `Name :: variants ;`.
-- An inline declaration closes on the line containing its `::`. A multiline declaration closes with `;` alone on its own line.
-- Only whitespace or a `--` comment may follow the declaration's closer on its line.
-- Choice and variant names use `PascalCase`.
-- A choice must declare at least one variant.
-- Variant names must be unique.
-- A payload record must contain at least one field.
-- Payload field names must be unique.
-- Payload fields require explicit types.
-- Payload fields are immutable.
-- Payload fields do not support defaults.
-- Mutable payload field declarations are invalid.
-- Shorthand payload declarations such as `Failed String` are invalid.
-- Constructor-style declarations such as `Failed(String)` are invalid.
-- Recursive choice declarations are deferred.
-- A choice has nominal identity. Matching variants and payload shapes do not make two choices interchangeable.
-
-Declaration placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
-
-Payload fields have concrete declared types. Constructors check values against
-those exact types and cannot infer a non-generic field type from later uses.
-Generic choice parameters follow the bounded rules in
-@../generics (Generics).
-
-### Choice declaration MON data boundary
-
-Nominal identity above is unchanged: matching variants and payload shapes never make two choices interchangeable. MON literal choice data follows the same declaration shapes by reference, with contextual `::Variant` or one exact `Choice::Variant` qualifier checked against the receiving schema. Contextual `::Variant` source construction is deferred, and choice payload defaults remain excluded. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+`DoorEvent = { Opened }` introduces `DoorEvent::Opened`. A struct instead has
+one constructor named after its type. See @../structs (Structs and methods) for field lists
+and @../language-overview/#blocks-and-statements (Blocks and statements) for
+declaration placement. Recursive choice declarations are deferred.
 
 ### Generic choices
 
-Choices may introduce declaration-site generic parameters.
-
 [codeblock, $code "moth":
-    Maybe type A ::
+    Maybe type A = {
         Some | value A |,
         Missing,
-    ;
+    }
 ]
 
-Generic inference and instance restrictions are documented by
-@../generics (Generics).
+Generic parameters follow the inference and instance rules in @../generics (Generics).

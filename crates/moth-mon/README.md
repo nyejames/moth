@@ -14,4 +14,4 @@ The codec depends only on `moth-lexical` within the workspace. Use `moth_mon` fo
 
 The crate-level Rust documentation contains the complete, executable schema and round-trip example. Run it with `cargo test -p moth-mon --doc`.
 
-Moth-native encode/decode, automatic schema extraction, `$mon` and the static project builder remain undelivered. This Rust codec does not deliver source `{=}`, Unicode escapes or contextual `::Variant` construction.
+Moth-native encode/decode, automatic schema extraction, `$mon` and the static project builder remain undelivered. This Rust codec does not deliver source `[=]`, Unicode escapes or contextual `::Variant` construction.

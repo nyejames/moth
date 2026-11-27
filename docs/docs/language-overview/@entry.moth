@@ -11,28 +11,81 @@
 
 @docs_styles navbar,
     section,
+    codeblock,
     language_theme_head,
     doc_level,
     doc_pager,
     sidebar,
-    init_docs_sidebar
+    sync_navigation,
+    sidebar_id
 
 [$in title:["Language basics"]]
-[$in description:["Blocks, comments, naming, core values, strings and MON syntax in Moth."]]
+[$in description:["Blocks, comments, naming, core values, strings and constructor syntax in Moth."]]
 [$in head:[language_theme_head]]
 
 [navbar]
 [sidebar]
-init_docs_sidebar()!
+listed = sync_navigation(sidebar_id)!
 [section, $md:
     # Language basics
 
-    Moth uses a compact set of syntax rules across the whole language. Colons
-    open blocks, semicolons close them and square brackets build strings rather
-    than index collections.
+    Moth aims to make code easy to reason about locally. You can often answer a question by reading a declaration and the expression that uses it. Start with a window size. What does it store, and what does the caller need to supply?
 
-    These choices keep declarations, supplied values and blocks visually distinct.
-    Start here before moving to bindings, control flow and user-defined types.
+    ## Declare fields and supply arguments
+
+    [codeblock, $code "moth":
+        Size = | width I32, height I32 = 720 |
+
+        screen = Size(1280)
+        wide = Size(height = 900, width = 1440)
+    ]
+
+    `Size` declares a struct. The parameter brackets, `|...|`, enclose its field declarations. The constructor takes arguments in parentheses. In the first call, `1280` fills the first field and the declared default supplies the height. The second call names both fields, so you can read which dimension each number sets without counting positions.
+
+    The outer `=` binds a name to the completed value. Inside `Size(...)`, the label in a named argument identifies a field. For example, `height = 900` supplies a value to the constructor without creating a variable called `height` in the caller.
+
+    ## Pass a value to a function
+
+    [codeblock, $code "moth":
+        describe |size Size| -> String {
+            return [:[size.width] x [size.height]]
+        }
+
+        caption = describe(screen)
+    ]
+
+    Pipes after a function name declare its parameters. Here `size` names the argument inside `describe`. The fields `width` and `height` belong to the value itself. The arrow gives the return type and braces enclose the statements. The template inserts the two dimensions into text, so `caption` holds `"1280 x 720"`.
+
+    ## Read brackets with their receiving type
+
+    [codeblock, $code "moth":
+        title = ["Moth", " Guide"]
+        parts [String] = ["Moth", " Guide"]
+        sizes [String = Size] = ["screen" = screen]
+    ]
+
+    The first two expressions contain identical text. With no other type to guide it, the all-String head joins the parts into `"Moth Guide"`. The type on `parts` asks for a collection, so it keeps two separate Strings, including the space at the start of the second one. In the third expression, the keyed entry places `screen` in a map. Passing `title` to another function later cannot turn it into a collection.
+
+    ## Follow a name through a block
+
+    [codeblock, $code "moth":
+        State = { Waiting, Ready | size Size | }
+
+        label |state State| -> String {
+            return if state is {
+                case Waiting: then "waiting"
+                case Ready(size): then describe(size)
+            }
+        }
+
+        message = label(State::Ready(screen))
+    ]
+
+    `State` declares two constructors. Only `Ready` has a field. At the call site, `::` selects that constructor and the parentheses supply its field. In a pattern, `Ready(size)` binds the stored field to the name `size` for that arm.
+
+    Braces mark a block's boundaries. The construct decides the scope of each name. Both arms belong to the same match block, but only the `Ready` arm can use its capture. `then` supplies the chosen arm's result and `return` sends it back to the caller.
+
+    You will see the same building blocks in other places. A loop, an option test or a `catch` uses parameter brackets to give an incoming value a local name. The same convention applies to closures planned after the syntax migration. In `|item| => item.title`, the callback signature supplies the type of `item`. A generic parameter lets a declaration work with several types. A named region selects a storage lifetime and a directive such as `$md` selects formatting for a text construction. The @../cheatsheet (cheatsheet) collects the forms, and the @../progress (progress matrix) tracks compiler support.
 ]
 
 [section:
@@ -78,7 +131,7 @@ init_docs_sidebar()!
 [section:
     [doc_level:
         [$in key:mon-syntax]
-        [$in title:MON syntax]
+        [$in title:Constructor syntax and MON]
         [$in advanced:[mon_syntax]]
 
         [mon_syntax_basic]

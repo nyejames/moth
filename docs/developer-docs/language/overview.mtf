@@ -71,7 +71,7 @@ observable semantics for their topics.
 - `docs/docs/loops/range-loops.mtf`
 - `docs/docs/loops/loop-control.mtf`
 
-### Structs
+### Structs and methods
 
 - `docs/docs/structs/struct-declarations.mtf`
 - `docs/docs/structs/construction-and-fields.mtf`
@@ -106,11 +106,17 @@ observable semantics for their topics.
 ### Templates
 
 - `docs/docs/templates/template-basics.mtf`
-- `docs/docs/templates/template-directives.mtf`
 - `docs/docs/templates/template-slots.mtf`
 - `docs/docs/templates/child-wrappers.mtf`
 - `docs/docs/templates/template-control-flow.mtf`
 - `docs/docs/templates/markdown-formatting.mtf`
+
+### Template directives
+
+- `docs/docs/template-directives/template-directives.mtf`
+- `docs/docs/template-directives/slots.mtf`
+- `docs/docs/template-directives/child-wrapping.mtf`
+- `docs/docs/template-directives/formatters.mtf`
 
 ### Directives
 
@@ -119,9 +125,8 @@ observable semantics for their topics.
 
 Contributor routing for compiler and build handoffs lives in
 `docs/docs/directives/overview.mtf`. That file is not a public page import.
-Template-specific directive meanings and comma-separated head items stay in
-`docs/docs/templates/template-directives.mtf`. `docs/docs/directives/directives.mtf`
-owns independent same-line source annotation stacking, unique directive names
+The Template directives references above own template head syntax and the
+individual directives. `docs/docs/directives/directives.mtf` owns independent same-line source annotation stacking, unique directive names
 and `$doc`/`$todo` declaration or statement attachment.
 `docs/docs/directives/constraints.mtf` owns `$fast_math`, `$safe_math` and
 `$infallible` placement, meanings, proof policy, trusted external evidence and
@@ -169,14 +174,16 @@ Capability-checked runtime title mutation remains deferred.
 - `docs/docs/traits/core-cast-traits.mtf`
 - `docs/docs/traits/trait-design-scope.mtf`
 
-### Wiring
+### Constrained closures
 
-- `docs/docs/wiring/wiring.mtf`
+- `docs/docs/closures/closures.mtf`
 
-This reference owns head-directed `of`, named-binding wires, contextual
-constructor routes, capability restrictions and the channel-construction
-boundary. Ordinary type, call, choice and memory contracts still apply outside
-its explicit parameter-context rules.
+This reference owns contextual closure literals, callback parameters and named
+struct fields, invocation, capture access, borrowed results and retention.
+
+### Channels
+
+`docs/docs/async/channels.mtf` owns the accepted Channels V1 contract for invocation-owned tasks, typed endpoints, guarded readiness selection, failure, cancellation, host IO and lifetimes. The short guide at `docs/docs/async/@entry.moth` introduces the syntax. Compiler and runtime delivery are pending.
 
 ### Project structure
 
@@ -214,10 +221,6 @@ its explicit parameter-context rules.
 - `docs/docs/markdown/markdown-dependencies.mtf`
 - `docs/docs/markdown/rendering-contract.mtf`
 - `docs/docs/markdown/choosing-a-content-format.mtf`
-
-The public Wiring route pairs Basic teaching with the canonical unsuffixed
-reference at `docs/docs/wiring/wiring.mtf`. The reference owns Wire and Route
-semantics; the progress matrix owns their target support.
 
 ## Public documentation
 
@@ -297,6 +300,9 @@ and numeric-text facts without compiler tokens, type lookup or arithmetic.
 Source call-argument and declaration parsers remain compiler-local. The real-source
 suite at `src/compiler_tests/mon_syntax_parity/` checks the common notation under
 equivalent exact receiving types.
-The codec does not imply Moth-native `$mon`, automatic schema extraction or a
-static project builder. Source `{=}`, Unicode escapes beyond the existing five
-and contextual `::Variant` construction remain named undelivered parity gaps.
+The accepted format uses square brackets for literal sequences and maps.
+The Alpha source parser and the standalone codec still require a coordinated
+cutover, including empty maps and choice field defaults. Unicode escapes
+beyond the existing five and contextual `::Variant` source construction have
+separate parity gaps. Moth-native `$mon`, schema extraction and the static
+asset builder remain planned work.

@@ -18,13 +18,7 @@
 STATUS: queued, implementation not started
 CURRENT_SLICE: Phase 0 activation pending
 BLOCKERS: normal serial roadmap position and the prerequisite capabilities below
-NEXT_ACTION: activate explicitly after Never return contracts, then refresh owners and establish evidence
-```
-
-Insert the following single entry in `docs/roadmap/roadmap.md`, immediately after the Runtime anonymous records entry (the delivered Never return contracts no longer have a roadmap entry):
-
-```markdown
-- [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
+NEXT_ACTION: at the roadmap position after the foreign-binding trust foundation, refresh owners and establish evidence
 ```
 
 This position is before the currently listed struct-layout, collector-free memory and mixed-Wasm work. Those later programmes are not prerequisites for this entire plan. Deliver the scalar file-backed path without requiring general mixed-target partitioning, managed Wasm aggregates or a new allocator. Unsupported representation-dependent instances remain explicitly target-gated.
@@ -125,14 +119,14 @@ Every code-bearing slice ends with the repository Slice review. Structured audit
 | G08 | `Item #Type`, `Number = NUMERIC` and `Number #Type = NUMERIC` are valid declaration forms. `Type` without compile-time mode is diagnosed. | Phase 1, D01-D06 |
 | G09 | V1 permits zero or one limit. No trait lists, alternatives, conjunctions, generic copying or generic aliasing. | Phases 1/5, D07-D08, N15 |
 | G10 | A repeated generic name means the same parameter within one signature. Different names mean independent parameters, even with identical limits. Each owning declaration and concrete instantiation is independent. | Phase 2, D15-D20, P07 |
-| G11 | Structs and choices use an explicit ordered list: `Pair of First, Second = ...` or `Maybe of Item :: ...`. | Phases 2/5, N01-N05, N14-N16 |
+| G11 | Structs and choices use an explicit ordered list: `Pair of First, Second = ...` or `Maybe of Item = { ...`. | Phases 2/5, N01-N05, N14-N16 |
 | G12 | A generic constructor needs an explicitly applied receiving type. Argument-only generic construction is removed. `of` stays in type positions, not function-call type arguments. | Phase 5, N06-N13 |
 | G13 | WAT annotations reuse JS Moth signature semantics. Imports, runtime capabilities and non-native adapters are explicit and validated. File authorship is not an unrestricted foreign ABI. | Phases 7/8, A01-A14, W01-W22 |
 | G14 | Core algorithms may live in JS/WAT files. Trusted registration connects semantic operations to target implementations without requiring Moth-source wrappers. | Phases 6-9, B07-B14, A14, M16 |
 | G15 | Mandatory consumers are generic `min`, `max`, `clamp` and `abs`. Only `abs` adds a uniform public `Error!` slot. | Phase 9, M01-M20 |
 | G16 | Conditional generic error signatures, general effect-polymorphism and generic error-presence directives remain outside scope. | Phases 4/6/9, B13, M10-M11, M17 |
 | G17 | Further Core generic opportunities, precision expansion, decimal algorithms and generic constants are recorded as later work, not delivered incidentally. | Phases 9/11, M20 and Section 15.3 |
-| G18 | Place this entry immediately after Runtime anonymous records, where the delivered Never return contracts entry stood. Remove the old generics deferred heading at initial activation without removing its permanent handoff or adjacent tooling work. | Phase 0 and Section 13.3 |
+| G18 | The roadmap places this work after the foreign-binding trust foundation. Remove the old generics deferred heading at initial activation without removing its permanent handoff or adjacent tooling work. | Phase 0 and Section 13.3 |
 
 The family names are `NUMERIC`, `INTEGER`, `SIGNED_INTEGER`, `FLOAT`, `DEC`, `INT_16_PLUS`, `INT_32_PLUS` and `FLOAT_32_PLUS`.
 
@@ -214,9 +208,9 @@ Within one signature, all occurrences of the same reusable declaration refer to 
 Left #Type
 Right #Type
 
-first |left Left, right Right| -> Left:
+first |left Left, right Right| -> Left {
     return left
-;
+}
 ```
 
 This signature relates the result to `Left`, not to `Right`. It can be instantiated with two equal or two different concrete types. A result annotated with a third generic name would be a third independent parameter, not an inferred common type.
@@ -232,9 +226,9 @@ Functions collect their owner-local parameters from the declared signature, incl
 ```moth
 Item #Type
 
-identity |value Item| -> Item:
+identity |value Item| -> Item {
     return value
-;
+}
 
 count I32 = 42
 text String = "Priya"
@@ -247,13 +241,13 @@ text_copy = identity(text)
 ```moth
 Number = NUMERIC
 
-add |left Number, right Number| -> Number, Error!:
+add |left Number, right Number| -> Number, Error! {
     return left + right
-;
+}
 
-greater |left Number, right Number| -> Bool:
+greater |left Number, right Number| -> Bool {
     return left > right
-;
+}
 ```
 
 Both functions reuse the declaration but own independent parameters. The two arguments of each call must resolve to the same exact type. Operators do not introduce a common-type search at generic call boundaries.
@@ -283,10 +277,10 @@ item Pair of I32, String = Pair(42, "hello")
 ```moth
 Item #Type
 
-Maybe of Item ::
+Maybe of Item = {
     Some |value Item|,
     Empty,
-;
+}
 
 present Maybe of String = Maybe::Some("hello")
 absent Maybe of String = Maybe::Empty
@@ -296,7 +290,7 @@ The list creates the nominal declaration's own parameters. Repeated uses in fiel
 
 Reject duplicate entries, an entry that is not a reusable generic declaration, a listed parameter unused by the nominal contract and a generic reference missing from the list. A nominal declaration does not acquire generic parameters from method bodies, default expressions or constructor calls.
 
-`of` remains head-directed. Its ordinary type-application meaning does not change Wire/Route capability syntax or permit arbitrary new heads to define a type grammar.
+`of` remains head-directed. Generic type application preserves the distinct construction and endpoint contracts of `Channel of T`, `ChannelReader of T` and `ChannelWriter of T`.
 
 Existing nested-inline-`of` restrictions remain. A concrete alias can name a fully applied nested type where the ordinary syntax requires one. Parameterised aliases, partial application and aliases of reusable generic declarations remain excluded.
 
@@ -309,9 +303,9 @@ Box of Item = |
     value Item,
 |
 
-get |this Box of Item| -> Item:
+get |this Box of Item| -> Item {
     return this.value
-;
+}
 ```
 
 Preserve same-file nominal receiver ownership, mutable access rules and the rejection of methods specialised on one concrete generic instance. Free functions can use independently named parameters in applied nominal types according to their signatures.
@@ -343,10 +337,10 @@ A concrete typed parameter can supply context to `consume_pair(Pair(...))`. An u
 The following function uses the `First`, `Second` and `Pair` declarations in Section 3.5:
 
 ```moth
-make_pair |first First, second Second| -> Pair of First, Second:
+make_pair |first First, second Second| -> Pair of First, Second {
     result Pair of First, Second = Pair(first, second)
     return result
-;
+}
 ```
 
 A call to `make_pair` can infer its arguments from the function signature. Its already resolved result is an ordinary concrete instance. This is not argument-only nominal construction and remains valid without another redundant local annotation.
@@ -457,9 +451,9 @@ Raw literal spelling can receive an active generic numeric parameter at an eligi
 ```moth
 Number = NUMERIC
 
-increment |value Number| -> Number, Error!:
+increment |value Number| -> Number, Error! {
     return value + 1
-;
+}
 ```
 
 Every NUMERIC member can receive the raw whole literal 1. Addition still follows the selected type's normal failure contract.
@@ -467,9 +461,9 @@ Every NUMERIC member can receive the raw whole literal 1. Addition still follows
 ```moth
 Count = INT_32_PLUS
 
-microseconds |seconds Count| -> Count, Error!:
+microseconds |seconds Count| -> Count, Error! {
     return seconds * 1_000_000
-;
+}
 ```
 
 The family admits the embedded constant but does not prove all products fit. This illustrates why minimum-width families are useful.
@@ -530,12 +524,12 @@ The declared parameter/result equality can carry the numeric origin until its pe
 
 An already concrete expected type may be forwarded to a nested generic call's success result. Its source can be an annotation, field/default, return, already known call parameter or an independently typed sibling argument that resolves the outer signature.
 
-Assume `empty` has signature `() -> {T}`, `consume` takes `{I32}` and `pick` has `(T, T) -> T`:
+Assume `empty` has signature `() -> [T]`, `consume` takes `[I32]` and `pick` has `(T, T) -> T`:
 
 ```moth
 consume(empty())
 
-known {I32} = {1, 2}
+known [I32] = [1, 2]
 first = pick(empty(), known)
 second = pick(known, empty())
 ```
@@ -549,7 +543,7 @@ unknown = pick(empty(), empty())
 remains underdetermined without an independent concrete receiver. This is valid with the receiver supplied:
 
 ```moth
-resolved {I32} = pick(empty(), empty())
+resolved [I32] = pick(empty(), empty())
 ```
 
 Forwarding may traverse further nested calls only through already declared signature relationships and known type structure. There is no arbitrary syntactic depth-one exception, but storage and work are bounded by authored calls and edges. A call still unresolved after permitted evidence is exhausted receives an annotation diagnostic.
@@ -785,9 +779,9 @@ The declared Error! slot exists for every specialisation. An unsigned or floatin
 
 Number = NUMERIC
 
-magnitude |value Number| -> Number, Error!:
+magnitude |value Number| -> Number, Error! {
     return abs(value)!
-;
+}
 ```
 
 Keep Error identity and numeric codes with their existing owners. No Math-only error carrier, implicit custom-error conversion or type-dependent signature is introduced.
@@ -823,7 +817,7 @@ Inspection of the newly pushed main established these starting points. They are 
 | Math is a homogeneous concrete F64 registration with inline JS | `builder_surface/core_packages/math.rs` | Replace only the four selected public signatures and their implementation path |
 | External providers already carry stable asset identity and runtime imports | `builder_surface/external_import_providers/provider.rs` | Extend the existing artifact/provider route for assembled WAT |
 | Wasm parser and encoder dependencies exist, but a WAT source-provider contract does not | `Cargo.toml` and external binding reference | Reuse tooling and add a small text front door, not a new engine or full linker programme |
-| Roadmap placement after Never is before the mixed backend | `docs/roadmap/roadmap.md` | The WAT scalar delivery must not wait on that later programme |
+| The roadmap schedules scalar bindings before the mixed backend | `docs/roadmap/roadmap.md` | The WAT scalar delivery must not wait on that later programme |
 
 Paths beginning with `ast/`, `datatypes/`, `headers/`, `hir/` or `public_interface/` below are relative to `src/compiler_frontend/` unless otherwise stated.
 
@@ -897,7 +891,7 @@ Package/provider work then builds on that frontend. The complete plan finishes w
 
 - [ ] Read the current repository rules and routed authorities. Verify that the prerequisite capabilities are actually delivered at activation, distinguishing accepted design from implementation status.
 - [ ] Establish the working-tree, branch, toolchain and effective feature/parallelism configuration. Preserve unrelated uncommitted work and accepted earlier checkpoints. Record the activation revision in untracked working notes.
-- [ ] Confirm the linked queued entry is immediately after Runtime anonymous records. Mark it active there only after activation, without moving it to a separate heading or reordering surrounding work.
+- [ ] At activation, confirm the foreign-binding trust foundation is available and mark the existing roadmap entry active in place.
 - [ ] Remove the exact old `## Generics, type-parametric Core bindings and file-backed JS/WAT` placeholder section. Stop deletion at the next same-level heading. Preserve the optional catch advisory and all unrelated notes.
 - [ ] Transfer the placeholder's D15, numeric-origin, explicit-limit and exclusion facts into the permanent generic/design-scope/architecture references. Keep the existing `Numeric and generic extensions` heading as the stable handoff.
 - [ ] Publish Sections 3 through 8 into the appropriate permanent semantic owners. Mark implementation support separately. Replace contradictory old exclusions only within the approved scope.
@@ -1259,11 +1253,11 @@ Use separate witness assertions within L04 and L11 for I8, U8 and F16. A declara
 |---|---|---|
 | I01 | Concrete-return inner call passed to an identity generic | Resolve outward without requiring a named intermediate |
 | I02 | Generic call with explicit immediate result receiver | Substitute missing parameters from the declared result relationship |
-| I03 | `consume(empty())` with concrete `{I32}` parameter | Forward the concrete expected type into the nested call |
-| I04 | `pick(empty(), known)` with known `{I32}` | Complete the waiting argument from independently established sibling type |
+| I03 | `consume(empty())` with concrete `[I32]` parameter | Forward the concrete expected type into the nested call |
+| I04 | `pick(empty(), known)` with known `[I32]` | Complete the waiting argument from independently established sibling type |
 | I05 | I04 with arguments reversed | Same inferred types and diagnostics, source-order runtime evaluation |
 | I06 | `pick(empty(), empty())` with no receiver | Annotation diagnostic, no default for a nonexistent numeric origin |
-| I07 | I06 with explicit `{I32}` result receiver | Resolve both nested calls from concrete expected context |
+| I07 | I06 with explicit `[I32]` result receiver | Resolve both nested calls from concrete expected context |
 | I08 | Existing `identity(1)` followed by direct U64 use | Preserve numeric-origin sharing and one completed concrete instance |
 | I09 | Multiple pending numeric call arguments plus independent concrete witnesses | Complete permitted relationships before defaults, with no first-use winner |
 | I10 | Conflicting concrete siblings or concrete argument/result expectations | Type conflict, no implicit promotion or candidate choice |
@@ -1276,14 +1270,14 @@ Use separate witness assertions within L04 and L11 for I8, U8 and F16. A declara
 | I17 | Generic-to-generic symbolic forwarding during template validation | No premature concrete requirement and no executable instance publication |
 | I18 | Failed/pruned call completion and recursive distinct instance shapes | No stranded tickets or leaked IDs, retained recursion/resource policy and useful diagnostics |
 
-For I03-I07, use a real generic `empty` returning `{Item}` and a real source `pick` relating its arguments/result. These cases do not allow an untyped empty literal to become a generic variable outside the call-owned receiving rule.
+For I03-I07, use a real generic `empty` returning `[Item]` and a real source `pick` relating its arguments/result. These cases do not allow an untyped empty literal to become a generic variable outside the call-owned receiving rule.
 
 ### 12.5 Nominal declarations and construction
 
 | ID | Case | Required result |
 |---|---|---|
 | N01 | `Pair of First, Second = ...` | Explicit ordered nominal parameter list bound to existing reusable declarations |
-| N02 | `Maybe of Item :: ...` | Equivalent ordered choice parameter contract |
+| N02 | `Maybe of Item = { ...` | Equivalent ordered choice parameter contract |
 | N03 | Bare `Pair First, Second` or old `Pair type ...` declaration | Reject replaced declaration spelling |
 | N04 | Missing, duplicate, non-generic or unused listed parameter | Precise nominal declaration diagnostic |
 | N05 | Reorder fields while keeping the `of` list unchanged | Stable type-argument interpretation and public parameter identity |
@@ -1399,7 +1393,7 @@ Beyond the named rows, preserve these properties wherever the new paths touch th
 - Inactive generic calls produce no durable executable request, target capability or helper after the correct summary-convergence boundary.
 - Published HIR, borrow/proof tables and link facts remain paired to the same final immutable executable after any rewrite.
 - Generic limits never become constraints directives, runtime Bool tests or source-visible physical target predicates.
-- Map keys, anonymous records, Wire/Route parameters and fixed capacities retain their independent eligibility rules. A numeric family does not automatically admit generic map keys or previously forbidden anonymous shapes.
+- Map keys, anonymous records, callback slots and fixed capacities retain their independent eligibility rules. Preserve the declared input types, access, result and retention destination when specialising a callback slot. A numeric family does not automatically admit generic map keys or previously forbidden anonymous shapes.
 - Native result-slot arity, Never/terminality, optional handling and same-file trait conformance retain their permanent contracts.
 - Matching source semantics on debug/release and supported targets produces the same accepted types and specified values. Optional optimisation cannot remove a declared error-handling requirement.
 
@@ -1459,7 +1453,7 @@ Show file-local generic privacy and invalid `Type` at least once in the Basic ma
 
 ### 13.3 Roadmap and later-owner coordination
 
-The authoring/insertion change added the queued plan bullet immediately after the Never return contracts entry, which was retired when that capability was delivered; the bullet now follows Runtime anonymous records. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
+The roadmap owns the serial position of this work. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
 
 Coordinate these existing owners by capability, not by creating links between temporary implementation plans:
 
@@ -1472,7 +1466,7 @@ Coordinate these existing owners by capability, not by creating links between te
 | Package dependency/manager work | Canonical callable identities, file-private reusable declarations and implementation dependency fingerprints, without making those declarations importable |
 | Moth-native MON integration | Concrete nominal parameter/application changes and unchanged requirement that schemas describe concrete types, not reusable generic metadata |
 | Later constraints and fast-math consumers | Explicit limits are separate from directives and inferred effect summaries, with no change to checked ordinary operations or the uniform public abs error slot |
-| Existing nominal, loop, Wiring and source-kind work | Updated examples and producers consuming the same `of`, signature and known-shape rules, without expanding their independent scope |
+| Existing nominal, loop, callback and source-kind work | Updated examples and producers consuming the same `of`, signature and known-shape rules, without expanding their independent scope |
 | LSP and editor follow-ups | Resolved limits shown in hover/documentation, optional advisories remain tooling work and never default compiler warnings |
 
 A future richer Math pass should identify useful generic algorithms from real package use. Record candidates and prerequisites without adding new approved APIs through an implementation note. Generic constants, decimal transcendental accuracy, extra numeric families and generic container bindings remain distinct design questions.
@@ -1660,7 +1654,7 @@ GitHub code search still returned some paths from the older indexed parent durin
 | Receipt | Current inspected source or reference | Relevance |
 |---|---|---|
 | R01 | `AGENTS.md` and `docs/roadmap/roadmap.md` | Authority, test/validation workflow, serial insertion point and exact placeholder removal |
-| R02 | `docs/compiler-design-overview.md` | Generic publication, source-owned metadata, numeric handoff, native result direction, call/proof and Wiring boundaries |
+| R02 | `docs/compiler-design-overview.md` | Generic publication, source-owned metadata, numeric handoff, native result direction, call proofs and the Wiring boundary at the inspected revision |
 | R03 | `docs/build-system-design.md` and `docs/compiler-data-layout-design.md` | Provider ownership, source/physical identity, capabilities, locked spans and diagnostic lanes |
 | R04 | `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf` | Small coherent changes, primary test ownership, assertion preservation and final gate policy |
 | R05 | `src/compiler_frontend/ast/generic_functions/calls.rs` | Shared instance/template-validation lanes, ready/retained arguments, deferred requests and source-ordered tickets |

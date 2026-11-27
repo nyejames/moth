@@ -10,13 +10,12 @@ directives that transform AST are excluded as well. Compiler-known directives
 may provide constrained language structure, templates, metadata and
 configuration, but they cannot become a user-extensible macro system.
 
-### General closures and broad function-value mechanisms
+### General function values and higher-order polymorphism
 
-General closures, anonymous callable values, generic function values and
-higher-order polymorphism are outside scope. These mechanisms add broad
-function-value semantics and solver pressure. Constrained template and builder
-contracts can cover explicit UI integration without general function values.
-Hidden event-handler closures remain outside the language model as well.
+The accepted @../closures/ (closure design) restricts each literal to a
+declared callback parameter or named struct field. General function values,
+generic function values, higher-order polymorphism and implicit event-handler
+closures remain outside scope.
 
 ### Dynamic trait values
 
@@ -137,15 +136,13 @@ outside scope.
 ### General lexical blocks and control-flow labels
 
 Moth has no dedicated general lexical-block construct. `block` is an ordinary
-identifier, so `block:` has the same declared-region meaning as any valid
-`name:` header. Anonymous `_:` blocks and brace replacements remain outside
-scope. Structured control flow introduces ordinary lexical scopes, while bare
-`identifier:` headers belong exclusively to declared regions.
+identifier, so `block { ... }` has the same declared-region meaning as any valid
+`name { ... }` header. A region needs a name. Bare braces have no standalone meaning. A control-flow block can contain several lexical scopes, one for each branch.
 
 Arbitrary statement labels, labelled `break`, labelled `continue` and `goto`
 remain outside scope. Unlabelled loop exits stay structural and target the
-nearest enclosing loop. Future compiler-owned scopes such as `$async:` remain
-distinct because their marker carries language-defined behaviour.
+nearest enclosing loop. Channels V1 owns child tasks by function invocation.
+Detached tasks, source futures and user-selected schedulers are outside that model.
 
 ### Source-visible RC and dynamic shared ownership
 

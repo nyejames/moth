@@ -6,7 +6,7 @@
 - `TimeMark` for measuring elapsed time and frame deltas
 - `Timestamp` for real-world UTC instants
 
-These types stay opaque. Pass them to the package functions. Do not construct them with struct syntax.
+Get these values from the package functions. The types expose no public constructor or fields.
 
 ### Measuring elapsed time
 
@@ -33,17 +33,17 @@ Use `Timestamp` for real-world UTC instants that may be logged, stored or exchan
 [codeblock, $code "moth":
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds, to_iso_string
 
-    parse_created || -> Timestamp, Error!:
+    parse_created || -> Timestamp, Error! {
         return timestamp_from_iso_string("1970-01-01T00:00:00.000Z")!
-    ;
+    }
 
-    created = parse_created() catch:
+    created = parse_created() catch {
         then timestamp_from_unix_milliseconds(0.0)
-    ;
+    }
 
-    rendered = to_iso_string(created) catch:
+    rendered = to_iso_string(created) catch {
         then "1970-01-01T00:00:00.000Z"
-    ;
+    }
 
     io.line(rendered)
 ]

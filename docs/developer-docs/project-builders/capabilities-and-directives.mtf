@@ -56,7 +56,7 @@ surface.
 Slot meaning stays with the builder. The HTML builder interprets its registered
 `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and
 `head` destinations and leaves the default body lane for ordinary fragments.
-Another builder may register unrelated names. Nested, aliased and runtime
+These HTML destinations receive Strings. A package explicitly renders typed component data before passing it to one. Another builder may register unrelated names. Nested, aliased and runtime
 inserts remain ordinary template composition and do not route to a builder
 destination. Runtime named builder slots remain unsettled final design.
 

@@ -51,7 +51,7 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - **Builder binding-backed package**: `@builder/web/canvas` is a builder-owned runtime package with no source facade.
 - **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
 
-### Public route paths
+### Public route paths @#public-route-paths
 
 A public route is a provider path below a facade. `@child/forms` names the
 `forms` route published by `child`. It does not resolve `child/forms` as a

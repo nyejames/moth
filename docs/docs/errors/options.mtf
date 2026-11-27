@@ -27,29 +27,29 @@ Inline inspection:
 Block inspection:
 
 [codeblock, $code "moth":
-    display_name = if maybe_name is |name|:
+    display_name = if maybe_name is |name| {
         then name
     else
         then "guest"
-    ;
+    }
 ]
 
 Statement inspection:
 
 [codeblock, $code "moth":
-    if maybe_name is none:
+    if maybe_name is none {
         io.line("missing")
-    ;
+    }
 ]
 
 Full option match:
 
 [codeblock, $code "moth":
-    label = if maybe_name is:
-        "Priya" => then "Hi Priya"
-        |name| => then name
-        none => then "guest"
-    ;
+    label = if maybe_name is {
+        case "Priya": then "Hi Priya"
+        case |name|: then name
+        case none: then "guest"
+    }
 ]
 
 Option patterns support:
@@ -59,9 +59,9 @@ Option patterns support:
 - compatible relational present-value patterns
 - `|name|` to capture any present value
 - guards
-- `else =>`
+- `else:`
 
-An option match can be exhaustive without `else =>` when it has both an
+An option match can be exhaustive without `else:` when it has both an
 unguarded `none` arm and an unguarded present-value capture.
 
 Direct fallback syntax such as `maybe_name else then "guest"` is invalid.
@@ -71,9 +71,9 @@ Direct fallback syntax such as `maybe_name else then "guest"` is invalid.
 Statement `if` can test for absence:
 
 [codeblock, $code "moth":
-    if maybe_name is none:
+    if maybe_name is none {
         io.line("missing")
-    ;
+    }
 ]
 
 ### Equality and ordering
@@ -99,10 +99,10 @@ Postfix `?` unwraps a present value or returns `none` from the enclosing
 function.
 
 [codeblock, $code "moth":
-    get_display_name |id String| -> String?:
+    get_display_name |id String| -> String? {
         user = find_user(id)?
         return user.name
-    ;
+    }
 ]
 
 The exact contract is:

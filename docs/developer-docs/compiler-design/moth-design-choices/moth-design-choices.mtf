@@ -36,7 +36,7 @@ This coupling feels strange if you expect `package.json` scripts or a free-form 
 
 ## Templates and static evidence
 
-Templates are first-class. They are not string soup with a helper library. The compiler tracks structure through a temporary **Template IR (TIR)** while AST work runs, then hands either a folded string or neutral runtime data to later stages.
+A String template can route slots, apply a wrapper and select output lazily. AST uses a temporary **Template IR (TIR)** to preserve those relationships. The accepted bracket design extends structural composition to typed sequences. Simple collection and map literals take their ordinary typed construction path.
 
 **Static traits**, **choices** and **concrete generated requests** push another bias: resolve what you can before HIR. A generic call becomes a request for a concrete function. Trait bounds become evidence and a concrete call target. HIR never carries trait objects or erased dispatch.
 
@@ -64,11 +64,13 @@ Accepted boundaries or outside-scope families include:
 
 - no shadowing of user-visible names
 - no source-visible lifetimes or reference categories
-- no general closures or anonymous function values as a broad higher-order system
+- no general-purpose function values
 - no inheritance
 - no trait objects or erased runtime dispatch
 - no broad reflection or runtime type inspection
 - no general-purpose macro language inside the language
+
+A constrained closure takes its signature from a callback parameter or named struct field. This lets a library ask its caller for a particular operation.
 
 If a feature would force solver-heavy reasoning, implicit behaviour or backend leakage into source, the design tends to refuse it. Deferred work still fits the model. Outside-scope work would need an explicit design change first.
 
@@ -83,7 +85,7 @@ Do not call those refusals "missing features" as if every language must collect 
             [$in href: ./]
             [$in eyebrow: Given up]
             [$in title: Source-surface power]
-            Macros, reflection, trait objects, general closures, source-visible lifetimes and shadowing.
+            Macros, reflection, trait objects, first-class function types, source-visible lifetimes and shadowing.
         ]
     ]
 

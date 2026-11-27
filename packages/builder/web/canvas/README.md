@@ -40,8 +40,8 @@ WebGL belongs in `@builder/web/graphics`, never here. `@builder/web/canvas` stay
 
 Each waits for a binding capability rather than a canvas-local workaround.
 
-- **Async image loading.** Needs callbacks, promises or an event and listener model.
-- **`toBlob` and `captureStream`.** Need callback and stream values with a Moth ABI shape. `to_data_url*` is available now but returns the whole encoded canvas as one in-memory string.
+- **Async image loading.** Needs a host adapter that delivers load completion into a live Moth task and tears down its registration when the owner exits.
+- **`toBlob` and `captureStream`.** Blob completion needs the same host delivery contract. Capturing a stream also needs a supported stream handle and lifecycle. `to_data_url*` returns the whole encoded canvas as one in-memory string.
 - **Typed-array pixel access and arbitrary line-dash arrays.** Need collection or typed-data signatures. This is the same bulk-data prerequisite `@builder/web/graphics` records, and both packages should consume one design.
 - **`Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap` and video sources.** Each becomes its own opaque API rather than being forced through the scalar 2D wrapper surface. Tentative considerations:
   - `Path2D` gives reusable path objects and fits the current opaque-handle model.

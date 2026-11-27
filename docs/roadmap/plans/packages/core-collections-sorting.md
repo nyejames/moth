@@ -106,24 +106,26 @@ Use the delivered mixed-backend owners rather than preserving any path named onl
 The declaration-like contract is:
 
 ```moth
-sort type T |
-    this ~{T},
+T #Type
+
+sort |
+    this ~[T],
     stable Bool = true,
     memory SortMemory = SortMemory::Automatic,
 |
 ```
 
 This is a compiler-owned member rather than a source function copied into each module. The same
-member is available on fixed `{N T}` collections. A fixed collection sorts only its logical occupied
+member is available on fixed `[N T]` collections. A fixed collection sorts only its logical occupied
 range and keeps its capacity.
 
 `SortMemory` is a closed compiler-owned policy choice:
 
 ```moth
-SortMemory ::
+SortMemory = {
     Automatic,
     Minimal,
-;
+}
 ```
 
 It uses normal nominal choice identity and unit-variant semantics. The compiler reserves the type
@@ -155,7 +157,7 @@ The receiver is not an authored argument slot. `this` documents its mutable rece
 - mutates the existing collection and returns no value
 - requires explicit mutable receiver access
 - is infallible in Moth source semantics
-- accepts neither postfix `!` nor `catch`
+- has no error slot for postfix `!`. A plain call with literal policies is ineligible for `catch`. Apply ordinary safety-catch eligibility to the whole expression when argument evaluation qualifies.
 - traps or aborts on allocation exhaustion instead of returning `Error!`
 - leaves empty and one-element collections unchanged
 - preserves logical length, fixed capacity and collection identity
@@ -385,8 +387,7 @@ An embedded helper cannot own separate memory, assume a private heap, bypass the
 ## Borrow, lifetime and retained-edge contract
 
 `sort` is one exclusive whole-collection mutation. A live shared element result or collection alias
-prevents it. The receiver requires explicit `~` on an existing mutable place. Reactive observers use
-the established whole-collection invalidation rule.
+prevents it. The receiver requires explicit `~` on an existing mutable place.
 
 Sorting is a permutation. It adds no retained edge, removes no retained edge, creates no cleanup
 frontier and preserves the multiset of element obligations, element allocation identities, the
@@ -495,7 +496,7 @@ Establish the complete source API before sorting reaches HIR.
 - [ ] Require both policies to fold and normalise them to compiler enums.
 - [ ] Diagnose dynamic policies with parameter identity and source location.
 - [ ] Add `sort` to both collection shapes as mutable, infallible and unit-returning.
-- [ ] Reject postfix `!` and `catch` through the normal infallible-call path.
+- [ ] Reject postfix `!` on the sort operation. Use ordinary expression eligibility for `catch`.
 
 ## Coverage
 
@@ -505,7 +506,7 @@ Establish the complete source API before sorting reaches HIR.
 - [ ] Runtime Bool and runtime `SortMemory` rejection
 - [ ] Reserved-name collisions
 - [ ] Existing builtin named-argument rejection
-- [ ] Mutable receiver, fixed/growable, postfix `!` and `catch`
+- [ ] Mutable receiver and both collection shapes. Reject postfix `!` and a catch on a bare sort. Accept a safety catch with authored arithmetic in a foldable policy argument.
 
 # Phase 2 - Classify natural order and carry sort through HIR
 
@@ -523,7 +524,6 @@ Create one complete backend-neutral sort operation and its analysis facts.
 - [ ] Add or extend the single HIR representation chosen in Phase 0.
 - [ ] Add HIR validation, display, remap, side-table and debug handling.
 - [ ] Treat sort as an exclusive whole-collection mutation in borrow validation.
-- [ ] Add normal reactive invalidation.
 - [ ] Record a no-change retained-edge permutation summary.
 - [ ] Preserve allocation-family and element identity facts.
 - [ ] Add per-function sort helper requirements and target validation.

@@ -16,9 +16,9 @@ an explicit dependency clause.
 ### Current-state capsule
 
 ```text
-STATUS: the accepted scalar expansion is delivered; package programme remains active in parallel
+STATUS: the accepted scalar expansion is delivered. The main roadmap controls when package work resumes.
 CURRENT_SLICE: exact F64-only API migration delivered through shared numeric/binding owners
-BLOCKERS: compile-time folding waits for Core const evaluation and its accepted Math precision contract
+BLOCKERS: Math folding needs an accepted compile-time F64 precision and numeric-failure contract
 NEXT_ACTION: retain coverage and finite-boundary ownership; consume later generic/precision work and Wasm Math delivery through their owners
 ```
 
@@ -97,8 +97,8 @@ numerical contract, not a transliteration of the JS expressions.
 
 ### Constant evaluation boundary
 
-Math folding waits for the shared Core const-eval prerequisite **and** for an accepted compile-time
-contract covering exact F64 semantics and numeric failure. An eligible scalar signature alone does not settle
+The shared Core evaluator is available. Math folding still needs an accepted compile-time
+contract for exact F64 semantics and numeric failure. An eligible scalar signature alone does not settle
 that contract. Add no Math-local interpreter, callback registry, package-name dispatch or
 placeholder evaluator metadata.
 
