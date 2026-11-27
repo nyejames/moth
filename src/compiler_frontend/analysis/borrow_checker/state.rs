@@ -17,7 +17,7 @@ mod allocation_layer;
 
 use allocation_layer::AllocationLayer;
 pub(super) use allocation_layer::{
-    AllocId, AllocationRetirement, FieldKey, MutationTarget, ResolvedPlace, StoredValue,
+    AllocId, AllocationRetirement, FieldKey, PlaceResolution, ResolvedPlace, StoredValue,
 };
 
 /// An occurrence of a local binding, whether it owns a slot or links to another place.
@@ -66,7 +66,7 @@ pub(super) enum Coverage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SmallSet<T> {
+pub(super) enum SmallSet<T> {
     Empty,
     One(T),
     Many(Vec<T>),
@@ -88,7 +88,7 @@ impl<T: Copy + Ord> SmallSet<T> {
         Self::Many(known)
     }
 
-    fn insert(&mut self, item: T) {
+    pub(super) fn insert(&mut self, item: T) {
         match self {
             Self::Empty => *self = Self::One(item),
             Self::One(old) if item != *old => {
@@ -129,7 +129,7 @@ impl<T: Copy + Ord> SmallSet<T> {
         }
     }
 
-    fn as_slice(&self) -> &[T] {
+    pub(super) fn as_slice(&self) -> &[T] {
         match self {
             Self::Empty => &[],
             Self::One(item) => std::slice::from_ref(item),
@@ -144,6 +144,7 @@ pub(super) struct AddressSet {
     cells: SmallSet<CellId>,
     pub coverage: Coverage,
     definite: Option<CellId>,
+    all_candidates_known: bool,
 }
 
 impl AddressSet {
@@ -152,6 +153,7 @@ impl AddressSet {
             cells: SmallSet::from_iter(cells),
             coverage,
             definite: None,
+            all_candidates_known: coverage == Coverage::Complete,
         }
     }
 
@@ -161,6 +163,15 @@ impl AddressSet {
 
     pub(super) fn definite(&self) -> Option<CellId> {
         self.definite
+    }
+
+    /// A missing binding alternative need not hide a possible storage location.
+    pub(super) fn may_coverage(&self) -> Coverage {
+        if self.all_candidates_known {
+            Coverage::Complete
+        } else {
+            Coverage::Partial
+        }
     }
 
     pub(super) fn with_singleton_proof(mut self) -> Self {
@@ -216,6 +227,7 @@ pub(super) enum BindingSpec {
     Projected {
         addresses: AddressSet,
         origin: WrapperId,
+        owner: Option<WrapperId>,
         writable: bool,
         isolated: bool,
         route_roots: RootSet,
@@ -237,6 +249,7 @@ enum BindingTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Origin {
     wrapper: WrapperId,
+    owner: Option<WrapperId>,
     isolated: bool,
 }
 
@@ -258,7 +271,7 @@ struct BindingRow {
     wrapper: WrapperId,
     alts: SmallSet<BindingAlt>,
     coverage: Coverage,
-    /// Coarse provenance for overlap checks; typed alternatives determine destinations.
+    /// Named routes for attribution and effect provenance, not storage identity.
     route_roots: RootSet,
     /// Slot provenance when the local's may-set cannot describe the owned cell on its own.
     slot_roots: Option<RootSet>,
@@ -563,26 +576,13 @@ impl<'a> BindingView<'a> {
         self.state.binding_route_roots(self.local)
     }
 
-    pub(super) fn aliases_root(self, root: usize) -> bool {
-        self.direct_slots().contains(root) || self.route_roots().contains(root)
-    }
-
-    pub(super) fn has_observed_roots(self) -> bool {
-        self.mode().contains(LocalMode::ALIAS) || !self.value_roots().is_empty()
-    }
-
-    /// Coarse access roots include the route through a projected holder, not just its address.
-    pub(super) fn include_overlap_roots(self, roots: &mut RootSet) {
+    pub(super) fn attribution_roots(self) -> RootSet {
+        let mut roots = RootSet::empty(self.state.locals.len());
         if self.mode().contains(LocalMode::SLOT) {
             roots.insert(self.local);
         }
         roots.union_with(&self.direct_slots());
         roots.union_with(&self.route_roots());
-    }
-
-    pub(super) fn overlap_roots(self) -> RootSet {
-        let mut roots = RootSet::empty(self.state.locals.len());
-        self.include_overlap_roots(&mut roots);
         roots
     }
 }
@@ -915,15 +915,6 @@ impl BorrowState {
         roots
     }
 
-    /// Whether `root_index` is in `effective_roots(local_index)`, without building that set.
-    /// WHY: alias conflict scans ask this for every local on every access; building the set
-    /// can allocate a word buffer per call.
-    pub(super) fn effective_root_contains(&self, local_index: usize, root_index: usize) -> bool {
-        let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
-        (includes_self && root_index == local_index)
-            || (includes_value_roots && self.locals[local_index].value_roots.contains(root_index))
-    }
-
     /// Alias derivation ledger a value read from `source_index` carries into a new binding.
     ///
     /// WHAT: the source binding's transitive derivation chain, including the source itself when
@@ -945,17 +936,18 @@ impl BorrowState {
     }
 
     /// Which sources of `effective_roots` apply to a local: its own allocation root, and its
-    /// value roots. The set builder and the membership test both read this one rule.
+    /// value roots.
     fn effective_root_sources(&self, local_index: usize) -> (bool, bool) {
         let state = &self.locals[local_index];
-        let mode = self.binding_mode(local_index);
-        let has_slot_binding = mode.contains(LocalMode::SLOT);
-        let has_alias_binding = mode.contains(LocalMode::ALIAS);
+        if state.init == Init::No {
+            return (false, false);
+        }
         let has_value_roots = !state.value_roots.is_empty();
-        (
-            has_slot_binding && self.implicit_slot_provenance(local_index),
-            has_alias_binding || (has_slot_binding && has_value_roots),
-        )
+        let includes_self = match self.binding_row(WrapperId::current(local_index)) {
+            None => !has_value_roots,
+            Some(row) => row.has_slot() && row.slot_roots.as_ref().is_some_and(RootSet::is_empty),
+        };
+        (includes_self, has_value_roots)
     }
 
     fn implicit_slot_provenance(&self, local: usize) -> bool {
@@ -1314,18 +1306,13 @@ impl RootSet {
         removed
     }
 
-    /// Whether the two sets share a root, without building their intersection.
-    ///
-    /// WHY: `intersect_with` on a clone allocates just to answer emptiness, and this runs per
-    /// argument pair on every call. Both sets are built over the same local count, so pairwise
-    /// word ANDs cover every bit; the debug assertion guards that precondition, since a length
-    /// mismatch would silently compare only the shared prefix in release builds.
-    pub(super) fn intersects(&self, other: &Self) -> bool {
+    fn has_members_outside(&self, other: &Self) -> bool {
         debug_assert_eq!(self.bit_len, other.bit_len);
-        self.word_slice()
-            .iter()
-            .zip(other.word_slice().iter())
-            .any(|(left, right)| (*left & *right) != 0)
+        match (self.words.as_deref(), other.words.as_deref()) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(left), Some(right)) => left.iter().zip(right).any(|(&a, &b)| a & !b != 0),
+        }
     }
 
     pub(super) fn clear(&mut self) {

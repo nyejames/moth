@@ -4,6 +4,9 @@
 //! WHY: call boundaries are where alias metadata is easiest to get wrong and hardest to debug.
 
 use crate::compiler_frontend::analysis::borrow_checker::problem::{EventKind, from_hir};
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BorrowCheckError, check_borrows, refresh_call_allocations, seed_call_summaries,
+};
 use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -23,6 +26,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     MultipleMutableBorrowsView, SharedMutableConflictView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, DiagnosticBag, InvalidMutableAccessReason,
@@ -43,6 +47,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
+use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
@@ -2345,6 +2350,126 @@ replace(produce(2.00))
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a checked Decimal result is a value-backed fresh mutable argument");
+}
+
+pub(super) fn assert_borrow_code_at(
+    error: BorrowCheckError,
+    source: &str,
+    access: &str,
+    code: &str,
+) {
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    assert_eq!(diagnostic.descriptor().code, code, "{access}");
+    let start = source.find(access).expect("authored access") as u32;
+    let range = start..start + access.len() as u32;
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span.local().inline_range().is_some_and(|site| range.contains(&site.start()))
+        ),
+        "diagnostic should point inside {access}",
+    );
+}
+
+#[test]
+fn call_reservations_distinguish_projected_cells_and_fresh_values() {
+    for (call, expected_code) in [
+        ("update(~pair.left, ~pair.right)", None),
+        ("update(~pair.left, ~pair.left)", Some("MOTH-BORROW-0002")),
+        ("update_holder(~pair.left, ~pair)", Some("MOTH-BORROW-0002")),
+        ("update(~pair.left, 8)", None),
+        ("update(copy pair.left, ~pair.left)", None),
+        ("update_and_read(~pair.left, pair.right)", None),
+        (
+            "update_and_read(~pair.left, pair.left)",
+            Some("MOTH-BORROW-0003"),
+        ),
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             update |first ~I32, second ~I32|:\n\
+             ~first = 3\n\
+             ~second = 4\n\
+             ;\n\
+             update_holder |field ~I32, holder ~Pair|:\n\
+             ~field = 3\n\
+             ~holder = Pair(4, 5)\n\
+             ;\n\
+             update_and_read |target ~I32, observed I32|:\n\
+             ~target = copy observed\n\
+             ;\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             {call}\n\
+             return pair.left\n\
+             ;"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let registry = default_external_package_registry(&mut string_table);
+        let (mut hir, mut types) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the reservation fixture should lower");
+        let mut summaries = seed_call_summaries(&hir, &path_fork, &string_table)
+            .expect("the fixture's declarations should seed call summaries");
+        infer_builtin_failure_summaries(&hir, &mut summaries);
+        install_private_failure_lanes(&mut hir, &summaries, &mut types, &registry)
+            .expect("the fixture's private call lanes should be finalized");
+        let links = collect_module_function_link_facts(&hir).expect("the fixture's call links");
+        refresh_call_allocations(
+            &hir,
+            &types,
+            &registry,
+            &path_fork,
+            &string_table,
+            (&links, &Default::default()),
+            &mut summaries,
+        )
+        .expect("call allocation summaries should converge before validation");
+        let result = check_borrows(
+            &hir,
+            &types,
+            &registry,
+            &path_fork,
+            &string_table,
+            Some(summaries.analysis.public_call_summaries),
+        );
+        if let Some(code) = expected_code {
+            let error = result.expect_err("overlapping call operands must conflict");
+            assert_borrow_code_at(error, &source, call, code);
+        } else {
+            result.unwrap_or_else(|error| panic!("{call} should be legal: {error:?}"));
+        }
+    }
+}
+
+#[test]
+fn builtin_receiver_edit_checks_a_live_lookup_on_a_sibling_receiver() {
+    let edit = "~pair.right.push(7)";
+    for (right, shared) in [("{2}", false), ("items", true)] {
+        let source = format!(
+            "Pair = |left {{I32}}, right {{I32}}|\n\
+             probe || -> I32, Error!:\n\
+             items ~= {{1}}\n\
+             pair ~= Pair(items, {right})\n\
+             observed = pair.left.get(0)!\n\
+             {edit}\n\
+             return observed\n\
+             ;"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let registry = default_external_package_registry(&mut string_table);
+        let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+        let result = run_borrow_checker(&hir, &registry, &path_fork, &string_table);
+        if shared {
+            let error = result.expect_err("the edit invalidates the shared receiver's live lookup");
+            assert_borrow_code_at(error, &source, edit, "MOTH-BORROW-0007");
+        } else {
+            result.expect("editing a distinct receiver does not invalidate the lookup");
+        }
+    }
 }
 
 #[test]

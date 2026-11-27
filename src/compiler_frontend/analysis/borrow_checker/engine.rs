@@ -30,7 +30,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::{VecDeque, hash_map::Entry};
+use std::collections::{BinaryHeap, hash_map::Entry};
 
 #[cfg(test)]
 #[path = "transfer/tests/invoke_edge_tests.rs"]
@@ -166,7 +166,6 @@ impl<'a> BorrowChecker<'a> {
         // 3) Persist facts + entry/exit snapshots for reachable blocks.
         let function = &self.module.functions[function_index];
         let reachable_blocks = self.collect_reachable_blocks(function)?;
-        let reachable_block_set = reachable_blocks.iter().copied().collect::<FxHashSet<_>>();
         let layout = self.build_function_layout(function, &reachable_blocks)?;
         let visible_locals_by_block = &layout.visible_locals_by_block;
 
@@ -211,11 +210,13 @@ impl<'a> BorrowChecker<'a> {
         }
         in_states.insert(function.entry, initial_state);
 
-        // `pending` mirrors queue membership so a block whose input grows from several
-        // predecessors before it runs is visited once with the accumulated input.
-        let mut worklist = VecDeque::new();
+        // Reverse postorder lets the forward inputs of a merge accumulate before it runs,
+        // even when they arrive along paths of different lengths.
+        let ranks = reverse_postorder_ranks(function.entry, &layout.block_successors);
+        let mut worklist = BinaryHeap::new();
+        // Pending membership prevents multiple growing inputs from queuing a block twice.
         let mut pending = FxHashSet::default();
-        worklist.push_back(function.entry);
+        worklist.push((ranks[&function.entry], function.entry.0));
         pending.insert(function.entry);
 
         let mut summary = FunctionBorrowSummary {
@@ -231,8 +232,9 @@ impl<'a> BorrowChecker<'a> {
             reachable_blocks.len()
         ));
 
-        // Standard forward fixed-point iteration over reachable blocks.
-        while let Some(block_id) = worklist.pop_front() {
+        // Keep diagnostic priority independent of fact publication order.
+        while let Some((_, block_index)) = worklist.pop() {
+            let block_id = BlockId(block_index);
             // Clear before transfer so a self-loop or later back edge can queue the block again.
             pending.remove(&block_id);
             summary.worklist_iterations += 1;
@@ -288,11 +290,12 @@ impl<'a> BorrowChecker<'a> {
                     return Ok::<(), BorrowCheckError>(());
                 }
                 let invoke_lane = invoke_lanes.next();
-                if invoke_lane.is_some_and(|lane| lane.unreachable)
-                    || !reachable_block_set.contains(&successor)
-                {
+                if invoke_lane.is_some_and(|lane| lane.unreachable) {
                     return Ok::<(), BorrowCheckError>(());
                 }
+                let Some(&rank) = ranks.get(&successor) else {
+                    return Ok::<(), BorrowCheckError>(());
+                };
 
                 let mut successor_input = output_state.clone();
                 if let Some(lane) = invoke_lane {
@@ -331,7 +334,7 @@ impl<'a> BorrowChecker<'a> {
                     }
                 };
                 if changed_in && pending.insert(successor) {
-                    worklist.push_back(successor);
+                    worklist.push((rank, successor.0));
                 }
 
                 Ok::<(), BorrowCheckError>(())
@@ -725,6 +728,33 @@ impl<'a> BorrowChecker<'a> {
 
         Ok(())
     }
+}
+
+/// A larger finishing rank means earlier reverse-postorder priority.
+fn reverse_postorder_ranks(
+    entry: BlockId,
+    successors: &FxHashMap<BlockId, Vec<BlockId>>,
+) -> FxHashMap<BlockId, usize> {
+    let mut ranks = FxHashMap::default();
+    ranks.reserve(successors.len());
+    ranks.insert(entry, 0);
+    // DFS follows successors backwards so independent successors keep their authored order
+    // when postorder is reversed.
+    let mut stack = vec![(entry, successors[&entry].iter().rev())];
+    let mut rank = 0;
+    while let Some((block, children)) = stack.last_mut() {
+        if let Some(&child) = children.next() {
+            if let Entry::Vacant(seen) = ranks.entry(child) {
+                seen.insert(0);
+                stack.push((child, successors[&child].iter().rev()));
+            }
+        } else {
+            ranks.insert(*block, rank);
+            rank += 1;
+            stack.pop();
+        }
+    }
+    ranks
 }
 
 /// Retire both previous outcomes before installing the selected lane's captures.

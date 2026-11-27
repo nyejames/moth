@@ -1,15 +1,13 @@
 //! Instantiate validated return shapes, or conservatively connect compatible opaque paths.
 
 use super::super::layer::{
-    CapturedValue, LayerValueContext, mark_alloc_provenance_readonly, projection_key,
-    resolve_place_allocs, stored_values,
+    CapturedValue, LayerValueContext, capture_copy, resolve_place, stored_allocation_values,
+    stored_values,
 };
-use super::super::place_load_source;
 use super::{CallArgumentTransfer, CallTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AddressSet, AllocId, CellId, Coverage, FieldKey, ResolvedPlace, RootSet, StoredValue,
-    TypedStore,
+    AllocId, Coverage, FieldKey, PlaceResolution, ResolvedPlace, RootSet, StoredValue, TypedStore,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
@@ -297,23 +295,23 @@ fn direct_result_ops(
         .layout
         .index_of(dest.local())
         .expect("result type lookup checked layout");
-    let arg = &actuals.args[param.index];
     if allow_plain_roots
         && !input
             .state
             .binding_mode(index)
             .contains(super::LocalMode::ALIAS)
-        && preserves_plain_roots(input, index, arg)
+        && preserves_plain_roots(input, actuals, index, param.index)?
     {
         return Ok(Some(Vec::new()));
     }
-    let captured = if allow_plain_roots {
-        argument_values(input, arg)?
-    } else {
-        actuals.root(input, param.index)?.clone()
-    };
+    let captured = actuals.root(input, param.index)?;
     let mut ops = Vec::new();
-    bind_result(&mut ops, dest, captured.values, captured.views);
+    bind_result(
+        &mut ops,
+        dest,
+        captured.values.iter().copied(),
+        captured.views.clone(),
+    );
     Ok(Some(ops))
 }
 
@@ -348,14 +346,22 @@ fn result_type(
 fn bind_result(
     ops: &mut Vec<InvokeLayerOp>,
     dest: HirLocalDestination,
-    values: Vec<StoredValue>,
+    values: impl IntoIterator<Item = StoredValue>,
     views: Vec<AllocId>,
 ) {
-    if !values.is_empty() {
+    let mut readonly = false;
+    let ids: Vec<_> = values
+        .into_iter()
+        .map(|value| {
+            readonly |= !value.writable;
+            value.id
+        })
+        .collect();
+    if !ids.is_empty() {
         ops.push(InvokeLayerOp::Bind {
             local: dest.local(),
-            readonly: values.iter().any(|value| !value.writable),
-            ids: values.into_iter().map(|value| value.id).collect(),
+            readonly,
+            ids,
             views,
         });
     }
@@ -366,111 +372,230 @@ fn bind_result(
 /// need the explicit capture instead.
 fn preserves_plain_roots(
     input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
     destination: usize,
-    arg: &CallArgumentTransfer,
-) -> bool {
-    let expression = input.context.expressions.expression(arg.argument);
+    index: usize,
+) -> Result<bool, BorrowCheckError> {
+    let argument = actuals.argument(input, index)?.argument;
+    let expression = input.context.expressions.expression(argument);
     let HirExpressionKind::Load(place) = &expression.kind else {
-        return false;
+        return Ok(false);
     };
     let Some(source) = input.layout.index_of(place.root) else {
-        return false;
+        return Ok(false);
     };
-    place.projections.is_empty()
-        && expression.value_kind != ValueKind::Const
-        && input.layout.local_mutable[source]
-        && resolve_place_allocs(input.layout, input.state, input.context.expressions, place)
-            .is_some_and(|resolved| {
-                !resolved.layer_only
-                    && !resolved.readonly
-                    && resolved
-                        .ids
-                        .iter()
-                        .all(|&id| input.state.alloc_origin_local(id) != Some(destination))
-            })
+    if !place.projections.is_empty()
+        || expression.value_kind == ValueKind::Const
+        || !input.layout.local_mutable[source]
+    {
+        return Ok(false);
+    }
+    let Some(place) = actuals.entry_place(input, index)? else {
+        return Ok(false);
+    };
+    input
+        .state
+        .load_place_content(place, &input.layout.local_mutable, false);
+    let content = place
+        .content
+        .as_ref()
+        .expect("forwarded place requests content");
+    Ok(!content.layer_only
+        && !content.readonly
+        && content.ids.iter().all(|&id| {
+            input
+                .state
+                .alloc_origin_local(id)
+                .is_none_or(|origin| origin != destination && input.layout.local_mutable[origin])
+        }))
 }
 
 fn heap_type(context: &BorrowTransferContext<'_>, ty: TypeId) -> Result<bool, BorrowCheckError> {
     Ok(classify_hir_type(ty, context.type_environment)?.has_in_place_mutation_surface())
 }
 
-/// Only paths demanded by the summary are resolved. Both Invoke lanes read the same entry
-/// values; synthesising a temporary actual (notably `copy place`) is done once.
+/// Resolve arguments on demand and share their entry values across both Invoke lanes.
 pub(super) struct CallActuals<'a> {
     args: &'a [CallArgumentTransfer],
-    roots: FxHashMap<usize, CapturedValue>,
+    entries: Vec<Option<CallActual>>,
+}
+
+struct CallActual {
+    place: Option<PlaceResolution>,
+    is_copy: bool,
+    value: Option<CapturedValue>,
 }
 
 impl<'a> CallActuals<'a> {
     pub(super) fn new(args: &'a [CallArgumentTransfer]) -> Self {
         Self {
             args,
-            roots: FxHashMap::default(),
+            entries: (0..args.len()).map(|_| None).collect(),
         }
     }
 
-    fn root(
-        &mut self,
-        input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    fn argument(
+        &self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
         index: usize,
-    ) -> Result<&CapturedValue, BorrowCheckError> {
-        let arg = self.args.get(index).ok_or_else(|| {
+    ) -> Result<&CallArgumentTransfer, BorrowCheckError> {
+        self.args.get(index).ok_or_else(|| {
             input
                 .context
                 .diagnostics
                 .internal_error("Allocation summary names a missing argument")
-        })?;
-        match self.roots.entry(index) {
-            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                Ok(entry.insert(argument_values(input, arg)?))
+        })
+    }
+
+    fn entry(
+        &mut self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+    ) -> Result<&mut CallActual, BorrowCheckError> {
+        let argument = self.argument(input, index)?.argument;
+        Ok(self.entries[index].get_or_insert_with(|| {
+            let expressions = input.context.expressions;
+            let resolve = |place| resolve_place(input.layout, input.state, expressions, place);
+            let (place, is_copy) = match &expressions.expression(argument).kind {
+                HirExpressionKind::Load(place) => (resolve(place), false),
+                HirExpressionKind::Copy(place) => (resolve(place), true),
+                _ => (None, false),
+            };
+            CallActual {
+                place,
+                is_copy,
+                value: None,
             }
+        }))
+    }
+
+    pub(super) fn entry_place(
+        &mut self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+    ) -> Result<Option<&mut PlaceResolution>, BorrowCheckError> {
+        let entry = self.entry(input, index)?;
+        Ok(entry.place.as_mut().filter(|_| !entry.is_copy))
+    }
+
+    pub(super) fn entry_copy_source(
+        &mut self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+    ) -> Result<Option<&mut PlaceResolution>, BorrowCheckError> {
+        let entry = self.entry(input, index)?;
+        Ok(entry.place.as_mut().filter(|_| entry.is_copy))
+    }
+
+    fn root_entry(
+        &mut self,
+        input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+    ) -> Result<&CallActual, BorrowCheckError> {
+        let argument = self.argument(input, index)?.argument;
+        let entry = self.entry(input, index)?;
+        if entry.value.is_none() {
+            let expression = input.context.expressions.expression(argument);
+            let value = if !heap_type(input.context, expression.ty)? {
+                CapturedValue::default()
+            } else if expression.value_kind != ValueKind::Const
+                && !entry.is_copy
+                && let Some(place) = entry.place.as_mut()
+            {
+                input
+                    .state
+                    .load_place_content(place, &input.layout.local_mutable, false);
+                let content = place
+                    .content
+                    .as_ref()
+                    .expect("captured place requests content");
+                CapturedValue {
+                    values: stored_allocation_values(
+                        input.layout,
+                        input.state,
+                        content,
+                        place.permission.wrapper_readonly_source.is_none(),
+                    ),
+                    views: content.views.clone(),
+                }
+            } else if entry.is_copy
+                && let Some(source) = entry.place.as_mut()
+            {
+                let source = if input.state.has_alloc_edges() {
+                    input
+                        .state
+                        .load_place_content(source, &input.layout.local_mutable, false);
+                    source.content.as_ref()
+                } else {
+                    None
+                };
+                capture_copy(
+                    &LayerValueContext {
+                        context: input.context,
+                        layout: input.layout,
+                        block_id: input.block_id,
+                    },
+                    input.state,
+                    argument,
+                    source,
+                    true,
+                )
+            } else {
+                stored_values(
+                    &LayerValueContext {
+                        context: input.context,
+                        layout: input.layout,
+                        block_id: input.block_id,
+                    },
+                    input.state,
+                    argument,
+                    true,
+                )?
+            };
+            entry.value = Some(value);
         }
+        Ok(entry)
+    }
+
+    pub(super) fn root(
+        &mut self,
+        input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+    ) -> Result<&CapturedValue, BorrowCheckError> {
+        let actual = self.root_entry(input, index)?;
+        Ok(actual
+            .value
+            .as_ref()
+            .expect("demanded entry value was captured"))
     }
 
     /// A replacement writes argument storage. A raw rvalue has only an entry value.
     fn capture_cell_store(
-        &self,
+        &mut self,
         input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
         index: usize,
         node: &LaneNode<'_>,
-    ) -> Option<InvokeLayerOp> {
-        let (local, place) = place_load_source(
-            input.layout,
-            input.context.expressions,
-            self.args[index].argument,
-        )?;
-        let projections = input.context.expressions.projections(place.projections);
-        let addresses = if let Some((last, prefix)) = projections.split_last() {
-            let holders = input.state.resolve_alloc_path(
-                local,
-                &input.layout.local_mutable,
-                prefix.iter().map(projection_key),
-            );
-            let key = projection_key(last);
-            AddressSet::from_cells(
-                holders
-                    .ids
-                    .into_iter()
-                    .map(|holder| CellId::Projected(holder, key)),
-                if holders.complete {
-                    Coverage::Complete
-                } else {
-                    Coverage::Partial
-                },
-            )
-        } else {
-            input.state.resolve_cells(local)
+    ) -> Result<Option<InvokeLayerOp>, BorrowCheckError> {
+        let argument = self.argument(input, index)?.argument;
+        let expression = input.context.expressions.expression(argument);
+        if expression.value_kind != ValueKind::Place
+            || !matches!(&expression.kind, HirExpressionKind::Load(_))
+        {
+            return Ok(None);
+        }
+        let Some(place) = self.entry_place(input, index)? else {
+            return Ok(None);
         };
-        (!addresses.cells().is_empty()).then(|| {
+        let addresses = &place.address;
+        Ok((!addresses.cells().is_empty()).then(|| {
             InvokeLayerOp::Store(TypedStore::write_cells(
-                addresses,
+                addresses.clone(),
                 CapturedValue {
                     values: node.values.clone(),
                     views: output_views(node),
                 },
             ))
-        })
+        }))
     }
 
     fn ty(
@@ -478,15 +603,8 @@ impl<'a> CallActuals<'a> {
         input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
         index: usize,
     ) -> Result<TypeId, BorrowCheckError> {
-        self.args
-            .get(index)
-            .map(|arg| input.context.expressions.expression(arg.argument).ty)
-            .ok_or_else(|| {
-                input
-                    .context
-                    .diagnostics
-                    .internal_error("Allocation summary names a missing argument")
-            })
+        let argument = self.argument(input, index)?.argument;
+        Ok(input.context.expressions.expression(argument).ty)
     }
 }
 
@@ -511,17 +629,33 @@ impl<'a> PathCaptures<'a> {
             return actuals.root(input, index);
         }
         let key = ActualPath { index, path };
-        if let std::collections::hash_map::Entry::Vacant(entry) = self.0.entry(key) {
-            let mut ty = actuals.ty(input, index)?;
-            let mut values = actuals.root(input, index)?.clone();
-            for &field in path {
-                let (key, child) = typed_child(input.context, ty, field)?;
-                values = step(input, values, key);
-                ty = child;
+        match self.0.entry(key) {
+            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let mut ty = actuals.ty(input, index)?;
+                let actual = actuals.root_entry(input, index)?;
+                let value = actual
+                    .value
+                    .as_ref()
+                    .expect("demanded entry value was captured");
+                let mut graph = ResolvedPlace::from_values(&value.values, value.views.clone());
+                if !actual.is_copy
+                    && let Some(content) = actual
+                        .place
+                        .as_ref()
+                        .and_then(|place| place.content.as_ref())
+                {
+                    graph.coverage = content.coverage;
+                    graph.may_be_absent = content.may_be_absent;
+                }
+                for &field in path {
+                    let (key, child) = typed_child(input.context, ty, field)?;
+                    step_graph(input, &mut graph, key);
+                    ty = child;
+                }
+                Ok(entry.insert(capture_graph_values(graph)))
             }
-            entry.insert(values);
         }
-        Ok(&self.0[&key])
     }
 }
 
@@ -792,7 +926,7 @@ fn instantiate_lane(
             CallOutputPath::Store { target, path } => {
                 let Some((&last, parent)) = path.split_last() else {
                     let Some((&key, holders)) = target.path.split_last() else {
-                        ops.extend(actuals.capture_cell_store(input, target.index, node));
+                        ops.extend(actuals.capture_cell_store(input, target.index, node)?);
                         continue;
                     };
                     let ty = actuals.ty(input, target.index)?;
@@ -888,39 +1022,30 @@ fn output_views(node: &LaneNode<'_>) -> Vec<AllocId> {
     }
 }
 
-fn argument_values(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    arg: &CallArgumentTransfer,
-) -> Result<CapturedValue, BorrowCheckError> {
-    stored_values(
-        &LayerValueContext {
-            context: input.context,
-            layout: input.layout,
-            block_id: input.block_id,
-        },
-        input.state,
-        arg.argument,
-        true,
-    )
-}
-
 fn step(
     input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    values: CapturedValue,
+    values: &CapturedValue,
     key: FieldKey,
 ) -> CapturedValue {
-    let mut place = ResolvedPlace {
-        readonly: values.values.iter().any(|value| !value.writable),
-        ids: values.values.into_iter().map(|value| value.id).collect(),
-        views: values.views,
-        layer_only: false,
-        readonly_source: None,
-        complete: true,
-    };
+    let mut place = ResolvedPlace::from_values(&values.values, values.views.clone());
+    step_graph(input, &mut place, key);
+    capture_graph_values(place)
+}
+
+fn step_graph(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    graph: &mut ResolvedPlace,
+    key: FieldKey,
+) {
     input
         .state
-        .step_resolved(&mut place, key, &input.layout.local_mutable);
-    mark_alloc_provenance_readonly(input.state, &input.layout.local_mutable, &mut place);
+        .step_resolved(graph, key, &input.layout.local_mutable);
+    input
+        .state
+        .mark_alloc_provenance_readonly(&input.layout.local_mutable, graph);
+}
+
+fn capture_graph_values(place: ResolvedPlace) -> CapturedValue {
     CapturedValue {
         values: place
             .ids
@@ -1021,7 +1146,7 @@ impl OpaqueInputs {
                 .internal_error("Recursive runtime layout reached opaque call provenance"));
         }
         for (key, child) in heap_children(input.context, ty)? {
-            self.visit_input(input, child, step(input, values.clone(), key), active)?;
+            self.visit_input(input, child, step(input, &values, key), active)?;
         }
         active.remove(&ty);
         Ok(())

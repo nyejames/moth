@@ -3,7 +3,9 @@
 //! These helpers are intentionally lightweight because they run for every
 //! statement/terminator transfer.
 
-use crate::compiler_frontend::analysis::borrow_checker::state::{FunctionLayout, RootSet};
+use crate::compiler_frontend::analysis::borrow_checker::state::{
+    AddressSet, CellId, Coverage, FunctionLayout, ResolvedPlace, RootSet, SmallSet, WrapperAge,
+};
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     AccessKind, OptionalTransferStatus, ValueAccessClassification, ValueBorrowFact,
 };
@@ -12,12 +14,76 @@ use crate::compiler_frontend::source::SourceSpan;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 
-#[derive(Debug, Clone)]
+/// The terminal operation. A projection's prefixes are always observed, not replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PlaceUse {
+    Read,
+    Acquire,
+    Replace,
+    Mutate { deep: bool },
+    ReadEntries,
+    WriteEntries,
+}
+
+impl PlaceUse {
+    pub(super) fn kind(self) -> AccessKind {
+        match self {
+            Self::Read | Self::ReadEntries => AccessKind::Shared,
+            _ => AccessKind::Mutable,
+        }
+    }
+
+    pub(super) fn touches_cell(self) -> bool {
+        !matches!(self, Self::ReadEntries | Self::WriteEntries)
+    }
+}
+
+/// Cell identities and graph alternatives stay separate, including when one is empty.
+#[derive(Debug)]
+pub(super) struct AccessFootprint {
+    pub address: AddressSet,
+    pub traversal: SmallSet<CellId>,
+    pub traversal_coverage: Coverage,
+    pub content: Option<ResolvedPlace>,
+    pub usage: PlaceUse,
+}
+
+impl AccessFootprint {
+    pub(super) fn cells(address: AddressSet, usage: PlaceUse) -> Self {
+        Self {
+            address,
+            traversal: SmallSet::Empty,
+            traversal_coverage: Coverage::Complete,
+            content: None,
+            usage,
+        }
+    }
+
+    pub(super) fn implicit_slot(&self) -> Option<usize> {
+        if self.usage.touches_cell()
+            && self.content.is_none()
+            && self.traversal.as_slice().is_empty()
+            && let Some(CellId::Slot(slot)) = self.address.definite()
+            && slot.age == WrapperAge::Current
+        {
+            return Some(slot.local);
+        }
+        None
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct AccessReservation {
+    pub footprint: AccessFootprint,
+    pub actor: Option<usize>,
+    pub span: Option<SourceSpan>,
+}
+
+#[derive(Debug)]
 pub(super) struct StatementAccessTracker {
-    root_access: Vec<Option<AccessKind>>,
-    // WHAT: first access span recorded per root, so same-statement conflicts can label
-    // the earlier access without inventing spans for generated accesses.
-    root_access_span: Vec<Option<SourceSpan>>,
+    first: Option<AccessReservation>,
+    slots: FxHashMap<usize, AccessReservation>,
+    places: Vec<AccessReservation>,
     pub(super) shared_roots: RootSet,
     pub(super) mutable_roots: RootSet,
     /// Roots whose storage this statement writes, separate from roots it accesses exclusively.
@@ -27,61 +93,70 @@ pub(super) struct StatementAccessTracker {
 impl StatementAccessTracker {
     pub(super) fn new(root_count: usize) -> Self {
         Self {
-            root_access: vec![None; root_count],
-            root_access_span: vec![None; root_count],
+            first: None,
+            slots: FxHashMap::default(),
+            places: Vec::new(),
             shared_roots: RootSet::empty(root_count),
             mutable_roots: RootSet::empty(root_count),
             written_roots: RootSet::empty(root_count),
         }
     }
 
-    pub(super) fn conflict(&self, root_index: usize, new_access: AccessKind) -> Option<AccessKind> {
-        let existing = self.root_access[root_index]?;
+    /// Index only implicit slot accesses; all other pairs use the same typed predicate.
+    pub(super) fn conflict(
+        &self,
+        footprint: &AccessFootprint,
+        mut overlaps: impl FnMut(&AccessReservation) -> bool,
+    ) -> Option<&AccessReservation> {
+        if let Some(first) = self.first.as_ref().filter(|first| overlaps(first)) {
+            return Some(first);
+        }
+        if let Some(slot) = footprint.implicit_slot() {
+            if let Some(other) = self.slots.get(&slot).filter(|other| overlaps(other)) {
+                return Some(other);
+            }
+        } else if let Some(other) = self.slots.values().find(|other| overlaps(other)) {
+            return Some(other);
+        }
+        self.places.iter().find(|other| overlaps(other))
+    }
 
-        match (existing, new_access) {
-            (AccessKind::Shared, AccessKind::Shared) => None,
-            (AccessKind::Shared, AccessKind::Mutable)
-            | (AccessKind::Mutable, AccessKind::Shared)
-            | (AccessKind::Mutable, AccessKind::Mutable) => Some(existing),
+    pub(super) fn reserve(&mut self, reservation: AccessReservation) {
+        if self.first.is_none() {
+            self.first = Some(reservation);
+        } else if let Some(slot) = reservation.footprint.implicit_slot() {
+            match self.slots.entry(slot) {
+                Entry::Vacant(entry) => {
+                    entry.insert(reservation);
+                }
+                Entry::Occupied(mut entry) => {
+                    if reservation.footprint.usage.kind() == AccessKind::Mutable {
+                        entry.insert(reservation);
+                    }
+                }
+            }
+        } else {
+            self.places.push(reservation);
         }
     }
 
-    // WHAT: returns the span of the first access recorded for this root.
-    // WHY: same-statement conflicts report the earlier access span without inventing
-    // spans for generated accesses.
-    pub(super) fn access_span(&self, root_index: usize) -> Option<SourceSpan> {
-        self.root_access_span[root_index]
+    pub(super) fn clear_reservations(&mut self) {
+        self.first = None;
+        self.slots.clear();
+        self.places.clear();
     }
 
-    pub(super) fn record(
-        &mut self,
-        root_index: usize,
-        access: AccessKind,
-        span: Option<SourceSpan>,
-    ) {
+    pub(super) fn report(&mut self, roots: &RootSet, access: AccessKind) {
         match access {
-            AccessKind::Shared => self.shared_roots.insert(root_index),
-            AccessKind::Mutable => self.mutable_roots.insert(root_index),
-        }
-
-        // Keep the first recorded span so the conflicting earlier access is labelled.
-        if self.root_access_span[root_index].is_none() {
-            self.root_access_span[root_index] = span;
-        }
-
-        let entry = &mut self.root_access[root_index];
-        match (*entry, access) {
-            (Some(AccessKind::Mutable), _) => {}
-            (_, AccessKind::Mutable) => *entry = Some(AccessKind::Mutable),
-            (None, AccessKind::Shared) => *entry = Some(AccessKind::Shared),
-            (Some(AccessKind::Shared), AccessKind::Shared) => {}
-        }
+            AccessKind::Shared => self.shared_roots.union_with(roots),
+            AccessKind::Mutable => self.mutable_roots.union_with(roots),
+        };
     }
 
     /// Records roots whose storage the statement actually writes.
     ///
-    /// WHY: `record` collects every exclusive access, including the incoming referent of a
-    /// mutation-capable alias rebind. Mutation summaries need the smaller actual write set.
+    /// An exclusive acquisition need not write the referent, so access facts alone would
+    /// overstate a function's mutation effects.
     pub(super) fn record_write(&mut self, roots: &RootSet) {
         self.written_roots.union_with(roots);
     }

@@ -10,9 +10,9 @@
 //!      that never stores one.
 
 use super::{
-    AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BindingView, BorrowState,
-    CellId, Coverage, EntryFamilies, Init, LocalState, OWN_SLOT, OrderKey, Origin, Replacement,
-    RootSet, SmallSet, TypedStore, TypedWrite, WrapperAge, WrapperId, remap_invoke_capture,
+    AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, CellId, Coverage,
+    EntryFamilies, Init, LocalState, OWN_SLOT, OrderKey, Origin, Replacement, RootSet, SmallSet,
+    TypedStore, TypedWrite, WrapperAge, WrapperId, remap_invoke_capture,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::BlockId;
@@ -193,6 +193,7 @@ struct Observation {
 
 struct ResolvedCells {
     addresses: AddressSet,
+    projected_origins: SmallSet<Origin>,
     readonly_source: Option<usize>,
     cyclic: bool,
     prior: bool,
@@ -210,8 +211,12 @@ impl ResolvedCells {
         if suffix.addresses.coverage == Coverage::Partial {
             self.addresses.coverage = Coverage::Partial;
         }
+        self.addresses.all_candidates_known &= suffix.addresses.all_candidates_known;
         for &cell in suffix.addresses.cells() {
             self.addresses.cells.insert(cell);
+        }
+        for &origin in suffix.projected_origins.as_slice() {
+            self.projected_origins.insert(origin);
         }
         self.readonly_source = self.readonly_source.or(suffix.readonly_source);
         self.cyclic |= suffix.cyclic;
@@ -256,6 +261,13 @@ impl SharingLayer {
             .map(|(_, view)| *view)
     }
 
+    fn clear_bindings(&mut self, local: WrapperId) {
+        let range = slot_group(&self.bindings, local, |&(owner, _)| owner);
+        if !range.is_empty() {
+            drop(self.bindings.drain(range));
+        }
+    }
+
     fn possible_pair(&self, left: AllocId, right: AllocId) -> Option<bool> {
         let (left, right) = ordered_pair(left, right);
         self.pairs
@@ -291,6 +303,19 @@ fn insert_fact<T: Ord>(facts: &mut Vec<T>, fact: T) {
     if let Err(index) = facts.binary_search(&fact) {
         facts.insert(index, fact);
     }
+}
+
+fn slot_group<T>(
+    rows: &[T],
+    slot: WrapperId,
+    owner: impl Fn(&T) -> WrapperId,
+) -> std::ops::Range<usize> {
+    let start = rows.partition_point(|row| owner(row) < slot);
+    let count = rows[start..]
+        .iter()
+        .take_while(|row| owner(row) == slot)
+        .count();
+    start..start + count
 }
 
 /// Explicit heap and slot contents, plus the sparse wrapper relation.
@@ -439,13 +464,7 @@ impl AllocationLayer {
     }
 
     fn bound_of(&self, local: WrapperId) -> &[(WrapperId, AllocId, bool)] {
-        let start = self.bound.partition_point(|(owner, _, _)| *owner < local);
-        let end = start
-            + self.bound[start..]
-                .iter()
-                .take_while(|(owner, _, _)| *owner == local)
-                .count();
-        &self.bound[start..end]
+        &self.bound[slot_group(&self.bound, local, |&(owner, _, _)| owner)]
     }
 
     fn observation(&self, local: usize) -> Option<&Observation> {
@@ -487,6 +506,16 @@ impl AllocationLayer {
 
     /// Whether `descendant` is `ancestor` or a lazy descendant still held through every step.
     fn covers(&self, table: &AllocTable, ancestor: AllocId, descendant: AllocId) -> bool {
+        self.covers_through(table, ancestor, descendant, false)
+    }
+
+    fn covers_through(
+        &self,
+        table: &AllocTable,
+        ancestor: AllocId,
+        descendant: AllocId,
+        writable_only: bool,
+    ) -> bool {
         let mut current = descendant;
         loop {
             if current == ancestor {
@@ -496,7 +525,11 @@ impl AllocationLayer {
                 return false;
             };
             let group = self.group(parent, key);
-            if !group.is_empty() && !group.iter().any(|edge| edge.held == current) {
+            if !group.is_empty()
+                && !group
+                    .iter()
+                    .any(|edge| edge.held == current && (!writable_only || edge.writable))
+            {
                 return false;
             }
             current = parent;
@@ -821,10 +854,10 @@ impl AllocationLayer {
         }
     }
 
-    /// Renumber every id whose base is `from` onto `to`.
-    fn rename_base(&mut self, from: AllocBase, to: AllocBase, to_singular: bool) {
+    /// Rebase only allocations named by this layer, not every key in the shared interner.
+    fn rename_bases(&mut self, replacement: impl Fn(AllocBase) -> Option<AllocBase>) {
         let mut table = self.table.borrow_mut();
-        let mentions = |id: AllocId| id != AllocId::EMPTY && table.base(id) == from;
+        let mentions = |id: AllocId| id != AllocId::EMPTY && replacement(table.base(id)).is_some();
         self.detached.retain(|(_, holder)| !mentions(*holder));
         let touched = self
             .edges
@@ -861,11 +894,12 @@ impl AllocationLayer {
             return;
         }
         let rename = |id: AllocId, table: &mut AllocTable| {
-            if id != AllocId::EMPTY && table.base(id) == from {
-                table.rebase(id, to, to_singular)
-            } else {
-                id
+            if id != AllocId::EMPTY
+                && let Some(to) = replacement(table.base(id))
+            {
+                return table.rebase(id, to, false);
             }
+            id
         };
         for edge in &mut self.edges {
             edge.holder = rename(edge.holder, &mut table);
@@ -965,7 +999,7 @@ fn normalize_observation(entry: &mut Observation) {
     entry.views.dedup();
 }
 
-/// Allocations a place reaches, with how the layer reached them.
+/// Graph content only. Its alternatives say nothing about the cells that supplied them.
 #[derive(Debug, Clone)]
 pub(in super::super) struct ResolvedPlace {
     pub ids: Vec<AllocId>,
@@ -978,8 +1012,106 @@ pub(in super::super) struct ResolvedPlace {
     pub readonly: bool,
     /// The binding that stored value came from, when the layer still names it.
     pub readonly_source: Option<usize>,
-    /// Every feasible location is represented, even if more than one allocation can occur.
-    pub complete: bool,
+    pub coverage: Coverage,
+    /// A represented alternative with no allocation, not a missing graph fact.
+    pub may_be_absent: bool,
+}
+
+impl ResolvedPlace {
+    pub(in super::super) fn from_values(values: &[StoredValue], views: Vec<AllocId>) -> Self {
+        let readonly = values.iter().any(|value| !value.writable);
+        Self {
+            ids: values.iter().map(|value| value.id).collect(),
+            views,
+            layer_only: false,
+            readonly,
+            readonly_source: None,
+            coverage: Coverage::Complete,
+            may_be_absent: false,
+        }
+    }
+
+    /// A known absence is covered as content but cannot supply a holder.
+    pub(in super::super) fn holder_coverage(&self) -> Coverage {
+        if self.may_be_absent {
+            Coverage::Partial
+        } else {
+            self.coverage
+        }
+    }
+}
+
+/// Permission to access the cell itself. Referent mutation also checks the loaded content.
+#[derive(Debug, Clone, Copy)]
+pub(in super::super) struct ResolvedPermission {
+    pub wrapper_readonly_source: Option<usize>,
+    pub holder_readonly: bool,
+    pub holder_readonly_source: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in super::super) struct AccessRoute {
+    pub local: usize,
+    pub projected: bool,
+}
+
+/// Resolve the storage first; only an observation needs to follow the final cell's payload.
+#[derive(Debug, Clone)]
+pub(in super::super) struct PlaceResolution {
+    pub address: AddressSet,
+    pub traversal: SmallSet<CellId>,
+    pub traversal_coverage: Coverage,
+    pub content: Option<ResolvedPlace>,
+    pub permission: ResolvedPermission,
+    pub route: AccessRoute,
+    terminal_projection: Option<(ResolvedPlace, FieldKey)>,
+    projected_origins: SmallSet<Origin>,
+    base_owner: Option<WrapperId>,
+}
+
+impl PlaceResolution {
+    pub(in super::super) fn final_projection(&self) -> Option<(&ResolvedPlace, FieldKey)> {
+        self.terminal_projection
+            .as_ref()
+            .map(|(holders, key)| (holders, *key))
+    }
+
+    /// An occurrence participating as an actual write target is not an independent loan.
+    pub(in super::super) fn names_terminal_slot(&self, slot: WrapperId) -> bool {
+        !self.route.projected && self.address.cells().contains(&CellId::Slot(slot))
+    }
+
+    /// The definite slot through which the holder was reached, including through links.
+    pub(in super::super) fn projection_owner(&self) -> Option<WrapperId> {
+        if self.route.projected && self.base_owner.is_some() {
+            return self.base_owner;
+        }
+        if self.address.coverage != Coverage::Complete
+            || !self.route.projected
+                && self
+                    .address
+                    .cells()
+                    .iter()
+                    .any(|cell| matches!(cell, CellId::Slot(_)))
+        {
+            return None;
+        }
+        let origins = self.projected_origins.as_slice();
+        let owner = origins.first()?.owner?;
+        origins
+            .iter()
+            .all(|origin| origin.owner == Some(owner))
+            .then_some(owner)
+    }
+
+    pub(in super::super) fn projected_holder_route(&self, actor: usize) -> Option<bool> {
+        let mut matches = self
+            .projected_origins
+            .as_slice()
+            .iter()
+            .filter(|origin| origin.wrapper.local == actor);
+        Some(matches.next()?.isolated && matches.all(|origin| origin.isolated))
+    }
 }
 
 /// One allocation stored into a holder field.
@@ -1015,67 +1147,6 @@ impl AllocationRetirement {
     }
 }
 
-/// A mutation target: the allocation and whether any alias reaching it conflicts, or only an
-/// alias that reaches it through layer facts.
-#[derive(Debug, Clone, Copy)]
-pub(in super::super) struct MutationTarget {
-    pub id: AllocId,
-    pub layer_reached: bool,
-    /// Whether the operation can also mutate fields of this allocation.
-    pub deep: bool,
-}
-
-impl<'a> BindingView<'a> {
-    pub(in super::super) fn projected_cells(self) -> impl Iterator<Item = (AllocId, FieldKey)> {
-        let addresses = self.state.resolve_cells(self.local);
-        let mut next = 0;
-        std::iter::from_fn(move || {
-            while let Some(cell) = addresses.cells().get(next) {
-                next += 1;
-                if let CellId::Projected(holder, key) = *cell {
-                    return Some((holder, key));
-                }
-            }
-            None
-        })
-    }
-
-    pub(in super::super) fn projected_coverage(self) -> Coverage {
-        let addresses = self.state.resolve_cells(self.local);
-        if !addresses.cells().is_empty()
-            && addresses
-                .cells()
-                .iter()
-                .all(|cell| matches!(cell, CellId::Projected(..)))
-        {
-            addresses.coverage
-        } else {
-            Coverage::Partial
-        }
-    }
-
-    pub(in super::super) fn projected_cells_share_singular_holder(self, holder: AllocId) -> bool {
-        self.state.alloc_singular(holder)
-            && self
-                .projected_cells()
-                .all(|(candidate, _)| candidate == holder)
-    }
-
-    pub(in super::super) fn projected_cells_touch(
-        self,
-        cells: &[(AllocId, FieldKey)],
-        values: &[MutationTarget],
-    ) -> bool {
-        let table = self.state.layer.table.borrow();
-        self.projected_cells().any(|(holder, key)| {
-            cells.contains(&(holder, key))
-                || values
-                    .iter()
-                    .any(|value| value.deep && self.state.layer.covers(&table, value.id, holder))
-        })
-    }
-}
-
 impl BorrowState {
     pub(super) fn binding_row(&self, wrapper: WrapperId) -> Option<&BindingRow> {
         self.layer
@@ -1083,6 +1154,39 @@ impl BorrowState {
             .binary_search_by_key(&wrapper, |row| row.wrapper)
             .ok()
             .map(|index| &self.layer.wrappers[index])
+    }
+
+    pub(in super::super) fn has_wrapped_binding(&self, local: usize) -> bool {
+        self.binding_row(WrapperId::current(local)).is_some()
+    }
+
+    pub(in super::super) fn wrapper_locals(&self) -> impl Iterator<Item = usize> + '_ {
+        self.layer
+            .wrappers
+            .iter()
+            .filter_map(|row| (row.wrapper.age == WrapperAge::Current).then_some(row.wrapper.local))
+    }
+
+    pub(in super::super) fn allocation_observer_locals(&self) -> impl Iterator<Item = usize> + '_ {
+        self.layer
+            .bound
+            .chunk_by(|left, right| left.0 == right.0)
+            .filter_map(|group| (group[0].0.age == WrapperAge::Current).then_some(group[0].0.local))
+            .chain(self.layer.observations.iter().map(|entry| entry.local))
+            // A lazy, unnamed owner can still reach an explicitly stored descendant.
+            .chain(
+                self.layer
+                    .edges
+                    .iter()
+                    .filter_map(|edge| self.alloc_origin_local(edge.holder)),
+            )
+    }
+
+    pub(in super::super) fn stability_locals(&self) -> impl Iterator<Item = usize> + '_ {
+        self.layer
+            .stability
+            .chunk_by(|left, right| left.0 == right.0)
+            .map(|loans| loans[0].0 as usize)
     }
 
     fn put_binding_row(&mut self, row: BindingRow) {
@@ -1140,6 +1244,7 @@ impl BorrowState {
             BindingSpec::Projected {
                 addresses,
                 origin,
+                owner,
                 writable,
                 isolated,
                 route_roots,
@@ -1150,6 +1255,7 @@ impl BorrowState {
                         writable,
                         origin: Some(Origin {
                             wrapper: origin,
+                            owner,
                             isolated,
                         }),
                     }),
@@ -1237,17 +1343,6 @@ impl BorrowState {
             .addresses
     }
 
-    /// A mutable access needs every alternative and every wrapper along it to be writable.
-    pub(in super::super) fn resolve_cells_with_permission(
-        &self,
-        local: usize,
-        aliases_only: bool,
-        local_mutable: &[bool],
-    ) -> (AddressSet, Option<usize>) {
-        let resolved = self.resolve_wrapper(WrapperId::current(local), aliases_only, local_mutable);
-        (resolved.addresses, resolved.readonly_source)
-    }
-
     pub(in super::super) fn resolve_alias_cells(&self, local: usize) -> AddressSet {
         self.resolve_wrapper(WrapperId::current(local), true, &[])
             .addresses
@@ -1302,6 +1397,9 @@ impl BorrowState {
                         continue;
                     }
                     BindingTarget::Projected(holder, key) => {
+                        if let Some(origin) = alt.origin {
+                            frame.result.projected_origins.insert(origin);
+                        }
                         if !alt.writable {
                             frame
                                 .result
@@ -1354,15 +1452,21 @@ impl BorrowState {
             Init::No
         };
         ResolvedCells {
-            addresses: AddressSet::from_cells(
-                (init != Init::No && !aliases_only).then_some(CellId::Slot(wrapper)),
-                if init == Init::Yes {
-                    Coverage::Complete
-                } else {
-                    Coverage::Partial
-                },
-            )
-            .with_singleton_proof(),
+            addresses: {
+                let mut addresses = AddressSet::from_cells(
+                    (init != Init::No && !aliases_only).then_some(CellId::Slot(wrapper)),
+                    if init == Init::Yes {
+                        Coverage::Complete
+                    } else {
+                        Coverage::Partial
+                    },
+                )
+                .with_singleton_proof();
+                // A missing Current binding is uninitialised, not an unmodelled address.
+                addresses.all_candidates_known = wrapper.age == WrapperAge::Current;
+                addresses
+            },
+            projected_origins: SmallSet::Empty,
             readonly_source,
             cyclic: false,
             prior: wrapper.age == WrapperAge::Prior,
@@ -1382,14 +1486,19 @@ impl BorrowState {
             wrapper,
             alternatives: row.alts.as_slice().iter(),
             result: ResolvedCells {
-                addresses: AddressSet::from_cells(
-                    [],
-                    if partial {
-                        Coverage::Partial
-                    } else {
-                        Coverage::Complete
-                    },
-                ),
+                addresses: {
+                    let mut addresses = AddressSet::from_cells(
+                        [],
+                        if partial {
+                            Coverage::Partial
+                        } else {
+                            Coverage::Complete
+                        },
+                    );
+                    addresses.all_candidates_known = row.coverage == Coverage::Complete;
+                    addresses
+                },
+                projected_origins: SmallSet::Empty,
                 readonly_source,
                 cyclic: false,
                 prior: wrapper.age == WrapperAge::Prior,
@@ -1523,10 +1632,7 @@ impl BorrowState {
     }
 
     fn bind_slot_views(&mut self, local: WrapperId, views: &[AllocId]) {
-        self.layer
-            .sharing
-            .bindings
-            .retain(|&(owner, _)| owner != local);
+        self.layer.sharing.clear_bindings(local);
         for &view in views {
             insert_fact(&mut self.layer.sharing.bindings, (local, view));
         }
@@ -1626,34 +1732,34 @@ impl BorrowState {
     /// A whole link loads its terminal cell; a projected location loads the retained holder.
     pub(in super::super) fn resolve_local_allocs(&self, local: usize) -> ResolvedPlace {
         let addresses = self.resolve_cells(local);
-        self.resolve_local_allocs_from_cells(local, &addresses, None)
+        self.resolve_local_allocs_from_cells(local, &addresses)
     }
 
-    pub(in super::super) fn resolve_local_allocs_from_cells(
+    fn resolve_local_allocs_from_cells(
         &self,
         local: usize,
         addresses: &AddressSet,
-        readonly_source: Option<usize>,
     ) -> ResolvedPlace {
         if let Some(entry) = self.layer.observation(local) {
             return ResolvedPlace {
                 ids: entry.values.iter().map(|value| value.id).collect(),
                 views: entry.views.clone(),
                 layer_only: true,
-                readonly: readonly_source.is_some()
-                    || entry.readonly
-                    || entry.values.iter().any(|value| !value.writable),
-                readonly_source,
-                complete: true,
+                readonly: entry.readonly || entry.values.iter().any(|value| !value.writable),
+                readonly_source: None,
+                coverage: Coverage::Complete,
+                may_be_absent: false,
             };
         }
         let mut result = ResolvedPlace {
             ids: Vec::new(),
             views: Vec::new(),
             layer_only: false,
-            readonly: readonly_source.is_some(),
-            readonly_source,
-            complete: addresses.coverage == Coverage::Complete,
+            readonly: false,
+            readonly_source: None,
+            coverage: addresses.may_coverage(),
+            may_be_absent: addresses.coverage == Coverage::Partial
+                && addresses.may_coverage() == Coverage::Complete,
         };
         for &cell in addresses.cells() {
             let mut value = match cell {
@@ -1670,7 +1776,8 @@ impl BorrowState {
                             || slot.age == WrapperAge::Prior,
                         readonly,
                         readonly_source: None,
-                        complete: true,
+                        coverage: Coverage::Complete,
+                        may_be_absent: false,
                     }
                 }
                 CellId::Projected(holder, key) => {
@@ -1680,7 +1787,8 @@ impl BorrowState {
                         layer_only: true,
                         readonly: false,
                         readonly_source: None,
-                        complete: true,
+                        coverage: Coverage::Complete,
+                        may_be_absent: false,
                     };
                     self.step_resolved(&mut projected, key, &[]);
                     projected
@@ -1706,9 +1814,12 @@ impl BorrowState {
             result.layer_only |= value.layer_only;
             result.readonly |= value.readonly;
             result.readonly_source = result.readonly_source.or(value.readonly_source);
-            result.complete &= value.complete;
+            if value.coverage == Coverage::Partial {
+                result.coverage = Coverage::Partial;
+            }
+            result.may_be_absent |= value.may_be_absent;
         }
-        if addresses.coverage == Coverage::Partial && self.locals[local].init != Init::No {
+        if addresses.may_coverage() == Coverage::Partial && self.locals[local].init != Init::No {
             let mut table = self.layer.table.borrow_mut();
             result.ids.extend(
                 self.locals[local]
@@ -1724,33 +1835,136 @@ impl BorrowState {
         result
     }
 
+    /// Resolve wrapper links and consume the contents of each prefix, never the final cell.
+    pub(in super::super) fn resolve_place_path(
+        &self,
+        local: usize,
+        local_mutable: &[bool],
+        keys: impl IntoIterator<Item = FieldKey>,
+    ) -> PlaceResolution {
+        let binding = self.resolve_wrapper(WrapperId::current(local), false, local_mutable);
+        let mut address = binding.addresses;
+        let base_owner = match address.definite() {
+            Some(CellId::Slot(slot)) => Some(slot),
+            _ => None,
+        };
+        let mut traversal = SmallSet::Empty;
+        let mut traversal_coverage = Coverage::Complete;
+        let mut terminal_projection = None;
+        for key in keys {
+            for &cell in address.cells() {
+                traversal.insert(cell);
+            }
+            if address.may_coverage() == Coverage::Partial {
+                traversal_coverage = Coverage::Partial;
+            }
+            let mut holders =
+                self.load_path_cell(local, &address, terminal_projection, local_mutable);
+            self.mark_alloc_provenance_readonly(local_mutable, &mut holders);
+            address = AddressSet::from_cells(
+                holders
+                    .ids
+                    .iter()
+                    .map(|&holder| CellId::Projected(holder, key)),
+                if holders.ids.is_empty() {
+                    Coverage::Partial
+                } else {
+                    holders.holder_coverage()
+                },
+            );
+            if matches!(holders.ids.as_slice(), [holder] if self.alloc_singular(*holder)) {
+                address = address.with_singleton_proof();
+            }
+            address.all_candidates_known = holders.coverage == Coverage::Complete;
+            terminal_projection = Some((holders, key));
+        }
+        let holders = terminal_projection.as_ref().map(|(holders, _)| holders);
+        let permission = ResolvedPermission {
+            wrapper_readonly_source: binding.readonly_source,
+            holder_readonly: holders.is_some_and(|holders| holders.readonly),
+            holder_readonly_source: holders.and_then(|holders| holders.readonly_source),
+        };
+        PlaceResolution {
+            address,
+            traversal,
+            traversal_coverage,
+            content: None,
+            permission,
+            route: AccessRoute {
+                local,
+                projected: terminal_projection.is_some(),
+            },
+            projected_origins: binding.projected_origins,
+            base_owner,
+            terminal_projection,
+        }
+    }
+
+    /// Scalar observations need the cell, but cannot contribute an allocation alternative.
+    pub(in super::super) fn load_place_content(
+        &self,
+        place: &mut PlaceResolution,
+        local_mutable: &[bool],
+        scalar: bool,
+    ) {
+        if place.content.is_none() {
+            place.content = Some(if scalar {
+                place.terminal_projection = None;
+                ResolvedPlace::from_values(&[], Vec::new())
+            } else {
+                self.load_path_cell(
+                    place.route.local,
+                    &place.address,
+                    place.terminal_projection.take(),
+                    local_mutable,
+                )
+            });
+        }
+    }
+
+    fn load_path_cell(
+        &self,
+        local: usize,
+        address: &AddressSet,
+        projection: Option<(ResolvedPlace, FieldKey)>,
+        local_mutable: &[bool],
+    ) -> ResolvedPlace {
+        if let Some((mut holders, key)) = projection {
+            self.step_resolved(&mut holders, key, local_mutable);
+            holders
+        } else {
+            self.resolve_local_allocs_from_cells(local, address)
+        }
+    }
+
+    /// The path into the value and the value's own origin both constrain mutation.
+    pub(in super::super) fn mark_alloc_provenance_readonly(
+        &self,
+        local_mutable: &[bool],
+        resolved: &mut ResolvedPlace,
+    ) {
+        if resolved.readonly_source.is_none()
+            && let Some(origin) = resolved
+                .ids
+                .iter()
+                .filter_map(|&id| self.alloc_origin_local(id))
+                .find(|&origin| !local_mutable[origin])
+        {
+            resolved.readonly = true;
+            resolved.readonly_source = Some(origin);
+        }
+    }
+
+    #[cfg(test)]
     pub(in super::super) fn resolve_alloc_path(
         &self,
-        local_index: usize,
+        local: usize,
         local_mutable: &[bool],
         keys: impl IntoIterator<Item = FieldKey>,
     ) -> ResolvedPlace {
-        let mut resolved = self.resolve_local_allocs(local_index);
-        for key in keys {
-            self.step_resolved(&mut resolved, key, local_mutable);
-        }
-        resolved
-    }
-
-    /// Allocations in a field, without following permissions or correlated views.
-    pub(in super::super) fn alloc_field_ids(
-        &self,
-        holders: &[AllocId],
-        key: FieldKey,
-    ) -> Vec<AllocId> {
-        let mut table = self.layer.table.borrow_mut();
-        let mut ids = Vec::with_capacity(holders.len());
-        for &holder in holders {
-            self.layer.project_alloc(&mut table, holder, key, &mut ids);
-        }
-        ids.sort_unstable();
-        ids.dedup();
-        ids
+        let mut result = self.resolve_place_path(local, local_mutable, keys);
+        self.load_place_content(&mut result, local_mutable, false);
+        result.content.expect("allocation path requests content")
     }
 
     /// Advance `resolved` through one field.
@@ -1775,9 +1989,9 @@ impl BorrowState {
                 continue;
             }
             resolved.layer_only = true;
-            resolved.complete &= group.iter().all(|edge| edge.held != AllocId::EMPTY);
             for edge in group {
                 if edge.held == AllocId::EMPTY {
+                    resolved.may_be_absent = true;
                     continue;
                 }
                 if !edge.writable && !resolved.readonly {
@@ -1824,11 +2038,11 @@ impl BorrowState {
     }
 
     fn clear_slot_payload(&mut self, slot: WrapperId) {
-        self.layer.bound.retain(|(owner, _, _)| *owner != slot);
-        self.layer
-            .sharing
-            .bindings
-            .retain(|&(owner, _)| owner != slot);
+        let range = slot_group(&self.layer.bound, slot, |&(owner, _, _)| owner);
+        if !range.is_empty() {
+            drop(self.layer.bound.drain(range));
+        }
+        self.layer.sharing.clear_bindings(slot);
     }
 
     pub(in super::super) fn stability_holders(
@@ -1859,16 +2073,13 @@ impl BorrowState {
     pub(in super::super) fn stability_overlaps(
         &self,
         local: usize,
-        targets: &[MutationTarget],
+        targets: impl Iterator<Item = AllocId> + Clone,
     ) -> bool {
-        if self.layer.stability.is_empty() || targets.is_empty() {
-            return false;
-        }
         let table = self.layer.table.borrow();
         self.stability_holders(local).any(|holder| {
-            targets.iter().any(|target| {
-                target.id == holder || (target.deep && self.layer.covers(&table, target.id, holder))
-            })
+            targets
+                .clone()
+                .any(|target| self.layer.covers(&table, target, holder))
         })
     }
 
@@ -1911,17 +2122,13 @@ impl BorrowState {
     }
 
     fn graphs_overlap(&self, left: &[AllocId], right: &[AllocId]) -> bool {
-        let mut targets = right.to_vec();
-        targets.extend(self.alloc_closure(right, false));
-        let targets = targets
-            .into_iter()
-            .map(|id| MutationTarget {
-                id,
-                layer_reached: true,
-                deep: true,
+        let children = self.alloc_closure(right, false);
+        self.alloc_reaches_where(left, false, |table, current| {
+            right.iter().chain(&children).any(|&target| {
+                self.layer.covers(table, current, target)
+                    || self.layer.covers(table, target, current)
             })
-            .collect::<Vec<_>>();
-        self.alloc_reaches(left, true, &targets)
+        })
     }
 
     fn proves_detached(&self, (local, holder): (u32, AllocId)) -> bool {
@@ -2032,15 +2239,12 @@ impl BorrowState {
                     .iter()
                     .map(|&(_, id, readonly)| (prior, id, readonly))
                     .collect()
-            } else if explicit_prior
-                || !self.slot_roots(current).is_empty()
-                || self.alloc_root_is_interned(current.local)
-            {
+            } else {
+                // The reached Prior wrapper keeps the current value even if nobody has yet
+                // looked up its implicit root. Capture before renaming to the retired base.
                 self.slot_values(current)
                     .map(|value| (prior, value.id, !value.writable))
                     .collect()
-            } else {
-                Vec::new()
             };
             if prior_has_views && views.is_empty() {
                 views.extend(
@@ -2096,7 +2300,8 @@ impl BorrowState {
                 };
                 let origin = alt.origin.map(|origin| Origin {
                     wrapper: origin.wrapper.retired(&retires),
-                    ..origin
+                    owner: origin.owner.map(|owner| owner.retired(&retires)),
+                    isolated: origin.isolated,
                 });
                 BindingAlt {
                     target,
@@ -2107,23 +2312,26 @@ impl BorrowState {
         }
     }
 
-    fn freeze_slot_observers(&mut self, local: usize, keep_name: impl Fn(usize) -> bool) {
+    fn freeze_slot_observers(
+        &mut self,
+        observers: impl Iterator<Item = usize>,
+        observes_retired: impl Fn(&RootSet) -> bool,
+    ) {
         // Root-only snapshots need an override before the old allocation is renamed.
         // Whole links are not snapshots and still load the cell.
         let first = self.layer.bound.len();
-        for observer in 0..self.locals.len() {
+        for observer in observers {
             let slot = WrapperId::current(observer);
-            if observer == local
-                || !keep_name(observer)
+            let roots = self.slot_roots(slot);
+            if !observes_retired(roots)
                 || !self.binding_mode(observer).contains(LocalMode::SLOT)
-                || !self.slot_roots(slot).contains(local)
                 || self.layer.bound[..first]
                     .binary_search_by_key(&slot, |&(owner, _, _)| owner)
                     .is_ok()
             {
                 continue;
             }
-            let roots = self.slot_roots(slot).clone();
+            let roots = roots.clone();
             let mut table = self.layer.table.borrow_mut();
             self.layer.bound.extend(
                 roots
@@ -2131,7 +2339,9 @@ impl BorrowState {
                     .map(|root| (slot, table.root(root), false)),
             );
         }
-        normalize_bindings(&mut self.layer.bound);
+        if self.layer.bound.len() != first {
+            normalize_bindings(&mut self.layer.bound);
+        }
     }
 
     /// Replace the allocation contents without retiring the enclosing storage cell.
@@ -2140,12 +2350,13 @@ impl BorrowState {
         local: usize,
         order: OrderKey,
     ) -> AllocationRetirement {
-        self.freeze_slot_observers(local, |_| true);
-        self.layer.rename_base(
-            AllocBase::Root(local as u32),
-            AllocBase::Old(local as u32, order),
-            false,
+        self.freeze_slot_observers(
+            (0..self.locals.len()).filter(|&observer| observer != local),
+            |roots| roots.contains(local),
         );
+        self.layer.rename_bases(|base| {
+            (base == AllocBase::Root(local as u32)).then_some(AllocBase::Old(local as u32, order))
+        });
         self.invalidate_observations(
             &[CellId::Slot(WrapperId::current(local))],
             Coverage::Complete,
@@ -2469,20 +2680,14 @@ impl BorrowState {
             return Vec::new();
         }
         let correlated = !source.views.is_empty()
-            || (!self.layer.sharing.projections.is_empty() && {
-                let targets: Vec<_> = self
-                    .layer
-                    .sharing
-                    .projections
-                    .iter()
-                    .map(|&(id, _, _)| MutationTarget {
-                        id,
-                        layer_reached: true,
-                        deep: false,
-                    })
-                    .collect();
-                self.alloc_reaches(sources, true, &targets)
-            });
+            || (!self.layer.sharing.projections.is_empty()
+                && self.alloc_reaches_where(sources, false, |table, current| {
+                    self.layer
+                        .sharing
+                        .projections
+                        .iter()
+                        .any(|&(holder, _, _)| self.layer.covers(table, current, holder))
+                }));
         let mut table = self.layer.table.borrow_mut();
         let singular = table.singular(site);
         let mut copied = Vec::new();
@@ -2697,7 +2902,7 @@ impl BorrowState {
             if let Some(roots) = slot_roots {
                 self.locals[local].value_roots = if roots.is_empty() {
                     // Report fresh payload origins rather than possible old value roots.
-                    self.binding(local).overlap_roots()
+                    self.binding(local).attribution_roots()
                 } else {
                     roots.clone()
                 };
@@ -2800,33 +3005,41 @@ impl BorrowState {
                 .detached
                 .retain(|&(owner, _)| owner != slot.local as u32);
         }
-        if exact {
+        if exact && values.is_empty() && views.is_empty() && !readonly && !explicit_slot_payload {
+            // Plain scalar updates keep the implicit slot and allocate no sparse facts.
             self.clear_slot_payload(slot);
-            if values.is_empty() && views.is_empty() && !readonly && !explicit_slot_payload {
-                // Plain scalar updates keep the implicit slot and allocate no sparse facts.
-                return;
-            }
+            return;
         }
         if !exact && retained.is_empty() && !views.is_empty() {
             retained.extend(old.iter().map(|value| value.id));
         }
-        if !exact && self.layer.bound_of(slot).is_empty() {
-            self.layer.bound.extend(
-                old.into_iter()
-                    .map(|value| (slot, value.id, !value.writable)),
-            );
+        if exact || !values.is_empty() {
+            let bound = &mut self.layer.bound;
+            let range = slot_group(bound, slot, |&(owner, _, _)| owner);
+            let incoming = |value: &StoredValue| (slot, value.id, readonly || !value.writable);
+            match (exact, values) {
+                (true, []) => drop(bound.splice(range, [(slot, AllocId::EMPTY, readonly)])),
+                (true, [value]) => drop(bound.splice(range, [incoming(value)])),
+                _ => {
+                    // Retiring captures can reorder or collapse ids, so normalise this slot only.
+                    let mut group = Vec::with_capacity(
+                        values.len() + if exact { 0 } else { range.len().max(old.len()) },
+                    );
+                    if !exact {
+                        if range.is_empty() {
+                            group.extend(old.iter().map(|value| (slot, value.id, !value.writable)));
+                        } else {
+                            group.extend_from_slice(&bound[range.clone()]);
+                        }
+                    }
+                    group.extend(values.iter().map(incoming));
+                    normalize_bindings(&mut group);
+                    drop(bound.splice(range, group));
+                }
+            }
         }
-        if exact && values.is_empty() {
-            self.layer.bound.push((slot, AllocId::EMPTY, readonly));
-        }
-        self.layer.bound.extend(
-            values
-                .iter()
-                .map(|value| (slot, value.id, readonly || !value.writable)),
-        );
-        normalize_bindings(&mut self.layer.bound);
         if retained.is_empty() {
-            if !views.is_empty() {
+            if exact || !views.is_empty() {
                 self.bind_slot_views(slot, views);
             }
         } else {
@@ -2890,38 +3103,53 @@ impl BorrowState {
         }
     }
 
-    /// Whether any allocation reached from `from` is one of `targets`.
-    ///
-    /// WHAT: walks lazy descendants and explicit edges. A target marked `layer_reached` matches
-    ///       any reach; another target matches only when `from_layer_only` or the walk crossed an
-    ///       explicit edge, because root provenance already decides the plain case.
-    pub(in super::super) fn alloc_reaches(
+    /// Test typed reach in the given direction, without a coarse provenance precondition.
+    pub(in super::super) fn alloc_reaches_typed(
+        &self,
+        ids: &[AllocId],
+        target: AllocId,
+        deep: bool,
+        writable_only: bool,
+    ) -> bool {
+        if !deep {
+            return ids.contains(&target);
+        }
+        self.alloc_reaches_where(ids, writable_only, |table, current| {
+            self.layer
+                .covers_through(table, current, target, writable_only)
+        })
+    }
+
+    fn alloc_reaches_where(
         &self,
         from: &[AllocId],
-        from_layer_only: bool,
-        targets: &[MutationTarget],
+        writable_only: bool,
+        matches: impl Fn(&AllocTable, AllocId) -> bool,
     ) -> bool {
-        if targets.is_empty() || from.is_empty() {
+        if from.is_empty() {
             return false;
         }
         let table = self.layer.table.borrow();
+        if self.layer.edges.is_empty() {
+            return from.iter().any(|&id| matches(&table, id));
+        }
         let mut visited = FxHashSet::default();
-        let mut stack: Vec<(AllocId, bool)> =
-            from.iter().map(|id| (*id, from_layer_only)).collect();
-        while let Some((current, crossed)) = stack.pop() {
-            if !visited.insert((current, crossed)) {
+        let mut stack = from.to_vec();
+        while let Some(current) = stack.pop() {
+            if !visited.insert(current) {
                 continue;
             }
-            if targets.iter().any(|target| {
-                (target.layer_reached || crossed)
-                    && (self.layer.covers(&table, current, target.id)
-                        || (target.deep && self.layer.covers(&table, target.id, current)))
-            }) {
+            if matches(&table, current) {
                 return true;
             }
             for edge in &self.layer.edges {
-                if edge.held != AllocId::EMPTY && self.layer.covers(&table, current, edge.holder) {
-                    stack.push((edge.held, true));
+                if edge.held != AllocId::EMPTY
+                    && (!writable_only || edge.writable)
+                    && self
+                        .layer
+                        .covers_through(&table, current, edge.holder, writable_only)
+                {
+                    stack.push(edge.held);
                 }
             }
         }
@@ -3210,37 +3438,34 @@ impl BorrowState {
     ///      binding keeps that allocation as an override, and every id rooted at the departing
     ///      binding moves to a base that outlives the name.
     pub(super) fn narrow_layer(&mut self, visible: &RootSet) {
+        let retires = |local| !visible.contains(local);
+        self.retain_observations_with_unchanged_route(|wrapper| {
+            wrapper.age == WrapperAge::Current && retires(wrapper.local)
+        });
+        // First capture all departing slot payloads in the pre-edge allocation coordinates.
+        if !self.layer.wrappers.is_empty() {
+            let reached = self.reachable_wrappers(|local| visible.contains(local));
+            for local in 0..self.locals.len() {
+                let wrapper = WrapperId::current(local);
+                if retires(local)
+                    && self.locals[local].init != Init::No
+                    && reached.contains(&wrapper)
+                {
+                    self.materialize_prior(wrapper);
+                }
+            }
+        }
+        self.freeze_slot_observers(visible.iter_ones(), |roots| {
+            roots.has_members_outside(visible)
+        });
         if self.layer.is_empty() {
             return;
         }
-        let reached = self.reachable_wrappers(|local| visible.contains(local));
-        self.retain_observations_with_unchanged_route(|wrapper| {
-            wrapper.age == WrapperAge::Current && !visible.contains(wrapper.local)
+        self.layer.rename_bases(|base| match base {
+            AllocBase::Root(local) if retires(local as usize) => Some(AllocBase::Departed(local)),
+            _ => None,
         });
-        // First capture all departing slot payloads in the pre-edge allocation coordinates.
-        for local in 0..self.locals.len() {
-            let wrapper = WrapperId::current(local);
-            if !visible.contains(local)
-                && self.locals[local].init != Init::No
-                && reached.contains(&wrapper)
-            {
-                self.materialize_prior(wrapper);
-            }
-        }
-        for local in 0..self.locals.len() {
-            if visible.contains(local) {
-                continue;
-            }
-            if self.alloc_root_is_interned(local) {
-                self.freeze_slot_observers(local, |observer| visible.contains(observer));
-                self.layer.rename_base(
-                    AllocBase::Root(local as u32),
-                    AllocBase::Departed(local as u32),
-                    false,
-                );
-            }
-        }
-        self.age_wrappers(|local| !visible.contains(local));
+        self.age_wrappers(retires);
         self.prune_wrappers(|local| visible.contains(local));
         for row in &mut self.layer.wrappers {
             row.route_roots.intersect_with(visible);
@@ -3325,7 +3550,22 @@ impl BorrowState {
             if self.locals[local].init == Init::No {
                 continue;
             }
-            live.extend(self.local_alloc_ids(local).0);
+            let slot = WrapperId::current(local);
+            if self.binding_row(slot).is_none()
+                && self.layer.bound_of(slot).is_empty()
+                && self.layer.observation(local).is_none()
+            {
+                // An ordinary slot can seed the graph without resolving addresses or views.
+                let roots = &self.locals[local].value_roots;
+                let mut table = self.layer.table.borrow_mut();
+                if roots.is_empty() {
+                    live.push(table.root(local));
+                } else {
+                    live.extend(roots.iter_ones().map(|root| table.root(root)));
+                }
+            } else {
+                live.extend(self.local_alloc_ids(local).0);
+            }
         }
         live.extend(self.layer.projected_holders());
         live.extend(

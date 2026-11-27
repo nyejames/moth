@@ -306,7 +306,9 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
         let mut state = entry.clone();
         apply_invoke_edge_transfer(&layout, &terminator, &selected, 1, &mut state);
         for (key, old) in keys.into_iter().zip(old_members) {
-            let contents = state.alloc_field_ids(&[receiver], key);
+            let mut place = state.resolve_place_path(0, &layout.local_mutable, [key]);
+            state.load_place_content(&mut place, &layout.local_mutable, false);
+            let contents = place.content.expect("loaded receiver member").ids;
             if erased {
                 assert!(contents.is_empty());
             } else {

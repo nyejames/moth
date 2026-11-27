@@ -215,6 +215,40 @@ fn repeated_retirement_keeps_lazy_and_explicit_payloads() {
 }
 
 #[test]
+fn visibility_edge_preserves_payloads_independently_of_interning() {
+    let count = 3;
+    let empty = RootSet::empty(count);
+    let root = roots(count, &[0]);
+    for with_link in [false, true] {
+        let visible = roots(count, &[1, 2]);
+        let mut fresh = BorrowState::new_uninitialized(count);
+        fresh.initialize_parameter(0);
+        if with_link {
+            bind_whole(&mut fresh, 1, 0, root.clone(), empty.clone());
+        }
+        fresh.set_binding(2, BindingSpec::Slot, root.clone(), empty.clone());
+
+        // Use the same table so the test compares abstract states, not unrelated numeric IDs.
+        // The first edge runs before the sibling has caused a lookup of the implicit root.
+        let mut preinterned = fresh.clone();
+        fresh.kill_invisible(&visible);
+        let current = preinterned.local_alloc_ids(0).0[0];
+        preinterned.kill_invisible(&visible);
+        assert_eq!(fresh, preinterned);
+
+        assert_eq!(fresh.resolve_cells(2).cells(), &[slot(2)]);
+        let retained = fresh.local_alloc_ids(2).0;
+        assert_eq!(retained.len(), 1);
+        assert_ne!(retained[0], current);
+        assert_eq!(fresh.alloc_origin_local(retained[0]), Some(0));
+        if with_link {
+            assert_eq!(fresh.resolve_cells(1).cells(), &[prior_slot(0)]);
+            assert_eq!(fresh.local_alloc_ids(1).0, retained);
+        }
+    }
+}
+
+#[test]
 fn join_intersects_derived_alias_facts() {
     let count = 5;
     let empty = RootSet::empty(count);
@@ -584,122 +618,6 @@ fn visibility_sweep_leaves_a_state_unchanged_under_a_covering_mask() {
     assert!(state.binding(2).value_roots().is_empty());
     assert_eq!(state.resolve_cells(2).cells(), &[slot(2)]);
     assert_eq!(state.binding_mode(0), LocalMode::SLOT);
-}
-
-/// `effective_root_contains` must answer exactly what `effective_roots(..).contains` answers, for
-/// every mode and value shape. Alias conflict scans use the shortcut in place of the set builder,
-/// so any disagreement would change which conflicts are reported.
-#[test]
-fn effective_root_contains_matches_effective_roots_membership() {
-    // Two words, so the check covers bits on both sides of the word boundary.
-    let local_count = 70;
-    let modes = [
-        LocalMode::UNINIT,
-        LocalMode::SLOT,
-        LocalMode::ALIAS,
-        LocalMode::UNINIT.union(LocalMode::SLOT),
-        LocalMode::UNINIT.union(LocalMode::ALIAS),
-        LocalMode::SLOT.union(LocalMode::ALIAS),
-        LocalMode::UNINIT
-            .union(LocalMode::SLOT)
-            .union(LocalMode::ALIAS),
-    ];
-    let all_roots: Vec<usize> = (0..local_count).collect();
-
-    for local_index in 0..local_count {
-        let value_shapes = [
-            roots(local_count, &[]),
-            roots(local_count, &[local_index]),
-            roots(local_count, &[0]),
-            roots(local_count, &[local_count - 1]),
-            roots(local_count, &[local_index, local_count - 1]),
-            roots(local_count, &all_roots),
-        ];
-
-        for mode in modes {
-            for value_roots in &value_shapes {
-                let uninit = BorrowState::new_uninitialized(local_count);
-                let mut incoming = uninit.clone();
-                let empty = RootSet::empty(local_count);
-                let has_slot = mode.contains(LocalMode::SLOT);
-                if has_slot {
-                    incoming.set_binding(
-                        local_index,
-                        BindingSpec::Slot,
-                        value_roots.clone(),
-                        empty.clone(),
-                    );
-                }
-                if mode.contains(LocalMode::ALIAS) {
-                    let mut alias = uninit.clone();
-                    alias.set_binding(
-                        local_index,
-                        BindingSpec::Alias {
-                            addresses: AddressSet::from_cells([], Coverage::Partial),
-                            route_roots: empty.clone(),
-                        },
-                        value_roots.clone(),
-                        empty,
-                    );
-                    if has_slot {
-                        incoming.join_in_place(&alias);
-                    } else {
-                        incoming = alias;
-                    }
-                }
-                if mode.contains(LocalMode::UNINIT) {
-                    incoming.join_in_place(&uninit);
-                }
-                assert_eq!(incoming.binding_mode(local_index), mode);
-                let state = incoming;
-
-                let expected = state.effective_roots(local_index);
-                // One past the last index: both sides must reject an index outside the set.
-                for root_index in 0..=local_count {
-                    assert_eq!(
-                        state.effective_root_contains(local_index, root_index),
-                        expected.contains(root_index),
-                        "local {local_index}, root {root_index}, mode {mode:?}, value roots {:?}",
-                        members(value_roots),
-                    );
-                }
-            }
-        }
-    }
-}
-
-/// `intersects` must answer exactly what intersecting a clone answers, including pairs whose only
-/// shared bit sits on either side of the word boundary. Conflict scans use it instead of building
-/// the intersection, so a disagreement would change which call arguments count as aliasing.
-#[test]
-fn intersects_matches_intersection_emptiness() {
-    // Two words, so bit 63 and bit 64 exercise both the last bit of word 0 and the first of word 1.
-    let local_count = 70;
-    let all_roots: Vec<usize> = (0..local_count).collect();
-    let shapes = [
-        roots(local_count, &[]),
-        roots(local_count, &[0]),
-        roots(local_count, &[63]),
-        roots(local_count, &[64]),
-        roots(local_count, &[local_count - 1]),
-        roots(local_count, &[63, 64]),
-        roots(local_count, &[0, 63, 64, local_count - 1]),
-        roots(local_count, &all_roots),
-    ];
-
-    for left in &shapes {
-        for right in &shapes {
-            let mut intersection = left.clone();
-            intersection.intersect_with(right);
-            assert_eq!(
-                left.intersects(right),
-                !intersection.is_empty(),
-                "left {:?}, right {:?}",
-                members(left),
-                members(right),
-            );
-        }
-    }
 }
 
 /// Copy-on-write words must behave exactly like value semantics: an update shows on the receiver,

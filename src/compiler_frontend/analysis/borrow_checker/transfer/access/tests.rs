@@ -1,10 +1,12 @@
 //! Source and state regressions for writes through the sparse allocation layer.
 
+use super::PlaceUse;
+use super::conflicts::{Overlap, footprint, overlap};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, FieldKey,
-    LocalState, MutationTarget, Replacement, RootSet, StoredValue, TypedStore, UNKNOWN_ORDER_KEY,
-    WrapperAge, WrapperId,
+    LocalState, Replacement, RootSet, StoredValue, TypedStore, UNKNOWN_ORDER_KEY, WrapperAge,
+    WrapperId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -85,6 +87,45 @@ probe || -> I32:\n\
     return writer\n\
 ;\n";
     check_source(write_through).expect("a write through an existing alias only reads its RHS");
+}
+
+#[test]
+fn scalar_map_lookup_stability_ends_at_last_use() {
+    let lookup = "\
+scores ~{String = I32} = {\"Priya\" = 10}
+score = scores.get(\"Priya\") catch:
+    then 0
+;
+";
+    let edit = "~scores.set(\"Rob\", 7) catch:\n;\n";
+    let observation = "~[:[score]]\n";
+    check_source(&format!("{lookup}{observation}{edit}"))
+        .expect("the last lookup use precedes the map edit");
+    check_rejection(
+        &format!("{lookup}{edit}{observation}"),
+        "scores.set",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+#[test]
+fn nested_lookup_stability_ends_at_last_use() {
+    let lookup = "\
+Bucket = |rows {{I32}}|
+bucket ~= Bucket({{1, 2}})
+row = bucket.rows.get(0)!
+item = row.get(0)!
+";
+    let edit = "~bucket.rows.push({3})\n";
+    let observation = "observed = item + 0\n";
+    let result = "~[:[observed]]\n";
+    check_source(&format!("{lookup}{observation}{edit}{result}"))
+        .expect("a computed result doesn't extend the nested lookup loan");
+    check_rejection(
+        &format!("{lookup}{edit}{observation}{result}"),
+        "bucket.rows.push",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
 }
 
 #[test]
@@ -303,6 +344,197 @@ fn writable_value(id: AllocId) -> CapturedValue {
 }
 
 #[test]
+fn place_resolution_distinguishes_complete_many_from_partial_singleton() {
+    const COUNT: usize = 4;
+    let mut state = BorrowState::new_uninitialized(COUNT);
+    for local in 0..COUNT {
+        state.initialize_parameter(local);
+    }
+    let first = state.local_alloc_ids(1).0[0];
+    let second = state.local_alloc_ids(2).0[0];
+    let child = state.local_alloc_ids(3).0[0];
+    let left = FieldKey::Field(0);
+    let right = FieldKey::Field(1);
+    state.bind_alloc_ids(0, &[first, second], false);
+
+    let resolve = |state: &BorrowState, key| {
+        let mut place = state.resolve_place_path(0, &[true; COUNT], [key]);
+        state.load_place_content(&mut place, &[true; COUNT], false);
+        place
+    };
+    let read = resolve(&state, left);
+    let write = resolve(&state, right);
+    assert_eq!(read.address.coverage, Coverage::Complete);
+    assert_eq!(read.traversal_coverage, Coverage::Complete);
+    assert_eq!(read.address.cells().len(), 2);
+    assert_eq!(read.address.definite(), None);
+    assert_eq!(
+        overlap(
+            &state,
+            &footprint(&read, PlaceUse::Read),
+            &footprint(&write, PlaceUse::WriteEntries)
+        ),
+        Overlap::No,
+    );
+
+    for key in [left, right] {
+        state.add_alloc_edge(
+            first,
+            key,
+            StoredValue {
+                id: child,
+                writable: true,
+            },
+        );
+    }
+    let read = resolve(&state, left);
+    let write = resolve(&state, right);
+    assert_eq!(
+        overlap(
+            &state,
+            &footprint(&read, PlaceUse::Read),
+            &footprint(&write, PlaceUse::WriteEntries)
+        ),
+        Overlap::Yes,
+    );
+
+    state.set_binding(
+        0,
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([slot(1)], Coverage::Partial),
+            route_roots: RootSet::empty(COUNT),
+        },
+        RootSet::empty(COUNT),
+        RootSet::empty(COUNT),
+    );
+    let partial = resolve(&state, left);
+    assert_eq!(partial.address.cells(), [CellId::Projected(first, left)]);
+    let sibling = state.resolve_place_path(1, &[true; COUNT], [right]);
+    assert!(
+        !sibling
+            .address
+            .cells()
+            .contains(&partial.address.cells()[0])
+    );
+    assert_eq!(partial.address.coverage, Coverage::Partial);
+    assert_eq!(partial.traversal_coverage, Coverage::Partial);
+    assert_eq!(partial.address.definite(), None);
+    assert_eq!(
+        overlap(
+            &state,
+            &footprint(&partial, PlaceUse::Read),
+            &footprint(&sibling, PlaceUse::Replace)
+        ),
+        Overlap::Unknown,
+    );
+    assert_eq!(partial.content.unwrap().coverage, Coverage::Partial);
+    set_link(&mut state, COUNT, 0, 1, true);
+    let through = state.resolve_place_path(0, &[true; COUNT], []);
+    assert_eq!(through.address.definite(), Some(slot(1)));
+    assert!(through.names_terminal_slot(WrapperId::current(1)));
+    assert!(!through.names_terminal_slot(WrapperId::current(2)));
+    let projected = state.resolve_place_path(0, &[true; COUNT], [left]);
+    assert_eq!(projected.projection_owner(), Some(WrapperId::current(1)));
+}
+
+#[test]
+fn known_address_does_not_depend_on_terminal_payload() {
+    let mut state = BorrowState::new_uninitialized(2);
+    state.initialize_parameter(0);
+    state.initialize_parameter(1);
+    let holder = state.local_alloc_ids(0).0[0];
+    let readonly = state.local_alloc_ids(1).0[0];
+    let field = FieldKey::Field(0);
+    let cell = CellId::Projected(holder, field);
+    state.add_alloc_edge(
+        holder,
+        field,
+        StoredValue {
+            id: readonly,
+            writable: false,
+        },
+    );
+
+    let mut place = state.resolve_place_path(0, &[true, false], [field]);
+    assert_eq!(place.address.definite(), Some(cell));
+    assert_eq!(place.traversal.as_slice(), [slot(0)]);
+    assert!(place.content.is_none());
+    state.load_place_content(&mut place, &[true, false], false);
+    assert_eq!(place.address.definite(), Some(cell));
+    assert!(!place.permission.holder_readonly);
+    let content = place.content.unwrap();
+    assert!(content.readonly);
+    assert_eq!(content.coverage, Coverage::Complete);
+    assert_eq!(content.ids, [readonly]);
+
+    let mut scalar = state.resolve_place_path(0, &[true, false], [field]);
+    state.load_place_content(&mut scalar, &[true, false], true);
+    assert_eq!(scalar.address.definite(), Some(cell));
+    let content = scalar.content.unwrap();
+    assert!(content.ids.is_empty());
+    assert!(!content.may_be_absent);
+    assert_eq!(content.coverage, Coverage::Complete);
+
+    state.publish_store(
+        &TypedStore::replace_cells(place.address, CapturedValue::default()),
+        UNKNOWN_ORDER_KEY,
+        None,
+    );
+    let mut absent = state.resolve_place_path(0, &[true, false], [field]);
+    state.load_place_content(&mut absent, &[true, false], false);
+    assert_eq!(absent.address.definite(), Some(cell));
+    let content = absent.content.unwrap();
+    assert!(content.ids.is_empty());
+    assert!(content.may_be_absent);
+    assert_eq!(content.coverage, Coverage::Complete);
+    assert_eq!(content.holder_coverage(), Coverage::Partial);
+}
+
+#[test]
+fn nested_field_replacement_observes_prefixes_but_not_old_payload() {
+    let mut state = BorrowState::new_uninitialized(3);
+    for local in 0..3 {
+        state.initialize_parameter(local);
+    }
+    let root = state.local_alloc_ids(0).0[0];
+    let field = FieldKey::Field(0);
+    let key = FieldKey::Field(1);
+    let child = state.alloc_child(root, field);
+    let old = state.local_alloc_ids(1).0[0];
+    let new = state.local_alloc_ids(2).0[0];
+    state.add_alloc_edge(
+        child,
+        key,
+        StoredValue {
+            id: old,
+            writable: false,
+        },
+    );
+
+    let mutability = [true, false, true];
+    let destination = state.resolve_place_path(0, &mutability, [field, key]);
+    assert_eq!(
+        destination.traversal.as_slice(),
+        [slot(0), CellId::Projected(root, field)]
+    );
+    assert_eq!(
+        destination.address.definite(),
+        Some(CellId::Projected(child, key))
+    );
+    assert!(destination.content.is_none());
+    assert!(!destination.permission.holder_readonly);
+    state.publish_store(
+        &TypedStore::replace_cells(destination.address, writable_value(new)),
+        UNKNOWN_ORDER_KEY,
+        None,
+    );
+    let captured = state.resolve_alloc_path(0, &mutability, [field, key]);
+    assert_eq!(captured.ids, [new]);
+    assert!(!captured.readonly);
+    assert_eq!(state.local_alloc_ids(1).0, [old]);
+}
+
+#[test]
 fn call_result_preserves_sharing_at_a_possible_whole_referent() {
     const WHOLE: usize = 0;
     const HOLDER: usize = 1;
@@ -332,6 +564,7 @@ fn call_result_preserves_sharing_at_a_possible_whole_referent() {
                 Coverage::Complete,
             ),
             origin: WrapperId::current(HOLDER),
+            owner: Some(WrapperId::current(HOLDER)),
             writable: true,
             isolated: false,
             route_roots: roots(LOCAL_COUNT, &[HOLDER]),
@@ -366,19 +599,16 @@ fn call_result_preserves_sharing_at_a_possible_whole_referent() {
         assert!(contents.ids.contains(&old));
         assert!(contents.ids.contains(&result));
     }
-    let observer = state.resolve_local_allocs(OBSERVER);
-    let targets: Vec<_> = state
-        .local_alloc_ids(WHOLE)
-        .0
-        .into_iter()
-        .map(|id| MutationTarget {
-            id,
-            layer_reached: true,
-            deep: false,
-        })
-        .collect();
+    let mut observer = state.resolve_place_path(OBSERVER, &[true; LOCAL_COUNT], []);
+    let mut writer = state.resolve_place_path(WHOLE, &[true; LOCAL_COUNT], []);
+    state.load_place_content(&mut observer, &[true; LOCAL_COUNT], false);
+    state.load_place_content(&mut writer, &[true; LOCAL_COUNT], false);
     assert!(
-        state.alloc_reaches(&observer.ids, observer.layer_only, &targets),
+        overlap(
+            &state,
+            &footprint(&observer, PlaceUse::Read),
+            &footprint(&writer, PlaceUse::Mutate { deep: false }),
+        ) == Overlap::Yes,
         "a later mutation of the possible whole referent must still see the old live observer"
     );
 }
@@ -427,6 +657,7 @@ fn assert_joined_projected_write(routes: [(usize, FieldKey); 2]) {
                     Coverage::Complete,
                 ),
                 origin: WrapperId::current(origin),
+                owner: Some(WrapperId::current(origin)),
                 writable: true,
                 isolated: false,
                 route_roots: roots(LOCAL_COUNT, &[origin]),
@@ -481,27 +712,32 @@ fn diamond_keeps_a_readonly_restriction_on_a_shared_suffix() {
     set_link(&mut right, 5, 4, 3, true);
     let mutable = [true; 5];
     assert!(
-        left.resolve_cells_with_permission(4, false, &mutable)
-            .1
+        left.resolve_place_path(4, &mutable, [])
+            .permission
+            .wrapper_readonly_source
             .is_none()
     );
     assert_eq!(
-        right.resolve_cells_with_permission(4, false, &mutable).1,
+        right
+            .resolve_place_path(4, &mutable, [])
+            .permission
+            .wrapper_readonly_source,
         Some(3)
     );
     let readonly_middle = [true, false, true, true, true];
     assert_eq!(
-        left.resolve_cells_with_permission(4, false, &readonly_middle)
-            .1,
+        left.resolve_place_path(4, &readonly_middle, [])
+            .permission
+            .wrapper_readonly_source,
         Some(1)
     );
 
     for (mut state, other) in [(left.clone(), &right), (right.clone(), &left)] {
         assert!(state.join_in_place(other));
-        let (addresses, readonly_source) = state.resolve_cells_with_permission(4, false, &mutable);
-        assert_eq!(addresses.cells(), &[slot(0)]);
-        assert_eq!(addresses.definite(), Some(slot(0)));
-        assert_eq!(readonly_source, Some(3));
+        let resolved = state.resolve_place_path(4, &mutable, []);
+        assert_eq!(resolved.address.cells(), &[slot(0)]);
+        assert_eq!(resolved.address.definite(), Some(slot(0)));
+        assert_eq!(resolved.permission.wrapper_readonly_source, Some(3));
         let route = state.binding(4).route_roots();
         assert!(route.contains(2) && route.contains(3));
     }
@@ -592,6 +828,7 @@ fn projected_destination_stays_on_the_old_holder_after_slot_replacement() {
         BindingSpec::Projected {
             addresses: AddressSet::from_cells([cell], Coverage::Complete),
             origin: WrapperId::current(HOLDER),
+            owner: Some(WrapperId::current(HOLDER)),
             writable: true,
             isolated: false,
             route_roots: roots(COUNT, &[HOLDER]),

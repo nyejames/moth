@@ -7,7 +7,9 @@
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     ValueAccessClassification, ValueBorrowFact,
 };
-use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BorrowCheckError, LocalMode, OptionalTransferStatus,
+};
 use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
@@ -16,8 +18,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    SharedMutableConflictView, UseOfUninitializedLocalView,
+    MultipleMutableBorrowsView, SharedMutableConflictView, UseOfUninitializedLocalView,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -739,6 +742,86 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             .expect("target initializer should have a borrow fact")
             .optional_transfer,
         OptionalTransferStatus::Transfer
+    );
+}
+
+fn check_place_access_source(source: &str) -> Result<(), BorrowCheckError> {
+    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut strings);
+    let (hir, types) = lower_ast(ast, &mut strings, &mut paths, &registry)
+        .expect("place access fixture should lower");
+    run_borrow_checker_with_types(&hir, &types, &registry, &paths, &strings).map(|_| ())
+}
+
+#[test]
+fn same_call_projected_arguments_reserve_cells_not_holder_names() {
+    let fixture = |parameter, first, second| {
+        format!(
+            "Pair = |left I32, right I32|\n\
+             combine |first {parameter}, second ~I32| -> I32:\n\
+                 ~second = 7\n\
+                 return first + second\n\
+             ;\n\
+             pair ~= Pair(1, 2)\n\
+             result = combine({first}, {second})\n\
+             ~[:[result]]\n"
+        )
+    };
+
+    for (parameter, first) in [("I32", "pair.left"), ("~I32", "~pair.left")] {
+        check_place_access_source(&fixture(parameter, first, "~pair.right"))
+            .expect("sibling cells can be reserved together");
+    }
+    let shared = check_place_access_source(&fixture("I32", "pair.left", "~pair.left"))
+        .expect_err("a mutable argument cannot reserve the shared argument's cell");
+    assert_borrow_error_view::<SharedMutableConflictView>(shared);
+    let exclusive = check_place_access_source(&fixture("~I32", "~pair.left", "~pair.left"))
+        .expect_err("two mutable arguments cannot reserve the same cell");
+    assert_borrow_error_view::<MultipleMutableBorrowsView>(exclusive);
+}
+
+#[test]
+fn only_a_must_derived_child_can_use_a_live_parent_loan() {
+    let source = |body| {
+        format!(
+            "probe || -> I32:\n\
+                 data ~= 1\n\
+                 parent ~= data\n\
+                 child ~= parent\n\
+                 {body}\n\
+             ;\n\
+             ~[:[probe()]]\n"
+        )
+    };
+    check_place_access_source(&source("~child = 2\nreturn parent"))
+        .expect("the child can exercise its live parent loan");
+    let parent = check_place_access_source(&source("~parent = 2\nreturn child"))
+        .expect_err("the parent cannot ignore its live child");
+    assert_invalid_mutable_access_reason(
+        parent,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+
+    let joined = check_place_access_source(
+        "probe |flag Bool| -> I32:\n\
+             first ~= 1\n\
+             second ~= 2\n\
+             parent ~= first\n\
+             child ~= 0\n\
+             if flag:\n\
+                 ~child = parent\n\
+             else\n\
+                 ~child = second\n\
+             ;\n\
+             ~child = 4\n\
+             return parent\n\
+         ;\n\
+         ~[:[probe(true)]]\n",
+    )
+    .expect_err("derivation on only one incoming path does not authorise the joined child");
+    assert_invalid_mutable_access_reason(
+        joined,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
     );
 }
 
@@ -3362,7 +3445,7 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
 }
 
 #[test]
-fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
+fn unequal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     use crate::compiler_frontend::tests::hir_fixture_support::{
         bool_expression, expression, statement,
     };
@@ -3429,12 +3512,12 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     assert_eq!(*target, view);
     *value = right_value;
 
-    // Both arms sit one edge from the entry, so breadth-first scheduling reaches the merge from
-    // the left arm and grows its input from the right arm before the merge is popped.
+    // Add an extra hop on the right so a FIFO worklist visits the merge before that arm arrives.
     let base = hir.blocks.len() as u32;
     let left_arm = BlockId(base);
     let right_arm = BlockId(base + 1);
-    let merge = BlockId(base + 2);
+    let right_relay = BlockId(base + 2);
+    let merge = BlockId(base + 3);
     let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
     let condition = bool_expression(true, builtin_type_ids::BOOL, region, &mut hir.expressions);
     hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
@@ -3466,6 +3549,16 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
             region,
             locals: vec![],
             statements: vec![right_definition],
+            terminator: HirTerminator::Jump {
+                target: right_relay,
+                args: vec![],
+            },
+        },
+        HirBlock {
+            id: right_relay,
+            region,
+            locals: vec![],
+            statements: vec![],
             terminator: jump_to_merge,
         },
         HirBlock {
@@ -3488,8 +3581,8 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     assert!(merge_view.alias_roots.contains(&left));
     assert!(merge_view.alias_roots.contains(&right));
 
-    // Entry, both arms and the merge: the grown merge input is visited once, not once per arm.
+    // The merge runs once even though the two arms need different numbers of visits.
     let summary = &report.analysis.function_summaries[&start];
-    assert_eq!(summary.reachable_blocks, 4);
-    assert_eq!(summary.worklist_iterations, 4);
+    assert_eq!(summary.reachable_blocks, 5);
+    assert_eq!(summary.worklist_iterations, 5);
 }

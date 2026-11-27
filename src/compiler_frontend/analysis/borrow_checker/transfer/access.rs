@@ -6,12 +6,14 @@
 
 use super::super::diagnostics::BorrowDiagnostics;
 use super::call_semantics::{ArgEffect, resolve_call_semantics};
-use super::facts::{StatementAccessTracker, ValueFactBuffer, roots_to_local_ids};
+use super::facts::{
+    AccessFootprint, PlaceUse, StatementAccessTracker, ValueFactBuffer, roots_to_local_ids,
+};
 use super::{BlockTransferStats, BorrowTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocationRetirement, BindingSpec, BorrowState, CellId, Coverage, FunctionLayout,
-    LocalState, OrderKey, Replacement, RootSet, TypedStore, WrapperAge, WrapperId,
+    LocalState, OrderKey, PlaceResolution, Replacement, RootSet, TypedStore, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     AccessKind, LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
@@ -40,11 +42,11 @@ mod terminator;
 #[cfg(test)]
 mod tests;
 
-use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access};
+use conflicts::{check_access, footprint, probe_mutable_access};
 use layer::{
     CapturedLocalFacts, LayerValueContext, capture_projected_binding, capture_slot_value,
-    check_captured_cell_write, check_layer_place_mutation, check_mutable_place_access,
-    check_shared_place_access, stored_values,
+    check_cell_permission, check_place_replacement, check_shared_place_access, resolve_place,
+    stored_values,
 };
 use move_decision::{MoveDecision, classify_move_decision};
 pub(super) use statement::transfer_statement;
@@ -105,68 +107,11 @@ fn immutable_cell_error(check: &AccessCheckContext<'_, '_>, origin: usize) -> Bo
 
 fn check_local_update_access(
     check: &mut AccessCheckContext<'_, '_>,
-    addresses: &AddressSet,
-    direct_slot: bool,
-    readonly_source: Option<usize>,
+    resolved: &PlaceResolution,
 ) -> Result<RootSet, BorrowCheckError> {
-    let actor = check
-        .actor_index_hint
-        .expect("a local update has a named actor");
-    if let Some(origin) = readonly_source {
-        return Err(immutable_cell_error(check, origin));
-    }
     let mut roots = RootSet::empty(check.layout.local_count());
-    let mut projects = false;
-    let mut retained_slot = false;
-    for &cell in addresses.cells() {
-        match cell {
-            CellId::Slot(wrapper) if wrapper.age == WrapperAge::Current => {
-                roots.insert(wrapper.local)
-            }
-            CellId::Slot(_) => retained_slot = true,
-            CellId::Projected(_, _) => projects = true,
-        }
-    }
-    if projects || addresses.coverage == Coverage::Partial {
-        // Only the transitional overlap check uses coarse route and provenance evidence.
-        let binding = check.state.binding(actor);
-        roots.union_with(&binding.route_roots());
-        if roots.is_empty() && addresses.coverage == Coverage::Partial {
-            roots.union_with(binding.value_roots());
-        }
-    }
-    if !roots.is_empty() {
-        check_mutable_access(
-            check,
-            &roots,
-            MutableAccessPolicy {
-                allow_prior_shared: true,
-                require_root_mutable: false,
-                strict_move_exclusivity: false,
-                alias_exclusivity: if direct_slot
-                    || (!projects && addresses.coverage == Coverage::Complete)
-                {
-                    AliasExclusivity::Direct
-                } else {
-                    AliasExclusivity::All
-                },
-            },
-        )?;
-    }
-    if projects || retained_slot {
-        check_captured_cell_write(check, actor, addresses)?;
-    }
-    if projects {
-        // Attribution keeps the old holder's origin even when its current name no
-        // longer overlaps the captured field.
-        for &cell in addresses.cells() {
-            if let CellId::Projected(holder, _) = cell
-                && let Some(origin) = check.state.alloc_origin_local(holder)
-            {
-                roots.insert(origin);
-            }
-        }
-    }
+    report_place_cells(check.state, &resolved.address, &mut roots);
+    check_place_replacement(check, resolved, &roots)?;
     Ok(roots)
 }
 
@@ -203,28 +148,20 @@ struct AccessCheckContext<'a, 'module> {
     current_order: i32,
 }
 
-/// Which overlapping aliases block an exclusive access to a written root.
-///
-/// WHAT: a definite-slot rebinding to a fresh value replaces the slot's value provenance, so only
-/// aliases of the binding cell itself observe that write. A value alias stored in the slot keeps
-/// the older allocation alive without being rebound.
-/// WHY: rebinding a result binding to a fresh allocation is legal while an alias of the old
-/// allocation is live, but writing a fresh value through a source alias of the binding cell is an
-/// overlapping mutation that must still be rejected.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum AliasExclusivity {
-    /// Only direct aliases of the written root conflict.
-    Direct,
-    /// Every active alias of the written root conflicts.
-    All,
-}
+const BORROW_ACCESS: MutableAccessPolicy = MutableAccessPolicy {
+    allow_prior_shared: false,
+    strict_move_exclusivity: false,
+};
+
+const STORE_ACCESS: MutableAccessPolicy = MutableAccessPolicy {
+    allow_prior_shared: true,
+    strict_move_exclusivity: false,
+};
 
 #[derive(Clone, Copy)]
 struct MutableAccessPolicy {
     allow_prior_shared: bool,
-    require_root_mutable: bool,
     strict_move_exclusivity: bool,
-    alias_exclusivity: AliasExclusivity,
 }
 
 /// Shared assignment-transfer environment for one statement.
@@ -346,7 +283,7 @@ fn transfer_assign_target(
     };
 
     if !target.projections.is_empty() {
-        let roots = access_roots_for_place(
+        let mut roots = roots_for_place(
             layout,
             check.state,
             target,
@@ -354,7 +291,11 @@ fn transfer_assign_target(
             check.span,
             &transfer.diagnostics,
         )?;
-        let addresses = layer::check_layer_field_write(&mut check, local, target, &roots)?;
+        let resolved = resolve_place(layout, check.state, transfer.expressions, target)
+            .expect("projected target's root is in the layout");
+        report_place_cells(check.state, &resolved.address, &mut roots);
+        check_place_replacement(&mut check, &resolved, &roots)?;
+        let addresses = resolved.address;
         check.tracker.record_write(&roots);
         let has_layer = !state.layer_is_empty();
         let stored = stored_values(&values, state, value, has_layer)?;
@@ -400,59 +341,17 @@ fn transfer_assign_target(
             .record_optional_transfer(value, status, roots);
     }
     let rhs_roots = rhs_roots.unwrap_or_else(|| RootSet::empty(layout.local_count()));
-    let direct_self =
-        source.is_some_and(|(source, place)| source == local && place.projections.is_empty());
-
-    if !is_definition
-        && mode == LocalMode::SLOT
-        && check.state.layer_is_empty()
-        && !layout.local_has_in_place_mutation_surface[local]
-        && (source.is_none() || direct_self)
-    {
-        // No wrapper can observe this implicit scalar cell. Only shared expression reads
-        // precede an ordinary assignment, and those can precede its replacement.
-        debug_assert!(!matches!(
-            check.tracker.conflict(local, AccessKind::Mutable),
-            Some(AccessKind::Mutable),
-        ));
-        check.stats.conflicts_checked += 1;
-        let mut writes = RootSet::empty(layout.local_count());
-        writes.insert(local);
-        check.tracker.record(local, AccessKind::Mutable, check.span);
-        check.tracker.record_write(&writes);
-        if direct_self {
-            return Ok(());
-        }
-        state.publish_store(
-            &TypedStore::replace_cells(
-                AddressSet::from_cells([own_cell], Coverage::Complete).with_singleton_proof(),
-                Default::default(),
-            )
-            .with_slot_roots(rhs_roots),
-            context.current_order,
-            None,
-        );
-        state.mark_slot_derivation(local, derivation);
-        return Ok(());
-    }
-
     let local_addresses = (!is_definition).then(|| {
         check
             .state
-            .resolve_cells_with_permission(local, false, &layout.local_mutable)
+            .resolve_place_path(local, &layout.local_mutable, [])
     });
-    let writes = if let Some((addresses, readonly_source)) = &local_addresses {
-        let roots = check_local_update_access(
-            &mut check,
-            addresses,
-            mode == LocalMode::SLOT,
-            *readonly_source,
-        )?;
+    if let Some(resolved) = &local_addresses {
+        let roots = check_local_update_access(&mut check, resolved)?;
         check.tracker.record_write(&roots);
-        roots
-    } else {
-        RootSet::empty(layout.local_count())
-    };
+    }
+    // The cell store and the new link are two accesses of one operation.
+    check.tracker.clear_reservations();
     // Scratch may carry a shared link, but its synthetic mutability cannot grant exclusivity.
     let writable =
         layout.local_mutable[local] && !is_compiler_owned_scratch_local(transfer, layout, local);
@@ -466,51 +365,43 @@ fn transfer_assign_target(
             preserve_slot = true;
             None
         } else if place.projections.is_empty() {
-            let (addresses, readonly_source) =
-                check
-                    .state
-                    .resolve_cells_with_permission(source, false, &layout.local_mutable);
+            let mut resolved = check
+                .state
+                .resolve_place_path(source, &layout.local_mutable, []);
+            let addresses = &resolved.address;
             preserve_slot = !is_definition
                 && (addresses.cells().contains(&own_cell)
                     || addresses.coverage == Coverage::Partial);
             if !is_definition && addresses.definite() == Some(own_cell) {
                 None
             } else {
-                let capture_payload = mixed_acquisition && layer::is_heap_value(transfer, value)?;
-                let needs_overlap_payload = writable
-                    && !check.state.layer_is_empty()
-                    && layout.local_has_in_place_mutation_surface[source];
-                let resolved = (capture_payload || needs_overlap_payload).then(|| {
+                let heap = layout.local_has_in_place_mutation_surface[source];
+                let capture_payload = mixed_acquisition && heap;
+                if heap && (capture_payload || writable) {
                     check
                         .state
-                        .resolve_local_allocs_from_cells(source, &addresses, readonly_source)
-                });
+                        .load_place_content(&mut resolved, &layout.local_mutable, false);
+                }
                 if writable {
                     check.span = expression.span;
-                    if let Some(origin) = readonly_source {
-                        return Err(immutable_cell_error(&check, origin));
-                    }
+                    check_cell_permission(&check, &resolved)?;
                     let mut roots = rhs_roots.clone();
-                    check
-                        .state
-                        .binding(source)
-                        .include_overlap_roots(&mut roots);
-                    roots.subtract_with(&writes);
+                    report_place_cells(check.state, &resolved.address, &mut roots);
                     check.actor_index_hint = Some(source);
-                    layer::check_alias_acquisition_overlap(
+                    check_access(
                         &mut check,
-                        source,
-                        &addresses,
                         &roots,
-                        resolved.as_ref(),
+                        footprint(&resolved, PlaceUse::Acquire),
+                        Some(&resolved),
+                        STORE_ACCESS,
                     )?;
                 }
-                if capture_payload && let Some(resolved) = resolved {
+                if capture_payload && let Some(content) = resolved.content {
                     place_payload = Some(layer::stored_allocations(
                         layout,
                         check.state,
-                        resolved,
-                        readonly_source.is_none(),
+                        content,
+                        resolved.permission.wrapper_readonly_source.is_none(),
                     ));
                 }
                 Some(BindingSpec::Link {
@@ -519,21 +410,16 @@ fn transfer_assign_target(
                 })
             }
         } else {
-            let mut roots = rhs_roots.clone();
-            check
-                .state
-                .binding(source)
-                .include_overlap_roots(&mut roots);
-            roots.subtract_with(&writes);
             check.span = expression.span;
             check.actor_index_hint = Some(source);
-            let capture_payload = mixed_acquisition && layer::is_heap_value(transfer, value)?;
+            let heap = layer::is_heap_value(transfer, value)?;
+            let capture_payload = mixed_acquisition && heap;
             let (binding, payload) = capture_projected_binding(
                 &mut check,
                 &place,
-                source,
                 writable,
-                &roots,
+                &rhs_roots,
+                heap,
                 capture_payload,
             )?;
             place_payload = payload;
@@ -592,7 +478,9 @@ fn transfer_assign_target(
         return Ok(());
     }
 
-    let (mut addresses, _) = local_addresses.expect("an assignment has pre-state destinations");
+    let mut addresses = local_addresses
+        .expect("an assignment has pre-state destinations")
+        .address;
     if binding.is_some() || preserve_slot {
         if mode.contains(LocalMode::ALIAS) {
             addresses = state.resolve_alias_cells(local);
@@ -671,10 +559,14 @@ fn remap_binding_capture(
     match binding {
         BindingSpec::Link { source, .. } => *source = retirement.remap_wrapper(*source),
         BindingSpec::Projected {
-            addresses, origin, ..
+            addresses,
+            origin,
+            owner,
+            ..
         } => {
             addresses.remap_allocations(state, retirement);
             *origin = retirement.remap_wrapper(*origin);
+            *owner = owner.map(|owner| retirement.remap_wrapper(owner));
         }
         BindingSpec::Slot => {}
         #[cfg(test)]
@@ -705,71 +597,6 @@ fn is_compiler_owned_scratch_local(
 
 fn place_root_local_index(layout: &FunctionLayout, place: &HirPlace) -> Option<usize> {
     layout.index_of(place.root)
-}
-
-fn mutable_argument_roots(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    expression_id: HirValueId,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
-) -> Result<RootSet, BorrowCheckError> {
-    let expression = context.expressions.expression(expression_id);
-    if let HirExpressionKind::Load(place) = &expression.kind {
-        // A mutable parameter may write the caller's binding cell and, for a heap-allocated
-        // value, mutate shared storage. Cell roots decide mutability and cell overlap; value
-        // provenance decides allocation overlap.
-        //
-        // WHAT: designated cells always participate; value provenance participates only when the
-        //       type has an in-place mutation surface.
-        // WHY: a scalar value copied into a definite slot owns its own cell, so immutable
-        //      provenance does not weaken the write check. Mixed `SLOT | ALIAS` states need the
-        //      alias branch's cells too, which `effective_roots` does not report.
-        if place.projections.is_empty()
-            && let Some(local_index) = layout.index_of(place.root)
-        {
-            let binding = state.binding(local_index);
-            let mut roots = binding.overlap_roots();
-            if layout.local_has_in_place_mutation_surface[local_index] {
-                roots.union_with(binding.value_roots());
-            }
-            if !roots.is_empty() {
-                return Ok(roots);
-            }
-        }
-
-        return roots_for_place(
-            layout,
-            state,
-            place,
-            location,
-            expression.span,
-            &context.diagnostics,
-        );
-    }
-
-    let mut roots = RootSet::empty(layout.local_count());
-    collect_expression_roots(
-        context,
-        layout,
-        state,
-        expression_id,
-        &mut roots,
-        location,
-        span,
-    )?;
-    Ok(roots)
-}
-
-fn direct_place_from_expression(
-    expressions: &HirExpressionStore,
-    expression_id: HirValueId,
-) -> Option<HirPlace> {
-    match &expressions.expression(expression_id).kind {
-        HirExpressionKind::Load(place) => Some(*place),
-        _ => None,
-    }
 }
 
 /// The source binding index and place a place-valued load names.
@@ -841,38 +668,20 @@ fn alias_derivation_roots_from_expression(
     state.derived_roots_from_source(source_index)
 }
 
-/// Roots a shared access to `place` must check for overlap.
-///
-/// WHAT: the place's value provenance plus the cells it designates for access.
-/// WHY: value provenance alone leaves a cell-only alias with no roots after pruning, and a place
-///      reached through a projected or whole-binding alias also designates the storage that alias
-///      writes through. Value flow keeps using `roots_for_place`; these roots only feed access
-///      checks.
-fn access_roots_for_place(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    place: &HirPlace,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
-    diagnostics: &BorrowDiagnostics<'_>,
-) -> Result<RootSet, BorrowCheckError> {
-    let mut roots = roots_for_place(layout, state, place, location, span, diagnostics)?;
-    include_designated_cells(layout, state, place, &mut roots);
-    Ok(roots)
-}
-
-/// Add the cells a place designates for access to an existing root set.
-///
-/// WHY: value facts and access checks share one rule for turning a place into cell roots, so a
-///      cell-only alias cannot be visible to one caller and invisible to another.
-fn include_designated_cells(
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    place: &HirPlace,
-    roots: &mut RootSet,
-) {
-    if let Some(local_index) = layout.index_of(place.root) {
-        state.binding(local_index).include_overlap_roots(roots);
+/// Report authored origins without making attribution part of overlap.
+fn report_place_cells(state: &BorrowState, addresses: &AddressSet, roots: &mut RootSet) {
+    for &cell in addresses.cells() {
+        match cell {
+            CellId::Slot(wrapper) if wrapper.age == WrapperAge::Current => {
+                roots.insert(wrapper.local)
+            }
+            CellId::Projected(holder, _) => {
+                if let Some(origin) = state.alloc_origin_local(holder) {
+                    roots.insert(origin);
+                }
+            }
+            CellId::Slot(_) => {}
+        }
     }
 }
 
@@ -939,6 +748,41 @@ fn record_shared_reads_in_place_indices(
             }),
     );
     run_shared_read_steps(env, &mut steps, roots)
+}
+
+fn record_assignment_value_reads(
+    env: &mut SharedReadEnv<'_, '_>,
+    target: &HirPlace,
+    is_definition: bool,
+    value: HirValueId,
+    location: Option<SourceSpan>,
+) -> Result<(), BorrowCheckError> {
+    let layout = env.layout;
+    let expressions = env.context.expressions;
+    let mut roots = RootSet::empty(layout.local_count());
+    if target.projections.is_empty()
+        && let Some(local) = layout.index_of(target.root)
+        && layout.local_mutable[local]
+        && (is_definition || env.state.binding_mode(local).contains(LocalMode::SLOT))
+        && !is_compiler_owned_scratch_local(env.context, layout, local)
+        && let Some((source, place)) = place_load_source(layout, expressions, value)
+        && (is_definition || source != local || !place.projections.is_empty())
+    {
+        // Another writer must conflict with the exclusive acquisition, not with
+        // a preliminary shared checkout of the same terminal cell.
+        record_shared_reads_in_place_indices(env, &place, location, &mut roots)?;
+        roots.union_with(&roots_for_place(
+            layout,
+            env.state,
+            &place,
+            location,
+            expressions.expression(value).span,
+            &env.context.diagnostics,
+        )?);
+        record_shared_read_classification(env, value, &roots);
+        return Ok(());
+    }
+    record_shared_reads_in_expression(env, value, location, &mut roots)
 }
 
 fn record_shared_reads_in_expression(
@@ -1026,13 +870,15 @@ fn run_shared_read_steps(
                 value_span,
             } => match &expressions.expression(expression_id).kind {
                 HirExpressionKind::Load(place) => {
-                    let place_roots = check_shared_place_read(env, place, value_span)?;
+                    let place_roots =
+                        check_shared_place_read(env, expression_id, place, value_span)?;
                     roots.union_with(&place_roots);
                     record_shared_read_classification(env, expression_id, roots);
                 }
 
                 HirExpressionKind::Copy(place) => {
-                    let place_roots = check_shared_place_read(env, place, value_span)?;
+                    let place_roots =
+                        check_shared_place_read(env, expression_id, place, value_span)?;
                     roots.union_with(&place_roots);
                     // WHY: a direct copy records only its own roots and skips classification
                     // from the accumulated roots.
@@ -1055,14 +901,10 @@ fn run_shared_read_steps(
 /// WHY: `Load` and `Copy` share this access check, so the walk keeps one copy of it.
 fn check_shared_place_read(
     env: &mut SharedReadEnv<'_, '_>,
+    expression: HirValueId,
     place: &HirPlace,
     value_span: Option<SourceSpan>,
 ) -> Result<RootSet, BorrowCheckError> {
-    // Value facts keep reporting the allocation the read observed. Access overlap also includes
-    // the place's cells. The active-exclusive scan covers both the provenance roots the read
-    // observes and the binding cells the place designates, so a live exclusive alias of either
-    // conflicts unless this read provably derives through it. Mutating through a derived alias
-    // still conflicts at the mutation's overlap check.
     let value_roots = roots_for_place(
         env.layout,
         env.state,
@@ -1072,8 +914,12 @@ fn check_shared_place_read(
         &env.context.diagnostics,
     )?;
     let mut access_roots = value_roots.clone();
-    include_designated_cells(env.layout, env.state, place, &mut access_roots);
     let actor_index_hint = place_root_local_index(env.layout, place);
+    let heap = if place.projections.is_empty() {
+        actor_index_hint.is_some_and(|actor| env.layout.local_has_in_place_mutation_surface[actor])
+    } else {
+        layer::is_heap_value(env.context, expression)?
+    };
     let mut check = AccessCheckContext {
         context: env.context,
         layout: env.layout,
@@ -1086,7 +932,7 @@ fn check_shared_place_read(
         actor_index_hint,
         current_order: env.current_order,
     };
-    check_shared_place_access(&mut check, place, &access_roots)?;
+    check_shared_place_access(&mut check, place, &mut access_roots, heap)?;
     Ok(value_roots)
 }
 

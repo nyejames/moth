@@ -3,6 +3,7 @@
 //! WHAT: checks definition retirement and ordinary/dedicated-result Updates.
 //! WHY: isolated transfers can retain incoming and previous bindings for direct comparison.
 
+use super::borrow_checker_call_summary_tests::assert_borrow_code_at;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
@@ -1035,6 +1036,33 @@ return old.length()
     }
 }
 
+#[test]
+fn projected_writer_can_outlive_a_directly_constructed_holder() {
+    for (first, second) in [
+        (
+            "new_count = holder.first.length()",
+            "old_count = writer.length()",
+        ),
+        (
+            "old_count = writer.length()",
+            "new_count = holder.first.length()",
+        ),
+    ] {
+        let source = format!(
+            "Pair = |first {{I32}}, second {{I32}}|\n\
+             probe || -> I32:\n\
+             holder ~= Pair({{1}}, {{0}})\n\
+             writer ~= holder.first\n\
+             ~holder = Pair({{2, 3}}, {{4}})\n\
+             {first}\n\
+             {second}\n\
+             return new_count + old_count\n\
+             ;"
+        );
+        check_source(&source).expect("the directly constructed holders are independent");
+    }
+}
+
 // WHAT: a projected mutable alias keeps the holder cell as a conservative write identity even
 //       when the containing allocation roots are recorded. Rebinding the holder to a fresh value
 //       does not retarget the alias, but reading the rebound holder while the alias is live is
@@ -1062,6 +1090,23 @@ return read_after + writer.length()
     let error = check_source(source)
         .expect_err("the conservative holder-cell identity must reject the live-alias read");
     assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+#[test]
+fn retained_writer_can_read_the_old_leaf_of_a_rebound_call_result() {
+    let source = "\
+Pair = |first {I32}, second {I32}|\n\
+same_pair |value Pair| -> Pair:\n\
+return value\n\
+;\n\
+probe || -> I32:\n\
+original ~= Pair({1}, {0})\n\
+holder ~= same_pair(original)\n\
+writer ~= holder.first\n\
+~holder = Pair({2}, {3})\n\
+return writer.length()\n\
+;";
+    check_source(source).expect("reading through the writer does not access the rebound holder");
 }
 
 // WHAT: a mutable alias writes through to its referent cell, so its value provenance is not the
@@ -1608,6 +1653,110 @@ return observed.length()
         state.binding(spare_index).value_roots().is_empty(),
         "a referent that did not hold the old value gains no provenance"
     );
+}
+
+#[test]
+fn scalar_projected_aliases_allow_sibling_writes_but_reject_a_second_same_cell_loan() {
+    for (right, expected_code) in [
+        ("right ~= pair.right", None),
+        ("right ~= pair.left", Some("MOTH-BORROW-0007")),
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             left ~= pair.left\n\
+             {right}\n\
+             ~right = 7\n\
+             return left + right\n\
+             ;"
+        );
+        let result = check_source(&source);
+        if let Some(code) = expected_code {
+            let error = result.expect_err("the second mutable acquisition overlaps the first");
+            assert_borrow_code_at(error, &source, right, code);
+        } else {
+            result.expect("the live sibling aliases designate disjoint scalar cells");
+        }
+    }
+}
+
+#[test]
+fn prior_scalar_sibling_store_allows_direct_and_explicit_alias_access() {
+    for sequence in [
+        "observed = pair.right\n~pair.left = observed\nreturn observed + pair.left",
+        "writer ~= pair.left\nobserved = pair.right\n~writer = observed\nreturn observed + writer",
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             ~pair.right = 4\n\
+             {sequence}\n\
+             ;"
+        );
+        check_source(&source).expect("a prior store does not make sibling fields overlap");
+    }
+}
+
+#[test]
+fn shared_scalar_observation_overlaps_the_same_field_or_its_aggregate() {
+    for (observation, later_read, overlaps) in [
+        ("observed = pair.right", "observed", false),
+        ("observed = pair.left", "observed", true),
+        ("observed = pair", "observed.right", true),
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             writer ~= pair.left\n\
+             {observation}\n\
+             ~writer = 7\n\
+             return {later_read} + writer\n\
+             ;"
+        );
+        let result = check_source(&source);
+        if overlaps {
+            let error = result.expect_err("the observation overlaps the live exclusive alias");
+            assert_borrow_code_at(error, &source, observation, "MOTH-BORROW-0003");
+        } else {
+            result.expect("a shared read of the sibling scalar cell is disjoint");
+        }
+    }
+}
+
+#[test]
+fn named_heap_sibling_writes_check_shared_children_across_holder_alternatives() {
+    for (setup, overlaps) in [
+        ("pair ~= Pair(items, {2})", false),
+        ("pair ~= Pair(items, items)", true),
+        (
+            "pair ~= Pair({1}, {2})\nif flag:\n~pair = Pair(items, {5})\n;",
+            false,
+        ),
+        (
+            "pair ~= Pair({1}, {2})\nif flag:\n~pair = Pair(items, items)\n;",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "Pair = |left {{I32}}, right {{I32}}|\n\
+             probe |flag Bool| -> I32:\n\
+             items ~= {{3, 4}}\n\
+             {setup}\n\
+             observed = pair.left\n\
+             ~pair.right.push(7)\n\
+             return observed.length()\n\
+             ;"
+        );
+        if overlaps {
+            let error = check_source(&source).expect_err("a live alias observes the shared child");
+            assert_borrow_code_at(error, &source, "~pair.right.push(7)", "MOTH-BORROW-0007");
+        } else {
+            check_source(&source).expect("the children are disjoint in every holder alternative");
+        }
+    }
 }
 
 #[test]
