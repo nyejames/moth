@@ -1,7 +1,7 @@
 recover |text String| -> String:
     code ~U32 = 0
     value = first(text, true) catch |parse_error|:
-        ~code = parse_error.code
+        ~code = copy parse_error.code
         then -7
     ;
     return [:[value]/[code]]

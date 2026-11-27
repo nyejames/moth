@@ -30,7 +30,7 @@ converted_target ~I8 = 100
 converted_calls ~I32 = 0
 converted_code ~U32 = 0
 converted_result = add_dec_to_i8(~converted_target, ~converted_calls, 40.0) catch |converted_error|:
-    ~converted_code = converted_error.code
+    ~converted_code = copy converted_error.code
     then 0
 ;
 io.line([:converted=[converted_target] calls=[converted_calls] code=[converted_code] result=[converted_result]])

@@ -13,7 +13,7 @@ retry |entries ~U32, value I32| -> I32:
 entries ~U32 = 0
 outer_code ~U32 = 0
 result = retry(~entries, 2) catch |outer_err|:
-    ~outer_code = outer_err.code
+    ~outer_code = copy outer_err.code
     then 0 - 1
 ;
 

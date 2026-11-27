@@ -23,7 +23,7 @@ observed Dec2 = adjust_dec(3, 2) catch:
 ;
 power_code ~U32 = 0
 recovered_power = power_dec(1, -1) catch |power_error|:
-    ~power_code = power_error.code
+    ~power_code = copy power_error.code
     then 9
 ;
 io.line([:recovered=[recovered] observed=[observed] power=[recovered_power]/[power_code]])

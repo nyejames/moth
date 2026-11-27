@@ -96,7 +96,7 @@ mixed_chain = add_then_divide(0.25, 0.35, 0.20) catch:
 ;
 mixed_chain_code ~U32 = 0
 mixed_chain_failure = add_then_divide(0.25, 0.35, 0) catch |mixed_error|:
-    ~mixed_chain_code = mixed_error.code
+    ~mixed_chain_code = copy mixed_error.code
     then -1
 ;
 
@@ -105,7 +105,7 @@ int32_maximum = number_to_int(2147483647) catch:
 ;
 int32_overflow_code ~U32 = 0
 int32_overflow = number_to_int(2147483648) catch |int32_error|:
-    ~int32_overflow_code = int32_error.code
+    ~int32_overflow_code = copy int32_error.code
     then 0
 ;
 

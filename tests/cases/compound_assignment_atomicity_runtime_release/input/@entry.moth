@@ -44,7 +44,7 @@ failed_local_i8 ~I8 = 100
 failed_local_i8_rhs_calls ~I32 = 0
 failed_local_i8_error ~U32 = 0
 failed_local_i8_result = mutate_i8(~failed_local_i8, ~failed_local_i8_rhs_calls, i8_factor) catch |local_i8_error|:
-    ~failed_local_i8_error = local_i8_error.code
+    ~failed_local_i8_error = copy local_i8_error.code
     then 0
 ;
 failed_local_i8_text String = cast failed_local_i8
@@ -59,7 +59,7 @@ failed_bucket ~= Bucket(value = 255)
 failed_bucket_rhs_calls ~I32 = 0
 failed_bucket_error ~U32 = 0
 failed_bucket_result = mutate_field(~failed_bucket, ~failed_bucket_rhs_calls, 1) catch |field_error|:
-    ~failed_bucket_error = field_error.code
+    ~failed_bucket_error = copy field_error.code
     then 0
 ;
 failed_bucket_text String = cast failed_bucket.value
@@ -68,7 +68,7 @@ mixed_bucket ~= Bucket(value = 255)
 mixed_bucket_rhs_calls ~I32 = 0
 mixed_bucket_error ~U32 = 0
 mixed_bucket_result = mutate_mixed_field(~mixed_bucket, ~mixed_bucket_rhs_calls, 1) catch |mixed_error|:
-    ~mixed_bucket_error = mixed_error.code
+    ~mixed_bucket_error = copy mixed_error.code
     then 0
 ;
 mixed_bucket_text String = cast mixed_bucket.value
@@ -96,14 +96,14 @@ failed_u16 ~U16 = 65535
 failed_u16_calls ~I32 = 0
 failed_u16_code ~U32 = 0
 failed_u16_result = mutate_u16(~failed_u16, ~failed_u16_calls, 1) catch |u16_error|:
-    ~failed_u16_code = u16_error.code
+    ~failed_u16_code = copy u16_error.code
     then 0
 ;
 mixed_u16 ~U16 = 65535
 mixed_u16_calls ~I32 = 0
 mixed_u16_code ~U32 = 0
 mixed_u16_result = mutate_mixed_u16(~mixed_u16, ~mixed_u16_calls, 1) catch |mixed_u16_error|:
-    ~mixed_u16_code = mixed_u16_error.code
+    ~mixed_u16_code = copy mixed_u16_error.code
     then 0
 ;
 ~[:compound u16 ok=[ok_u16_result]/[ok_u16_calls] failed=[failed_u16_code]/[failed_u16]/[failed_u16_calls]/[failed_u16_result] mixed=[mixed_u16_code]/[mixed_u16]/[mixed_u16_calls]/[mixed_u16_result]]

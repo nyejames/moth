@@ -33,7 +33,7 @@ real_div |a U32, b U32| -> F64, Error!:
 
 under_code ~U32 = 0
 underflow U32 = sub(0, 1) catch |under_err|:
-    ~under_code = under_err.code
+    ~under_code = copy under_err.code
     then 99
 ;
 div_failure U32 = floor_div(7, 0) catch:
@@ -71,7 +71,7 @@ atomic_target ~U32 = 100
 atomic_calls ~I32 = 0
 atomic_code ~U32 = 0
 atomic_result U32 = add_next(~atomic_target, ~atomic_calls, 4294967295) catch |atomic_err|:
-    ~atomic_code = atomic_err.code
+    ~atomic_code = copy atomic_err.code
     then 0
 ;
 
@@ -85,7 +85,7 @@ overwrite |target ~U32, a U32, b U32| -> U32, Error!:
 wback ~U32 = 4294967295
 wback_code ~U32 = 0
 wback_result U32 = overwrite(~wback, 1, 0) catch |wback_err|:
-    ~wback_code = wback_err.code
+    ~wback_code = copy wback_err.code
     then 0
 ;
 
