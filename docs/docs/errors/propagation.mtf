@@ -75,3 +75,16 @@ with `catch` and `return!`. It receives no automatic conversion or hidden extra
 channel. Explicit typed errors still require `!` or an applicable catch.
 See @./#error-returns (Error returns) for the boundary rules and @../progress
 (Progress) for current compiler support.
+
+### Deferred Channels failures
+
+Under @../async (Channels), a send without a receiving endpoint and a
+recoverable child-task failure at its owning invocation are implicit builtin
+failures. The same private inference, closed exported signature and custom
+error mapping rules apply. A call to an owning function with `Error!` keeps
+ordinary explicit typed propagation or catch syntax. Child errors are observed
+at invocation completion, not as immediate results of dispatch. To map a
+child failure to a custom error, call the owning function through an ordinary
+wrapper and map the returned builtin `Error`. Normal channel end is optional
+absence. Cooperative cancellation and fatal traps do not create additional
+source error channels.

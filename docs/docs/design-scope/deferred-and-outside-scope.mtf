@@ -22,7 +22,7 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - generic external package functions and types
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
-- invocation-owned child tasks and typed channel endpoints
+- @../async (Channels V1): invocation-owned child tasks, typed directional endpoints, implicit suspension, readiness selection and host integration
 - first-class filesystem path values, directory values and runtime filesystem access
 - source-file reflection and reading `.moth` source as text
 - constructing a file reference from a runtime `String`

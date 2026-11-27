@@ -50,7 +50,15 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 
-- [Memory management implementation](../developer-docs/memory-management) - Collector free memory implementation (see below for more notes). Should have its initial implementation here before Wasm backend implementation.
+- [Final memory design and Channels compatibility brief](./plans/final-memory-management-redesign-and-implementation-plan.md#pre-channels-design-and-safety-foundation-checkpoint) - Reconcile the canonical memory model with accepted Channels V1, consolidate the memory work items and freeze the production semantic/physical handoff before implementation.
+
+- [Memory safety foundations](./plans/final-memory-management-redesign-and-implementation-plan.md#pre-channels-design-and-safety-foundation-checkpoint) - Deliver production borrow/last-use, provenance, retention and mandatory local/link lifetime topology proof plus the conservative validated JS memory handoff. Review and validate before Channels activation. Boracle research informs this work; no alternate channel checker.
+
+- [Repeated option-capture loops](./plans/repeated-option-capture-loops-plan.md) - Prerequisite for Channels V1 stream draining. A statement loop reevaluates a `T?` expression once per attempt, binds the present payload in its body and exits on `none`.
+
+- [Channels V1](./plans/channels-v1-implementation-plan.md) - Deliver structured function-owned tasks, inferred suspension, typed channels, bounded buffering, selection, cancellation, error propagation, host-integrated HTML-JS and a validated portable Wasm handoff. Consume the delivered repeated statement option-capture loop. Consume the delivered memory safety foundations. No full-control collector-free or full Wasm implementation prerequisite.
+
+- [Memory management implementation](../developer-docs/memory-management) - Review the delivered Channels runtime and its lifetime/cleanup facts, then complete physical memory planning, region and REC lowering, precision and collector-free verification before full Wasm backend implementation. Reuse the completed memory safety foundations.
 
 - Large review and tidy up of the core documentation. Reduction of bloat, repetition and redundant or verbose terminology to tighten them up. This is sequenced here due to a large number of features having been implemented that are close to the final feature set for Moth, and its worth trimming the compiler design and build system design docs down particularly around that hardened design state. The Cheatsheet and advanced user facing language docs also need attention.
 
@@ -59,8 +67,6 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
 - TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. The syntax migration owns coordinated source and codec support for the empty map `[=]`. Complete remaining source parity for Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
-
-- [Repeated option-capture loops](./plans/repeated-option-capture-loops-plan.md) - Low priority. A statement loop reevaluates a `T?` expression once per attempt, binds the present payload in its body and exits on `none`.
 
 - [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `@package.moth` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
@@ -155,7 +161,7 @@ validation before unreachable executable work disappears. Consume the same
 
 Canonical memory design lives under [the memory management design docs](../developer-docs/memory-management).
 
-Two temporary implementation plans remain in the tree. They are work items awaiting consolidation into one replacement implementation plan, not design authorities:
+Two temporary memory implementation plans remain in the tree. The pre-Channels design closure consolidates their remaining work and divides semantic safety foundations from later physical memory planning. They are work items, not design authorities:
 
 - [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) - temporary implementation plan covering analysis, region and planning sequencing
 - [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) - temporary implementation plan covering REC analysis, the two-bit handle ABI, counters and lowering sequencing

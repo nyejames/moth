@@ -487,7 +487,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Deferred]
             [: None]
             [: Async / lifetime planning / full-control backends]
-            [: Accepted prerequisites are mandatory affine transfer on successful send, responsibility preservation on failed send, bounded channel or task lifetimes, independent graphs across task boundaries and non-atomic REC under the cooperative task model. The future form `reader, writer Channel of AppMessage = Channel()` has directional endpoints but no compiler or runtime implementation; omitted initialisation is unsupported. Complete when the final memory prerequisites and a separate channel implementation plan are accepted.]
+            [$md: Accepted V1 design, no compiler or runtime implementation. Directional `Channel()` results, symbolic dispatch/send/receive, function-owned join/cancellation, inferred suspension, bounded buffering, logical closure, selection and host-integrated HTML-JS. Mandatory memory safety foundations precede runtime delivery. The later full Wasm backend must implement the common validated execution and memory handoff. See @../async (Channels).]
         ]
 
         [data:

@@ -283,9 +283,14 @@ reuse after a fault needs a later ABI version.
 Neither retries nor transactional rollback of earlier host IO are implied by a
 Moth error.
 
-Moth channels and asynchronous execution will need coordinated compiler,
-builder and runtime work later. V1 adds no event loop, task scheduler, async
-host-signature convention or background callback delivery.
+The accepted Moth language [Channels V1 contract](../../../docs/docs/async/channels.mtf)
+requires a portable suspension/host wakeup and cancellation handoff before the
+full Wasm backend. The existing Lappet synchronous V1 runtime profile adds no
+event loop, task scheduler or background callback delivery. The later async
+checkpoint must validate small native mechanism fixtures and extend the closed
+host ABI before native Channels execution, without general guest re-entry or
+retaining arbitrary Moth references. The builder owns lifecycle and execution
+policy; Lappet supplies the approved runtime mechanisms.
 
 ## Capabilities and failures
 

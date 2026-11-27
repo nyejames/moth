@@ -197,3 +197,15 @@ for several statements.
 
 `then` and closed receiving sites are specified by
 @../branching/#value-producing-if (Value-producing if).
+
+### Deferred Channels recovery
+
+The accepted @../async (Channels) send operator is an implicit builtin
+failure producer. `message >> writer catch { ... }` uses ordinary no-success
+recovery; an uncommitted graph remains available on the failure path, while
+a successfully transferred graph is no longer usable by the sender. This
+does not roll back operand IO or other earlier effects. A caller can catch
+an owning invocation's recoverable child error after its cleanup and join.
+A catch on an unrelated operation does not intercept asynchronous sibling
+failure or forced cancellation. Expressionless `if {` is channel selection,
+not a grouped catch form.

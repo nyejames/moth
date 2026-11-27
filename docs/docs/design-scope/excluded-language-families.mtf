@@ -141,7 +141,8 @@ identifier, so `block { ... }` has the same declared-region meaning as any valid
 
 Arbitrary statement labels, labelled `break`, labelled `continue` and `goto`
 remain outside scope. Unlabelled loop exits stay structural and target the
-nearest enclosing loop.
+nearest enclosing loop. Channels V1 owns child tasks by function invocation.
+Detached tasks, source futures and user-selected schedulers are outside that model.
 
 ### Source-visible RC and dynamic shared ownership
 

@@ -33,6 +33,18 @@ conflict checking consumes its `query_overlap` result.
 Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and
 analysis queries throughout the compiler's life.
 
+## Channels V1 research input
+
+The accepted deferred source contract is `docs/docs/async/channels.mtf`.
+The design and production foundation checkpoints must extend the normalized
+borrow input for dispatch, successful transfer, failed and unselected paths,
+suspension, endpoint release, joins and cancellation. Investigate these with
+the existing reference solver and bounded operational oracle, without
+changing their ownership or claiming concurrency coverage before delivery.
+Task/queue lifetimes and retained-edge proof remain the separate canonical
+lifetime-topology owner's responsibility. Runtime safety is mandatory;
+const execution keeps its independent bounded interpreter access contract.
+
 ## Core contract
 
 [table:
@@ -1105,7 +1117,7 @@ Boracle and the future production design should exploit these facts:
 - statically resolved named calls and explicit callback operands with declared signatures
 - concrete generated generics before borrow validation
 - closed external boundary profiles
-- no current async suspension model in accepted borrow semantics
+- no implemented task suspension in the current borrow analysis
 
 These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, async-generator, trait-object, unsafe or drop-check machinery.
 

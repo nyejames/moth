@@ -2,7 +2,7 @@
 
 ## Current state
 
-Queued at low priority. No slice is active. On activation, check the current
+Queued before Channels V1 as a stream-draining prerequisite. No slice is active. On activation, check the current
 statement-loop, option-capture and HIR control-flow owners against the compiler
 design and the canonical loop and option references.
 

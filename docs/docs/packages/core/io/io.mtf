@@ -283,7 +283,7 @@ HTML-JS maps console helpers to the browser console, one entry per call, and inp
 
 ### Scope boundaries
 
-Operations that wait, suspend or run Moth code later need structured async and a host-ingress contract. They include sleep, timeouts, intervals, frame callbacks, event waits, fetch and network IO, WebSocket and server-sent events, listeners that call into Moth and asynchronous file selection or image loading. `io` provides no synchronous-looking forms of them and no general callback mechanism.
+The accepted deferred @../../../async (Channels) model makes ordinary runtime calls suspension-capable without annotations. `io.task.yield()` and `io.task.cancel_children()` are the V1 scheduling operations. Timer and host completion/event adapters are part of Channels V1. Exact host API signatures, ingress capacity and teardown policies require the implementation's approved host checkpoint. No general callback mechanism or host promise enters Moth source. None of these async operations is implemented today.
 
 Browser-specific event control belongs to future `@builder/web/*` packages. This covers targeted DOM and canvas input sources, propagation, default suppression, composition and IME events, clipboard access and drag and drop.
 

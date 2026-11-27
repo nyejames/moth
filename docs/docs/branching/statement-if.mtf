@@ -22,7 +22,7 @@ Block and branch placement follows @../language-overview/#blocks-and-statements 
 
 ### Compile-time-known statement conditions
 
-An ordinary Boolean conditional also handles compile-time-known conditions. The frontend validates both branches before a known Bool selects the executable body. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
+An ordinary Boolean conditional also handles compile-time-known conditions. Expressionless `if {` readiness selection is a separate statement form specified in @../async (Channels). The frontend validates both branches before a known Bool selects the executable body. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
 
 [codeblock, $code "moth":
     enabled #= false

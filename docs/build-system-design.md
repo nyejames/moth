@@ -789,6 +789,27 @@ A full-control release backend realises every topology accepted by semantic and 
 
 After lowering, a builder may verify that an artefact contains no tracing runtime. That reports an output property without changing source legality or behaviour.
 
+### Structured task execution
+
+Channels V1 uses builder-owned execution lifecycle roots, one cooperative
+scheduler per execution instance and compiler-validated task, channel and
+host-registration requirements. The builder supplies capabilities and lifecycle
+inputs, not source suspension or ownership decisions. Target validation checks
+reachable suspendable calls, dispatch targets and cross-target edges before
+physical planning. A host callback publishes a bounded completion or independent
+value and schedules a wakeup without re-entering an active guest. Stale or
+cancelled completion identities cannot resume a destroyed instance.
+
+The HTML entry remains active until its invocation and owned descendants settle.
+Normal return joins; failure cancels and joins before delivery. Existing
+success-only runtime fragment publication applies to the complete invocation,
+not each suspension. Explicit live host IO is not rolled back. Long-lived page
+execution and host teardown use actual builder roots and explicit registration
+cancellation, never an invented global lifetime. Synchronous-only entries do not
+require a scheduler. The Channels source reference and compiler/memory handoffs
+own semantics; precise portable continuation and host ABI details are settled
+at the implementation architecture checkpoint before full Wasm lowering.
+
 ### Runtime and memory
 
 Each page owns one runtime instance and one memory for its native Moth Wasm entry bundle. The bundle imports that runtime memory. Runtime bytes may be emitted once and instantiated separately for each page.
