@@ -385,6 +385,32 @@ call effect starts
 - [ ] Run `just boracle`.
 - [ ] Commit deferred activation experiment.
 
+## Related exploration: universal runtime access
+
+The owner approved this inquiry, not a change to ordinary Moth. Keep it
+inactive until BC-06, const publication and the Boracle representations
+for cells, projections and ordered effects stabilise. Phase 4 asks about
+reservation within one call. The broader question asks whether Moth could
+require exclusivity when code exercises a mutable capability rather than
+throughout the capability's lifetime.
+
+Start with non-escaping local storage. Test whether a mutable alias can
+stay dormant, then activate exclusively at a known access without an
+overlapping conflicting use. Generalise only on evidence. Ask what happens
+if suspension, re-entry or callbacks let other code run before activation
+or while access stays active. Treat escaping references, concurrency and
+calls with unknown effects conservatively unless the analysis can prove
+the necessary isolation and compatibility.
+
+Separate better proofs under today's rules from programs that need a new
+access contract. Prefer one consistent rule over context-dependent
+borrowing modes or new directives. Keep ordinary reference rules unchanged
+and test alternatives as named Boracle experiments. The operational oracle
+must model each experimental contract independently of the static solver.
+Bounded runs can find counterexamples but can't prove universal safety.
+The [group-aware stability research](./group-aware-place-and-stability-effects-research.md#8-universal-runtime-access-and-stability)
+owns the related questions about invalidation, isolation and evaluation.
+
 ## Phase 5: public-boundary review, documentation and closeout
 
 ### Summary and reasoning

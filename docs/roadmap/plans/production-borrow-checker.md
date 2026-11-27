@@ -722,6 +722,13 @@ outcome gaps ahead of broad refinement. Re-anchor the evidence after
 BC-06 and the const publication foundation stabilise. `BR-04` stays
 inactive. Do not pass production borrow verdicts to Boracle.
 
+The owner also approved an inactive exploratory goal:
+[more permissive universal runtime access semantics](./boracle-next-research-plans/README.md#inactive-exploratory-goal-more-permissive-universal-runtime-access-semantics).
+The existing deferred-exclusive-access and group-aware stability plans own
+the inquiry. It waits for BC-06, const publication and the Boracle
+representation work it needs to stabilise. No runtime semantic relaxation
+has approval for implementation.
+
 For the older replay failures, the historical reproducer was `cargo run --features boracle -- boracle <source> --dump problem`. Its result was tied to an earlier source corpus. Do not claim those exact failures persist on a later branch without rerunning it. Resolve the reference acceptance gap before using that case as supporting evidence for a production precision change. The `BR-01` counterexample is a **known reference-model issue** and must remain visible to the differential campaign until resolved. A bounded oracle is not a replacement for a proof of universal correctness.
 
 The proposed `$checked:` deeper proof-budget surface remains a separate design/research question. It is not implementation-ready and must not alter the ordinary source safety rules. Production compilation retains no developer-visible reference/experimental mode switch.

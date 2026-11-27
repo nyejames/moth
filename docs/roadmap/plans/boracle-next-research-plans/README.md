@@ -109,6 +109,19 @@ regression motivates that split, but no stopped draft measures the cost or benef
 
 This topic should be re-anchored when native-result foundations are available and the relevant Boracle soundness gaps have been resolved or isolated. The [production companion](../production-borrow-checker.md) tracks activation and any eventual production implications.
 
+### Inactive exploratory goal: more permissive universal runtime access semantics
+
+The owner approved exploring whether exclusive access could start when
+code exercises a mutable capability. The existing
+[deferred exclusive-access plan](./boracle-call-summary-and-deferred-exclusive-access-plan.md#related-exploration-universal-runtime-access)
+owns activation and call boundaries. The
+[group-aware stability research](./group-aware-place-and-stability-effects-research.md#8-universal-runtime-access-and-stability)
+owns const-inspired invalidation, isolation and narrow mutation effects.
+This goal waits for BC-06, const publication and the necessary Boracle
+representation improvements to stabilise. It doesn't add a package,
+change ordinary reference rules or approve any runtime semantic
+relaxation for implementation.
+
 ### Package 1 result
 
 `OriginRelations` is the only origin-overlap owner. Loan conflicts consume `OriginOverlapDecision`. Empty `AliasParams` is malformed input. Missing argument, copy, projection, and aggregate provenance cannot become a fresh generation. Rule selection is `boracle-reference-v1` plus a sorted experiment set; `dead-exclusive-loan` remains the only named experiment. Canonical Boracle docs describe that model.
