@@ -11,7 +11,7 @@ One audit run covers one kind. Read the [audit guide](../audit-guide.md) first -
 | [Tests](./tests.md) | Missing, misplaced or weak coverage of a real contract |
 | [Style](./style.md) | Code that is correct but hard to read, review or extend |
 | [Comments](./comments.md) | Missing, stale or noisy local intent |
-| [Documentation](./documentation.md) | Inaccurate public, canonical, status or routing prose |
+| [Documentation](./documentation.md) | Design drift, inaccurate or missing context, poor navigation or prose quality |
 
 ## Picking the kind
 
@@ -24,7 +24,7 @@ Choose by the **observed problem**, not the likely patch:
 - a contract nothing protects → Tests
 - unclear code → Style
 - unclear intent around clear code → Comments
-- prose that misleads → Documentation
+- inaccurate, incomplete, redundant or unclear documentation → Documentation
 
 An unrelated discovery belongs in [bug reports](../../bug-reports.md), even when it concerns another audit kind. Record the location, observed concern and next investigation, then resume the original scope. It does not create another audit run or record coverage for the other kind. A later focused audit may take it up formally.
 
