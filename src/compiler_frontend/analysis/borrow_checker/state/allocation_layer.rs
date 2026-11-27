@@ -908,8 +908,12 @@ pub(in super::super) struct AllocationRetirement {
 }
 
 impl AllocationRetirement {
+    pub(in super::super) fn retires_local(self, local: usize) -> bool {
+        self.local == local
+    }
+
     pub(in super::super) fn remap_id(self, state: &BorrowState, id: &mut AllocId) {
-        *id = state.remap_retired_alloc_id(*id, self.order, |local| local == self.local);
+        *id = state.remap_retired_alloc_id(*id, self.order, |local| self.retires_local(local));
     }
 
     pub(in super::super) fn remap_value(self, state: &BorrowState, value: &mut StoredValue) {
@@ -1104,7 +1108,6 @@ impl BorrowState {
         }
     }
 
-    #[cfg(test)]
     pub(in super::super) fn resolve_alloc_path(
         &self,
         local_index: usize,
@@ -1234,14 +1237,18 @@ impl BorrowState {
     }
 
     pub(in super::super) fn alias_cells(&self, local_index: usize) -> Vec<(AllocId, FieldKey)> {
+        self.alias_cell_facts(local_index)
+            .map(|cell| (cell.holder, cell.key))
+            .collect()
+    }
+
+    fn alias_cell_facts(&self, local_index: usize) -> impl Iterator<Item = &AliasCell> {
         let local = local_index as u32;
         let cells = &self.layer.cells;
         let start = cells.partition_point(|cell| cell.local < local);
         cells[start..]
             .iter()
-            .take_while(|cell| cell.local == local)
-            .map(|cell| (cell.holder, cell.key))
-            .collect()
+            .take_while(move |cell| cell.local == local)
     }
 
     pub(in super::super) fn alias_cell_is_definite(
@@ -1827,6 +1834,45 @@ impl BorrowState {
         );
         if !retained.is_empty() {
             self.bind_alloc_views(local_index, &retained);
+        }
+    }
+
+    /// Publish a may-store to caller storage, not to the allocations it used to hold.
+    pub(in super::super) fn store_call_cells(
+        &mut self,
+        slots: &[usize],
+        fields: &[(AllocId, FieldKey)],
+        values: &[StoredValue],
+        views: &[AllocId],
+        retires: impl Fn(usize) -> bool,
+    ) {
+        let stores_slot = |local| slots.contains(&local) && !retires(local);
+        if values.is_empty() || (fields.is_empty() && slots.iter().copied().all(&retires)) {
+            return;
+        }
+        for &(holder, key) in fields {
+            self.store_alloc_field_with_views(&[holder], key, values, views, false, false);
+        }
+
+        let mut binding_values = None;
+        for local in 0..self.locals.len() {
+            let binding = &self.locals[local];
+            let observes_cell = binding.mode.contains(LocalMode::ALIAS)
+                && !retires(local)
+                && (binding.direct_alias_roots.iter_ones().any(stores_slot)
+                    || (!fields.is_empty()
+                        && self
+                            .alias_cell_facts(local)
+                            .any(|cell| fields.contains(&(cell.holder, cell.key)))));
+            if stores_slot(local) || observes_cell {
+                let (ids, readonly) = binding_values.get_or_insert_with(|| {
+                    (
+                        values.iter().map(|value| value.id).collect::<Vec<_>>(),
+                        values.iter().any(|value| !value.writable),
+                    )
+                });
+                self.extend_alloc_ids(local, ids, views, *readonly);
+            }
         }
     }
 

@@ -52,6 +52,56 @@ recoverable from Git.
 | 5 | [Call summaries and deferred exclusive access](./boracle-call-summary-and-deferred-exclusive-access-plan.md) | proposed, inactive | Explores per-result, outcome-sensitive, recursive summaries and reserved exclusive arguments |
 | 6 | [Aggregate copy and builtin storage provenance](./boracle-aggregate-copy-and-builtin-storage-provenance-plan.md) | proposed, inactive | Models deep-copy topology, fixed projection precision and compiler-known storage effects |
 
+### Inactive proposal: consolidate packages 3–6 after BC-06 and const publication
+
+**Decision requested:** Retain the individual plans as design notes. At a future review, consider
+replacing their fixed sequence with the evidence-led order below. This proposal opens no package,
+changes no reference verdict and sets no production acceptance requirement. Revisit it only after
+BC-06 closes and the const shared-graph publication foundation lands. Re-anchor the cases against
+the merged HIR and normalized event owners before opening a new owning plan.
+
+**Evidence:** The [BC-06 reference record](../../../developer-docs/memory-management/boracle/boracle-reference-solver.mtf#bc-06-evidence-cells-referents-and-call-outcomes)
+distinguishes slot replacement, place retargeting and write-through. The [oracle replay record](../../../developer-docs/memory-management/boracle/boracle-operational-oracle.mtf#bc-06-replay-evidence-and-limits)
+separates measured disagreements from missing replay data. The [caller-cell stop](../production-borrow-checker-bc06-redesign.md#caller-cell-stop)
+shows why a missing store can't make a continuation dead. [Const C1](../const-functions-evaluation-foundation-and-semantics-plan.md#c1-findings-and-approved-decisions)
+shows why equal values, independent result cells and shared allocations need separate identities.
+
+1. **Start with an independent replay contract, drawing narrowly from packages 5 and 6.**
+   Extract ordered accesses, receiving writes, captured destinations and sources from validated
+   HIR and independently specified semantic contracts. Distinguish cell replacement, alias
+   retargeting, write-through and fixed-edge retirement. Keep store effects separate from
+   per-result provenance and keep success and error effects separate. Preserve sharing and
+   permission through stored children, detached results and frozen graphs without importing
+   interpreter handles, runtime borrow facts or production verdicts. An unresolved call or lane
+   stays explicitly unknown. Keep `MissingSummary` for missing result provenance and
+   `Inconclusive(OpaqueCallStores)` for opaque stores in the oracle. Neither implies a no-op
+   or an unreachable edge. The oracle still executes normalized events independently of static
+   solving.
+   The current scalar escape replay returns `CompleteSafe` on events that omit the shared
+   callee-local cell. Check this refusal boundary before adding effect replay: lack of heap
+   mutation does not prove lack of scalar cell effects. Pair any refusal with supported direct
+   and normalized controls that still execute the intended operation.
+2. **Apply package 3 only to conflicts that survive correct representation.** First replay the
+   retarget and direct controls, the whole-replacement continuation, the assigned-alias store,
+   W3/W4 and L4, and the disjoint and shared sibling controls. Use W7's disjoint/shared outcome
+   twins and shared-result publication as further checks. Keep a deterministic coarse analysis.
+   Add conflict-directed refinement only when a reduced witness shows that a correct coarse may-set
+   lost a useful correlation. Join alternatives may distinguish exit-specific sharing, but no
+   refinement can recover an omitted effect. Compare normalized events and exact conflict sites
+   before claiming an acceptance improvement. Keep unmeasured or incomplete replays out of the
+   safety count.
+3. **Gate package 4 and the rest of packages 5 and 6 on separate evidence.** Add loop epochs or
+   edge-specific last use only for reduced cases that still need them after local identity and
+   effects work. Bounded enumeration never proves unbounded safety. Defer recursive summary
+   specialisation, reserved-exclusive activation, general dynamic-index reasoning and broader
+   allocation modelling until separate witnesses justify them. Do not expand into allocation
+   families, retained-edge cardinality, cleanup or REC selection.
+
+Before any promotion, record reductions, required semantics, actual reference and oracle
+outcomes (including typed unknowns), and any remaining production differences. Measure coarse-path
+cost separately from summary convergence and conflict refinement. The older B2 convergence
+regression motivates that split, but no stopped draft measures the cost or benefit of this proposal.
+
 ### Additional exploratory research - group-aware place precision and stability effects
 
 [Group-aware place precision and stability-effect research](./group-aware-place-and-stability-effects-research.md) records Zeta-inspired index-disjointness proofs, conditional and iterator stability, narrow operation effects and lessons from Valen, Carbon, Ante and Rust. It is inactive research, not package 7 and not an amendment to packages 3-6. Initial experiments preserve Moth's exclusive-access, no-data-race and lifetime-topology guarantees. More permissive collection receiver contracts, aliasable mutation and parallel APIs require separate semantic approval.

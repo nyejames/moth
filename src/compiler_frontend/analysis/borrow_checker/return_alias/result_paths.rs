@@ -23,7 +23,8 @@ use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTermin
 use crate::compiler_frontend::hir::utils::for_each_terminator_target;
 use crate::compiler_frontend::public_call_summary::{
     CallAllocationFacts, CallField, CallLaneSummary, CallOutputPath, CallParameterPath,
-    CallPathSource, CallResultPath, CallSharing, PublicCallParameterAccess, PublicCallSummary,
+    CallPathSource, CallResultPath, CallSharing, FunctionReturnAliasSummary,
+    PublicCallParameterAccess, PublicCallSummary,
 };
 use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -41,7 +42,7 @@ use graph::{Cell, Graph, Origin, Owner, Path, Site, Spec};
 #[derive(Clone, Copy)]
 struct Local {
     mutable: bool,
-    parameter: bool,
+    mutable_parameter: Option<usize>,
     authored: bool,
 }
 
@@ -76,14 +77,7 @@ impl IndexedFunction {
         let access = &checker.public_call_summaries[&function.id].parameters;
         for (&local, parameter) in function.params.iter().zip(access) {
             if !tracks_values && parameter.access == PublicCallParameterAccess::Mutable {
-                CallField::for_each_child(
-                    checker.local_types[&local],
-                    checker.type_environment,
-                    |_, ty| {
-                        tracks_values |= is_heap(checker, ty)?;
-                        Ok::<_, BorrowCheckError>(())
-                    },
-                )?;
+                tracks_values = is_heap(checker, checker.local_types[&local])?;
             }
         }
         let expressions = &checker.module.expressions;
@@ -101,7 +95,7 @@ impl IndexedFunction {
                         local.id,
                         Local {
                             mutable: local.mutable,
-                            parameter: false,
+                            mutable_parameter: None,
                             authored,
                         },
                     )
@@ -164,13 +158,13 @@ impl IndexedFunction {
             }
         }
         if tracks_values {
-            for parameter in &function.params {
+            for (index, parameter) in function.params.iter().enumerate() {
                 let local = locals.get_mut(parameter).ok_or_else(|| {
                     checker
                         .diagnostics
                         .internal_error("Missing summary parameter local")
                 })?;
-                local.parameter = true;
+                local.mutable_parameter = local.mutable.then_some(index);
             }
         }
         for (local, uses) in uses {
@@ -359,10 +353,79 @@ impl FunctionEvidence<'_, '_> {
                 }
             }
         }
-        Ok(CallAllocationFacts {
-            success: success.finish(),
-            error: error.finish(),
-        })
+        let mut success = success.finish();
+        let mut error = error.finish();
+        let needs_success = !success.reachable;
+        let needs_error = !error.reachable
+            && self
+                .function
+                .return_contract
+                .ordinary()
+                .is_some_and(|shape| shape.is_fallible());
+        if needs_success || needs_error {
+            let (may_succeed, may_fail) = self.structural_returns(needs_success, needs_error)?;
+            success.structural_only = needs_success && may_succeed;
+            error.structural_only = needs_error && may_fail;
+        }
+        Ok(CallAllocationFacts { success, error })
+    }
+
+    /// Find permitted exits without treating absent allocation evidence as a control-flow
+    /// predicate. Only needed for lanes the graph transfer did not reach. Calls use the same
+    /// least fixed point, but read the structural return bit rather than the graph bottom.
+    fn structural_returns(
+        &self,
+        needs_success: bool,
+        needs_error: bool,
+    ) -> Result<(bool, bool), BorrowCheckError> {
+        let can_return = |target: &CallTarget, error: bool| match target {
+            CallTarget::External(_) => true,
+            _ => matches!(
+                self.call_summary(target).map(|summary| &summary.return_alias),
+                Some(FunctionReturnAliasSummary::Known(facts))
+                    if (if error { &facts.error } else { &facts.success }).can_return()
+            ),
+        };
+        let entry = self.function.entry;
+        let mut seen = rustc_hash::FxHashSet::default();
+        seen.insert(entry);
+        let mut worklist = vec![entry];
+        let (mut success, mut error) = (false, false);
+        while let Some(id) = worklist.pop() {
+            let block = self.checker.block_by_id_or_error(id, self.function.id)?;
+            if block.statements.iter().any(|statement| {
+                matches!(&statement.kind, HirStatementKind::Call { target, .. } if !can_return(target, false))
+            }) {
+                continue;
+            }
+            let mut push = |id| {
+                if seen.insert(id) {
+                    worklist.push(id);
+                }
+            };
+            match &block.terminator {
+                HirTerminator::Return(_) => success = true,
+                HirTerminator::ReturnError(_) => error = true,
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::Call { target, .. },
+                    success,
+                    failure,
+                    ..
+                } => {
+                    if can_return(target, false) {
+                        push(*success);
+                    }
+                    if can_return(target, true) {
+                        push(*failure);
+                    }
+                }
+                terminator => for_each_terminator_target(terminator, push),
+            }
+            if (success || !needs_success) && (error || !needs_error) {
+                break;
+            }
+        }
+        Ok((success, error))
     }
 
     fn statement(
@@ -791,10 +854,18 @@ impl FunctionEvidence<'_, '_> {
                     weak,
                 ) || weak;
             } else {
-                let aliases = state.aliases.get(&place_local(&target));
+                let local = place_local(&target);
+                let aliases = state.aliases.get(&local);
                 let weak = weak || aliases.is_some_and(|aliases| aliases.len() != 1);
                 if let Some(aliases) = aliases {
                     pending.extend(aliases.iter().cloned().map(|alias| (alias, weak)));
+                }
+                if let Some(index) = self.index.locals[&LocalId(local)].mutable_parameter {
+                    let output = Cell::root(Owner::Store(CallParameterPath {
+                        index,
+                        path: Vec::new(),
+                    }));
+                    self.rebind(state, output, value, weak);
                 }
                 self.rebind(state, target, value, weak);
             }
@@ -1014,6 +1085,7 @@ impl Lane {
     fn finish(self) -> CallLaneSummary {
         CallLaneSummary {
             reachable: self.reachable,
+            structural_only: false,
             sources: self.sources.into_iter().collect(),
             stores: self.stores.into_iter().collect(),
             sharing: self.sharing.into_iter().collect(),

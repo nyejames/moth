@@ -1,0 +1,32 @@
+Box = |items {I32}|
+
+seed |boxes ~{Box}|:
+    ~boxes = {Box({0})}
+;
+
+-- The replacement makes the remove success path executable, so guard can return normally.
+guard || -> I32, Error!:
+    boxes ~{Box} = {}
+    seed(~boxes)
+    removed ~= ~boxes.remove(0) catch |err|:
+        return! err
+    ;
+    ~removed.items = {1}
+    return 1
+;
+
+probe || -> I32:
+    status = guard() catch:
+        return 0
+    ;
+    if status is 0:
+        return 0
+    ;
+    child ~= {1}
+    observer = Box(child)
+    ~child.push(2)
+    return observer.items.length()
+;
+
+result = probe()
+~[:result=[result]]

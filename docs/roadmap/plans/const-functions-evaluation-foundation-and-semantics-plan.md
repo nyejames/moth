@@ -742,6 +742,18 @@ The interpreter executes sequentially, with no event loop, concurrency, async, I
 - `items {I32} = {1}; return Duo(first = items, second = items)` publishes two collection constructions today. A runtime consumer `graph ~= make(); ~graph.first.push(2); return graph.second.length()` prints `2` when `make` is ordinary and `1` when it is const. For `return items, items`, a caller defining two new results and mutating one before reading the other is rejected for the ordinary call (`MOTH-BORROW-0007`) but accepted for the const call. This does not use the independent existing-target runtime multi-bind defect.
 - The owner approved preserving sharing in the frozen data. Materialise each shared allocation once per runtime evaluation and present its allocation relationships to ordinary borrow validation. Graph identity belongs to the owned data, never to interpreter handles, generations, equal contents or incidental `ConstValueId` equality. C4 must verify ordinary access for fresh runtime materialisations separately from permissions on existing immutable referents.
 
+BC-06's [retarget and mixed-exit controls](./production-borrow-checker-bc06-redesign.md#retarget-and-mixed-exit-controls)
+exercise the same cell/edge/value separation at an ordinary call boundary. Two
+caller slots can retarget to one scalar cell or to two equal but distinct
+cells. The const storage model gives each mutable cell a `CellId`, each
+allocation an `AllocationId` and projections a concrete edge location.
+`rebind_to_place` changes a cell's target without identifying it with the
+incoming value. `resolve` intersects permissions through the alias chain.
+These give separate semantics for binding identity, value provenance and
+permission without scanning every alias. They don't supply an analysis for
+ordinary calls: mutable formals remain unsupported in const, and publication
+still freezes owned value graphs rather than exporting interpreter cells.
+
 ### C2. Replace alias refresh with one live storage owner
 
 - [x] Reproduce permission and alias errors and assert exact results or diagnostic reasons for local, projected, nested, imported and returned aliases, copies and loop iteration freshness. Use ordinary controls where the contracts agree.

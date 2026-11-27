@@ -156,6 +156,7 @@ fn allocation_widening_keeps_reachability_and_every_lane_component() {
     };
     let lane = CallLaneSummary {
         reachable: true,
+        structural_only: false,
         sources: vec![root.clone(), left.clone(), right.clone()],
         sharing: vec![CallSharing {
             left: right.output.clone(),

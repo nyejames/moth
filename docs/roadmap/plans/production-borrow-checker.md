@@ -6,8 +6,8 @@ The accepted source language and memory semantics remain authoritative in `docs/
 
 ## Current handoff
 
-**Status:** The cap-free [BC-06 Slice 1 candidate](./production-borrow-checker-bc06-redesign.md#resume-point) passed the unchanged 18-workload guard and preserved the approved differential. The abandoned factored cutover and holder-edge prototype are historical evidence, not implementation bases.
-**Next action:** Keep Slice 2 and C4 shared runtime lowering paused. On owner approval, continue from the accepted Slice 1 implementation with conditional result sharing and per-lane store effects.
+**Status:** B1 remains the accepted [BC-06 checkpoint](./production-borrow-checker-bc06-redesign.md#resume-point). B2 has not passed its caller-cell and mixed-exit correctness controls. Shared C4 runtime lowering stays disabled.
+**Next action:** Implement the approved B2 binding-transition and lane-completeness contract, then repeat the unchanged reviews and gates. The redesign companion records the reduced controls and current failure.
 
 The October inventory below records `AUDITED_MAIN` at
 `36156b40849eecad12e69b8d4e62388672a1ecff`, the starting point of
@@ -64,6 +64,23 @@ These constraints are already established by compiler/memory authorities and exi
 **Status:** The owner approved a committed baseline, test-only proofs and the field-precise direction on `docs/const-foundation-profile-independent-semantics`. The slice 3 cutover was attempted and abandoned. The owner then chose the narrow route: keep the root-granular checker, land the Stage 5 capture and defer projection tracking to a later, more comprehensive design. That design is now under investigation in the [BC-06 redesign companion](./production-borrow-checker-bc06-redesign.md), which owns the witnesses, evidence and resume point.
 
 **Goal:** Make Stage 6 distinguish binding cells, allocation identity, projections and permission in one production provenance model. Preserve which relationships can coexist through control-flow joins and ordinary calls. Keep the existing validated-HIR input, diagnostics and read-only borrow handoff. Do not add a production Boracle path, activate research experiments, change access timing, implement lifetime topology or change physical memory planning.
+
+The call boundary needs to distinguish three effects: replacing the value in a
+caller's cell, mutating the allocation that cell held at entry and retargeting
+a slot to another cell. A mutable argument can name a slot, a projected
+location or an alias chain. Capture its destination separately from its entry
+value. A returned lane may contain a write on just some paths, so its store
+rows don't prove a strong update. An incomplete allocation graph can't prove
+that a call continuation is unreachable. The [caller-cell witnesses](./production-borrow-checker-bc06-redesign.md#caller-cell-stop)
+record how confusing these distinctions hides mandatory checks.
+
+Escaped binding identities include scalars. Two callers' slots can become
+aliases of one callee-local cell, or of distinct cells that hold equal
+values. Neither case belongs in the heap allocation vocabulary. Keep a
+stable boundary identity for each observable cell alternative and
+instantiate it at the call. Preserve the binding role after each operation
+when composing forwarded summaries. Keep complete effects even when
+another feasible exit on the lane lacks provenance.
 
 #### Evidence and acceptance controls
 
@@ -686,6 +703,13 @@ Keep reference-solver findings and downstream production relevance separate. Bor
 | `BR-05` | Deliberately deferred | The reference's `dead-exclusive-loan` experiment remains opt-in and not canonical acceptance. `MultiHolderLoan`, `RepeatedProjectionChild`, dynamic-index sibling precision and empty-union CFG joins have bounded or deferred treatment in the reference research handoff. Reopen only with an actual reduced case and named research owner. |
 | `BR-06` | Historical oracle inconclusive. Revalidate | The old progress matrix recorded checked numeric reassignment with `OracleInconclusive` / `UndecidableOverlap` on the existing result-carrier projection and no completed executions. It supplied no bounded safety evidence. Infallible Boolean reassignment had recorded real-source mutation replay coverage, which should be retained as a control. Revisit after native result-channel migration, with a reduced source replay and separate proof of any improvement. |
 | `BR-07` | Exploratory, inactive | [Group-aware place precision and stability effects](./boracle-next-research-plans/group-aware-place-and-stability-effects-research.md): investigate Zeta-style positive index-disjointness evidence, guards, narrow builtin access footprints and structural/iterator stability without weakening shared/exclusive access, data-race freedom or lifetime topology. Use Boracle's existing origin and conflict owners. Research activation requires a fresh checkpoint, relevant native-result prerequisites and resolution or isolation of `BR-01`. Any changed collection receiver contract, public effects or concurrency model needs separate semantic approval. |
+| `BR-08` | Confirmed source replay coverage gap | The [scalar escape control](./production-borrow-checker-bc06-redesign.md#retarget-and-mixed-exit-controls) changes which cell an actual names without mutating a heap allocation. Source extraction omits the effect, so the reference and oracle agree on incomplete input. Report the unknown independently before attempting scalar cell replay. Preserve the supported direct and distinct-cell controls. |
+
+The [inactive post-BC-06 Boracle proposal](./boracle-next-research-plans/README.md#inactive-proposal-consolidate-packages-36-after-bc-06-and-const-publication)
+puts independent event extraction for evidenced cell, projection and
+outcome gaps ahead of broad refinement. Re-anchor the evidence after
+BC-06 and the const publication foundation stabilise. `BR-04` stays
+inactive. Do not pass production borrow verdicts to Boracle.
 
 For the older replay failures, the historical reproducer was `cargo run --features boracle -- boracle <source> --dump problem`. Its result was tied to an earlier source corpus. Do not claim those exact failures persist on a later branch without rerunning it. Resolve the reference acceptance gap before using that case as supporting evidence for a production precision change. The `BR-01` counterexample is a **known reference-model issue** and must remain visible to the differential campaign until resolved. A bounded oracle is not a replacement for a proof of universal correctness.
 

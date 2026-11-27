@@ -56,11 +56,11 @@ pub(crate) enum FunctionReturnAliasSummary {
 }
 
 impl FunctionReturnAliasSummary {
-    /// Two bottom lanes and a pending contract both stop summary transfer at the call.
-    /// Their retained evidence differs, but neither advances the caller's allocation state.
+    /// A pending contract and two bottom lanes expose no continuation or allocation facts
+    /// to the internal fixed point. They differ at the mandatory validation boundary.
     pub(crate) fn same_allocation_transfer_as(&self, next: &Self) -> bool {
         let both_lanes_unreachable =
-            |facts: &CallAllocationFacts| !facts.success.reachable && !facts.error.reachable;
+            |facts: &CallAllocationFacts| !facts.success.can_return() && !facts.error.can_return();
         match (self, next) {
             (Self::Pending, Self::Known(facts)) | (Self::Known(facts), Self::Pending) => {
                 both_lanes_unreachable(facts)
@@ -76,14 +76,24 @@ pub(crate) struct CallAllocationFacts {
     pub error: CallLaneSummary,
 }
 
-/// Each reachable lane has sorted, duplicate-free result, sharing and store atoms.
-/// An unreachable lane is bottom and has no atoms.
+/// A lane with allocation evidence has sorted, duplicate-free result, sharing and store atoms.
+/// Structural return flow is tracked separately: a missing allocation holder is not proof that
+/// the lane cannot execute.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CallLaneSummary {
     pub reachable: bool,
+    /// The HIR and call contracts allow this outcome even though extraction found no complete
+    /// allocation path. The precise case (`reachable`) implies the same structural fact.
+    pub structural_only: bool,
     pub sources: Vec<CallPathSource>,
     pub sharing: Vec<CallSharing>,
     pub stores: Vec<CallPathSource>,
+}
+
+impl CallLaneSummary {
+    pub(crate) fn can_return(&self) -> bool {
+        self.reachable || self.structural_only
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -95,7 +105,9 @@ pub(crate) struct CallPathSource {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CallOutputPath {
     Result(CallResultPath),
-    /// Write to an entry cell, then optionally walk the newly stored value.
+    /// Store into the caller's mutable argument cell when `target.path` is empty. A
+    /// nonempty target instead names a cell in the allocation passed at call entry.
+    /// `path` selects within the newly stored value, not within the old allocation.
     Store {
         target: CallParameterPath,
         path: Vec<CallField>,
@@ -482,11 +494,12 @@ fn return_alias_is_widening(
 }
 
 fn lane_is_widening(previous: &CallLaneSummary, next: &CallLaneSummary) -> bool {
-    !previous.reachable
-        || (next.reachable
-            && sorted_subset(&previous.sources, &next.sources)
-            && sorted_subset(&previous.sharing, &next.sharing)
-            && sorted_subset(&previous.stores, &next.stores))
+    (!previous.can_return() || next.can_return())
+        && (!previous.reachable
+            || (next.reachable
+                && sorted_subset(&previous.sources, &next.sources)
+                && sorted_subset(&previous.sharing, &next.sharing)
+                && sorted_subset(&previous.stores, &next.stores)))
 }
 
 fn sorted_subset<T: Ord>(previous: &[T], next: &[T]) -> bool {
@@ -574,9 +587,9 @@ fn validate_lane_atoms(
             return Err(allocation_error("store row uses a result endpoint"));
         };
         let receiver = validate_parameter_index(target.index, parameters)?;
-        if target.path.is_empty() || receiver.access != PublicCallParameterAccess::Mutable {
+        if receiver.access != PublicCallParameterAccess::Mutable {
             return Err(allocation_error(format!(
-                "store target {target:?} must be a projected cell of a mutable parameter"
+                "store target {target:?} must name a mutable parameter or its projection"
             )));
         }
         validate_parent_output(&lane.stores, &row.output)?;
@@ -729,7 +742,7 @@ pub(crate) fn validate_public_call_allocation_layout<T: Eq>(
             ] {
                 let lane_name = if error_lane { "error" } else { "success" };
                 let Some(slot_count) = slot_count else {
-                    if lane.reachable {
+                    if lane.can_return() {
                         return Err(allocation_error(format!(
                             "reachable {lane_name} lane has no declared return contract"
                         )));

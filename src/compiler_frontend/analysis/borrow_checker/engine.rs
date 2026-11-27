@@ -791,6 +791,25 @@ impl InvokeLayerOp {
                     *distinct_occurrence,
                 );
             }
+            Self::StoreCells {
+                slots,
+                fields,
+                values,
+                views,
+            } => {
+                let fields =
+                    remap_invoke_capture(fields, |(holder, key)| (remap_id(state, holder), key));
+                let values = remap_invoke_capture(values, |mut value| {
+                    value.id = remap_id(state, value.id);
+                    value
+                });
+                let views = remap_invoke_capture(views, |id| remap_id(state, id));
+                // A result overwrites a captured slot, but not fields in the old value
+                // that occupied it; those holders have been rebased above.
+                state.store_call_cells(slots, &fields, &values, &views, |local| {
+                    rebase.is_some_and(|(_, retires)| retires(local))
+                });
+            }
             Self::Contribute { holder, key, value } => {
                 let holder = remap_id(state, *holder);
                 let mut value = *value;
@@ -867,6 +886,23 @@ impl InvokeLayerOp {
                 }
                 for value in values {
                     retirement.remap_value(state, value);
+                }
+            }
+            Self::StoreCells {
+                slots,
+                fields,
+                values,
+                views,
+            } => {
+                slots.retain(|&slot| !retirement.retires_local(slot));
+                for (holder, _) in fields {
+                    retirement.remap_id(state, holder);
+                }
+                for value in values {
+                    retirement.remap_value(state, value);
+                }
+                for view in views {
+                    retirement.remap_id(state, view);
                 }
             }
             Self::Contribute { holder, value, .. } => {

@@ -15,9 +15,238 @@ This companion to [BC-06: Relational production provenance](./production-borrow-
 | Slice 1 | The verified cap-free release build is `a08f2d820e3ed`. Its parent `0e95895fd5` is the user-pushed review base, not the Slice 1 checkpoint. |
 | Toolchain | rustc and cargo 1.99.0, Apple M1 Pro, Node v24.21.0 for rendered output |
 | Sessions complete | 1 (Sections 1-2: evidence and witnesses), 2 (Section 3: fact-lifetime ledger), 3 (Section 4: calls and publication), 4 (Sections 5-7: C4 consumption, design choice and implementation sequence) |
-| Last established result | B1 (`f2390602e`) remains the accepted checkpoint. B2 stopped again: a whole-parameter write can hide an executable path from borrow checking. See [B2 resume stop](#b2-resume-stop). |
-| Next task | Review the missing caller-cell write and false lane pruning before resuming B2 validation. Keep shared C4 runtime HIR lowering disabled and both C4 fixture expectations unchanged. |
-| Next unanswered question | How should a whole mutable parameter replacement reach the caller's actual cell, distinct from mutation of its old allocation, without losing effects or making convergence schedule-dependent? |
+| Last established result | B1 (`f2390602e`) remains the accepted checkpoint. The B2 draft handles the focused fresh-value replacements but still misses caller-visible alias acquisition and stores on mixed complete/unresolved exits. |
+| Next task | Implement the approved retargeting contract with distinct cell and allocation identity. Preserve both C4 fixture expectations and keep shared C4 runtime HIR lowering disabled. |
+| Latest evidence | [Retarget and mixed-exit controls](#retarget-and-mixed-exit-controls) pin the scalar escape, ordered forwarding and mixed-lane store failures. |
+
+### Retarget and mixed-exit controls
+
+C1 and the canonical [access reference](../../developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf)
+settle the operation, independently of JavaScript. A `HirWriteTarget::AssignPlace` with a
+`ValueKind::Place` operand lets an independent mutable slot acquire an alias. An existing
+alias or projected destination instead writes the operand's value through. A produced value
+does not acquire an alias. Const `execute_assign` and `LiveStorage::rebind_to_place` make
+this distinction for local writes. Const doesn't admit mutable formals, so it isn't a
+call-boundary oracle for these cases.
+
+**Escaping scalar cell.** This uses `I32` deliberately: there is no heap allocation
+provenance to stand in for cell identity.
+
+```moth
+seed |first ~I32, second ~I32|:
+    local ~= 2
+    ~first = local
+    ~second = first
+;
+
+first ~= 0
+second ~= 1
+seed(~first, ~second)
+observed = second
+~first = 9
+~[:seen=[observed] first=[first]]
+```
+
+B1 and the B2 draft accept. The draft renders `seen=9 first=9`. Both caller bindings
+lead to one cell, so the write conflicts with the live shared observation. Inline the
+two assignments at the call site, with the same fresh `local`, and B2 rejects the
+write with `MOTH-BORROW-0007`. The positive control creates `other ~= 2` in `seed`
+and assigns `~second = other`. B1 and B2 accept and the draft renders
+`seen=2 first=9`. Equal contents do not identify a cell. Moving allocation
+provenance alone, making each retarget fresh independently, or using the callee's
+lexical local ID at all call sites cannot preserve this pair.
+
+**Forwarded role transition.** Execute `set_from(~dest, ~first)` followed by
+`set_from(~dest, ~second)`, via a one-call forwarder, where `set_from` performs only
+`~dest = source`. With a slot destination and `first` an interior field, the first
+call captures the field and the second writes `second`'s value into that field.
+It must not redirect `dest` to `second`. A subsequent `observed = dest` followed by
+a write to `first`'s field while `observed` lives must reject. B1 and B2 accept
+this case and the draft renders `9`. A summary needs a current binding role at
+composition, not two unordered retarget rows interpreted against entry mode.
+
+```moth
+Cell = |value I32|
+
+set_from |dest ~I32, source ~I32|:
+    ~dest = source
+;
+
+forward |dest ~I32, source ~I32|:
+    set_from(~dest, ~source)
+;
+
+twice |dest ~I32, first ~I32, second ~I32|:
+    forward(~dest, ~first)
+    forward(~dest, ~second)
+;
+
+slot ~= 1
+incoming ~= Cell(2)
+later ~= 3
+twice(~slot, ~incoming.value, ~later)
+observed = slot
+~incoming.value = 9
+~[:[observed]]
+```
+
+**Mixed success lane.** Both success paths exist. Only the path through `remove`
+publishes the `dest.items` store.
+
+```moth
+Box = |items {I32}|
+Holder = |boxes {Box}|
+
+seed |dest ~{Box}, source ~{Box}|:
+    ~dest = source
+;
+
+guard |dest ~Box, incoming {I32}, skip Bool| -> I32, Error!:
+    if skip:
+        return 0
+    ;
+    empty ~{Box} = {}
+    holder ~= Holder(empty)
+    source ~= {Box({10})}
+    seed(~holder.boxes, ~source)
+    removed ~= ~holder.boxes.remove(0) catch |err|:
+        return! err
+    ;
+    ~dest.items = incoming
+    ~removed.items = {2}
+    return 1
+;
+
+probe |skip Bool| -> I32:
+    incoming ~= {1}
+    dest ~= Box({0})
+    status = guard(~dest, incoming, skip) catch:
+        return 9
+    ;
+    ~incoming.push(3)
+    return status * 10 + dest.items.length()
+;
+
+result = probe(false)
+~[:[result]]
+```
+
+B1 and B2 accept and the B2 draft renders `12`. Replace `seed(~holder.boxes, ~source)`
+with `~holder.boxes = source`: B2 reports `MOTH-BORROW-0007` on `~incoming.push(3)`.
+Graph extraction knows the first success exit, but the missed projected store leaves
+the `remove` without element provenance. The later write through `removed` stalls
+the second exit and suppresses its already-executed `dest.items` store. The caller
+visits the success continuation, but checks it with incomplete effects. Adding
+opaque *result* rows cannot recover this effect: the result is scalar.
+
+Keep structural reachability and provenance completeness separate even within a
+lane. An unsolved dependency can be graph bottom during convergence. A stable
+unresolved operation needs conservative effects, not invented freshness,
+unreachable flow or a certificate that a store didn't occur. A fix must keep
+complete effects and cover missing ones on the same lane, then recheck caller
+lifetimes, allocation and permissions. Don't remove strong exact direct updates
+or publish irreversible opaque rows for transient recursive bottom.
+
+The independent design review identified three implementation constraints:
+
+1. Capture a whole wrapper, a projected location and the incoming value as distinct
+   facts. Compose binding postconditions in operation order, with explicit entry
+   roles and a preserved alternative unless coverage proves otherwise. A call's
+   result receiving write runs after its binding effects. A returned value does
+   not carry a callee binding cell.
+2. Publish only observable escaped cells. Canonical summary-local identities need
+   to represent shared scalar cells as well as aggregate storage. Instantiate
+   identities per call and widen repeated occurrences to a finite nonsingleton
+   class. Never allocate a new identity from an ever-growing forwarding path.
+   Preserve the cell's reference permissions and its contents separately.
+3. Mandatory body checking must cover feasible entry roles, not just summary
+   replay. `engine.rs` currently initializes all formals as slots. Argument
+   mutability doesn't prove a caller wrapper is a slot. Acquiring an exclusive
+   place on the slot branch and reading a value to store on the alias branch
+   require different access. Reuse the existing direct transfer rules instead
+   of teaching an unrelated call-only checker.
+
+Independent Boracle replay finds the direct escaping-cell conflict and reports
+`CompleteSafe` for its called counterpart because scalar binding effects are
+missing from normalized input. The mixed `guard` yields `OpaqueCallStores`
+after one completed execution. These outcomes share the underlying input
+coverage issue, not a solver or runtime contract. See the
+[inactive research proposal](./boracle-next-research-plans/README.md#inactive-proposal-consolidate-packages-36-after-bc-06-and-const-publication).
+
+For replay, save each example as `@entry.moth` under a project name with
+underscores: `moth check <project> --terse`, then `moth build <project>` for
+the accepted control. Run `moth boracle <project>/@entry.moth --dump differential`
+with a Boracle-enabled binary. The observations above came from the B1 release
+comparator and the current B2 debug build. Runtime observations execute the
+emitted scripts with Node 24.21.0 and collect the inserted fragment text.
+
+The current B2 draft fails these correctness controls. No B2 checkpoint, final
+release guard or C4 cutover follows from these runs.
+
+### Caller-cell stop
+
+The draft uses the existing `Store` endpoint. An empty target path replaces the
+mutable actual's cell. A nonempty target path writes into the allocation the
+actual held at entry. The path inside the stored value has the same meaning
+for both. Capture argument values and destinations before replaying a lane.
+Replaying a may-store keeps the old value as an alternative. The presence of
+a store row does not prove that every returning execution wrote.
+
+**Correctness gate failed on place-valued assignment.**
+`tmp/bc06-review/b2/param_place_assignment/@entry.moth` calls the same function
+with a whole slot and with a field. `~dest = source` followed by
+`~dest = {3, 4, 5}` renders `3 3 / 3 2` on B1. The whole actual becomes an
+alias of `source`, so the second write reaches `source`. The projected
+actual already writes through, so it changes the captured field and leaves
+`source` alone. This distinction comes from `__moth_param_binding` and
+`__moth_assign_borrow`, not from allocation sharing.
+
+`tmp/bc06-review/b2/param_retarget_live/@entry.moth` observes that new alias
+after the call. B1 and the B2 replacement prototype both accept and render
+`3`. The direct assignment control in `local_retarget_live` rejects the
+shared read at `4:10` with `MOTH-BORROW-0003`. A cell may hold the same
+allocation as another cell without aliasing that cell. Treating retargeting
+as a value store loses the difference on the next read or write. Preserve
+the observed runtime distinction unless the language owner approves a
+different contract. A sound summary must identify the possible destination
+wrapper, the source cell and whether the destination was already an alias,
+including when a local cell escapes through the retargeted wrapper.
+
+```moth
+set_from |dest ~{I32}, source ~{I32}|:
+    ~dest = source
+;
+
+first ~= {1}
+second ~= {2, 3}
+set_from(~first, ~second)
+observed = second
+~first = {4, 5, 6}
+~[:[observed.length()]]
+```
+
+Replace `set_from(~first, ~second)` with `~first = second` for the direct
+control.
+
+Allocation extraction may defer a path with an unresolved holder rather than
+publish a store that the next iteration would retract. Mandatory borrow
+validation cannot treat that graph bottom as dead control flow. The draft
+distinguishes structurally possible returns from allocation evidence. Final
+review must also cover a lane with one complete exit and another unresolved
+exit. Nonempty rows alone don't prove that the lane includes every effect.
+
+Boracle source mode still stops before production convergence. It can
+report opaque stores as inconclusive without using the checker verdict.
+Modelling caller-cell transitions in its normalized graph remains a separate
+research task.
+
+The saved draft passed 21 allocation-summary tests, both hard-dead call
+controls, the positive caller-cell fixture, the original skipped-continuation
+rejection and the assigned-alias-store rejection. `moth check docs --terse`
+passed. Logs are in `tmp/bc06-review/b2/gates/caller-cell-focused.log` and
+`caller-cell-retarget.log`. The correctness failure stopped the final
+independent reviews, Boracle, the release guard and integrated validation.
+The draft is not a B2 checkpoint.
 
 ### B2 resume stop
 

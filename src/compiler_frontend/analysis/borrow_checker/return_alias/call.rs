@@ -8,7 +8,7 @@ use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAccessKind, ExternalReturnAlias,
 };
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::statements::HirLocalDestination;
 use crate::compiler_frontend::public_call_summary::{
@@ -115,8 +115,11 @@ impl FunctionEvidence<'_, '_> {
             .iter()
             .map(|&value| {
                 let ty = self.checker.module.expressions.expression(value).ty;
-                let value = self.value(state, value)?;
-                Ok(Actual { value, ty })
+                Ok(Actual {
+                    expression: value,
+                    value: self.value(state, value)?,
+                    ty,
+                })
             })
             .collect()
     }
@@ -147,24 +150,24 @@ impl FunctionEvidence<'_, '_> {
                 ),
                 CallOutputPath::Store { target, path } => {
                     let next_index = results.len() + stores.len();
-                    let store = stores.entry(target).or_insert_with(|| {
-                        let actual = &actuals[target.index];
-                        let &last = target
-                            .path
-                            .last()
-                            .expect("validated store target has a selector");
-                        let prefix = &target.path[..target.path.len() - 1];
-                        let holder = state.capture(&actual.value.at(prefix));
-                        let value = state.temporary();
-                        let ty = self.checker.call_path_type(actual.ty, &target.path);
-                        Store {
-                            holder,
-                            value,
-                            key: last,
-                            ty,
-                            index: next_index,
+                    let store = match stores.entry(target) {
+                        std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            let actual = &actuals[target.index];
+                            let destination =
+                                if let Some((&last, prefix)) = target.path.split_last() {
+                                    Some(state.capture(&actual.value.at(prefix)).at(&[last]))
+                                } else {
+                                    self.capture_actual_destination(state, actual.expression)?
+                                };
+                            entry.insert(Store {
+                                destination,
+                                value: state.temporary(),
+                                ty: self.checker.call_path_type(actual.ty, &target.path),
+                                index: next_index,
+                            })
                         }
-                    });
+                    };
                     let ty = store.ty.ok_or_else(|| {
                         self.checker
                             .diagnostics
@@ -245,16 +248,41 @@ impl FunctionEvidence<'_, '_> {
             }
         }
         state.install(rows, &[], Some(sharing));
-        // A lane's store row is a may-store: a bottom holder means this alternative cannot
-        // happen, not that the call path is incomplete.
+        // A store describes a possible write. Do not kill the prior contents: another
+        // execution of this lane may not write, and a summary may gain new stores later.
         for store in stores.values() {
-            let _ = self.store(state, &store.holder, store.key, &store.value, true);
+            if let Some(destination) = &store.destination {
+                let _ = self.assign(state, destination, &store.value, true);
+            }
         }
         let mut reached = true;
         for (&destination, result) in destinations.iter().zip(&results) {
             reached &= self.bind(state, destination, result);
         }
         Ok(reached)
+    }
+
+    /// Capture the cell separately from its entry value. A projected argument keeps the
+    /// containing allocation it named before any lane writes replace an enclosing slot.
+    fn capture_actual_destination(
+        &self,
+        state: &mut Graph,
+        actual: HirValueId,
+    ) -> Result<Option<Cell>, BorrowCheckError> {
+        let expression = self.checker.module.expressions.expression(actual);
+        let HirExpressionKind::Load(place) = &expression.kind else {
+            return Ok(None);
+        };
+        if expression.value_kind != ValueKind::Place {
+            return Ok(None);
+        }
+        let target = self.place(place)?;
+        if let Some((&key, prefix)) = target.path.split_last() {
+            let holder = Cell::root(target.owner.clone()).at(prefix);
+            Ok(Some(state.capture(&holder).at(&[key])))
+        } else {
+            Ok(Some(target))
+        }
     }
 
     fn opaque_result(
@@ -429,14 +457,14 @@ impl FunctionEvidence<'_, '_> {
 }
 
 struct Actual {
+    expression: HirValueId,
     value: Cell,
     ty: TypeId,
 }
 
 struct Store {
-    holder: Cell,
+    destination: Option<Cell>,
     value: Cell,
-    key: CallField,
     ty: Option<TypeId>,
     index: usize,
 }

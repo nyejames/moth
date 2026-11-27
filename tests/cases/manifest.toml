@@ -18170,6 +18170,20 @@ contract = "language.borrows.call_store_effects_follow_assigned_aliases"
 role = "primary"
 
 [[case]]
+id = "runtime_call_caller_cell_replacement"
+path = "runtime_call_caller_cell_replacement"
+tags = ["integration", "borrows", "functions", "control-flow", "runtime"]
+contract = "language.borrows.call_store_effects_replace_mutable_actual_cells"
+role = "primary"
+
+[[case]]
+id = "runtime_call_caller_cell_replacement_rejected"
+path = "runtime_call_caller_cell_replacement_rejected"
+tags = ["integration", "borrows", "functions", "control-flow", "diagnostics"]
+contract = "language.borrows.call_store_effects_replace_mutable_actual_cells"
+role = "boundary"
+
+[[case]]
 id = "runtime_call_callee_local_binding_mutable"
 path = "runtime_call_callee_local_binding_mutable"
 tags = ["integration", "borrows", "functions", "runtime"]

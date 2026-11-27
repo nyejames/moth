@@ -73,6 +73,13 @@ pub(super) enum InvokeLayerOp {
         views: Vec<AllocId>,
         distinct_occurrence: bool,
     },
+    /// Replace the mutable actual's caller cells on some paths of this outcome.
+    StoreCells {
+        slots: Vec<usize>,
+        fields: Vec<(AllocId, FieldKey)>,
+        values: Vec<StoredValue>,
+        views: Vec<AllocId>,
+    },
     Contribute {
         holder: AllocId,
         key: FieldKey,

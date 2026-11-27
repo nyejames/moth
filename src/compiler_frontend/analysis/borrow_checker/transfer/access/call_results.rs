@@ -1,9 +1,10 @@
 //! Instantiate validated return shapes, or conservatively connect compatible opaque paths.
 
-use super::super::layer::resolve_place_allocs;
 use super::super::layer::{
-    CapturedValue, LayerValueContext, mark_alloc_provenance_readonly, stored_values,
+    CapturedValue, LayerValueContext, mark_alloc_provenance_readonly, projection_key,
+    resolve_place_allocs, stored_values,
 };
+use super::super::place_load_source;
 use super::{CallArgumentTransfer, CallTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
@@ -13,6 +14,7 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BorrowTransferContext, InvokeLane, InvokeLayerOp,
 };
+use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{ExternalReturnAlias, ExternalReturnSlot};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -42,7 +44,9 @@ pub(super) enum Inputs<'a> {
 impl<'a> CallLane<'a> {
     pub(super) fn new(returns: CallReturns<'a>, lane: InvokeLane) -> Self {
         match (returns, lane) {
-            (CallReturns::Summary(FunctionReturnAliasSummary::Pending), _) => Self::Unreachable,
+            (CallReturns::Summary(FunctionReturnAliasSummary::Pending), _) => {
+                Self::Opaque(Inputs::Any)
+            }
             (CallReturns::Summary(FunctionReturnAliasSummary::Known(facts)), lane) => {
                 let facts = match lane {
                     InvokeLane::Success => &facts.success,
@@ -50,6 +54,8 @@ impl<'a> CallLane<'a> {
                 };
                 if facts.reachable {
                     Self::Known(facts)
+                } else if facts.can_return() {
+                    Self::Opaque(Inputs::Any)
                 } else {
                     Self::Unreachable
                 }
@@ -423,6 +429,50 @@ impl<'a> CallActuals<'a> {
         }
     }
 
+    /// A replacement writes argument storage. A raw rvalue has only an entry value.
+    fn capture_cell_store(
+        &self,
+        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+        index: usize,
+        node: &LaneNode<'_>,
+    ) -> Option<InvokeLayerOp> {
+        let (local, place) = place_load_source(
+            input.layout,
+            input.context.expressions,
+            self.args[index].argument,
+        )?;
+        let mut slots = Vec::new();
+        let mut fields = Vec::new();
+        let projections = input.context.expressions.projections(place.projections);
+        if let Some((last, prefix)) = projections.split_last() {
+            let holders = input.state.resolve_alloc_path(
+                local,
+                &input.layout.local_mutable,
+                prefix.iter().map(projection_key),
+            );
+            let key = projection_key(last);
+            fields.extend(holders.ids.into_iter().map(|holder| (holder, key)));
+        } else {
+            let binding = input.state.local_state(local);
+            if binding.mode.contains(LocalMode::SLOT) {
+                slots.push(local);
+            }
+            if binding.mode.contains(LocalMode::ALIAS) {
+                // These are the original cells, not the allocations the alias reads now.
+                fields = input.state.alias_cells(local);
+                slots.extend(binding.direct_alias_roots.iter_ones().filter(|&slot| {
+                    slot != local && input.state.local_state(slot).mode.contains(LocalMode::SLOT)
+                }));
+            }
+        }
+        (!slots.is_empty() || !fields.is_empty()).then(|| InvokeLayerOp::StoreCells {
+            slots,
+            fields,
+            values: node.values.clone(),
+            views: output_views(node),
+        })
+    }
+
     fn ty(
         &self,
         input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
@@ -742,10 +792,8 @@ fn instantiate_lane(
             CallOutputPath::Store { target, path } => {
                 let Some((&last, parent)) = path.split_last() else {
                     let Some((&key, holders)) = target.path.split_last() else {
-                        return Err(input
-                            .context
-                            .diagnostics
-                            .internal_error("Call store does not name an entry cell"));
+                        ops.extend(actuals.capture_cell_store(input, target.index, node));
+                        continue;
                     };
                     let ty = actuals.ty(input, target.index)?;
                     let ty = typed_path(input.context, ty, holders)?;

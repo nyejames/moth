@@ -1,0 +1,95 @@
+Box = |items {I32}|
+
+seed |boxes ~{Box}|:
+    ~boxes = {Box({0})}
+;
+
+direct || -> I32:
+    boxes ~{Box} = {}
+    seed(~boxes)
+    removed ~= ~boxes.remove(0) catch:
+        return 0
+    ;
+    ~removed.items = {1, 2}
+    return removed.items.length()
+;
+
+replace |items ~{I32}|:
+    ~items = {1, 2, 3}
+;
+
+forward |items ~{I32}|:
+    replace(~items)
+;
+
+relay |items ~{I32}|:
+    forward(~items)
+;
+
+projected || -> I32:
+    box ~= Box({0})
+    relay(~box.items)
+    return box.items.length()
+;
+
+replace_recursively |items ~{I32}, depth I32, take Bool|:
+    if depth > 0:
+        replace_recursively(~items, depth - 1, take)
+    else
+        if take:
+            relay(~items)
+        ;
+    ;
+;
+
+aliased |take Bool| -> I32:
+    box ~= Box({0})
+    first ~= box.items
+    second ~= first
+    replace_recursively(~second, 2, take)
+    return second.length()
+;
+
+identity |box Box| -> Box:
+    return box
+;
+
+rebind_local |box ~Box, child {I32}| -> I32:
+    -- The identity result shares the old referent but occupies a separate local cell.
+    local ~= identity(box)
+    old = local.items
+    ~local = Box(child)
+    return old.length() * 10 + local.items.length()
+;
+
+local_only || -> I32:
+    box ~= Box({0})
+    child ~= {1, 2}
+    seen = rebind_local(~box, child)
+    ~child.push(3)
+    return seen * 100 + box.items.length() * 10 + child.length()
+;
+
+replace_on_exit |box ~Box, success_child {I32}, error_child {I32}, ok Bool| -> I32, Error!:
+    if ok:
+        ~box = Box(success_child)
+        return 7
+    ;
+    ~box = Box(error_child)
+    return! Error("failed")
+;
+
+lane |ok Bool| -> I32:
+    box ~= Box({0})
+    success_child ~= {1, 2}
+    error_child ~= {1, 2, 3}
+    -- Each lane may mutate the child installed only by the other lane.
+    status = replace_on_exit(~box, success_child, error_child, ok) catch:
+        ~success_child.push(4)
+        return box.items.length() * 10 + success_child.length()
+    ;
+    ~error_child.push(4)
+    return status * 100 + box.items.length() * 10 + error_child.length()
+;
+
+~[:direct=[direct()] projected=[projected()] alias=[aliased(true)] skipped=[aliased(false)] local=[local_only()] success=[lane(true)] error=[lane(false)]]
