@@ -452,14 +452,18 @@ fn store_rows_require_a_mutable_entry_cell_and_connected_descendants() {
             ..direct.clone()
         }],
     );
-    assert!(validate_public_call_summary_transition(&root_store, &root_store).is_err());
+    // An empty target path stores into the caller's mutable argument cell.
+    assert_eq!(
+        validate_public_call_summary_transition(&root_store, &root_store).unwrap(),
+        PublicCallSummaryTransition::Unchanged
+    );
     parameters[0].access = PublicCallParameterAccess::Shared;
     let shared = make(parameters, vec![direct, child]);
     let error = validate_public_call_summary_transition(&shared, &shared).unwrap_err();
     assert!(
         error
             .message
-            .contains("projected cell of a mutable parameter")
+            .contains("must name a mutable parameter or its projection")
     );
 }
 
