@@ -1,4 +1,4 @@
-Braces enclose the body of a function, control-flow construct, trait or declared region. In a choice declaration they enclose a comma-separated list of alternatives. Statements in an executable body run in source order until control flow exits or redirects execution.
+Braces mark the block and the construct determines scope. They enclose the body of a function, control-flow construct, trait or declared region. In a choice declaration they enclose a comma-separated list of alternatives. Statements in an executable body run in source order until control flow exits or redirects execution.
 
 [codeblock, $code "moth":
     Status = { Ready, Busy }
@@ -11,11 +11,28 @@ Braces enclose the body of a function, control-flow construct, trait or declared
     }
 ]
 
+### Block layout
+
+The opening brace stays on the same logical line as the end of its header.
+Newlines separate ordinary statements. A block can be empty or contain a
+single statement inline. Nested blocks and their closing braces may share a
+physical line. A closing brace may follow a statement in a multiline block.
+A comment can follow the closer. Start the next sibling statement on a new
+logical line. Formatting multiline blocks with a separate aligned closer is a
+convention rather than a grammar requirement.
+
+[codeblock, $code "moth":
+    tick || {}
+    run || { if ready { update() } }
+]
+
+Each example has its own required declarations or receiving context.
+
 ### Branch scopes
 
-An ordinary `if` encloses both branches in a single pair of braces. The optional bare `else` ends the first branch's scope and starts the second. A nested conditional closes before the enclosing one resumes. A missing closing brace belongs to its opener. A brace inside text cannot close a statement block. Each name declared in a branch stays local to that branch.
+An ordinary `if` encloses both branches in a single pair of braces. The optional line-initial bare `else` ends the first branch's scope and starts the second. A nested conditional closes before the enclosing one resumes. A missing closing brace belongs to its opener. A brace inside text cannot close a statement block. Each name declared in a branch stays local to that branch.
 
-A full match starts with `if subject is {`. Each `case` starts a logical line. A colon ends its pattern and optional Boolean guard. The arm's statements can start on the same line or continue on later lines. The next arm at the same depth or the match's closing brace ends its body. A final `else:` handles the remaining cases. A pattern capture belongs to its arm's guard and body.
+A full match starts with `if subject is {`. Each reserved `case` starts a logical line. A match requires at least one case with a body. A colon ends its pattern and optional Boolean guard. The arm's statements can start on the same line or continue on later lines. The next arm at the same depth or the match's closing brace ends its body. A final `else:` handles the remaining cases. It may have an empty body in a statement match. A pattern capture belongs to its arm's guard and body.
 
 An expressionless `if {` selects a ready channel operation. Its `case` headers offer sends or receives. A receive binding first becomes available inside the winning body. A final `else:` handles the case where no enabled operation is ready. See @../async (Channels and readiness) for the future runtime contract.
 

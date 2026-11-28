@@ -3,13 +3,12 @@ reclaim reserved words by changing ASCII case or adding leading underscores.
 
 ### Keywords
 
-- **Control flow:** `if`, `else`, `then`, `loop`, `to`, `by`, `break`, `continue`, `return`, `catch`, `assert`
-- **Declarations and types:** `type`, `of`, `as`, `copy`, `cast`, `must`, `this`, `This`
-- **Reserved for future syntax:** `async`, `yield`, `checked`
+- **Control flow:** `if`, `else`, `case`, `then`, `loop`, `to`, `by`, `break`, `continue`, `return`, `catch`, `assert`
+- **Declarations and types:** `type`, `of`, `as`, `copy`, `cast`, `must`, `this`, `This`, `into`
 - **Word operators:** `is`, `not`, `and`, `or`
 - **Literals:** `true`, `false`, `none`
 
-`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions and names a retention destination on a planned callback parameter. See @../closures/ (Closures). A line-initial `case` introduces a match or readiness arm. Whether `case` is reserved outside arm headers, including in MON field names, remains open.
+`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places allocations in declared regions and names a retention destination on a planned callback parameter. See @../closures/ (Closures). A line-initial `case` introduces a match or readiness arm. Both `case` and `into` follow the global shared reservation rule, including in MON. The bare words `async`, `yield` and `checked` are ordinary names in the target grammar. The syntax cutover retires their obsolete keyword paths. The `$checked` proof-budget directive remains a separate open proposal.
 
 ### Builtin types
 

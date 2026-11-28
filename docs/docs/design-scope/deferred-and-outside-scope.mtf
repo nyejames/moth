@@ -96,6 +96,7 @@ compiler needn't provide a "coming later" diagnostic.
 
 Current open questions include:
 
+- standalone braced blocks: an ordinary lexical scope or anonymous declared region. Neither form is part of the syntax migration.
 - distinct primitive-backed nominal wrapper or newtype syntax
 - narrow references to named, monomorphic, non-capturing functions
 - @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), whose

@@ -27,4 +27,4 @@ A Boolean decision uses one pair of braces. A bare `else` starts the other branc
 
 This call prints `Waiting`. Both branches belong to the same `if` block.
 Only the first branch can use its local name `message`. Indentation shows
-the nesting. The braces and branch headers determine where names are visible.
+the nesting. Braces mark the block and the construct determines scope.

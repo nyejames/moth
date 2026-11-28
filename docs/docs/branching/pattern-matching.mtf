@@ -12,8 +12,8 @@ A full match checks one value against a sequence of patterns.
 ### Match shape
 
 - The match evaluates its subject once and checks arms in source order.
-- Each pattern arm begins a logical line with `case`. An optional `if` guard follows the pattern and must evaluate to Bool.
-- A colon ends the header. The arm body starts on that line or continues on later lines.
+- A full match has at least one pattern arm. Each pattern arm begins a logical line with the reserved keyword `case`. An optional `if` guard follows the pattern and must evaluate to Bool.
+- A colon ends the header. Each case has a body, which starts on that line or continues on later lines. A final statement `else:` may be empty.
 - The next arm at the same match depth or the closing brace ends the body. Captures belong to that arm's guard and body.
 - The first matching arm with a true or omitted guard runs. A selected arm never falls through to its neighbour.
 
