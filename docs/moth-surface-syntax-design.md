@@ -44,7 +44,7 @@ The second event carries a width of 1280 and a height of 720. The function reads
 | `case ...:` and `else:` | An arm and its fallback. A subject match tests patterns. An expressionless `if` selects a channel operation. |
 | `then` and `return` | `then` supplies a result to an enclosing value-producing construct. `return` exits the function. |
 
-Moth code closes these blocks with `}`. Strings, raw text and embedded languages can still contain literal braces or semicolons. Grouping an expression in parentheses continues to work. Standalone braces introduce neither an anonymous record nor a general-purpose lexical block.
+Braces mark the block and the construct determines scope. Moth code closes these blocks with `}`. Strings, raw text and embedded languages can still contain literal braces or semicolons. Grouping an expression in parentheses continues to work. Standalone braces introduce neither an anonymous record nor a general-purpose lexical block. Whether to add a standalone lexical block or anonymous lifetime region remains a separate open design question.
 
 ### Parameter brackets
 
@@ -102,6 +102,10 @@ caption |ready Bool| -> String {
 
 The multi-bind receives two separate result slots. A declaration, assignment or return can receive a producing block. A value-producing branch must supply its required results or leave that path through recognised control flow.
 
+### Block layout
+
+The opening brace appears on the same logical line as the end of its header. Newlines separate ordinary statements. An empty or single-statement body may share the header's line. Nested blocks and consecutive closing braces can share a physical line, and a closing brace may follow a statement even when the block spans several lines. A new sibling statement still requires its normal statement boundary. A comment may follow a closer. A closer may also be followed by punctuation belonging to an enclosing construct. A braced conditional's bare `else` and each match or readiness arm header begin a logical line. A terminal arm's body and the final closer may share a line without a special grammar exception. Indentation has no grammatical meaning. Prefer a separate aligned closing line for multiline blocks when formatting.
+
 ### Pattern matches
 
 ```moth
@@ -131,7 +135,7 @@ greet |name String?| -> String {
 }
 ```
 
-A full match evaluates its subject once and considers its arms in source order. Each pattern arm begins with `case` at the start of a logical line. The fallback begins with `else:`. The colon ends the pattern and optional guard. The body can begin on that line or continue across several lines. The next arm at the same match depth or the closing brace ends the body.
+A full match evaluates its subject once and considers its arms in source order. Each pattern arm begins with the reserved keyword `case` at the start of a logical line. A match requires at least one `case`, and each case requires a body. A final statement fallback may be bodyless. The fallback begins with `else:`. The colon ends the pattern and optional guard. The body can begin on that line or continue across several lines. The next arm at the same match depth or the closing brace ends the body.
 
 Choice patterns capture all payload fields in declaration order. Use `as` to rename an arm-local capture. Those bindings are available to the pattern's guard and body. A guard leaves open the path where the pattern matches but the guard is false. The existing exhaustiveness rules apply. An unguarded choice match can cover all alternatives, and an option match can cover presence and absence. An ordinary numeric match needs a fallback. A bodyless final `else:` in a statement match explicitly ignores the remaining cases.
 
@@ -392,7 +396,7 @@ Migrate collection literals according to what they store. Old `names = {"Priya",
 - **Closing the intended construct.** In a Boolean `if`, `else` belongs inside the open brace pair. An `else` after the completed outer `}` with no enclosing conditional is an error. A missing inner `}` should identify its opener. A literal `}` in `[: }]` neither closes the executable body nor repairs the missing brace.
 - **Region exit.** A binding placed into an enclosing `request` region from a straight-line nested `scratch` remains usable after `scratch` closes. An ordinary local of `scratch` goes out of scope there. Placing an ancestor-owned declaration across a conditional boundary still fails. Returning early still ends every region exited.
 
-Two compatibility details remain for planning. Determine how `case` affects existing source identifiers and MON schemas with names such as `case` or `Case`. MON has no arm grammar. Also settle any exact formatter rules for inline arms and brace placement. The line-initial arm marker and the distinction between bare `else` and fallback `else:` belong to the agreed grammar. Example layout alone does not establish additional rules.
+The shared identifier policy reserves `case` and `into` after the syntax cutover, including their case variants and leading-underscore forms in MON. Release the obsolete bare-word reservations `async`, `yield` and `checked`. The proposed `$checked` directive remains a separate open research question. Remove the obsolete bare-keyword grammar and diagnostics. Section 2 fixes the layout grammar independently of formatter preferences. Standalone blocks remain an open question outside the migration.
 
 ### Reference revisions
 
