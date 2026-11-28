@@ -28,6 +28,8 @@ mod transfer;
 mod types;
 
 pub(crate) use error::BorrowCheckError;
+#[cfg(feature = "detailed_timers")]
+pub(crate) use transfer::{BorrowTiming, BorrowTimingOwner};
 pub(crate) use types::{BorrowAnalysis, BorrowCheckReport, BorrowDropSiteKind};
 
 #[cfg(test)]
@@ -69,8 +71,32 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Validate against the already-converged contracts without replaying extraction.
+#[cfg(test)]
 pub(in crate::compiler_frontend) fn check_borrows(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    inputs: (
+        FxHashMap<FunctionId, PublicCallSummary>,
+        &CanonicalTypeProjectionContext<'_>,
+    ),
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    check_borrows_attributed(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+        inputs,
+        #[cfg(feature = "detailed_timers")]
+        None,
+    )
+}
+
+/// Validate against the already-converged contracts without replaying extraction.
+pub(in crate::compiler_frontend) fn check_borrows_attributed(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
@@ -80,16 +106,19 @@ pub(in crate::compiler_frontend) fn check_borrows(
         FxHashMap<FunctionId, PublicCallSummary>,
         &CanonicalTypeProjectionContext<'_>,
     ),
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    BorrowChecker::new(
+    let checker = BorrowChecker::new(
         module,
         type_environment,
         external_package_registry,
         path_fork,
         string_table,
     )
-    .with_type_projection(projection)
-    .run(summaries)
+    .with_type_projection(projection);
+    #[cfg(feature = "detailed_timers")]
+    let checker = checker.with_timing(timing);
+    checker.run(summaries)
 }
 
 #[cfg(test)]
@@ -190,6 +219,7 @@ pub(in crate::compiler_frontend) fn seed_call_summaries(
     Ok(report)
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(in crate::compiler_frontend) fn stabilize_call_metadata(
     module: &HirModule,
@@ -201,13 +231,39 @@ pub(in crate::compiler_frontend) fn stabilize_call_metadata(
     report: &mut BorrowCheckReport,
     scope: Option<&FxHashSet<FunctionId>>,
 ) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
+    stabilize_call_metadata_attributed(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+        projection,
+        report,
+        scope,
+        #[cfg(feature = "detailed_timers")]
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::compiler_frontend) fn stabilize_call_metadata_attributed(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    projection: &CanonicalTypeProjectionContext<'_>,
+    report: &mut BorrowCheckReport,
+    scope: Option<&FxHashSet<FunctionId>>,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
+) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
     if !scope.map_or_else(
         || report.metadata.has_work(),
         |scope| report.metadata.has_work_for(scope),
     ) {
         return Ok(Vec::new());
     }
-    let mut checker = BorrowChecker::new(
+    let checker = BorrowChecker::new(
         module,
         type_environment,
         external_package_registry,
@@ -215,6 +271,9 @@ pub(in crate::compiler_frontend) fn stabilize_call_metadata(
         string_table,
     )
     .with_type_projection(projection);
+    #[cfg(feature = "detailed_timers")]
+    let checker = checker.with_timing(timing);
+    let mut checker = checker;
     checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
     let result = report.metadata.solve(&mut checker, scope);
     report.analysis.public_call_summaries = checker.public_call_summaries;
@@ -222,21 +281,32 @@ pub(in crate::compiler_frontend) fn stabilize_call_metadata(
 }
 
 /// Widen call mutation effects from already-validated reaches, without replaying transfer.
-pub(in crate::compiler_frontend) fn refresh_call_mutation_effects(
+pub(in crate::compiler_frontend) fn refresh_call_mutation_effects_attributed(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
     report: &mut BorrowCheckReport,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<(), BorrowCheckError> {
-    let mut checker = BorrowChecker::without_transfer_indices(
+    #[cfg(feature = "detailed_timers")]
+    let _refresh_timing = timing.map(|timing| {
+        timing.start(
+            crate::timing::TimingMetric::FrontendBorrowConvergeDirtyRefresh,
+            crate::timing::TimingMetric::FrontendGeneratedBorrowDirtyRefresh,
+        )
+    });
+    let checker = BorrowChecker::without_transfer_indices(
         module,
         type_environment,
         external_package_registry,
         path_fork,
         string_table,
     );
+    #[cfg(feature = "detailed_timers")]
+    let checker = checker.with_timing(timing);
+    let mut checker = checker;
     checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
     checker.finalize_public_call_summary_effects_to_fixed_point(report)?;
     report.analysis.public_call_summaries = checker.public_call_summaries;

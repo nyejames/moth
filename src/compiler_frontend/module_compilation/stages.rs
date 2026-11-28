@@ -4,10 +4,13 @@
 //!      the owning compiler state is live, without cloning the compiler's whole `StringTable`.
 
 use crate::compiler_frontend::CompilerFrontend;
+#[cfg(feature = "detailed_timers")]
+use crate::compiler_frontend::analysis::borrow_checker::BorrowTiming;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows as check_hir_borrows,
-    refresh_call_mutation_effects as finalize_mutation_effects,
-    seed_call_summaries as seed_contracts, stabilize_call_metadata as stabilize_allocation_facts,
+    BorrowCheckReport, check_borrows_attributed as check_hir_borrows,
+    refresh_call_mutation_effects_attributed as finalize_mutation_effects,
+    seed_call_summaries as seed_contracts,
+    stabilize_call_metadata_attributed as stabilize_allocation_facts,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::Ast;
@@ -68,6 +71,7 @@ pub(in crate::compiler_frontend::module_compilation) fn stabilize_call_metadata(
     >,
     report: &mut BorrowCheckReport,
     scope: Option<&FxHashSet<FunctionId>>,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<Vec<(FunctionId, bool)>, PreparedFailure> {
     let result = stabilize_allocation_facts(
         hir,
@@ -78,10 +82,13 @@ pub(in crate::compiler_frontend::module_compilation) fn stabilize_call_metadata(
         projection,
         report,
         scope,
+        #[cfg(feature = "detailed_timers")]
+        timing,
     );
     compiler.prepare_borrow_check_result(result, types, warnings, owner)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     compiler: &mut CompilerFrontend<'_>,
     hir_module: &HirModule,
@@ -92,6 +99,7 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     projection: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<
         '_,
     >,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<(), PreparedFailure> {
     let result = check_hir_borrows(
         hir_module,
@@ -103,6 +111,8 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
             std::mem::take(&mut report.analysis.public_call_summaries),
             projection,
         ),
+        #[cfg(feature = "detailed_timers")]
+        timing,
     );
     let checked = compiler.prepare_borrow_check_result(
         result,
@@ -121,6 +131,7 @@ pub(in crate::compiler_frontend::module_compilation) fn refresh_call_mutation_ef
     warnings: &mut DiagnosticBag,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
     report: &mut BorrowCheckReport,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<(), PreparedFailure> {
     let result = finalize_mutation_effects(
         hir_module,
@@ -129,6 +140,8 @@ pub(in crate::compiler_frontend::module_compilation) fn refresh_call_mutation_ef
         &compiler.path_fork,
         &compiler.string_table,
         report,
+        #[cfg(feature = "detailed_timers")]
+        timing,
     );
     compiler.prepare_borrow_check_result(result, type_environment, warnings, frozen_identity_handle)
 }

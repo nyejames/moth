@@ -45,6 +45,8 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_co
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+#[cfg(feature = "detailed_timers")]
+use crate::timing::TimingMetric;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 #[cfg(test)]
@@ -218,6 +220,8 @@ pub(super) struct BorrowChecker<'a> {
     // One frontend-owned local call contract used by transfer and retained for semantic consumers.
     pub(super) public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
     pub(super) local_types: FxHashMap<LocalId, TypeId>,
+    #[cfg(feature = "detailed_timers")]
+    pub(super) timing: Option<super::transfer::BorrowTiming>,
     #[cfg(test)]
     pub(super) forward_probe: Option<RefCell<ForwardProbe>>,
 }
@@ -271,9 +275,17 @@ impl<'a> BorrowChecker<'a> {
             region_parent_by_id: FxHashMap::default(),
             public_call_summaries: FxHashMap::default(),
             local_types: FxHashMap::default(),
+            #[cfg(feature = "detailed_timers")]
+            timing: None,
             #[cfg(test)]
             forward_probe: None,
         }
+    }
+
+    #[cfg(feature = "detailed_timers")]
+    pub(super) fn with_timing(mut self, timing: Option<super::transfer::BorrowTiming>) -> Self {
+        self.timing = timing;
+        self
     }
 
     pub(super) fn with_type_projection(
@@ -324,6 +336,8 @@ impl<'a> BorrowChecker<'a> {
             type_projection: self.type_projection,
             diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
             typed_call_cache: Default::default(),
+            #[cfg(feature = "detailed_timers")]
+            timing: self.timing,
         }
     }
 
@@ -342,6 +356,13 @@ impl<'a> BorrowChecker<'a> {
     }
 
     fn run_validation(mut self) -> Result<BorrowCheckReport, BorrowCheckError> {
+        #[cfg(feature = "detailed_timers")]
+        let _validation_timing = self.timing.map(|timing| {
+            timing.start(
+                TimingMetric::FrontendBorrowConvergeValidation,
+                TimingMetric::FrontendGeneratedBorrowValidation,
+            )
+        });
         let mut report = BorrowCheckReport::default();
 
         for function_index in 0..self.module.functions.len() {
@@ -1105,6 +1126,8 @@ impl<'a> BorrowChecker<'a> {
                     source.order,
                     state,
                     deliver,
+                    #[cfg(feature = "detailed_timers")]
+                    self.timing,
                 )?;
             } else {
                 let mut incoming = state;
@@ -1157,6 +1180,8 @@ impl<'a> BorrowChecker<'a> {
                     outcomes,
                     order,
                     state,
+                    #[cfg(feature = "detailed_timers")]
+                    self.timing,
                 )?);
             }
             let operations = view.operations;
@@ -1472,6 +1497,7 @@ pub(super) fn replay_captured_sparse_support(
     order: OrderKey,
     mut state: Rc<BorrowState>,
     mut deliver: impl FnMut(Rc<BorrowState>),
+    #[cfg(feature = "detailed_timers")] timing: Option<super::transfer::BorrowTiming>,
 ) -> Result<(), BorrowCheckError> {
     if let [stratum] = batch.post.as_slice()
         && stratum
@@ -1499,6 +1525,8 @@ pub(super) fn replay_captured_sparse_support(
             outcomes.iter().copied(),
             order,
             Rc::make_mut(&mut state),
+            #[cfg(feature = "detailed_timers")]
+            timing,
         )?;
         deliver(state);
         return Ok(());
@@ -1546,9 +1574,9 @@ pub(super) fn replay_captured_sparse_support(
         } else {
             Rc::clone(base.as_ref().expect("shared replay input"))
         };
-        apply_captured_call_batch(
+        apply_captured_call_batch_from(
             view,
-            CapturedCallBatch {
+            Cow::Owned(CapturedCallBatch {
                 post: vec![MatchedStratum {
                     #[cfg(test)]
                     guard: stratum.guard.clone(),
@@ -1558,19 +1586,19 @@ pub(super) fn replay_captured_sparse_support(
                 member_reads: batch.member_reads.clone(),
                 checkpoints: batch.checkpoints.clone(),
                 detachment: batch.detachment.clone(),
-            },
+            }),
             outcomes.iter().copied(),
             order,
             Rc::make_mut(&mut branch),
+            #[cfg(feature = "detailed_timers")]
+            timing,
         )?;
         deliver(branch);
     }
     Ok(())
 }
 
-/// Apply the captures of one selected outcome and no effects from its sibling.
-/// Reads use entry coordinates; a receiving destination never supplies a
-/// source for another captured operation.
+#[cfg(test)]
 pub(super) fn apply_captured_call_batch(
     view: EdgeTransferView<'_>,
     batch: CapturedCallBatch<impl CapturedPosts>,
@@ -1578,15 +1606,27 @@ pub(super) fn apply_captured_call_batch(
     order: OrderKey,
     state: &mut BorrowState,
 ) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
-    apply_captured_call_batch_from(view, Cow::Owned(batch), outcomes, order, state)
+    apply_captured_call_batch_from(
+        view,
+        Cow::Owned(batch),
+        outcomes,
+        order,
+        state,
+        #[cfg(feature = "detailed_timers")]
+        None,
+    )
 }
 
-fn apply_captured_call_batch_from<P: CapturedPosts>(
+/// Apply the captures of one selected outcome and no effects from its sibling.
+/// Reads use entry coordinates; a receiving destination never supplies a
+/// source for another captured operation.
+pub(super) fn apply_captured_call_batch_from<P: CapturedPosts>(
     view: EdgeTransferView<'_>,
     batch: Cow<'_, CapturedCallBatch<P>>,
     outcomes: impl IntoIterator<Item = usize>,
     order: OrderKey,
     state: &mut BorrowState,
+    #[cfg(feature = "detailed_timers")] timing: Option<super::transfer::BorrowTiming>,
 ) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     if batch
         .post
@@ -1600,6 +1640,13 @@ fn apply_captured_call_batch_from<P: CapturedPosts>(
             ),
         );
     }
+    #[cfg(feature = "detailed_timers")]
+    let _publication_timing = timing.map(|timing| {
+        timing.start(
+            TimingMetric::FrontendBorrowConvergePublication,
+            TimingMetric::FrontendGeneratedBorrowPublication,
+        )
+    });
     let layout = view.operations;
     let mut observations = ValueObservations::default();
     let (mut post, mut destinations, mut detachment) = match batch {

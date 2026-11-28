@@ -6,6 +6,8 @@ use super::super::layer::{
 };
 use super::{CallArgumentTransfer, CallTransferContext};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+#[cfg(feature = "detailed_timers")]
+use crate::compiler_frontend::analysis::borrow_checker::BorrowTiming;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, AllocationRetirement, BindingAlt, BindingTarget, BorrowState, CellId,
     Coverage, DependencySet, FamilyMember, FieldKey, OrderKey, Origin, PlaceResolution,
@@ -25,8 +27,12 @@ use crate::compiler_frontend::external_packages::{ExternalReturnAlias, ExternalR
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::statements::HirLocalDestination;
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::public_call_summary::{CallField, CallFieldHir};
 use crate::compiler_frontend::public_call_summary::{allocation_error, typed};
+#[cfg(feature = "detailed_timers")]
+use crate::timing::TimingMetric;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -150,6 +156,13 @@ pub(super) fn capture_typed_actuals(
     ports: &[typed::EntryPort],
 ) -> Result<Vec<EntryCapture>, BorrowCheckError> {
     use typed::EntryPort;
+    #[cfg(feature = "detailed_timers")]
+    let _capture_timing = input.context.timing.map(|timing| {
+        timing.start(
+            TimingMetric::FrontendBorrowConvergeCapture,
+            TimingMetric::FrontendGeneratedBorrowCapture,
+        )
+    });
     let mut captured = vec![EntryCapture::default(); ports.len()];
     for (at, port) in ports.iter().enumerate() {
         let (parameter, selectors) = match port {
@@ -411,6 +424,13 @@ pub(super) fn match_call_actuals(
     error: bool,
 ) -> Result<MatchedLane, BorrowCheckError> {
     let context = input.context;
+    #[cfg(feature = "detailed_timers")]
+    let _match_timing = context.timing.map(|timing| {
+        timing.start(
+            TimingMetric::FrontendBorrowConvergeMatch,
+            TimingMetric::FrontendGeneratedBorrowMatch,
+        )
+    });
     let selected = input.call_components;
     let site = (input.block_id, input.current_order, error);
     let mut cache = context.typed_call_cache.lanes.borrow_mut();
@@ -553,6 +573,8 @@ pub(super) fn match_call_actuals(
         },
         lane,
         selection,
+        #[cfg(feature = "detailed_timers")]
+        context.timing,
     )
     .map_err(Into::into)
 }
@@ -1044,7 +1066,13 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn match_typed_lane(
     input: &impl MatchInput,
     lane: &typed::Lane,
 ) -> Result<MatchedLane, InfrastructureFailure> {
-    match_selected_lane(input, lane, None)
+    match_selected_lane(
+        input,
+        lane,
+        None,
+        #[cfg(feature = "detailed_timers")]
+        None,
+    )
 }
 
 fn selected_components<'a>(
@@ -1060,13 +1088,29 @@ fn match_selected_lane(
     input: &impl MatchInput,
     lane: &typed::Lane,
     selection: Option<&[typed::SupportId]>,
+    #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
 ) -> Result<MatchedLane, InfrastructureFailure> {
     let mut strata = Vec::new();
     lane.visit_compatible(
-        |predicate| observe_typed_guard(input, predicate),
+        |predicate| {
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(FrontendCounter::BorrowMatcherGuardTests, 1);
+            observe_typed_guard(input, predicate)
+        },
         |path, product| {
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(FrontendCounter::BorrowMatcherProductVisits, 1);
             if let Some(presentation) = guard_presentation(input, path, &[])? {
-                let mut components = capture_product(&presentation, path, product, selection)?;
+                let mut components = {
+                    #[cfg(feature = "detailed_timers")]
+                    let _capture_timing = timing.map(|timing| {
+                        timing.start(
+                            TimingMetric::FrontendBorrowConvergeCapture,
+                            TimingMetric::FrontendGeneratedBorrowCapture,
+                        )
+                    });
+                    capture_product(&presentation, path, product, selection)?
+                };
                 weaken_product_collisions(input.state(), &mut components);
                 strata.push(MatchedStratum {
                     #[cfg(test)]
@@ -1092,6 +1136,8 @@ fn capture_product(
         let mut alternatives = Vec::with_capacity(component.alternatives.len());
         for post in &component.alternatives {
             let mut capture = |presentation: &GuardPresentation<'_, _>| {
+                #[cfg(feature = "benchmark_counters")]
+                add_frontend_counter(FrontendCounter::BorrowCapturePostVisits, 1);
                 let mut locations = FxHashSet::default();
                 let mut captured = capture_typed_post(presentation, post, |location, definite| {
                     if definite

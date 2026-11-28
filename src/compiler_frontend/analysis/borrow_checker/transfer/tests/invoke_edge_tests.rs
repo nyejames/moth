@@ -29,6 +29,125 @@ fn call_batch(post: CapturedPost, destinations: Vec<CapturedDestination>) -> Cap
     }
 }
 
+#[cfg(feature = "detailed_timers")]
+#[test]
+fn selected_invoke_outcome_records_one_attributed_publication() {
+    use super::{BorrowCheckReport, BorrowChecker};
+    use crate::compiler_frontend::analysis::borrow_checker::{BorrowTiming, BorrowTimingOwner};
+    use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
+    use crate::timing::{
+        TimingBoundaryKind, TimingContext, TimingMetric, register_timing_boundary,
+        register_timing_module, start_benchmark_collection,
+    };
+
+    let _timing_lock = crate::timing::lock_instrumentation_tests();
+    for (body, is_success, timing_owner, measured, other) in [
+        (
+            "return 1",
+            true,
+            BorrowTimingOwner::BaseConverge,
+            TimingMetric::FrontendBorrowConvergePublication,
+            TimingMetric::FrontendGeneratedBorrowPublication,
+        ),
+        (
+            "return! Error(\"missing\")",
+            false,
+            BorrowTimingOwner::GeneratedRecheck,
+            TimingMetric::FrontendGeneratedBorrowPublication,
+            TimingMetric::FrontendBorrowConvergePublication,
+        ),
+    ] {
+        let source = format!(
+            "sample || -> I32, Error!:\n    {body}\n;\n\
+             probe || -> I32:\n    return sample() catch then 0\n;"
+        );
+        let fixture = PreparedHirFixture::new(&source);
+        let module = &fixture.hir;
+        let mut checker = BorrowChecker::new(
+            module,
+            &module.type_environment,
+            &fixture.packages,
+            &fixture.paths,
+            &fixture.strings,
+        )
+        .with_type_projection(&fixture.type_projection());
+        checker.build_public_call_summaries().unwrap();
+        let (probe_index, probe) = module
+            .functions
+            .iter()
+            .enumerate()
+            .find(|(_, function)| {
+                module
+                    .side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| fixture.paths.component(path))
+                    .is_some_and(|component| fixture.strings.resolve(component) == "probe")
+            })
+            .unwrap();
+        let (success, error) = checker
+            .collect_reachable_blocks(probe)
+            .unwrap()
+            .into_iter()
+            .find_map(|id| {
+                match &checker
+                    .block_by_id_or_error(id, probe.id)
+                    .unwrap()
+                    .terminator
+                {
+                    HirTerminator::Invoke {
+                        success, failure, ..
+                    } => Some((*success, *failure)),
+                    _ => None,
+                }
+            })
+            .expect("the explicitly fallible call must lower to Invoke");
+
+        let session = start_benchmark_collection(true).unwrap();
+        let boundary =
+            register_timing_boundary(TimingBoundaryKind::MainProject, || "borrow".into());
+        let module_key = register_timing_module(boundary, 0, "invoke", 1, source.len() as u64);
+        let mut checker = checker.with_timing(Some(BorrowTiming {
+            owner: timing_owner,
+            context: Some(TimingContext::for_module(module_key)),
+        }));
+        let mut report = BorrowCheckReport::default();
+        checker.analyze_function(probe_index, &mut report).unwrap();
+        assert_eq!(
+            report.analysis.block_entry_states.contains_key(&success),
+            is_success
+        );
+        assert_eq!(
+            report.analysis.block_entry_states.contains_key(&error),
+            !is_success
+        );
+
+        let snapshot = session.finish();
+        let timing = snapshot
+            .modules
+            .iter()
+            .find(|module| module.key == module_key)
+            .unwrap();
+        let samples = |metric| {
+            timing
+                .timings
+                .iter()
+                .find(|row| row.metric == metric)
+                .unwrap()
+                .samples
+        };
+        assert_eq!(
+            samples(measured),
+            1,
+            "only the reached typed outcome publishes: {body}"
+        );
+        assert_eq!(
+            samples(other),
+            0,
+            "the active stage owns the publication: {body}"
+        );
+    }
+}
+
 #[test]
 fn typed_invoke_retires_both_outcomes_and_rebases_retained_entry_cell() {
     use crate::compiler_frontend::analysis::borrow_checker::state::{BindingSpec, SmallSet};

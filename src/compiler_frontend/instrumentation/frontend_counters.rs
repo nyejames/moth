@@ -139,6 +139,20 @@ pub(crate) enum FrontendCounter {
     BorrowStatementFactCount,
     BorrowTerminatorFactCount,
     BorrowValueFactCount,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowFirstExtractions,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowDirtyReextractions,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowDependencyRevisits,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowIndexRebuildFunctions,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowMatcherGuardTests,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowMatcherProductVisits,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowCapturePostVisits,
     BorrowIndexEntryPorts,
     BorrowIndexAccessIncidences,
     BorrowIndexReachIncidences,
@@ -440,6 +454,13 @@ mod detailed {
     static BORROW_STATEMENT_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_TERMINATOR_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_VALUE_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_FIRST_EXTRACTIONS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_DIRTY_REEXTRACTIONS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_DEPENDENCY_REVISITS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_REBUILD_FUNCTIONS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_MATCHER_GUARD_TESTS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_MATCHER_PRODUCT_VISITS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_CAPTURE_POST_VISITS: AtomicUsize = AtomicUsize::new(0);
     static BORROW_INDEX_ENTRY_PORTS: AtomicUsize = AtomicUsize::new(0);
     static BORROW_INDEX_ACCESS_INCIDENCES: AtomicUsize = AtomicUsize::new(0);
     static BORROW_INDEX_REACH_INCIDENCES: AtomicUsize = AtomicUsize::new(0);
@@ -724,6 +745,13 @@ mod detailed {
             FrontendCounter::BorrowStatementFactCount,
             FrontendCounter::BorrowTerminatorFactCount,
             FrontendCounter::BorrowValueFactCount,
+            FrontendCounter::BorrowFirstExtractions,
+            FrontendCounter::BorrowDirtyReextractions,
+            FrontendCounter::BorrowDependencyRevisits,
+            FrontendCounter::BorrowIndexRebuildFunctions,
+            FrontendCounter::BorrowMatcherGuardTests,
+            FrontendCounter::BorrowMatcherProductVisits,
+            FrontendCounter::BorrowCapturePostVisits,
             FrontendCounter::BorrowIndexEntryPorts,
             FrontendCounter::BorrowIndexAccessIncidences,
             FrontendCounter::BorrowIndexReachIncidences,
@@ -1037,6 +1065,13 @@ mod detailed {
 
             FrontendCounter::BorrowTerminatorFactCount => &BORROW_TERMINATOR_FACT_COUNT,
 
+            FrontendCounter::BorrowFirstExtractions => &BORROW_FIRST_EXTRACTIONS,
+            FrontendCounter::BorrowDirtyReextractions => &BORROW_DIRTY_REEXTRACTIONS,
+            FrontendCounter::BorrowDependencyRevisits => &BORROW_DEPENDENCY_REVISITS,
+            FrontendCounter::BorrowIndexRebuildFunctions => &BORROW_INDEX_REBUILD_FUNCTIONS,
+            FrontendCounter::BorrowMatcherGuardTests => &BORROW_MATCHER_GUARD_TESTS,
+            FrontendCounter::BorrowMatcherProductVisits => &BORROW_MATCHER_PRODUCT_VISITS,
+            FrontendCounter::BorrowCapturePostVisits => &BORROW_CAPTURE_POST_VISITS,
             FrontendCounter::BorrowValueFactCount => &BORROW_VALUE_FACT_COUNT,
             FrontendCounter::BorrowIndexEntryPorts => &BORROW_INDEX_ENTRY_PORTS,
             FrontendCounter::BorrowIndexAccessIncidences => &BORROW_INDEX_ACCESS_INCIDENCES,
@@ -1486,6 +1521,13 @@ mod detailed {
             FrontendCounter::BorrowTerminatorFactCount => "borrow_terminator_fact_count",
 
             FrontendCounter::BorrowValueFactCount => "borrow_value_fact_count",
+            FrontendCounter::BorrowFirstExtractions => "borrow_first_extractions",
+            FrontendCounter::BorrowDirtyReextractions => "borrow_dirty_reextractions",
+            FrontendCounter::BorrowDependencyRevisits => "borrow_dependency_revisits",
+            FrontendCounter::BorrowIndexRebuildFunctions => "borrow_index_rebuild_functions",
+            FrontendCounter::BorrowMatcherGuardTests => "borrow_matcher_guard_tests",
+            FrontendCounter::BorrowMatcherProductVisits => "borrow_matcher_product_visits",
+            FrontendCounter::BorrowCapturePostVisits => "borrow_capture_post_visits",
             FrontendCounter::BorrowIndexEntryPorts => "borrow_index_entry_ports",
             FrontendCounter::BorrowIndexAccessIncidences => "borrow_index_access_incidences",
             FrontendCounter::BorrowIndexReachIncidences => "borrow_index_reach_incidences",

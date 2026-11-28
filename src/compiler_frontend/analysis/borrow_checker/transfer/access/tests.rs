@@ -3853,6 +3853,21 @@ probe |rows ~{Holder}| -> I32:\n\
         .expect("summarize the two pushes");
     let blocks = checker.collect_reachable_blocks(probe).unwrap();
     let layout = checker.build_function_layout(probe, &blocks).unwrap();
+    #[cfg(feature = "detailed_timers")]
+    let _timing_lock = crate::timing::lock_instrumentation_tests();
+    #[cfg(feature = "detailed_timers")]
+    let (session, module_key) = {
+        use crate::timing::{
+            TimingBoundaryKind, register_timing_boundary, register_timing_module,
+            start_benchmark_collection,
+        };
+        let session = start_benchmark_collection(true).unwrap();
+        let boundary =
+            register_timing_boundary(TimingBoundaryKind::MainProject, || "borrow".into());
+        let module_key =
+            register_timing_module(boundary, 0, "immediate call", 1, source.len() as u64);
+        (session, module_key)
+    };
     let context = BorrowTransferContext {
         external_package_registry: &fixture.packages,
         public_call_summaries: &checker.public_call_summaries,
@@ -3867,6 +3882,11 @@ probe |rows ~{Holder}| -> I32:\n\
         type_projection: fixture.type_projection(),
         diagnostics: BorrowDiagnostics::new(module, &fixture.paths, &fixture.strings),
         typed_call_cache: Default::default(),
+        #[cfg(feature = "detailed_timers")]
+        timing: Some(super::super::BorrowTiming {
+            owner: super::super::BorrowTimingOwner::BaseConverge,
+            context: Some(crate::timing::TimingContext::for_module(module_key)),
+        }),
     };
     let mut state = BorrowState::new_uninitialized(layout.local_count());
     let rows = layout.index_of(probe.params[0]).unwrap();
@@ -3902,6 +3922,26 @@ probe |rows ~{Holder}| -> I32:\n\
         results,
     )
     .expect("capture and publish the append without a validation sink");
+    #[cfg(feature = "detailed_timers")]
+    {
+        use crate::timing::TimingMetric;
+        let snapshot = session.finish();
+        let module = snapshot
+            .modules
+            .iter()
+            .find(|module| module.key == module_key)
+            .unwrap();
+        let samples = |metric| {
+            module
+                .timings
+                .iter()
+                .find(|row| row.metric == metric)
+                .unwrap()
+                .samples
+        };
+        assert_eq!(samples(TimingMetric::FrontendBorrowConvergePublication), 1);
+        assert_eq!(samples(TimingMetric::FrontendGeneratedBorrowPublication), 0);
+    }
     assert_eq!(stats.conflicts_checked, 0);
     assert!(stats.statement_facts.is_empty());
     transfer_block(&context, &layout, block, &mut state).expect("transfer the authored append");

@@ -2240,6 +2240,8 @@ fn transfer_isolated_statement(
             checker.string_table,
         ),
         typed_call_cache: Default::default(),
+        #[cfg(feature = "detailed_timers")]
+        timing: None,
     };
     let isolated_block = HirBlock {
         id: original_block.id,

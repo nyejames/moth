@@ -187,6 +187,35 @@ impl IntoIterator for ReplayStates {
     }
 }
 
+#[cfg(feature = "detailed_timers")]
+#[derive(Clone, Copy)]
+pub(crate) enum BorrowTimingOwner {
+    BaseConverge,
+    GeneratedRecheck,
+}
+
+#[cfg(feature = "detailed_timers")]
+#[derive(Clone, Copy)]
+pub(crate) struct BorrowTiming {
+    pub(crate) owner: BorrowTimingOwner,
+    pub(crate) context: Option<crate::timing::TimingContext>,
+}
+
+#[cfg(feature = "detailed_timers")]
+impl BorrowTiming {
+    pub(crate) fn start(
+        self,
+        base: crate::timing::TimingMetric,
+        generated: crate::timing::TimingMetric,
+    ) -> crate::timing::PipelineTimingGuardAttributed {
+        let metric = match self.owner {
+            BorrowTimingOwner::BaseConverge => base,
+            BorrowTimingOwner::GeneratedRecheck => generated,
+        };
+        crate::timing::PipelineTimingGuardAttributed::new(metric, || self.context)
+    }
+}
+
 pub(super) struct BorrowTransferContext<'a> {
     // WHAT: shared lookup/diagnostic tables for one function transfer pass.
     // WHY: avoids repeated module scans while statements/terminators are analyzed.
@@ -205,6 +234,8 @@ pub(super) struct BorrowTransferContext<'a> {
         crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'a>,
     pub diagnostics: BorrowDiagnostics<'a>,
     pub typed_call_cache: typed_call::TypedCallCache,
+    #[cfg(feature = "detailed_timers")]
+    pub timing: Option<BorrowTiming>,
 }
 
 /// The storage queries use local indices, not validation's dense liveness tables.
@@ -334,6 +365,8 @@ pub(super) fn transfer_sparse_block(
                         |branch| {
                             next.insert(branch, false);
                         },
+                        #[cfg(feature = "detailed_timers")]
+                        context.timing,
                     )?;
                 } else {
                     next.insert(state, false);

@@ -13,6 +13,7 @@ use super::conflicts::{
 };
 use super::layer::needs_layer_store_capture;
 use super::*;
+use crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch_from;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, AllocationRetirement, CapturedValue, Coverage, EntryFamilies, FieldKey,
     ReceiverDependency, ResolvedPlace, RootSet, SmallSet, TypedStore, ValueAlt,
@@ -34,6 +35,7 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::public_call_summary::typed::{SupportId, TypedCallAllocationFacts};
+use std::borrow::Cow;
 
 #[cfg(test)]
 mod typed_argument_tests {
@@ -62,6 +64,8 @@ mod typed_argument_tests {
             expressions: &module.expressions,
             type_environment: &types,
             typed_call_cache: Default::default(),
+            #[cfg(feature = "detailed_timers")]
+            timing: None,
             type_projection:
                 crate::compiler_frontend::ast::generic_functions::registered_type_projection(
                     &types, &packages,
@@ -223,6 +227,8 @@ mod typed_argument_tests {
             expressions: &module.expressions,
             type_environment: &types,
             typed_call_cache: Default::default(),
+            #[cfg(feature = "detailed_timers")]
+            timing: None,
             type_projection:
                 crate::compiler_frontend::ast::generic_functions::registered_type_projection(
                     &types, &packages,
@@ -1154,7 +1160,6 @@ fn transfer_typed_user_call(
     facts: Option<&TypedCallAllocationFacts>,
     transfer: CallResultTransfer,
 ) -> Result<(), BorrowCheckError> {
-    use crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch;
     use crate::compiler_frontend::public_call_summary::typed::EntryPort;
 
     let error = match transfer {
@@ -1312,14 +1317,16 @@ fn transfer_typed_user_call(
             input.stats.sparse_call = Some(success);
             return Ok(());
         }
-        let observations = apply_captured_call_batch(
+        let observations = apply_captured_call_batch_from(
             super::super::EdgeTransferView {
                 operations: input.view,
             },
-            success,
+            Cow::Owned(success),
             [],
             input.current_order,
             input.state,
+            #[cfg(feature = "detailed_timers")]
+            input.context.timing,
         )?;
         input.stats.observations.append(observations);
     } else {
@@ -1441,11 +1448,17 @@ fn publish_call_continuations(
                 input.stats.invoke.success.unreachable = true;
             }
         } else if let Some(batch) = batch {
-            let observations =
-                crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch(
-                    super::super::EdgeTransferView { operations: input.view },
-                    batch, [], input.current_order, input.state,
-                )?;
+            let observations = apply_captured_call_batch_from(
+                super::super::EdgeTransferView {
+                    operations: input.view,
+                },
+                Cow::Owned(batch),
+                [],
+                input.current_order,
+                input.state,
+                #[cfg(feature = "detailed_timers")]
+                input.context.timing,
+            )?;
             input.stats.observations.append(observations);
         } else {
             input.stats.diverges = true;

@@ -34,6 +34,8 @@ use crate::compiler_frontend::public_call_summary::{
     typed::{PortId, SupportId},
     validate_public_call_summary_transition,
 };
+#[cfg(feature = "detailed_timers")]
+use crate::timing::TimingMetric;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{BTreeSet, VecDeque};
 
@@ -73,6 +75,8 @@ struct FunctionMetadata {
     revision: u64,
     indexed_revision: Option<u64>,
     schema: Option<BodySchema>,
+    #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+    extracted: bool,
 }
 
 /// Entry and declaration support available before a full sparse index exists.
@@ -107,6 +111,8 @@ impl BorrowMetadataCache {
                     revision: 0,
                     indexed_revision: None,
                     schema: Some(BodySchema::from(function)),
+                    #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+                    extracted: false,
                 },
             );
             cache.unindexed.insert(position);
@@ -228,6 +234,8 @@ impl BorrowMetadataCache {
             scope.is_some(),
             queue,
             on_visit,
+            #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+            Some(&mut self.bodies),
         );
         if let Ok(changed) = &result {
             if let Some(scope) = scope {
@@ -273,6 +281,18 @@ impl BorrowMetadataCache {
             if rebuilding.is_empty() {
                 return Ok(());
             }
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(
+                FrontendCounter::BorrowIndexRebuildFunctions,
+                rebuilding.len(),
+            );
+            #[cfg(feature = "detailed_timers")]
+            let _rebuild_timing = checker.timing.map(|timing| {
+                timing.start(
+                    TimingMetric::FrontendBorrowConvergeIndexRebuild,
+                    TimingMetric::FrontendGeneratedBorrowIndexRebuild,
+                )
+            });
             let mut changed_envelopes = FxHashSet::default();
             let callers = &mut self.callers;
             let bodies = &self.bodies;
@@ -591,6 +611,8 @@ impl<'a> BorrowChecker<'a> {
             false,
             (0..self.module.functions.len()).collect(),
             |_| {},
+            #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+            None,
         )
         .map(|_| ())
     }
@@ -603,6 +625,9 @@ impl<'a> BorrowChecker<'a> {
         record_changes: bool,
         mut queue: VecDeque<usize>,
         mut on_visit: impl FnMut(FunctionId),
+        #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))] mut bodies: Option<
+            &mut FxHashMap<FunctionId, FunctionMetadata>,
+        >,
     ) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
         if queue.is_empty() {
             return Ok(Vec::new());
@@ -618,7 +643,41 @@ impl<'a> BorrowChecker<'a> {
             on_visit(function.id);
             let previous = &self.public_call_summaries[&function.id];
             let index = &indices.current[&function.id];
-            let return_alias = self.classify_function_return_alias(function, index)?;
+            let return_alias = {
+                #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+                let first = bodies.as_deref_mut().is_some_and(|bodies| {
+                    !std::mem::replace(
+                        &mut bodies.get_mut(&function.id).expect("known body").extracted,
+                        true,
+                    )
+                });
+                #[cfg(feature = "benchmark_counters")]
+                if bodies.is_some() {
+                    let counter = if first {
+                        FrontendCounter::BorrowFirstExtractions
+                    } else if matches!(previous.return_alias, FunctionReturnAliasSummary::Pending) {
+                        FrontendCounter::BorrowDirtyReextractions
+                    } else {
+                        FrontendCounter::BorrowDependencyRevisits
+                    };
+                    add_frontend_counter(counter, 1);
+                }
+                #[cfg(feature = "detailed_timers")]
+                let _extraction_timing = self.timing.map(|timing| {
+                    if first {
+                        timing.start(
+                            TimingMetric::FrontendBorrowConvergeFirstExtraction,
+                            TimingMetric::FrontendGeneratedBorrowFirstExtraction,
+                        )
+                    } else {
+                        timing.start(
+                            TimingMetric::FrontendBorrowConvergeReextraction,
+                            TimingMetric::FrontendGeneratedBorrowReextraction,
+                        )
+                    }
+                });
+                self.classify_function_return_alias(function, index)?
+            };
             if previous.return_alias == return_alias {
                 indices.displaced.remove(&function.id);
                 continue;

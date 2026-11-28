@@ -93,10 +93,11 @@ fn schema_version_is_v2_and_levels_are_well_formed() {
     }
 }
 
-/// Timing schema v2 contains 49 metrics, split into 34 Basic and 15 Detailed.
+/// Timing schema v2 contains 68 metrics, split into 34 Basic and 34 Detailed.
+/// BC-06 B2b.3d added Detailed borrow evidence only, so Basic stays fixed.
 #[test]
 fn registry_size_matches_plan_closeout() {
-    assert_eq!(TimingMetric::ALL.len(), 49);
+    assert_eq!(TimingMetric::ALL.len(), 68);
     let basic = TimingMetric::ALL
         .iter()
         .filter(|metric| metric.descriptor().level == TimingLevel::Basic)
@@ -106,7 +107,7 @@ fn registry_size_matches_plan_closeout() {
         .filter(|metric| metric.descriptor().level == TimingLevel::Detailed)
         .count();
     assert_eq!(basic, 34);
-    assert_eq!(detailed, 15);
+    assert_eq!(detailed, 34);
 }
 
 /// Every command-accounting metric owns one distinct pipeline segment.

@@ -322,6 +322,61 @@ timing_metrics! {
     FrontendGeneratedBorrowRecheck,
         "frontend.generated.borrow_recheck", Basic, Accumulated, Module, Universal, Frontend,
         Some(TimingParent::SummaryGroup(TimingSummaryGroup::GeneratedFunctions)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeFirstExtraction,
+        "frontend.borrow.converge.first_extraction", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeReextraction,
+        "frontend.borrow.converge.reextraction", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeIndexRebuild,
+        "frontend.borrow.converge.index_rebuild", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeLaneInstall,
+        "frontend.borrow.converge.lane_install", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeDirtyRefresh,
+        "frontend.borrow.converge.dirty_refresh", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeMatch,
+        "frontend.borrow.converge.call_match", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeCapture,
+        "frontend.borrow.converge.call_capture", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergeValidation,
+        "frontend.borrow.converge.final_validation", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendBorrowConvergePublication,
+        "frontend.borrow.converge.selected_publication", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendBorrowConverge)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowFirstExtraction,
+        "frontend.generated.borrow_recheck.first_extraction", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowReextraction,
+        "frontend.generated.borrow_recheck.reextraction", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowIndexRebuild,
+        "frontend.generated.borrow_recheck.index_rebuild", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowLaneInstall,
+        "frontend.generated.borrow_recheck.lane_install", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowDirtyRefresh,
+        "frontend.generated.borrow_recheck.dirty_refresh", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowMatch,
+        "frontend.generated.borrow_recheck.call_match", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowCapture,
+        "frontend.generated.borrow_recheck.call_capture", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowValidation,
+        "frontend.generated.borrow_recheck.final_validation", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+    FrontendGeneratedBorrowPublication,
+        "frontend.generated.borrow_recheck.selected_publication", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendGeneratedBorrowRecheck)), TimingAccountingRole::Evidence;
+
 // `frontend.public_interface.finalise`: post-borrow public-interface
 // closure.
     FrontendPublicInterfaceFinalise,
@@ -332,6 +387,9 @@ timing_metrics! {
     FrontendModuleSemanticTotal,
         "frontend.module.semantic_total", Basic, Accumulated, Module, Universal, Frontend,
         None, TimingAccountingRole::Evidence;
+    FrontendBorrowGraphReset,
+        "frontend.borrow.graph_reset", Detailed, NestedEvidence, Module, Universal, Frontend,
+        Some(TimingParent::Metric(TimingMetric::FrontendModuleSemanticTotal)), TimingAccountingRole::Evidence;
 // `config.ast.total`: complete config AST construction.
     ConfigAstTotal, "config.ast.total", Detailed, NestedEvidence, None, Universal, BuildSystem,
         Some(TimingParent::Metric(TimingMetric::BuildBootstrapTotal)), TimingAccountingRole::Evidence;
@@ -468,8 +526,27 @@ pub(crate) const fn benchmark_label(metric: TimingMetric) -> &'static str {
         TimingMetric::FrontendBorrowConverge => "borrow convergence",
         TimingMetric::FrontendGeneratedMaterialise => "generated materialise",
         TimingMetric::FrontendGeneratedBorrowRecheck => "generated borrow recheck",
+        TimingMetric::FrontendBorrowConvergeFirstExtraction => "borrow first extraction",
+        TimingMetric::FrontendBorrowConvergeReextraction => "borrow re-extraction",
+        TimingMetric::FrontendBorrowConvergeIndexRebuild => "borrow index rebuild",
+        TimingMetric::FrontendBorrowConvergeLaneInstall => "borrow lane install",
+        TimingMetric::FrontendBorrowConvergeDirtyRefresh => "borrow dirty refresh",
+        TimingMetric::FrontendBorrowConvergeMatch => "borrow call matching",
+        TimingMetric::FrontendBorrowConvergeCapture => "borrow call capture",
+        TimingMetric::FrontendBorrowConvergeValidation => "borrow final validation",
+        TimingMetric::FrontendBorrowConvergePublication => "borrow selected publication",
+        TimingMetric::FrontendGeneratedBorrowFirstExtraction => "generated borrow first extraction",
+        TimingMetric::FrontendGeneratedBorrowReextraction => "generated borrow re-extraction",
+        TimingMetric::FrontendGeneratedBorrowIndexRebuild => "generated borrow index rebuild",
+        TimingMetric::FrontendGeneratedBorrowLaneInstall => "generated borrow lane install",
+        TimingMetric::FrontendGeneratedBorrowDirtyRefresh => "generated borrow dirty refresh",
+        TimingMetric::FrontendGeneratedBorrowMatch => "generated borrow call matching",
+        TimingMetric::FrontendGeneratedBorrowCapture => "generated borrow call capture",
+        TimingMetric::FrontendGeneratedBorrowValidation => "generated borrow final validation",
+        TimingMetric::FrontendGeneratedBorrowPublication => "generated borrow selected publication",
         TimingMetric::FrontendPublicInterfaceFinalise => "final public interface",
         TimingMetric::FrontendModuleSemanticTotal => "module semantics",
+        TimingMetric::FrontendBorrowGraphReset => "borrow graph reset",
         TimingMetric::ConfigAstTotal => "config AST",
         TimingMetric::ConfigAstEnvironment => "config AST environment",
         TimingMetric::ConfigAstEmit => "config AST emit",

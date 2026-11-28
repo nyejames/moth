@@ -13,6 +13,8 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+#[cfg(feature = "detailed_timers")]
+use crate::compiler_frontend::analysis::borrow_checker::{BorrowTiming, BorrowTimingOwner};
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     WitnessCandidates, retain_bounded_witness_hops, select_failure_witness,
@@ -713,6 +715,11 @@ fn stabilize_final_call_metadata(
                 base_projection,
                 report,
                 None,
+                #[cfg(feature = "detailed_timers")]
+                Some(BorrowTiming {
+                    owner: BorrowTimingOwner::BaseConverge,
+                    context: timing_context,
+                }),
             )
         )
         .map(|_| ());
@@ -776,6 +783,11 @@ fn stabilize_final_call_metadata(
                             base_projection,
                             report,
                             Some(scope),
+                            #[cfg(feature = "detailed_timers")]
+                            Some(BorrowTiming {
+                                owner: BorrowTimingOwner::BaseConverge,
+                                context: timing_context,
+                            }),
                         )
                     )?,
                     ConvergenceNode::Generated(identity) => {
@@ -790,8 +802,19 @@ fn stabilize_final_call_metadata(
                             crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
                                 &executable.type_environment, &registry, |projection| {
                                     stabilize_call_metadata(
-                                        compiler, &executable.hir, &executable.type_environment,
-                                        warnings, Some(&source_owner), projection, &mut executable.borrow_analysis, Some(scope),
+                                        compiler,
+                                        &executable.hir,
+                                        &executable.type_environment,
+                                        warnings,
+                                        Some(&source_owner),
+                                        projection,
+                                        &mut executable.borrow_analysis,
+                                        Some(scope),
+                                        #[cfg(feature = "detailed_timers")]
+                                        Some(BorrowTiming {
+                                            owner: BorrowTimingOwner::GeneratedRecheck,
+                                            context: timing_context,
+                                        }),
                                     )
                                 },
                             )
@@ -1099,15 +1122,23 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 generated_transaction,
                 &convergence_model,
             );
-            reset_final_call_metadata(
-                hir_module,
-                generated_transaction,
-                &mut borrow_analysis,
-                &convergence_model,
-                old_edges.as_ref().unwrap_or(&edges),
-                &edges,
-                &receipts,
-            );
+            {
+                #[cfg(feature = "detailed_timers")]
+                crate::timing_scope_attributed!(
+                    _graph_reset,
+                    crate::timing::TimingMetric::FrontendBorrowGraphReset,
+                    timing_context,
+                );
+                reset_final_call_metadata(
+                    hir_module,
+                    generated_transaction,
+                    &mut borrow_analysis,
+                    &convergence_model,
+                    old_edges.as_ref().unwrap_or(&edges),
+                    &edges,
+                    &receipts,
+                );
+            }
             for (index, receipt) in receipts.iter().enumerate() {
                 if receipt.newly_executable_handlers.is_empty() {
                     continue;
@@ -1208,6 +1239,11 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         &mut borrow_analysis,
                         base_projection,
                         true,
+                        #[cfg(feature = "detailed_timers")]
+                        Some(BorrowTiming {
+                            owner: BorrowTimingOwner::BaseConverge,
+                            context: timing_context,
+                        }),
                     )
                 )?;
                 let Some(previous_summaries) = previous_summaries else {
@@ -1267,6 +1303,11 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                                 &mut executable.borrow_analysis,
                                 projection,
                                 false,
+                                #[cfg(feature = "detailed_timers")]
+                                Some(BorrowTiming {
+                                    owner: BorrowTimingOwner::GeneratedRecheck,
+                                    context: timing_context,
+                                }),
                             ),
                         )
                     )?;
@@ -1581,12 +1622,24 @@ fn install_validated_failure_lanes(
             crate::timing::TimingMetric::FrontendBorrowConverge
         },
         timing_context,
-        install_private_failure_lanes(
-            hir,
-            report,
-            type_environment,
-            compiler.external_package_registry.as_ref(),
-        )
+        {
+            #[cfg(feature = "detailed_timers")]
+            crate::timing_scope_attributed!(
+                _lane_install,
+                if source_owner.is_some() {
+                    crate::timing::TimingMetric::FrontendGeneratedBorrowLaneInstall
+                } else {
+                    crate::timing::TimingMetric::FrontendBorrowConvergeLaneInstall
+                },
+                timing_context,
+            );
+            install_private_failure_lanes(
+                hir,
+                report,
+                type_environment,
+                compiler.external_package_registry.as_ref(),
+            )
+        }
     )
     .map_err(|failure| match failure {
         HirConstructionFailure::Diagnosed(mut diagnostic) => {
@@ -1645,17 +1698,33 @@ impl BorrowVisit {
         report: &mut BorrowCheckReport,
         projection: &CanonicalTypeProjectionContext<'_>,
         compare_base_summaries: bool,
+        #[cfg(feature = "detailed_timers")] timing: Option<BorrowTiming>,
     ) -> Result<Option<FxHashMap<FunctionId, PublicCallSummary>>, PreparedFailure> {
         let previous =
             compare_base_summaries.then(|| report.analysis.public_call_summaries.clone());
         match self {
             Self::InferFailure => infer_builtin_failure_summaries(hir, report),
-            Self::Check => {
-                check_borrows(compiler, hir, types, warnings, owner, report, projection)?
-            }
-            Self::RefreshMutation => {
-                refresh_call_mutation_effects(compiler, hir, types, warnings, owner, report)?;
-            }
+            Self::Check => check_borrows(
+                compiler,
+                hir,
+                types,
+                warnings,
+                owner,
+                report,
+                projection,
+                #[cfg(feature = "detailed_timers")]
+                timing,
+            )?,
+            Self::RefreshMutation => refresh_call_mutation_effects(
+                compiler,
+                hir,
+                types,
+                warnings,
+                owner,
+                report,
+                #[cfg(feature = "detailed_timers")]
+                timing,
+            )?,
         }
         Ok(previous)
     }
