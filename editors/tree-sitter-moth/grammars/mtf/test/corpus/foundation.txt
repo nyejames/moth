@@ -1,0 +1,29 @@
+==================
+Implicit body and embedded expressions
+==================
+# Title
+-- text [name]
+[$html:<b>ok</b>]
+---
+
+(template_file
+  (template_text)
+  (construction (construction_head (identifier)))
+  (template_text)
+  (construction
+    (construction_head (formatter_directive))
+    (template_body (template_text)))
+  (template_text))
+
+==================
+Balanced note is not live code
+==================
+[$note: [name]]
+---
+
+(template_file
+  (construction
+    (note_directive)
+    (note_body (note_text) (note_brackets (note_body (note_text)))))
+  (template_text))
+

@@ -1,0 +1,39 @@
+==================
+Implicit record
+==================
+title = "Moth",
+settings = (enabled = true, count = 12),
+---
+
+(document
+  (record_fields
+    (record_field (identifier) (field_separator) (string))
+    (record_field (identifier) (field_separator)
+      (record (record_fields
+        (record_field (identifier) (field_separator) (boolean))
+        (record_field (identifier) (field_separator) (number)))))))
+
+==================
+Explicit record and distinct containers
+==================
+(names = ["Priya", "Rob"], scores = ["Priya" = 10], empty = [=], rows = [[1], []])
+---
+
+(document
+  (record (record_fields
+    (record_field (identifier) (field_separator) (sequence (string) (string)))
+    (record_field (identifier) (field_separator) (map (map_entries (map_entry (string) (map_separator) (number)))))
+    (record_field (identifier) (field_separator) (map))
+    (record_field (identifier) (field_separator) (sequence (sequence (number)) (sequence))))))
+
+==================
+Unicode escapes
+==================
+letter = '\u{1F98B}', name = "\u{41}",
+---
+
+(document
+  (record_fields
+    (record_field (identifier) (field_separator) (character))
+    (record_field (identifier) (field_separator) (string))))
+

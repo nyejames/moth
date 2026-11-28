@@ -1,0 +1,17 @@
+{
+  "name": "tree-sitter-moth-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Moth editor grammar development (unpublished)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "generate": "node scripts/grammar.cjs generate",
+    "test": "node scripts/grammar.cjs test",
+    "test:lexical": "node --test tests/lexical.test.cjs"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "0.25.10"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "grammars": [
+    {
+      "name": "moth",
+      "camelcase": "Moth",
+      "scope": "source.moth",
+      "path": "grammars/moth",
+      "file-types": [
+        "moth"
+      ],
+      "highlights": "grammars/moth/queries/highlights.scm",
+      "injections": "grammars/moth/queries/injections.scm",
+      "injection-regex": "^moth$"
+    },
+    {
+      "name": "moth_template",
+      "camelcase": "MothTemplate",
+      "scope": "source.mtf",
+      "path": "grammars/mtf",
+      "file-types": [
+        "mtf"
+      ],
+      "highlights": "grammars/mtf/queries/highlights.scm",
+      "injections": "grammars/mtf/queries/injections.scm"
+    },
+    {
+      "name": "mon",
+      "camelcase": "Mon",
+      "scope": "source.mon",
+      "path": "grammars/mon",
+      "file-types": [
+        "mon"
+      ],
+      "highlights": "grammars/mon/queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.0.0",
+    "description": "Moth, Moth template and MON syntax parsers",
+    "authors": [
+      {
+        "name": "Moth contributors"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/nyejames/moth"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "java": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}

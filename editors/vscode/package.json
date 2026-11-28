@@ -1,0 +1,134 @@
+{
+  "name": "moth-highligher",
+  "displayName": "Moth",
+  "description": "Experimental Moth, MTF and MON syntax fallback (unpublished)",
+  "version": "0.0.0",
+  "files": [
+    "package.json",
+    "syntaxes/*.json",
+    "language-configuration.json",
+    "mtf-language-configuration.json",
+    "mon-language-configuration.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "publisher": "Nye",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:static": "node --test tests/inventory.test.cjs"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "moth",
+        "aliases": [
+          "moth"
+        ],
+        "extensions": [
+          ".moth"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "mtf",
+        "aliases": [
+          "mothtemplate",
+          "moth template file",
+          "moth template",
+          "Moth Template",
+          "Moth Template File",
+          "mtf"
+        ],
+        "extensions": [
+          ".mtf"
+        ],
+        "configuration": "./mtf-language-configuration.json"
+      },
+      {
+        "id": "mon",
+        "aliases": [
+          "MON",
+          "Moth Object Notation"
+        ],
+        "extensions": [
+          ".mon"
+        ],
+        "configuration": "./mon-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "moth",
+        "scopeName": "source.moth",
+        "path": "./syntaxes/moth.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.markdown.moth": "markdown",
+          "meta.embedded.block.css.moth": "css",
+          "meta.embedded.block.html.moth": "html",
+          "meta.embedded.block.code.js.moth": "javascript",
+          "meta.embedded.block.code.ts.moth": "typescript",
+          "meta.embedded.block.code.py.moth": "python",
+          "meta.embedded.block.code.mothlang.moth": "moth",
+          "meta.embedded.block.code.generic.moth": "plaintext",
+          "meta.embedded.block.code.rs.moth": "rust",
+          "meta.embedded.block.code.shell.moth": "shellscript",
+          "meta.embedded.block.code.html.moth": "html",
+          "meta.embedded.block.code.markdown.moth": "markdown",
+          "meta.embedded.block.code.toml.moth": "toml",
+          "meta.embedded.block.code.json.moth": "json",
+          "meta.embedded.block.code.yaml.moth": "yaml",
+          "meta.embedded.block.code.css.moth": "css",
+          "meta.embedded.block.code.c.moth": "c",
+          "meta.embedded.block.code.sql.moth": "sql"
+        }
+      },
+      {
+        "language": "mtf",
+        "scopeName": "source.mtf",
+        "path": "./syntaxes/mtf.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.markdown.moth": "markdown",
+          "meta.embedded.block.css.moth": "css",
+          "meta.embedded.block.html.moth": "html",
+          "meta.embedded.block.code.js.moth": "javascript",
+          "meta.embedded.block.code.ts.moth": "typescript",
+          "meta.embedded.block.code.py.moth": "python",
+          "meta.embedded.block.code.mothlang.moth": "moth",
+          "meta.embedded.block.code.generic.moth": "plaintext",
+          "meta.embedded.block.code.rs.moth": "rust",
+          "meta.embedded.block.code.shell.moth": "shellscript",
+          "meta.embedded.block.code.html.moth": "html",
+          "meta.embedded.block.code.markdown.moth": "markdown",
+          "meta.embedded.block.code.toml.moth": "toml",
+          "meta.embedded.block.code.json.moth": "json",
+          "meta.embedded.block.code.yaml.moth": "yaml",
+          "meta.embedded.block.code.css.moth": "css",
+          "meta.embedded.block.code.c.moth": "c",
+          "meta.embedded.block.code.sql.moth": "sql"
+        }
+      },
+      {
+        "language": "mon",
+        "scopeName": "source.mon",
+        "path": "./syntaxes/mon.tmLanguage.json"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nyejames/moth",
+    "directory": "editors/vscode"
+  },
+  "devDependencies": {
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  },
+  "private": true
+}

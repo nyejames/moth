@@ -1,0 +1,86 @@
+{
+  "name": "MON",
+  "scopeName": "source.mon",
+  "patterns": [
+    {
+      "include": "source.moth#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#chars"
+    },
+    {
+      "include": "source.moth#numbers"
+    },
+    {
+      "name": "constant.language.boolean.mon",
+      "match": "\\b(?:true|false)\\b"
+    },
+    {
+      "name": "constant.language.none.mon",
+      "match": "\\bnone\\b"
+    },
+    {
+      "name": "variable.other.property.mon",
+      "match": "[\\p{L}_][\\p{L}\\p{N}_]*(?=[^\\S\\r\\n]+=)"
+    },
+    {
+      "name": "entity.name.type.mon",
+      "match": "\\b[\\p{Lu}][\\p{L}\\p{N}_]*\\b"
+    },
+    {
+      "name": "keyword.operator.mon",
+      "match": "=|::"
+    },
+    {
+      "name": "punctuation.brackets.mon",
+      "match": "[()\\[\\],]"
+    },
+    {
+      "name": "variable.other.mon",
+      "match": "[\\p{L}_][\\p{L}\\p{N}_]*"
+    }
+  ],
+  "repository": {
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.mon",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.mon",
+              "match": "\\\\(?:[\"\\\\nrt]|u\\{[0-9a-fA-F]{1,6}\\})"
+            },
+            {
+              "name": "invalid.illegal.string.escape.mon",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "chars": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.mon",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.mon",
+              "match": "\\\\(?:['\\\\nrt]|u\\{[0-9a-fA-F]{1,6}\\})"
+            },
+            {
+              "name": "invalid.illegal.string.escape.mon",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
