@@ -1,0 +1,777 @@
+{
+  "version": "0.3.0",
+  "name": "Moth Template File",
+  "scopeName": "source.mtf",
+  "patterns": [
+    {
+      "include": "#mtf-implicit-body"
+    }
+  ],
+  "repository": {
+    "mtf-implicit-body": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": "^",
+          "end": "(?!)",
+          "contentName": "meta.embedded.block.markdown.moth text.html.markdown",
+          "patterns": [
+            {
+              "include": "#mtf-markdown-body"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-markdown-body": {
+      "patterns": [
+        {
+          "include": "#mtf-template-children"
+        },
+        {
+          "include": "source.moth#markdown-fragment"
+        }
+      ]
+    },
+    "mtf-template-children": {
+      "patterns": [
+        {
+          "include": "#mtf-template-markdown"
+        },
+        {
+          "include": "#mtf-template-raw"
+        },
+        {
+          "include": "#mtf-template-escape-html"
+        },
+        {
+          "include": "#mtf-template-html"
+        },
+        {
+          "include": "source.moth#template-note"
+        },
+        {
+          "include": "source.moth#template-slot"
+        },
+        {
+          "include": "source.moth#template-code-js"
+        },
+        {
+          "include": "source.moth#template-code-ts"
+        },
+        {
+          "include": "source.moth#template-code-py"
+        },
+        {
+          "include": "source.moth#template-code-rs"
+        },
+        {
+          "include": "source.moth#template-code-shell"
+        },
+        {
+          "include": "source.moth#template-code-moth"
+        },
+        {
+          "include": "source.moth#template-code-html"
+        },
+        {
+          "include": "source.moth#template-code-markdown"
+        },
+        {
+          "include": "source.moth#template-code-toml"
+        },
+        {
+          "include": "source.moth#template-code-json"
+        },
+        {
+          "include": "source.moth#template-code-yaml"
+        },
+        {
+          "include": "source.moth#template-code-css"
+        },
+        {
+          "include": "source.moth#template-code-c"
+        },
+        {
+          "include": "source.moth#template-code-sql"
+        },
+        {
+          "include": "source.moth#template-code-generic"
+        },
+        {
+          "include": "source.moth#template-css"
+        },
+        {
+          "include": "#mtf-template-default"
+        },
+        {
+          "include": "source.moth#template-generic"
+        }
+      ]
+    },
+    "mtf-template-default": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.markdown.moth",
+          "begin": "\\[(?=[^\\[\\]]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#mtf-template-head-until-formatter"
+            },
+            {
+              "include": "#mtf-template-formatter-fallbacks"
+            },
+            {
+              "include": "#mtf-template-body-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.markdown.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$md\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.moth#template-head"
+            },
+            {
+              "include": "#mtf-template-body-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-raw": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.raw.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$raw\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.moth#template-head"
+            },
+            {
+              "include": "#mtf-template-body-raw"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-escape-html": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.escape-html.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$escape_html\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.moth#template-head"
+            },
+            {
+              "include": "#mtf-template-body-escape-html"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-html": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.html.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$html\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.moth#template-head"
+            },
+            {
+              "include": "#mtf-template-body-html"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-body-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.markdown.moth text.html.markdown",
+          "patterns": [
+            {
+              "include": "#mtf-markdown-body"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-body-raw": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-children"
+            },
+            {
+              "name": "string.unquoted.template.body.moth",
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-body-escape-html": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-children"
+            },
+            {
+              "name": "string.unquoted.template.body.moth",
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-body-html": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.html.moth text.html.basic",
+          "patterns": [
+            {
+              "include": "#mtf-template-children"
+            },
+            {
+              "include": "source.moth#embedded-html"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-formatter-fallbacks": {
+      "patterns": [
+        {
+          "name": "meta.template.code.js.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:js|javascript)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-js"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.ts.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:ts|typescript)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-ts"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.py.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:py|python)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-py"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.rs.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:rs|rust)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-rs"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.shell.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:sh|shell|bash)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-shell"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.mothlang.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:moth)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-moth"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:html)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-html"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.markdown.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:md|markdown)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-markdown"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.toml.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:toml)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-toml"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.json.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:json)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-json"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.yaml.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:yaml|yml)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-yaml"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.css.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:css)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-css"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.c.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:c)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-c"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.sql.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:sql)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-sql"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.generic.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"[^\"]*\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-generic"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.generic.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)\\b(?=[ \\t]*:)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-code-generic"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.markdown.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$md)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-body-markdown"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.raw.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$raw)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-body-raw"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$html)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-body-html"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.css.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$css)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "source.moth#template-body-css"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.escape-html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$escape_html)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#mtf-template-body-escape-html"
+            },
+            {
+              "include": "source.moth#template-head-patterns"
+            }
+          ]
+        }
+      ]
+    },
+    "mtf-template-head-until-formatter": {
+      "name": "meta.template.head.moth",
+      "begin": "(?!(?:\\$(?:md|raw|html|css|escape_html)\\b(?!\\s*\\()|\\$code\\b)|[:\\]])",
+      "end": "(?=\\$(?:md|raw|html|css|escape_html)\\b(?!\\s*\\()|\\$code\\b|:(?!:)|\\])",
+      "patterns": [
+        {
+          "include": "source.moth#template-head-patterns"
+        }
+      ]
+    }
+  }
+}

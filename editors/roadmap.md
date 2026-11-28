@@ -13,6 +13,7 @@ Read [design.md](design.md) first. Its accepted goals and ownership constrain ev
 - [x] Record the required highlighting vocabulary, ObVer policy and approved multi-root grammar organisation.
 - [x] Add the initial settled grammar subset, corpus and injection experiments in `tree-sitter-moth/`. This is candidate source until the generator and corpus pass.
 - [ ] Run parser generation and tests on the pinned toolchain. Commit reproducibly generated files only after verification.
+- [x] Import and update the existing TextMate fallback candidate and add focused tokenizer tests.
 - [ ] Validate the ported TextMate candidates with the real tokenizer, then decide their long-term role at M1.
 - [ ] Expand the settled subset only when its tests run. Preserve the remaining syntax and host-specific work for M1/M2.
 - [ ] Verify that every preparation commit changes only `editors/`. Keep root manifests, docs, roadmap, CI and compiler code unchanged.

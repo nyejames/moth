@@ -1,6 +1,20 @@
 # Moth for VS Code
 
-Status: design only. This is the intended replacement for the existing TextMate-based extension, not an installable package.
+Status: unpublished TextMate fallback candidate. It is not the completed TypeScript/Tree-sitter extension.
+
+## Imported fallback
+
+Migrated from [moth-vscode-highlighting](https://github.com/nyejames/moth-vscode-highlighting/tree/392641f3476a05bd73951832e3ce45536775ae4c) at commit `392641f3476a05bd73951832e3ce45536775ae4c`. Retain its Apache-2.0 license, language IDs and existing publisher/name (`Nye.moth-highligher`). The original repository is untouched. The placeholder SemVer manifest is not an ObVer release and must not be published.
+
+Reuse the existing nested body, Markdown, dependency and listing rules. Update new brace/arm and square bracket syntax presentation, remove obsolete keyword/raw-string roles, retain `$fresh`, add `$supplied`, documentation Markdown presentation, trait scopes, additional literal guest listing routes and an initial MON fallback. The original bundled icons, old VSIX builds and retired fixtures are not imported. The old test harness informs the focused tests here.
+
+```sh
+npm ci
+npm run test:static
+npm test
+```
+
+The real tokenizer and editor integration are not verified in this environment. This is a candidate, not complete syntax coverage. The guest registry must supply matching external grammars. Generic and explicit plain text currently share the simple fallback. Full nesting across guest strings, comments, Moth-specific Markdown and CSS inline declarations remain host prototype work. Review the port against the final syntax before replacing the old extension.
 
 ## Planned integration
 

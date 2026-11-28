@@ -1,0 +1,3355 @@
+{
+  "version": "0.3.0",
+  "name": "Moth",
+  "scopeName": "source.moth",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#documentation-template"
+    },
+    {
+      "include": "#source-directives"
+    },
+    {
+      "include": "#dependency-clauses"
+    },
+    {
+      "include": "#path-literals"
+    },
+    {
+      "include": "#invalid-at-sign"
+    },
+    {
+      "include": "#template-nested"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#chars"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#trait-roles"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#type-identifiers"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-dash.moth",
+          "match": "--[^\\n]*"
+        }
+      ]
+    },
+    "source-directives": {
+      "patterns": [
+        {
+          "name": "invalid.illegal.directive.call-syntax.moth",
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*[ \\t]*\\("
+        },
+        {
+          "name": "keyword.control.directive.source.moth",
+          "match": "\\$(?:export|config|doc|todo|fast_math|safe_math|infallible)\\b"
+        },
+        {
+          "name": "invalid.illegal.directive.template-in-source.moth",
+          "match": "\\$(?:before|after|fresh|slot|supplied|in|note|raw|md|html|css|escape_html|code)\\b"
+        },
+        {
+          "name": "invalid.illegal.directive.unknown.moth",
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "dependency-clauses": {
+      "patterns": [
+        {
+          "name": "meta.dependency-clause.moth",
+          "begin": "^(\\s*)(@)((?:\"(?:\\\\[\"\\\\]|[^\"\\\\])*\"|[A-Za-z0-9_.-]+)(?:[\\\\/](?:\"(?:\\\\[\"\\\\]|[^\"\\\\])*\"|[A-Za-z0-9_.-]+))*)(?:(\\s+)(as)(\\s+)([A-Za-z_][A-Za-z0-9_]*)(?=\\s*(?:--.*)?$))?",
+          "beginCaptures": {
+            "2": {
+              "name": "punctuation.definition.path.begin.moth entity.name.path.segment.moth entity.name.module.moth"
+            },
+            "3": {
+              "name": "meta.path.dependency.moth entity.name.path.segment.moth entity.name.module.moth"
+            },
+            "5": {
+              "name": "keyword.other.alias.moth"
+            },
+            "7": {
+              "name": "variable.other.namespace.alias.moth"
+            }
+          },
+          "end": "$|(?=[^ \\t\\r\\nA-Za-z_,-])",
+          "patterns": [
+            {
+              "include": "#dependency-continuation"
+            },
+            {
+              "include": "#dependency-selection-alias"
+            },
+            {
+              "include": "#dependency-selection"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "match": "[ \\t\\r]+",
+              "name": "text.whitespace.moth"
+            }
+          ]
+        }
+      ]
+    },
+    "dependency-continuation": {
+      "patterns": [
+        {
+          "begin": "(,)([ \\t\\r]*)?(--[^\\n]*)?",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.separator.comma.moth"
+            },
+            "2": {
+              "name": "text.whitespace.moth"
+            },
+            "3": {
+              "name": "comment.line.double-dash.moth"
+            }
+          },
+          "end": "(?=[A-Za-z_-])|(?=[^ \\t\\r\\nA-Za-z_,-])",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "match": "[ \\t\\r]+",
+              "name": "text.whitespace.moth"
+            }
+          ]
+        }
+      ]
+    },
+    "dependency-selection-alias": {
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\s+)(as)(\\s+)([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "variable.other.dependency.selection.moth"
+            },
+            "3": {
+              "name": "keyword.other.alias.moth"
+            },
+            "5": {
+              "name": "variable.other.dependency.alias.moth"
+            }
+          }
+        }
+      ]
+    },
+    "dependency-selection": {
+      "patterns": [
+        {
+          "name": "variable.other.dependency.selection.moth",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "path-literals": {
+      "patterns": [
+        {
+          "name": "meta.path.moth",
+          "begin": "(@)(?=[A-Za-z_./\\\\\"])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.path.begin.moth entity.name.path.segment.moth entity.name.module.moth"
+            }
+          },
+          "end": "(?=$|\\s|[,;\\]\\)\\}])",
+          "patterns": [
+            {
+              "include": "#path-components"
+            },
+            {
+              "name": "constant.other.path.relative.moth",
+              "match": "\\.{1,2}(?=[\\\\/\\s\\]\\)\\},;]|$)"
+            },
+            {
+              "name": "text.whitespace.moth",
+              "match": "\\s+"
+            },
+            {
+              "name": "invalid.illegal.path.character.moth",
+              "match": "[^\\sA-Za-z0-9_{}\\\\/,.\"-]"
+            }
+          ]
+        }
+      ]
+    },
+    "path-components": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.path.moth entity.name.path.segment.moth entity.name.module.moth",
+          "match": "[\\\\/]"
+        },
+        {
+          "name": "entity.name.path.segment.moth entity.name.module.moth",
+          "match": "\"(?:\\\\[\"\\\\]|[^\"\\\\])*\"|[A-Za-z0-9_.-]+"
+        }
+      ]
+    },
+    "invalid-at-sign": {
+      "patterns": [
+        {
+          "name": "invalid.illegal.path-at.moth",
+          "match": "@(?![A-Za-z_./\\\\\"])"
+        }
+      ]
+    },
+    "template-nested": {
+      "patterns": [
+        {
+          "include": "#template-note"
+        },
+        {
+          "include": "#template-slot"
+        },
+        {
+          "include": "#template-code-js"
+        },
+        {
+          "include": "#template-code-ts"
+        },
+        {
+          "include": "#template-code-py"
+        },
+        {
+          "include": "#template-code-rs"
+        },
+        {
+          "include": "#template-code-shell"
+        },
+        {
+          "include": "#template-code-moth"
+        },
+        {
+          "include": "#template-code-html"
+        },
+        {
+          "include": "#template-code-markdown"
+        },
+        {
+          "include": "#template-code-toml"
+        },
+        {
+          "include": "#template-code-json"
+        },
+        {
+          "include": "#template-code-yaml"
+        },
+        {
+          "include": "#template-code-css"
+        },
+        {
+          "include": "#template-code-c"
+        },
+        {
+          "include": "#template-code-sql"
+        },
+        {
+          "include": "#template-code-generic"
+        },
+        {
+          "include": "#template-css"
+        },
+        {
+          "include": "#template-html"
+        },
+        {
+          "include": "#template-markdown"
+        },
+        {
+          "include": "#template-raw"
+        },
+        {
+          "include": "#template-escape-html"
+        },
+        {
+          "include": "#template-generic"
+        }
+      ]
+    },
+    "template-head": {
+      "name": "meta.template.head.moth",
+      "begin": "(?=[^:\\]])",
+      "end": "(?=:(?!:)|\\])",
+      "patterns": [
+        {
+          "include": "#template-head-patterns"
+        }
+      ]
+    },
+    "template-head-directive-targets": {
+      "patterns": [
+        {
+          "match": "(\\$supplied)([ \\t]+)([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "variable.parameter.template.slot.target.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$supplied)([ \\t]+)([1-9][0-9]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "constant.numeric.positional-slot.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$slot)([ \\t]*)(\\()",
+          "captures": {
+            "0": {
+              "name": "invalid.illegal.directive.call-syntax.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$in)([ \\t]*)(\\()",
+          "captures": {
+            "0": {
+              "name": "invalid.illegal.directive.call-syntax.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$slot)([ \\t]+)(0)(?![\\p{Nd}])",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "invalid.illegal.template.slot.position.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$slot)([ \\t]+)(\"(?:[^\"\\\\]|\\\\.)*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "invalid.illegal.template.slot.target.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$slot)([ \\t]+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "variable.parameter.template.slot.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$slot)([ \\t]+)([1-9][0-9]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "constant.numeric.positional-slot.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$in)([ \\t]+)(\"(?:[^\"\\\\]|\\\\.)*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.fill.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "invalid.illegal.template.slot.target.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$in)([ \\t]+)(\\d+)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.fill.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "invalid.illegal.template.slot.target.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$in)([ \\t]+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.slot.fill.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "variable.parameter.template.slot.target.moth"
+            }
+          }
+        },
+        {
+          "match": "(\\$code)([ \\t]+)(\"(?:[^\"\\\\]|\\\\.)*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          }
+        }
+      ]
+    },
+    "template-directive": {
+      "patterns": [
+        {
+          "name": "invalid.illegal.directive.call-syntax.moth",
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*[ \\t]*\\("
+        },
+        {
+          "match": "(\\$(?:before|after))([ \\t]*)(=)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "invalid.illegal.directive.operand.moth"
+            }
+          }
+        },
+        {
+          "name": "invalid.illegal.directive.source-in-template.moth",
+          "match": "\\$(?:export|config|doc|todo|fast_math|safe_math|infallible|test)\\b"
+        },
+        {
+          "name": "keyword.control.directive.template.moth",
+          "match": "\\$(?:before|after|fresh|slot|supplied|in|note|raw|md|html|css|escape_html|code)\\b"
+        },
+        {
+          "name": "invalid.illegal.directive.unknown.moth",
+          "match": "\\$[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "template-default-expression": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#template-nested"
+        },
+        {
+          "include": "#path-literals"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#chars"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#trait-roles"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#punctuation"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#type-identifiers"
+        },
+        {
+          "include": "#identifiers"
+        },
+        {
+          "name": "text.whitespace.moth",
+          "match": "\\s+"
+        }
+      ]
+    },
+    "template-slot": {
+      "patterns": [
+        {
+          "name": "meta.template.slot.marker.moth",
+          "begin": "\\[(?=[ \\t\\r\\n]*\\$slot\\b)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth punctuation.definition.slot.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth punctuation.definition.slot.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "name": "invalid.illegal.template.slot.body.moth",
+              "match": ":"
+            },
+            {
+              "include": "#template-head-directive-targets"
+            },
+            {
+              "include": "#template-directive"
+            },
+            {
+              "include": "#template-default-expression"
+            }
+          ]
+        }
+      ]
+    },
+    "template-note": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.comment.note.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$note\\b)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "name": "meta.template.body.moth",
+              "begin": ":",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.separator.template.head-body.moth"
+                }
+              },
+              "end": "(?=\\])",
+              "contentName": "comment.block.template.comment.moth",
+              "patterns": [
+                {
+                  "include": "#note-body"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "note-body": {
+      "patterns": [
+        {
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#note-body"
+            },
+            {
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        },
+        {
+          "match": "[^\\[\\]]+"
+        }
+      ]
+    },
+    "template-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.markdown.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$md\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "template-raw": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.raw.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$raw\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-raw"
+            }
+          ]
+        }
+      ]
+    },
+    "template-escape-html": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.escape-html.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$escape_html\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-escape-html"
+            }
+          ]
+        }
+      ]
+    },
+    "template-html": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.html.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$html\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-html"
+            }
+          ]
+        }
+      ]
+    },
+    "template-css": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.css.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$css\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-css"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-js": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.js.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:js|javascript)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-js"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-ts": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.ts.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:ts|typescript)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-ts"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-py": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.py.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:py|python)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-py"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-rs": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.rs.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:rs|rust)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-rs"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-shell": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.shell.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:sh|shell|bash)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-shell"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-moth": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.mothlang.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:moth)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-moth"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-generic": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.generic.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\b[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-generic"
+            }
+          ]
+        }
+      ]
+    },
+    "template-generic": {
+      "patterns": [
+        {
+          "name": "meta.template.moth",
+          "begin": "\\[",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head-until-formatter"
+            },
+            {
+              "include": "#template-formatter-fallbacks"
+            },
+            {
+              "include": "#template-body-generic"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.markdown.moth text.html.markdown",
+          "patterns": [
+            {
+              "include": "#markdown-fragment"
+            },
+            {
+              "include": "#template-nested"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-generic": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "string.unquoted.template.body.moth",
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-raw": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "string.unquoted.template.body.moth",
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-escape-html": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "string.unquoted.template.body.moth",
+              "match": "[^\\[\\]]+"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-html": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.html.moth text.html.basic",
+          "patterns": [
+            {
+              "include": "#embedded-html"
+            },
+            {
+              "include": "#template-nested"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-css": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.css.moth source.css",
+          "patterns": [
+            {
+              "include": "#embedded-css"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-js": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.js.moth source.js",
+          "patterns": [
+            {
+              "include": "#embedded-code-js"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-ts": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.ts.moth source.ts",
+          "patterns": [
+            {
+              "include": "#embedded-code-ts"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-py": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.py.moth source.python",
+          "patterns": [
+            {
+              "include": "#embedded-code-py"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-rs": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.rs.moth source.rust",
+          "patterns": [
+            {
+              "include": "#embedded-code-rs"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-shell": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.shell.moth source.shell",
+          "patterns": [
+            {
+              "include": "#embedded-code-shell"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-moth": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.mothlang.moth source.moth.embedded",
+          "patterns": [
+            {
+              "include": "#embedded-code-moth"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-generic": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.generic.moth source.code.generic.moth",
+          "patterns": [
+            {
+              "include": "#embedded-code-generic"
+            }
+          ]
+        }
+      ]
+    },
+    "markdown-fragment": {
+      "patterns": [
+        {
+          "include": "#markdown-heading"
+        },
+        {
+          "include": "#markdown-list-unnumbered"
+        },
+        {
+          "include": "#markdown-list-numbered"
+        },
+        {
+          "include": "#markdown-inline"
+        },
+        {
+          "name": "meta.paragraph.markdown",
+          "match": "[^\\[\\]`*@\\n]+"
+        },
+        {
+          "name": "meta.paragraph.markdown",
+          "match": "[^\\[\\]\\n]"
+        }
+      ]
+    },
+    "markdown-heading": {
+      "patterns": [
+        {
+          "name": "markup.heading.markdown",
+          "begin": "^([ \\t]*)(#{1,6})([ \\t]+)",
+          "beginCaptures": {
+            "2": {
+              "name": "punctuation.definition.heading.markdown"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "include": "#markdown-inline"
+            },
+            {
+              "match": "[^\\[\\]`*@\\n]+"
+            },
+            {
+              "match": "[^\\[\\]\\n]"
+            }
+          ]
+        }
+      ]
+    },
+    "markdown-list-unnumbered": {
+      "patterns": [
+        {
+          "name": "markup.list.unnumbered.markdown",
+          "match": "^[ \\t]*(-)(?=[ \\t]+)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.list.begin.markdown"
+            }
+          }
+        }
+      ]
+    },
+    "markdown-list-numbered": {
+      "patterns": [
+        {
+          "name": "markup.list.numbered.markdown",
+          "match": "^[ \\t]*(\\d+\\.)(?=[ \\t]+)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.list.begin.markdown"
+            }
+          }
+        }
+      ]
+    },
+    "markdown-inline": {
+      "patterns": [
+        {
+          "include": "#markdown-link"
+        },
+        {
+          "include": "#markdown-link-multiline"
+        },
+        {
+          "include": "#markdown-section-id"
+        },
+        {
+          "include": "#markdown-inline-code"
+        },
+        {
+          "include": "#markdown-bold"
+        },
+        {
+          "include": "#markdown-italic"
+        },
+        {
+          "include": "#template-nested"
+        }
+      ]
+    },
+    "markdown-link": {
+      "patterns": [
+        {
+          "name": "meta.link.inline.markdown.moth",
+          "match": "(?<!\\S)(@)((?:[A-Za-z][A-Za-z0-9+.-]*:|//|/|\\.\\./|\\./|#|\\?)[^\\s()\\[\\]]*)([ \\t]+)(\\()([^()\\n]*\\S[^()\\n]*)(\\))",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.link.begin.markdown"
+            },
+            "2": {
+              "name": "markup.underline.link.markdown"
+            },
+            "3": {
+              "name": "text.whitespace.moth"
+            },
+            "4": {
+              "name": "punctuation.definition.metadata.begin.markdown"
+            },
+            "5": {
+              "name": "string.other.link.description.title.markdown"
+            },
+            "6": {
+              "name": "punctuation.definition.metadata.end.markdown"
+            }
+          }
+        }
+      ]
+    },
+    "markdown-link-multiline": {
+      "patterns": [
+        {
+          "name": "meta.link.inline.markdown.moth",
+          "begin": "(?<!\\S)(@)((?:[A-Za-z][A-Za-z0-9+.-]*:|//|/|\\.\\./|\\./|\\?)[^\\s()\\[\\]]*)([ \\t]*)(?=\\r?$)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.link.begin.markdown"
+            },
+            "2": {
+              "name": "markup.underline.link.markdown"
+            },
+            "3": {
+              "name": "text.whitespace.moth"
+            }
+          },
+          "end": "(?<=\\))|^(?![ \\t]*\\()",
+          "patterns": [
+            {
+              "match": "^([ \\t]*)(\\()([^()\\r\\n]*\\S[^()\\r\\n]*)(\\))",
+              "captures": {
+                "1": {
+                  "name": "text.whitespace.moth"
+                },
+                "2": {
+                  "name": "punctuation.definition.metadata.begin.markdown"
+                },
+                "3": {
+                  "name": "string.other.link.description.title.markdown"
+                },
+                "4": {
+                  "name": "punctuation.definition.metadata.end.markdown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "markdown-section-id": {
+      "patterns": [
+        {
+          "name": "meta.section-id.markdown.moth",
+          "match": "(?<!\\S)(@)(#)([\\p{L}][\\p{L}\\p{Nd}_-]*)(?![\\p{L}\\p{Nd}_-])(?![ \\t\\r\\n]*\\()",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.section-id.begin.markdown"
+            },
+            "2": {
+              "name": "punctuation.definition.section-id.marker.markdown"
+            },
+            "3": {
+              "name": "entity.other.attribute-name.id.moth"
+            }
+          }
+        }
+      ]
+    },
+    "markdown-inline-code": {
+      "patterns": [
+        {
+          "name": "markup.inline.raw.string.markdown",
+          "begin": "(?<!`)(`)(?!`)(?=[^`\\n]*`)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.raw.markdown"
+            }
+          },
+          "end": "(`)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.raw.markdown"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "markup.inline.raw.string.markdown",
+              "match": "[^`\\[\\]\\n]+"
+            }
+          ]
+        }
+      ]
+    },
+    "markdown-bold": {
+      "patterns": [
+        {
+          "name": "markup.bold.markdown",
+          "begin": "(\\*\\*)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.bold.markdown"
+            }
+          },
+          "end": "(\\*\\*)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.bold.markdown"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#markdown-inline"
+            },
+            {
+              "match": "[^*\\[\\]\\n]+"
+            }
+          ]
+        }
+      ]
+    },
+    "markdown-italic": {
+      "patterns": [
+        {
+          "name": "markup.italic.markdown",
+          "begin": "(?<![*\\p{L}\\p{Nd}_])(\\*)(?![*\\s])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.italic.markdown"
+            }
+          },
+          "end": "(\\*)(?!\\*)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.italic.markdown"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#markdown-inline"
+            },
+            {
+              "match": "[^*\\[\\]\\n]+"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-html": {
+      "patterns": [
+        {
+          "include": "#embedded-html-fragment"
+        },
+        {
+          "include": "#template-nested"
+        }
+      ]
+    },
+    "embedded-html-fragment": {
+      "patterns": [
+        {
+          "name": "comment.block.html.moth",
+          "begin": "<!--",
+          "end": "-->|(?=\\])",
+          "patterns": [
+            {
+              "name": "comment.block.html.moth",
+              "match": "[^-]+"
+            },
+            {
+              "name": "comment.block.html.moth",
+              "match": "."
+            }
+          ]
+        },
+        {
+          "name": "meta.tag.html.moth",
+          "begin": "(</?)(?=[A-Za-z])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.begin.html"
+            }
+          },
+          "end": "(/?>)|(?=\\])",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.end.html"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#embedded-html-string-double"
+            },
+            {
+              "include": "#embedded-html-string-single"
+            },
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "entity.other.attribute-name.html",
+              "match": "\\b[A-Za-z_:][A-Za-z0-9:._-]*\\b(?=\\s*=)"
+            },
+            {
+              "name": "entity.name.tag.html",
+              "match": "\\b[A-Za-z][A-Za-z0-9:-]*\\b"
+            },
+            {
+              "name": "punctuation.separator.key-value.html",
+              "match": "="
+            },
+            {
+              "name": "text.whitespace.moth",
+              "match": "\\s+"
+            },
+            {
+              "name": "invalid.illegal.html-tag-character.moth",
+              "match": "."
+            }
+          ]
+        },
+        {
+          "name": "constant.character.entity.html",
+          "match": "&(?:[A-Za-z][A-Za-z0-9]+|#\\d+|#x[0-9A-Fa-f]+);"
+        },
+        {
+          "name": "text.html.moth",
+          "match": "[^<&\\[\\]]+"
+        },
+        {
+          "name": "text.html.moth",
+          "match": "[^\\[\\]]"
+        }
+      ]
+    },
+    "embedded-html-string-double": {
+      "patterns": [
+        {
+          "name": "meta.attribute.value.html.moth",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.moth string.quoted.double.html.moth"
+            }
+          },
+          "end": "\"|(?=\\])|(?=>)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.moth string.quoted.double.html.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "string.quoted.double.html.moth",
+              "match": "[^\"\\[\\]]+"
+            },
+            {
+              "name": "string.quoted.double.html.moth",
+              "match": "[^\"\\[]"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-html-string-single": {
+      "patterns": [
+        {
+          "name": "meta.attribute.value.html.moth",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.moth string.quoted.single.html.moth"
+            }
+          },
+          "end": "'|(?=\\])|(?=>)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.moth string.quoted.single.html.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-nested"
+            },
+            {
+              "name": "string.quoted.single.html.moth",
+              "match": "[^'\\[\\]]+"
+            },
+            {
+              "name": "string.quoted.single.html.moth",
+              "match": "[^'\\[]"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-css": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.css.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-css"
+            },
+            {
+              "include": "#css-fragment"
+            }
+          ]
+        },
+        {
+          "include": "#css-fragment"
+        }
+      ]
+    },
+    "css-fragment": {
+      "patterns": [
+        {
+          "name": "comment.block.css",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [
+            {
+              "name": "comment.block.css",
+              "match": "[^*\\[\\]]+|."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.css",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.css"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.css"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.css",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.css",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.css"
+            }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.css"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.css",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "support.type.property-name.css",
+          "match": "(?<![-_A-Za-z0-9])(?:--[-_A-Za-z0-9]+|[-_A-Za-z][-_A-Za-z0-9]*)(?=\\s*:)"
+        },
+        {
+          "name": "keyword.control.at-rule.css",
+          "match": "@[-_A-Za-z][-_A-Za-z0-9]*"
+        },
+        {
+          "name": "keyword.other.important.css",
+          "match": "!important\\b"
+        },
+        {
+          "name": "constant.other.color.rgb-value.hex.css",
+          "match": "#[0-9A-Fa-f]{3,8}\\b"
+        },
+        {
+          "name": "constant.numeric.css",
+          "match": "(?<![-_A-Za-z0-9])[-+]?(?:\\d+\\.\\d+|\\d+|\\.\\d+)(?:%|[A-Za-z]+)?\\b"
+        },
+        {
+          "name": "support.function.css",
+          "match": "[-_A-Za-z][-_A-Za-z0-9]*(?=\\()"
+        },
+        {
+          "name": "entity.other.attribute-name.class.css",
+          "match": "\\.[-_A-Za-z][-_A-Za-z0-9]*"
+        },
+        {
+          "name": "entity.other.attribute-name.id.css",
+          "match": "#[-_A-Za-z][-_A-Za-z0-9]*"
+        },
+        {
+          "name": "entity.other.attribute-name.pseudo-class.css",
+          "match": "::?[-_A-Za-z][-_A-Za-z0-9]*"
+        },
+        {
+          "name": "support.constant.property-value.css",
+          "match": "\\b(?:auto|inherit|initial|unset|none|solid|relative|absolute|fixed|sticky|flex|grid|block|inline|inline-block|center|cover|contain|transparent|currentColor)\\b"
+        },
+        {
+          "name": "punctuation.separator.key-value.css",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.terminator.rule.css",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.section.property-list.css",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.function.css",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.separator.comma.css",
+          "match": ","
+        },
+        {
+          "name": "keyword.operator.css",
+          "match": "[>+~=|^$*]"
+        },
+        {
+          "name": "entity.name.tag.css",
+          "match": "\\b[-_A-Za-z][-_A-Za-z0-9]*\\b"
+        },
+        {
+          "name": "text.whitespace.css",
+          "match": "\\s+"
+        },
+        {
+          "name": "source.css",
+          "match": "[^\\[\\]]"
+        }
+      ]
+    },
+    "embedded-code-js": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.js.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-js"
+            },
+            {
+              "include": "source.js"
+            }
+          ]
+        },
+        {
+          "include": "source.js"
+        }
+      ]
+    },
+    "embedded-code-ts": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.ts.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-ts"
+            },
+            {
+              "include": "source.ts"
+            }
+          ]
+        },
+        {
+          "include": "source.ts"
+        }
+      ]
+    },
+    "embedded-code-py": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.py.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-py"
+            },
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        {
+          "include": "source.python"
+        }
+      ]
+    },
+    "embedded-code-rs": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.rs.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-rs"
+            },
+            {
+              "include": "source.rust"
+            }
+          ]
+        },
+        {
+          "include": "source.rust"
+        }
+      ]
+    },
+    "embedded-code-shell": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.shell.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-shell"
+            },
+            {
+              "include": "source.shell"
+            }
+          ]
+        },
+        {
+          "include": "source.shell"
+        }
+      ]
+    },
+    "embedded-code-moth": {
+      "patterns": [
+        {
+          "include": "#template-nested"
+        },
+        {
+          "name": "meta.embedded.block.code.mothlang.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-moth"
+            },
+            {
+              "include": "#code-moth-fragment"
+            }
+          ]
+        },
+        {
+          "include": "#code-moth-fragment"
+        }
+      ]
+    },
+    "embedded-code-generic": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.generic.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-generic"
+            },
+            {
+              "include": "#code-generic-fragment"
+            }
+          ]
+        },
+        {
+          "include": "#code-generic-fragment"
+        }
+      ]
+    },
+    "code-moth-fragment": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#documentation-template"
+        },
+        {
+          "include": "#source-directives"
+        },
+        {
+          "include": "#dependency-clauses"
+        },
+        {
+          "include": "#path-literals"
+        },
+        {
+          "include": "#invalid-at-sign"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#chars"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#trait-roles"
+        },
+        {
+          "include": "#keywords"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#punctuation"
+        },
+        {
+          "include": "#constants"
+        },
+        {
+          "include": "#type-identifiers"
+        },
+        {
+          "include": "#identifiers"
+        },
+        {
+          "name": "text.whitespace.moth",
+          "match": "\\s+"
+        }
+      ]
+    },
+    "code-generic-fragment": {
+      "patterns": [
+        {
+          "name": "string.unquoted.code.generic.moth",
+          "match": "[^\\[\\]]+"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.moth",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.moth"
+            }
+          },
+          "end": "\"|(?=\\r?$)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.moth",
+              "match": "\\\\[\\\\\"nrt]"
+            },
+            {
+              "name": "invalid.illegal.string.escape.moth",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "chars": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.char.moth",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.char.begin.moth"
+            }
+          },
+          "end": "'|(?=\\r?$)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.char.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.moth",
+              "match": "\\\\[\\\\'nrt]"
+            },
+            {
+              "name": "invalid.illegal.string.escape.moth",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.moth",
+          "match": "(?<![A-Za-z0-9_.])(?:-)?\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?(?:e[+-]?\\d(?:_?\\d)*)?(?![A-Za-z0-9_])"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.flow.error-return.moth",
+          "match": "\\breturn!(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "meta.function.return.never.moth",
+          "match": "(->)([ \\t]*)(!)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.return.moth"
+            },
+            "3": {
+              "name": "storage.type.never.moth"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.flow.moth",
+          "match": "\\b(?:if|else|case|return|loop|break|continue|catch|then)\\b"
+        },
+        {
+          "name": "keyword.control.loop.range.moth",
+          "match": "\\b(?:to|by)\\b|&"
+        },
+        {
+          "name": "keyword.other.moth",
+          "match": "\\b(?:as|copy|must|cast|into)\\b"
+        },
+        {
+          "name": "keyword.control.logical.moth",
+          "match": "\\b(?:is|not|and|or)\\b"
+        },
+        {
+          "name": "variable.language.this.moth",
+          "match": "\\bthis\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.option.moth",
+          "match": "(?:(?<=^(?:[\\p{Lu}][\\p{L}\\p{Nd}_]*[\\p{Ll}][\\p{L}\\p{Nd}_]*|[\\p{Lu}]|I(?:8|16|32|64)|U(?:8|16|32|64)|F(?:16|32|64)))|(?<=[^\\p{L}\\p{Nd}_](?:[\\p{Lu}][\\p{L}\\p{Nd}_]*[\\p{Ll}][\\p{L}\\p{Nd}_]*|[\\p{Lu}]|I(?:8|16|32|64)|U(?:8|16|32|64)|F(?:16|32|64)))|(?<=\\]))\\?"
+        },
+        {
+          "name": "support.type.error.moth",
+          "match": "(?:(?<=^(?:[\\p{Lu}][\\p{L}\\p{Nd}_]*[\\p{Ll}][\\p{L}\\p{Nd}_]*|[\\p{Lu}]|I(?:8|16|32|64)|U(?:8|16|32|64)|F(?:16|32|64)))|(?<=[^\\p{L}\\p{Nd}_](?:[\\p{Lu}][\\p{L}\\p{Nd}_]*[\\p{Ll}][\\p{L}\\p{Nd}_]*|[\\p{Lu}]|I(?:8|16|32|64)|U(?:8|16|32|64)|F(?:16|32|64))))!(?=\\s*(?:[,{}|]|$))"
+        },
+        {
+          "name": "support.type.primitive.moth",
+          "match": "\\b(?:I(?:8|16|32|64)|U(?:8|16|32|64)|F(?:16|32|64)|Dec(?:0|[1-9]|[1-9]\\d|1\\d\\d|2[0-4]\\d|25[0-6])?|Bool|String|Char|Byte|None|True|False)\\b"
+        },
+        {
+          "name": "invalid.illegal.type.decimal.moth",
+          "match": "\\bDec[0-9]+\\b"
+        },
+        {
+          "name": "support.type.cast-trait.moth",
+          "match": "\\b(?:TRY_)?CASTABLE_TO_(?:I8|I16|I32|I64|U8|U16|U32|U64|F16|F32|F64|BOOL|STRING|CHAR|ERROR)\\b"
+        },
+        {
+          "name": "constant.language.boolean.moth",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.none.moth",
+          "match": "\\bnone\\b"
+        },
+        {
+          "name": "variable.language.trait-this.moth",
+          "match": "\\bThis\\b"
+        },
+        {
+          "name": "variable.language.generics.moth",
+          "match": "\\b(?:type|of)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.closure.moth",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.assignment.mutable.moth",
+          "match": "~="
+        },
+        {
+          "name": "keyword.operator.assignment.constant.moth",
+          "match": "#="
+        },
+        {
+          "name": "keyword.operator.assignment.compound.moth",
+          "match": "\\+=|-=|\\*=|//=|/=|%=|\\^="
+        },
+        {
+          "name": "keyword.operator.channel.future.moth",
+          "match": "<<|>>"
+        },
+        {
+          "name": "keyword.operator.runtime-fragment.moth",
+          "match": "~(?=\\[)"
+        },
+        {
+          "name": "keyword.operator.mutable.moth",
+          "match": "~(?=[\\p{L}_\\[])"
+        },
+        {
+          "name": "keyword.operator.constant.moth",
+          "match": "#(?=[\\p{Lu}\\|\\[])"
+        },
+        {
+          "name": "keyword.operator.symbol.moth punctuation.separator.double-colon.moth",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.symbol.moth",
+          "match": "->|<=|>=|//|=|\\+|-|\\*|/|%|\\^|~|#|<|>|\\$"
+        },
+        {
+          "name": "storage.type.never.moth",
+          "match": "!"
+        },
+        {
+          "name": "support.type.option.moth",
+          "match": "\\?"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.colon.moth",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.comma.moth",
+          "match": ","
+        },
+        {
+          "name": "invalid.illegal.semicolon.moth",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.section.block.moth",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.brackets.round.moth",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.brackets.square.moth",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.brackets.pipe.moth",
+          "match": "\\|"
+        },
+        {
+          "name": "punctuation.accessor.dot.moth",
+          "match": "\\."
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.moth",
+          "match": "\\bassert\\b"
+        },
+        {
+          "name": "support.namespace.builtin.moth",
+          "match": "\\bio\\b"
+        },
+        {
+          "name": "support.type.builtin.moth",
+          "match": "\\bError\\b"
+        },
+        {
+          "name": "constant.other.caps.moth",
+          "match": "\\b(?:[A-Z][A-Z0-9_]*_[A-Z0-9_]*|[A-Z]{2,}[A-Z0-9_]*)\\b"
+        }
+      ]
+    },
+    "type-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.type.moth",
+          "match": "(?<![\\p{L}\\p{Nd}_])[\\p{Lu}][\\p{L}\\p{Nd}_]*(?![\\p{L}\\p{Nd}_])"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.moth",
+          "match": "(?<![\\p{L}\\p{Nd}_])[\\p{Ll}_][\\p{L}\\p{Nd}_]*(?![\\p{L}\\p{Nd}_])"
+        }
+      ]
+    },
+    "template-head-patterns": {
+      "patterns": [
+        {
+          "include": "#template-head-directive-targets"
+        },
+        {
+          "include": "#template-directive"
+        },
+        {
+          "name": "keyword.control.flow.template.moth",
+          "match": "\\b(?:if|loop)\\b"
+        },
+        {
+          "name": "invalid.illegal.template.control.moth",
+          "match": "\\b(?:else(?:[ \\t]+if)?|break|continue)\\b"
+        },
+        {
+          "include": "#template-default-expression"
+        },
+        {
+          "name": "invalid.illegal.template-head-character.moth",
+          "match": "."
+        }
+      ]
+    },
+    "template-formatter-fallbacks": {
+      "patterns": [
+        {
+          "name": "meta.template.code.js.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:js|javascript)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-js"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.ts.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:ts|typescript)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-ts"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.py.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:py|python)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-py"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.rs.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:rs|rust)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-rs"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.shell.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:sh|shell|bash)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-shell"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.mothlang.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:moth)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-moth"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:html)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-html"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.markdown.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:md|markdown)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-markdown"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.toml.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:toml)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-toml"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.json.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:json)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-json"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.yaml.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:yaml|yml)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-yaml"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.css.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:css)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-css"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.c.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:c)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-c"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.sql.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"(?:sql)\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-sql"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.generic.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)([ \\t]+)(\"[^\"]*\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.template.code.directive.moth keyword.control.directive.template.moth"
+            },
+            "3": {
+              "name": "string.quoted.double.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-generic"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.code.generic.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$code)\\b(?=[ \\t]*:)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-code-generic"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.markdown.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$md)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-markdown"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.raw.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$raw)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-raw"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$html)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-html"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.css.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$css)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-css"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        },
+        {
+          "name": "meta.template.escape-html.moth",
+          "begin": "(?<![A-Za-z0-9_])(\\$escape_html)\\b(?!\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.template.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "patterns": [
+            {
+              "include": "#template-body-escape-html"
+            },
+            {
+              "include": "#template-head-patterns"
+            }
+          ]
+        }
+      ]
+    },
+    "template-head-until-formatter": {
+      "name": "meta.template.head.moth",
+      "begin": "(?!(?:\\$(?:md|raw|html|css|escape_html)\\b(?!\\s*\\()|\\$code\\b)|[:\\]])",
+      "end": "(?=\\$(?:md|raw|html|css|escape_html)\\b(?!\\s*\\()|\\$code\\b|:(?!:)|\\])",
+      "patterns": [
+        {
+          "include": "#template-head-patterns"
+        }
+      ]
+    },
+    "trait-roles": {
+      "patterns": [
+        {
+          "name": "entity.name.type.trait.moth",
+          "match": "\\b[A-Z][A-Z0-9_]*(?=[ \\t]+must[ \\t]*\\{)"
+        },
+        {
+          "match": "\\b(must)([ \\t]+)([A-Z][A-Z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.moth"
+            },
+            "3": {
+              "name": "entity.name.type.trait.moth"
+            }
+          }
+        }
+      ]
+    },
+    "documentation-template": {
+      "patterns": [
+        {
+          "name": "meta.documentation.moth",
+          "begin": "(\\$doc)([ \\t]+)(\\[)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.directive.source.moth"
+            },
+            "3": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head-until-formatter"
+            },
+            {
+              "include": "#template-formatter-fallbacks"
+            },
+            {
+              "include": "#template-body-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "template-code-html": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.html.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:html)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-html"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-html": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.html.moth text.html.basic",
+          "patterns": [
+            {
+              "include": "#embedded-code-html"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-html": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.html.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-html"
+            },
+            {
+              "include": "text.html.basic"
+            }
+          ]
+        },
+        {
+          "include": "text.html.basic"
+        }
+      ]
+    },
+    "template-code-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.markdown.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:md|markdown)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-markdown": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.markdown.moth text.html.markdown",
+          "patterns": [
+            {
+              "include": "#embedded-code-markdown"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-markdown": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.markdown.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-markdown"
+            },
+            {
+              "include": "text.html.markdown"
+            }
+          ]
+        },
+        {
+          "include": "text.html.markdown"
+        }
+      ]
+    },
+    "template-code-toml": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.toml.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:toml)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-toml"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-toml": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.toml.moth source.toml",
+          "patterns": [
+            {
+              "include": "#embedded-code-toml"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-toml": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.toml.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-toml"
+            },
+            {
+              "include": "source.toml"
+            }
+          ]
+        },
+        {
+          "include": "source.toml"
+        }
+      ]
+    },
+    "template-code-json": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.json.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:json)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-json"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-json": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.json.moth source.json",
+          "patterns": [
+            {
+              "include": "#embedded-code-json"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-json": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.json.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-json"
+            },
+            {
+              "include": "source.json"
+            }
+          ]
+        },
+        {
+          "include": "source.json"
+        }
+      ]
+    },
+    "template-code-yaml": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.yaml.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:yaml|yml)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-yaml"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-yaml": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.yaml.moth source.yaml",
+          "patterns": [
+            {
+              "include": "#embedded-code-yaml"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-yaml": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.yaml.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-yaml"
+            },
+            {
+              "include": "source.yaml"
+            }
+          ]
+        },
+        {
+          "include": "source.yaml"
+        }
+      ]
+    },
+    "template-code-css": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.css.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:css)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-css"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-css": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.css.moth source.css",
+          "patterns": [
+            {
+              "include": "#embedded-code-css"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-css": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.css.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-css"
+            },
+            {
+              "include": "source.css"
+            }
+          ]
+        },
+        {
+          "include": "source.css"
+        }
+      ]
+    },
+    "template-code-c": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.c.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:c)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-c"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-c": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.c.moth source.c",
+          "patterns": [
+            {
+              "include": "#embedded-code-c"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-c": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.c.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-c"
+            },
+            {
+              "include": "source.c"
+            }
+          ]
+        },
+        {
+          "include": "source.c"
+        }
+      ]
+    },
+    "template-code-sql": {
+      "patterns": [
+        {
+          "name": "meta.template.moth meta.template.code.sql.moth",
+          "begin": "\\[(?=[^\\[\\]:]*\\$code\\s*\"(?:sql)\"[^\\[\\]:]*:)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.template.begin.moth"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.template.end.moth"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#template-head"
+            },
+            {
+              "include": "#template-body-code-sql"
+            }
+          ]
+        }
+      ]
+    },
+    "template-body-code-sql": {
+      "patterns": [
+        {
+          "name": "meta.template.body.moth",
+          "begin": ":",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.separator.template.head-body.moth"
+            }
+          },
+          "end": "(?=\\])",
+          "contentName": "meta.embedded.block.code.sql.moth source.sql",
+          "patterns": [
+            {
+              "include": "#embedded-code-sql"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-code-sql": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.code.sql.moth",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "include": "#embedded-code-sql"
+            },
+            {
+              "include": "source.sql"
+            }
+          ]
+        },
+        {
+          "include": "source.sql"
+        }
+      ]
+    }
+  }
+}

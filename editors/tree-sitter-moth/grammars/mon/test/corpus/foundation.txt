@@ -11,7 +11,7 @@ settings = (enabled = true, count = 12),
     (record_field (identifier) (field_separator)
       (record (record_fields
         (record_field (identifier) (field_separator) (boolean))
-        (record_field (identifier) (field_separator) (number))))))
+        (record_field (identifier) (field_separator) (number)))))))
 
 ==================
 Explicit record and distinct containers
@@ -22,9 +22,9 @@ Explicit record and distinct containers
 (document
   (record (record_fields
     (record_field (identifier) (field_separator) (sequence (string) (string)))
-    (record_field (identifier) (field_separator) (map (map_entries (map_entry (string) (map_separator) (number)))))
+    (record_field (identifier) (field_separator) (map (map_entries (map_entry (string) (map_separator) (number))))
     (record_field (identifier) (field_separator) (map))
-    (record_field (identifier) (field_separator) (sequence (sequence (number)) (sequence))))))
+    (record_field (identifier) (field_separator) (sequence (sequence (number)) (sequence)))))))
 
 ==================
 Unicode escapes
