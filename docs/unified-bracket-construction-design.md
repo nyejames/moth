@@ -16,7 +16,7 @@ The motivating uses are binary data, ordinary sequence construction and package-
 
 Square brackets replace the collection and map delimiters in Moth and MON. Moth uses the freed braces for blocks and choice declarations. Braces in raw template text, quoted Strings, comments and embedded languages retain their literal meaning.
 
-The following decision record fixes the surrounding source syntax. The companion document Moth Surface Syntax After Unified Bracket Construction (`moth-surface-syntax-design.md`) gives the full control-flow, constructor and channel examples. Parts I to III cover bracket construction and its cutover. Section 34 identifies the questions to resolve before enabling the affected grammar.
+The following decision record fixes the surrounding source syntax. The companion document Moth Surface Syntax After Unified Bracket Construction (`moth-surface-syntax-design.md`) gives the full control-flow, constructor and channel examples. Parts I to III cover bracket construction and its cutover. Section 34 records the settled source decisions and the remaining implementation checks.
 
 ## Agreed surface syntax (26 November 2026)
 
@@ -122,11 +122,11 @@ A type-specific directive may supply evidence directly. For example, `$md`, `$ht
 
 In the absence of a stronger receiving contract:
 
-- A non-empty raw textual body establishes String.
+- A body with non-whitespace raw text establishes String evidence. Layout-only whitespace supplies no type evidence.
 - A head consisting of String values constructs String by concatenation.
 - Homogeneous non-String values establish a collection of their element type.
 - An existing sequence supplies sequence evidence and its element type. Compatible scalar contributions can extend that sequence. For example, a `[String]` collection plus a String constructs `[String]`, rather than concatenating into text.
-- Explicit nested head constructions establish collection nesting, including when their leaves are Strings.
+- Direct nested plain ordered heads establish collection nesting, including when their leaves are Strings. A direct child with independently established String or map output contributes its completed value instead (section 5).
 - A direct map entry establishes map construction.
 - Incompatible or insufficient evidence requires a diagnostic. There is no default that converts a heterogeneous head into String.
 
@@ -155,13 +155,16 @@ Raw numeric literals receive exact element types (including Byte and U64) throug
 
 ### 3. Empty constructions
 
-All empty bracket constructions require type evidence. A colon on its own supplies no evidence. This deliberately rejects the tempting default of interpreting an untyped empty bracket as an empty String.
+Empty constructions and bodies containing only layout whitespace require type evidence. A colon and formatting whitespace supply no evidence. Once the receiving type is known, apply the ordinary whitespace rules: preserve String content according to its formatter and ignore layout whitespace in sequence bodies. An explicitly typed empty sequence body is legal wherever an empty sequence is legal. It is the zero-contribution case, not a separate construction rule. The same empty-fixed-binding restrictions still apply.
 
 ```moth
 value = []                     -- diagnostic
 text = [:]                     -- diagnostic
+space = [:   ]                 -- diagnostic
 text String = []               -- empty String
 other String = [:]             -- empty String
+space String = [:   ]          -- String whitespace rules apply
+blank [I32] = [:   ]           -- zero elements
 text_literal = ""              -- inferred empty String
 labels [String] = []           -- empty collection
 matrix [[I32]] = []            -- zero rows
@@ -198,7 +201,7 @@ greetings [String] = [loop names |name|:
 ]
 ```
 
-The enclosing body collects the String result of each child. A raw word outside a child is still invalid. Formatting-only whitespace is discarded in a typed sequence body, not in a String body. A whitespace-only body with no other evidence needs a precise inference rule (section 34); do not strip whitespace from a known String construction. A textual child in a sequence body is one String contribution, whereas direct head nesting establishes a collection dimension. The same punctuation in different grammar positions is not a global nesting heuristic. No raw-body token sequence should be reinterpreted as numbers, field expressions or application-specific markup because of its receiver type. The lexer must not need semantic type information to decide whether raw body characters are code.
+The enclosing body collects the String result of each child. A raw word outside a child is still invalid. Formatting whitespace is ignored in a sequence body and supplies no type evidence. String bodies follow their existing formatting rules. A typed sequence body may have zero children. In a sequence body, a completed String child contributes one String. Section 5 defines the distinction between direct plain nested heads and independently established String or map values. No raw-body token sequence should be reinterpreted as numbers, field expressions or application-specific markup because of its receiver type. The lexer must not need semantic type information to decide whether raw body characters are code.
 
 Directives and child constructs keep their grammatical roles. A bracket expression used as a directive operand or a normal function argument is not an explicit nested row merely because it is lexically inside another pair of brackets. The parser owns these boundaries.
 
@@ -216,7 +219,24 @@ rows = [[first], [second]]      -- [[1, 2], [3, 4]]
 one_row = [[first, second]]     -- [[1, 2, 3, 4]]
 ```
 
-A direct nested bracket construction in a sequence head preserves one additional collection boundary. This applies at any supported depth. It is not a special runtime marker or an implicit deep copy. The nested head syntax replaces the suggested `$item` directive, which is unnecessary.
+A direct nested plain ordered head in an ordinary construction head preserves one additional collection boundary. This applies at any supported depth and grouping parentheses alone do not change the role. A plain ordered head has no colon body, keyed entry, map marker or structural directive/wrapper giving it a separate contribution contract. The row context is established before defaulting its leaves, even if every leaf is String. A row is fresh membership, not a special runtime marker or an implicit deep copy. The nested head syntax replaces the suggested `$item` directive.
+
+A direct nested construction with independent String evidence (raw non-layout body text, a String formatter or a String-producing wrapper) contributes a completed String. A direct keyed map construction contributes a completed map. Apply ordinary contribution rules to these values rather than inventing an extra row. Structural children and routed arguments retain their own receiving contracts. An outer String receiver does not turn a plain nested row into text. Incompatible scalar and row contributions are errors; do not try a different nesting interpretation to make them type-check.
+
+```moth
+matrix = [[1, 2], [3, 4]]                     -- [[I32]]
+names = [["Priya", "Rob"], ["Emmy"]]           -- [[String]]
+words [String] = [[:Hello], [:World]]         -- two Strings
+message = [[:Hello], [:World]]                -- "HelloWorld"
+scores = [["Priya" = 10], ["Rob" = 8]]        -- sequence of maps
+
+-- Invalid: a plain nested row cannot become text.
+text String = [[42]]
+-- Invalid: the scalar does not match the row shape.
+mixed = [[1, 2], 3]
+```
+
+A direct map value is a single element of an ordinary sequence, not a map splice. This does not add const maps or permit ordinary map bodies. Slot arguments are routed before contribution completion under section 10. Brackets inside ordinary call arguments or directive operands do not establish an outer row.
 
 A bracketed child in a body continues to contribute its constructed output. A child loop can therefore emit many items into its parent's sequence. Head nesting and body composition must remain distinguishable in the parser and the semantic representation.
 
@@ -391,7 +411,7 @@ links [HtmlNode] = [loop pages |page|:
 
 Ordinary imperative loops remain available for local bindings, complex updates, early termination and checked collection insertion. Do not extend template loops into full statement blocks just to replace a deferred feature.
 
-Directive applicability follows the operation's concrete output contract. `$slot`, `$in`, `$supplied`, `$before`, `$after` and `$fresh` work with String and sequence constructions under their existing grammatical placement restrictions. `$note` is a child-only lexical form in any template body and produces no value or type evidence. `$md`, `$html`, `$css`, `$escape_html`, `$code` and `$raw` require String. Maps have no structural directive or template-body semantics. A directive's required receiving type supplies type evidence or diagnoses conflicting evidence. Preserve the compiler-owned registry and existing source-directive attachment rules. The representation of directive type requirements remains an implementation decision, with broader statement-target constraints outside this migration.
+Directive applicability follows the operation's concrete output contract. `$slot`, `$in`, `$supplied`, `$before`, `$after` and `$fresh` work with String and sequence constructions under their existing grammatical placement restrictions. `$note` is a child-only lexical form in any template body and produces no value or type evidence. `$md`, `$html`, `$css`, `$escape_html`, `$code` and `$raw` require String. Maps have no structural directive or template-body semantics. A directive's required receiving type supplies type evidence or diagnoses conflicting evidence. Preserve the compiler-owned registry and existing source-directive attachment rules. Reuse the existing `StyleDirectiveSpec` registry in `src/compiler_frontend/style_directives/{specs,builtins}.rs`. Represent construction requirements with a small registry-owned type-family requirement (for example `Option<ConstructionRequirement>` with `String` and `StringOrSequence`). String requirements establish exact String evidence; family requirements restrict the eligible construction kinds without selecting one. `$note` has no type requirement and remains subject to its child-only rule. The registry is shared, so it must not carry a module-local `TypeId`. Resolve the requirement against the local type environment at the normal construction owner. Keep source-directive attachment constraints and operand contracts distinct from construction output requirements. Reuse existing semantic kinds where sufficient rather than maintaining duplicate tables. Broader statement-target constraints and a general-purpose constraint framework remain outside this migration.
 
 Type-specific directives supply type evidence and report conflicts with known receivers. They do not become user-defined conversion or evaluator hooks. All directive names and semantics remain compiler-owned. Builders and packages do not extend the grammar or install arbitrary parsing or TIR callbacks.
 
@@ -472,7 +492,7 @@ Relevant owners include `src/compiler_frontend/tokenizer/lexer.rs`, the shared `
 The lexer already distinguishes bracket heads from bodies. Keep that lexical transition independent of types. `utilities/token_scan.rs` currently has brace-specific counters in `NestingDepth`, `ExpressionBoundaryDepth` and body-local binding scanning, alongside `TemplateBalance`, `TemplateNestingTracker` and open-construct tracking. Audit these together. Track braced Moth blocks and declarations at their grammatical boundaries. Remove collection-specific brace tracking after its consumers move to brackets. Preserve the separate requirements for expression termination, source-scope recovery and template skipping.
 
 - Replace brace collection/map grammar with bracket grammar in type and value positions. Keep the brace tokens used by blocks and declarations. Retire modes specific to brace-delimited collections and maps. Keep literal characters in text, strings, comments and formatter payloads intact.
-- Recognise explicit nested head constructions while preserving nested brackets in directive operands, calls, generic/type syntax and child bodies. Distinguish empty `[]`, body-opening `[:]` and empty map `[=]` without guessing a type.
+- Recognise direct nested plain ordered heads separately from independently established String and map contributions, preserving nested brackets in directive operands, calls, generic/type syntax, routed slot arguments and child bodies. Distinguish empty `[]`, body-opening `[:]` and empty map `[=]` without guessing a type.
 - Retain raw body text and its source spans until the semantic construction type is known. A typed sequence rejects non-layout text in its own body. Do not run the text through an expression lexer or infer its type from token spelling.
 - Disambiguate direct map entries at the bracket's own syntactic depth. An equals sign inside an argument, record field, slot default or nested expression is not a map discriminator. Reuse the existing delimiter and argument-routing owners.
 - Update grammar consumers that skip or capture balanced ranges, including declaration shells, signature/default parsing, generic bodies, config, source directives, orphan checking and entry capture. An entry's direct `[...]` and `~[...]` rules remain unchanged.
@@ -489,7 +509,7 @@ Reuse canonical String, growable/fixed sequence and map types. No new type famil
 
 Resolve in this order:
 
-1. Recognise grammar-only shape (direct map entries, direct nested rows, body/structural constructs, directives) at the appropriate depth. The existing expression parser remains the sole parser for operands.
+1. Recognise grammar-only shape (direct map entries, candidate plain nested rows, body/structural constructs, directives) at the appropriate depth. The existing expression parser remains the sole parser for operands.
 2. Reconcile that shape with the immediate receiving type, known wrapper/slot contract and applicable directive evidence. A receiver can select String formatting but cannot erase a conflicting explicit map or row shape.
 3. If needed, gather local homogeneous/sibling evidence before defaulting all-String heads or numeric leaves. Retain unresolved nested rows only within their construction owner. A later sibling may type an earlier empty row; a later unrelated use cannot change the declaration's construction kind.
 4. Resolve each contribution as store-one, splice-one-level, nested-row construction, text append/format or map entry. These are semantic roles, not necessarily a new retained enum. Use existing operation shapes where adequate. Preserve generic roles before substitution and do not reroute an already typed operand by its concrete specialised shape.
@@ -751,7 +771,7 @@ Use the current testing guide. Extend existing tests instead of duplicating equi
 
 | Gate | Required coverage |
 |---|---|
-| A: grammar and evidence | Exact type and output for scalar/all-String heads, typed `[String]`, Byte/numeric receivers, mixed heads, directive conflicts, empty forms (`[]`, `[:]`, `[[]]`, `[=]`), both sibling-row orders, optional presence, raw-text rejection and layout whitespace. Direct map entries vs call arguments/slot defaults, nested heads vs bodies/operands, unchanged type suffixes. Accept fixed types with a literal or named capacity and an explicit element type. Reject capacity-only annotations even with a non-empty literal. Preserve `[T]` as a growable type and `[8]` as a value expression. Diagnostics retain original spans. Reject brace-delimited collections and maps in type and value positions. Recognise the agreed braced blocks and declarations in their own positions. |
+| A: grammar and evidence | Exact type and output for scalar/all-String heads, typed `[String]`, Byte/numeric receivers, mixed heads, directive conflicts, empty forms (`[]`, `[:]`, `[:   ]`, `[[]]`, `[=]`), both sibling-row orders, typed empty bodies, optional presence, raw-text rejection and layout whitespace. Direct map entries vs call arguments/slot defaults, plain nested heads vs independent String/map children and bodies/operands, unchanged type suffixes. Accept fixed types with a literal or named capacity and an explicit element type. Reject capacity-only annotations even with a non-empty literal. Preserve `[T]` as a growable type and `[8]` as a value expression. Diagnostics retain original spans. Reject brace-delimited collections and maps in type and value positions. Recognise the agreed braced blocks and declarations in their own positions. |
 | B: contribution semantics | One-level splice, fixed/growable sources, fresh nested membership vs stored rows, generic store/splice specialised to scalars/String/collections, shared read-only referents, internal sharing after explicit graph copy, correlated branch/call provenance and illegal topology rejection. Effectful operand once, dynamic lengths, early capture before later mutation (including `copy`), failures before/after other effects. Fixed proof from length/capacity, alternatives, repeated slots, loops and nesting. Insufficient bounds rejected across profiles. Preserve empty-fixed rules. |
 | C: structural composition | Local/imported typed wrappers, named/positional/default slots, consistent repeated slot types, missing/wrong inserts, defaults vs supplied empty, guard-only validation without evaluation, conditional no-output presence, repeated runtime-slot replay, prefix content and head-only open references vs closed applications. Direct-child loop grouping, `$before`/`$after` and `$fresh`. Multiple style utilities accepted, second receiver diagnosed, reusable warning style and real migrated Core HTML/docs fixtures. |
 | D: semantic publication and execution | Completed constant graphs, stable public slot/output type closure, re-export identity, private types and fingerprint changes; generic materialisation keeps declared roles. Const functions cannot return open wrappers/helpers. Required const and ordinary eager/runtime paths agree on output, order and applicable failures. Debug/release parity of validated semantics; no removed speculative-fold notes/budgets. Resource-bearing values and inactive dependency references survive correctly. HIR and borrow validation cover capture and retention; JS/Wasm/native execution or explicit reachable target refusal. No target-specific construction type. |
@@ -761,23 +781,23 @@ Run the current `AGENTS.md`-routed format, lint, architecture, test, documentati
 
 ### 34. Open design/implementation edges
 
-The major semantic decisions above were agreed in the interview. The following narrow edges are intentionally not disguised as settled source rules:
+The source decisions are settled for this migration. Sections 2-5 define whitespace-only bodies, direct plain nested heads and independent String/map output. Sections 8 and 10-12 define bounds, positional routing, declaration-owned slot types and directive applicability.
 
-- Whitespace-only bodies with no type evidence: distinguish `[:]` (always needs evidence), raw non-layout text (String evidence) and a body containing only formatting whitespace. Review recommendation: require evidence for layout-only bodies and preserve actual whitespace under an explicit String receiver. Confirm in phase 0 of the migration.
-- Direct nested heads establish collection dimensions. Grouping parentheses alone do not change the role. Slot arguments, directive operands and call arguments belong to their own receiving boundaries. The remaining question is whether a direct nested child with a text body can instead be an ordinary String contribution in a head (for example, `items [String] = [[: Hello], [: World]]`). Confirm this exact edge before fixing the full direct-head classifier.
-- Independently annotated slot types are deferred. Diagnose missing or conflicting declaration-owned slot evidence in V1.
-- Verify the approved nesting and routed-contribution roles in the parser. Include mixed nested and scalar contributions, wrapper/slot boundaries, directives and grouped operands. The text-body child edge above remains a source decision for this classifier.
-- The initial fixed-capacity proof vocabulary is settled in section 8. Implementation must demonstrate checked bounds and profile-independent acceptance.
-- The minimal internal representation and reuse strategy for typed structural construction. Benchmark and inspect actual owners before widening TIR, introducing HIR operations or extracting shared components. The cheap literal path and deletion of obsolete chain handling are required outcomes, not a prescribed class hierarchy.
-- Directive applicability is settled in section 12. Choose the smallest registry/semantic representation and verify the existing placement rules. Do not broaden source directives by analogy.
+Implementation must verify those decisions rather than choose new source rules:
 
-The following are excluded, not missing implementation details: user-extensible template semantics, arbitrary nominal construction by implicit bracket function invocation, runtime open-template values, automatic ancestor-slot routing, arbitrary map splicing, transparent String/Byte equivalence, automatic HTML node rendering by the builder and a new component framework. The agreed uses of braces for blocks and choice declarations are recorded above.
+- Exercise empty and whitespace-only bodies with no receiver, a String receiver and a sequence receiver. Preserve String formatting and the distinction between selected empty output and structurally absent output.
+- Prove the nesting and routing roles with grouped plain heads, independent String/map children, incompatible mixed row/scalar contributions, wrapper arguments and directive operands. Retain one owner of the resolved contribution role.
+- Verify repeated slot and wrapper bounds and profile-independent fixed-capacity acceptance.
+- Benchmark and inspect actual owners before widening TIR, introducing HIR operations or extracting shared components. The cheap literal path and deletion of obsolete chain handling are required outcomes.
+- Reuse the compiler-owned directive registry for construction requirements. Verify existing placement, operand and composition contracts independently of output-type eligibility.
 
-Any further semantic choice that materially changes a worked example, public contract, evaluation order or source acceptance requires design review. Do not hide such choices in a compiler implementation or silently broaden the language to pass migrated tests.
+Independently annotated slot types, const maps, standalone blocks, user-extensible template semantics, arbitrary nominal construction by implicit bracket function invocation, runtime open-template values, automatic ancestor-slot routing, arbitrary map splicing, transparent String/Byte equivalence, automatic HTML node rendering by the builder and a new component framework are outside this migration.
+
+Any further semantic choice that materially changes a worked example, public contract, evaluation order or source acceptance requires design review. Do not silently broaden the language to pass migrated tests.
 
 ### 35. Activation and completion
 
-Activation requires completed hard removal and the settled foundation in section 15. Resolve the source-visible questions in section 34 before enabling the affected grammar. Implementation completes only when gates A-E and section 26 pass, all old grammar/chain-only paths are deleted, permanent docs carry the accepted semantics and the roadmap and progress updates in sections 31-32 are complete. Review the resulting diff using the code-review guide, separating deletion, consolidation, justified specialisation and deferred opportunities. No new runtime template system, implicit component effect or general parser is permitted as a shortcut.
+Activation requires completed hard removal and the settled foundation in section 15. Verify the settled source decisions using the checks in section 34 before enabling the affected grammar. Implementation completes only when gates A-E and section 26 pass, all old grammar/chain-only paths are deleted, permanent docs carry the accepted semantics and the roadmap and progress updates in sections 31-32 are complete. Review the resulting diff using the code-review guide, separating deletion, consolidation, justified specialisation and deferred opportunities. No new runtime template system, implicit component effect or general parser is permitted as a shortcut.
 
 ## Reference baseline and source anchors
 

@@ -172,7 +172,7 @@ flat = [first, second]
 rows = [[first], [second]]
 ```
 
-`title` joins two strings. `labels` stores two strings. `bytes` contains four bytes and has room for four more. `flat` has four integers. `rows` has two freshly constructed inner rows. Direct nested brackets preserve a dimension. Splicing a compatible sequence contributes its elements once, in order. A fresh row has its own membership and preserves normal sharing for any reference-valued elements.
+`title` joins two strings. `labels` stores two strings. `bytes` contains four bytes and has room for four more. `flat` has four integers. `rows` has two freshly constructed inner rows. Direct nested plain ordered heads preserve a dimension. Independent String or map constructions contribute their completed values, so `words [String] = [[:Hello], [:World]]` contains two Strings, while `[["Home", "Docs"], ["API"]]` constructs rows. Untyped empty or whitespace-only constructions need type evidence; a typed empty sequence body is legal under the ordinary empty-value rules. See sections 2-5 of the bracket design. Splicing a compatible sequence contributes its elements once, in order. A fresh row has its own membership and preserves normal sharing for any reference-valued elements.
 
 Write a fixed collection type as `[capacity T]`. Both parts are required. A positive `I32` literal or visible `#I32` constant supplies the capacity. The old capacity-only annotation goes away. A known field or parameter can still supply the complete fixed type to a literal. A map accepts direct keyed entries and `[=]` for an empty map. A map head gains no sequence-splicing or template-body semantics.
 
