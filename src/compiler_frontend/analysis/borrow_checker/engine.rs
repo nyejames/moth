@@ -8,8 +8,8 @@ use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, BorrowState, CapturedValue, CellId, FunctionLayout, LocalState, OrderKey,
-    RootSet, StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, WrapperId,
+    AllocId, AllocationRetirement, BorrowState, CapturedValue, CellId, FunctionLayout, LocalState,
+    OrderKey, RootSet, SmallSet, StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     AccessFootprint, Carrier, Demand, ObservationBoundary, ObservationCheckpoint, PlaceUse,
@@ -20,7 +20,8 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, CapturedCallBatch, CapturedDestination,
-    EdgeTransferView, InvokeLayerOp, InvokeTransfer, OperationView, transfer_block,
+    CapturedDetachment, EdgeTransferView, InlineVec, InvokeLayerOp, InvokeTransfer, OperationView,
+    ReplayStates, transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
@@ -63,7 +64,7 @@ struct ForwardEdgeSource<'a> {
 }
 
 pub(super) struct SparseEvaluation {
-    pub exits: FxHashMap<BlockId, FxHashSet<Rc<BorrowState>>>,
+    pub exits: FxHashMap<BlockId, ReplayStates>,
     pub retained: BTreeSet<usize>,
 }
 
@@ -72,6 +73,9 @@ struct FunctionObservations {
     blocks: FxHashMap<BlockId, ValueObservations>,
     edges: FxHashMap<(BlockId, usize), ValueObservations>,
     diverges: FxHashSet<BlockId>,
+    reached: FxHashSet<BlockId>,
+    unreachable_invokes: FxHashMap<BlockId, [bool; 2]>,
+    carrier_origins: FxHashMap<AllocId, usize>,
 }
 
 impl FunctionObservations {
@@ -94,11 +98,23 @@ impl FunctionObservations {
         divergence_changed
     }
 
+    fn record_origins(&mut self, observations: &ValueObservations, state: &BorrowState) {
+        for (_, boundary) in &observations.splits {
+            if let ObservationBoundary::Checkpoint(checkpoint) = boundary {
+                for candidate in &checkpoint.candidates {
+                    if let Carrier::Cell(CellId::Projected(holder, _), ..) = candidate
+                        && let Some(local) = state.alloc_origin_local(*holder)
+                    {
+                        self.carrier_origins.insert(*holder, local);
+                    }
+                }
+            }
+        }
+    }
+
     fn solve<'s>(
         &'s self,
         layout: &FunctionLayout,
-        outputs: &FxHashMap<BlockId, BorrowState>,
-        invokes: &FxHashMap<BlockId, InvokeTransfer>,
     ) -> Option<(BlockId, &'s ObservationCheckpoint, &'s Carrier)> {
         if !self
             .blocks
@@ -108,15 +124,12 @@ impl FunctionObservations {
         {
             return None;
         }
-        let executable = |block, edge| {
+        let executable = |block: BlockId, edge: usize| {
             !self.diverges.contains(&block)
-                && invokes.get(&block).is_none_or(|invoke| {
-                    if edge == 0 {
-                        !invoke.success.unreachable
-                    } else {
-                        !invoke.error.unreachable
-                    }
-                })
+                && self
+                    .unreachable_invokes
+                    .get(&block)
+                    .is_none_or(|lanes| !lanes[edge])
         };
         let successors = |block| {
             layout.block_successors[&block]
@@ -124,12 +137,12 @@ impl FunctionObservations {
                 .copied()
                 .enumerate()
                 .filter(move |&(edge, successor)| {
-                    executable(block, edge) && outputs.contains_key(&successor)
+                    executable(block, edge) && self.reached.contains(&successor)
                 })
         };
 
         let mut predecessors = FxHashMap::<BlockId, Vec<BlockId>>::default();
-        for &block in outputs.keys() {
+        for &block in &self.reached {
             for (_, successor) in successors(block) {
                 predecessors.entry(successor).or_default().push(block);
             }
@@ -310,19 +323,25 @@ impl<'a> BorrowChecker<'a> {
             type_environment: self.type_environment,
             type_projection: self.type_projection,
             diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
+            typed_call_cache: Default::default(),
         }
     }
 
     pub(super) fn run(
         mut self,
-        summaries: Option<FxHashMap<FunctionId, PublicCallSummary>>,
+        summaries: FxHashMap<FunctionId, PublicCallSummary>,
     ) -> Result<BorrowCheckReport, BorrowCheckError> {
-        if let Some(summaries) = summaries {
-            self.public_call_summaries = summaries;
-        } else {
-            self.build_public_call_summaries()?;
-        }
+        self.public_call_summaries = summaries;
+        self.run_validation()
+    }
 
+    #[cfg(test)]
+    pub(super) fn run_cold(mut self) -> Result<BorrowCheckReport, BorrowCheckError> {
+        self.build_public_call_summaries()?;
+        self.run_validation()
+    }
+
+    fn run_validation(mut self) -> Result<BorrowCheckReport, BorrowCheckError> {
         let mut report = BorrowCheckReport::default();
 
         for function_index in 0..self.module.functions.len() {
@@ -404,12 +423,21 @@ impl<'a> BorrowChecker<'a> {
         in_states.insert(function.entry, initial_state);
 
         let mut worklist = ForwardWorklist::new(function.entry, &layout.block_successors);
+        // Strictly decreasing RPO ranks prove that all incoming contributions
+        // precede the one visit. FIFO probes instead keep the fixed-point path.
+        let consume_states = layout.block_successors.iter().all(|(block, successors)| {
+            successors
+                .iter()
+                .all(|successor| worklist.ranks[block] > worklist.ranks[successor])
+        });
         #[cfg(test)]
         if let Some(probe) = &self.forward_probe {
             let probe = probe.borrow();
             worklist.fifo = probe.fifo.then(|| VecDeque::from([function.entry]));
             worklist.reverse_siblings = probe.reverse_siblings;
         }
+        #[cfg(test)]
+        let consume_states = consume_states && worklist.fifo.is_none();
 
         let mut summary = FunctionBorrowSummary {
             reachable_blocks: reachable_blocks.len(),
@@ -435,15 +463,22 @@ impl<'a> BorrowChecker<'a> {
             // Stored inputs are already narrowed to this block's visibility: the entry state and
             // every incoming edge are narrowed before insertion or join, and joining states
             // narrowed to the same mask stays narrowed.
-            let Some(input_state) = in_states.get(&block_id) else {
-                continue;
+            let mut output_state = if consume_states {
+                let Some(state) = in_states.remove(&block_id) else {
+                    continue;
+                };
+                #[cfg(any(test, feature = "show_borrow_checker"))]
+                report
+                    .analysis
+                    .block_entry_states
+                    .insert(block_id, state.to_snapshot(&layout.local_ids));
+                state
+            } else {
+                let Some(state) = in_states.get(&block_id) else {
+                    continue;
+                };
+                clone_validation_state(state)
             };
-            #[cfg(feature = "benchmark_counters")]
-            add_frontend_counter(
-                FrontendCounter::BorrowValidationRowsCloned,
-                input_state.validation_row_count(),
-            );
-            let mut output_state = input_state.clone();
 
             let block = self.block_by_id_or_error(block_id, function.id)?;
 
@@ -469,12 +504,21 @@ impl<'a> BorrowChecker<'a> {
                     .insert(terminator_block, fact);
             }
             final_value_facts_by_block.insert(block_id, block_stats.value_facts);
+            #[cfg(any(test, feature = "show_borrow_checker"))]
+            if consume_states {
+                report
+                    .analysis
+                    .block_exit_states
+                    .insert(block_id, output_state.to_snapshot(&layout.local_ids));
+            }
+            observations.record_origins(&block_stats.observations, &output_state);
             let divergence_changed =
                 observations.record_block(block_id, block_stats.observations, block_stats.diverges);
             let invoke = block_stats.invoke;
             let previous_invoke = invoke_by_block.get(&block_id);
             let has_invoke_effects = !invoke.is_empty();
-            let changed_out = out_states.get(&block_id) != Some(&output_state)
+            let changed_out = consume_states
+                || out_states.get(&block_id) != Some(&output_state)
                 || divergence_changed
                 || previous_invoke.map_or(has_invoke_effects, |previous| previous != &invoke);
 
@@ -482,58 +526,76 @@ impl<'a> BorrowChecker<'a> {
             if !changed_out {
                 continue;
             }
+            observations.reached.insert(block_id);
+            let unreachable = [invoke.success.unreachable, invoke.error.unreachable];
+            if unreachable.iter().any(|&lane| lane) {
+                observations
+                    .unreachable_invokes
+                    .insert(block_id, unreachable);
+            } else {
+                observations.unreachable_invokes.remove(&block_id);
+            }
+            self.record_advisory_drop_sites(function, block, &layout, &output_state, report)?;
 
-            let mut deliver_edge = |edge_index, successor| {
+            // Check feasibility against the common predecessor, not a state
+            // already changed by a sibling edge.
+            #[cfg(test)]
+            let reverse_delivery = self
+                .forward_probe
+                .as_ref()
+                .is_some_and(|probe| probe.borrow().reverse_delivery);
+            #[cfg(not(test))]
+            let reverse_delivery = false;
+            let successors = &layout.block_successors[&block_id];
+            let mut feasible = InlineVec::Empty;
+
+            for index in 0..successors.len() {
+                let edge_index = if reverse_delivery {
+                    successors.len() - 1 - index
+                } else {
+                    index
+                };
+                let successor = successors[edge_index];
                 let edge = (block_id, edge_index);
                 #[cfg(test)]
                 if let Some(probe) = &self.forward_probe {
                     probe.borrow_mut().deliveries.push(edge);
-                }
-                if block_stats.diverges {
-                    #[cfg(test)]
-                    if let Some(probe) = &self.forward_probe {
-                        probe.borrow_mut().edges.remove(&edge);
-                    }
-                    observations.edges.remove(&edge);
-                    return Ok::<(), BorrowCheckError>(());
                 }
                 let invoke_lane = if matches!(&block.terminator, HirTerminator::Invoke { .. }) {
                     Some([&invoke.success, &invoke.error][edge_index])
                 } else {
                     None
                 };
-                if invoke_lane.is_some_and(|lane| lane.unreachable) {
+                if block_stats.diverges
+                    || invoke_lane.is_some_and(|lane| lane.unreachable)
+                    || !super::transfer::access::option_edge_is_possible(
+                        OperationView::from_layout(&layout),
+                        &output_state,
+                        &self.module.expressions,
+                        &block.terminator,
+                        successor,
+                    )
+                {
                     observations.edges.remove(&edge);
                     #[cfg(test)]
                     if let Some(probe) = &self.forward_probe {
                         probe.borrow_mut().edges.remove(&edge);
                     }
-                    return Ok::<(), BorrowCheckError>(());
+                    continue;
                 }
-                if !worklist.ranks.contains_key(&successor) {
-                    return Ok::<(), BorrowCheckError>(());
-                }
-                if !super::transfer::access::option_edge_is_possible(
-                    OperationView::from_layout(&layout),
-                    &output_state,
-                    &self.module.expressions,
-                    &block.terminator,
-                    successor,
-                ) {
-                    observations.edges.remove(&edge);
-                    #[cfg(test)]
-                    if let Some(probe) = &self.forward_probe {
-                        probe.borrow_mut().edges.remove(&edge);
-                    }
-                    return Ok::<(), BorrowCheckError>(());
-                }
+                feasible.push((edge_index, successor, invoke_lane));
+            }
+            let mut output = Some(output_state);
+            let mut remaining = feasible.len();
+            for (edge_index, successor, invoke_lane) in feasible {
+                let edge = (block_id, edge_index);
+                remaining -= 1;
 
-                #[cfg(feature = "benchmark_counters")]
-                add_frontend_counter(
-                    FrontendCounter::BorrowValidationRowsCloned,
-                    output_state.validation_row_count(),
-                );
-                let mut successor_input = output_state.clone();
+                let mut successor_input = if consume_states && remaining == 0 {
+                    output.take().expect("last edge owns the output")
+                } else {
+                    clone_validation_state(output.as_ref().expect("shared output"))
+                };
                 let mut edge_observations = self.apply_forward_edge(
                     &ForwardEdgeSource {
                         function: function.id,
@@ -568,6 +630,8 @@ impl<'a> BorrowChecker<'a> {
                         .insert(edge, successor_input.clone());
                 }
                 if !edge_observations.is_empty() {
+                    // Allocation IDs retain their diagnostic origin after rekeying.
+                    observations.record_origins(&edge_observations, &successor_input);
                     observations.edges.insert(edge, edge_observations);
                 } else {
                     observations.edges.remove(&edge);
@@ -593,41 +657,17 @@ impl<'a> BorrowChecker<'a> {
                 if changed_in {
                     worklist.push(successor);
                 }
-
-                Ok::<(), BorrowCheckError>(())
-            };
-            #[cfg(test)]
-            let reverse_delivery = self
-                .forward_probe
-                .as_ref()
-                .is_some_and(|probe| probe.borrow().reverse_delivery);
-            #[cfg(not(test))]
-            let reverse_delivery = false;
-            if reverse_delivery {
-                let mut edges = Vec::new();
-                try_for_each_terminator_target(&block.terminator, |successor| {
-                    edges.push((edges.len(), successor));
-                    Ok::<_, BorrowCheckError>(())
-                })?;
-                for (index, successor) in edges.into_iter().rev() {
-                    deliver_edge(index, successor)?;
-                }
-            } else {
-                let mut edge_index = 0;
-                try_for_each_terminator_target(&block.terminator, |successor| {
-                    let index = edge_index;
-                    edge_index += 1;
-                    deliver_edge(index, successor)
-                })?;
             }
             #[cfg(test)]
             worklist.finish_successors();
 
-            out_states.insert(block_id, output_state);
-            if has_invoke_effects {
-                invoke_by_block.insert(block_id, invoke);
-            } else {
-                invoke_by_block.remove(&block_id);
+            if !consume_states {
+                out_states.insert(block_id, output.expect("revisits retain the output"));
+                if has_invoke_effects {
+                    invoke_by_block.insert(block_id, invoke);
+                } else {
+                    invoke_by_block.remove(&block_id);
+                }
             }
         }
         #[cfg(test)]
@@ -642,15 +682,13 @@ impl<'a> BorrowChecker<'a> {
         }
 
         // The verdict uses final executable edges and cannot change forward state.
-        if let Some((block, at, carrier)) =
-            observations.solve(&layout, &out_states, &invoke_by_block)
-        {
+        if let Some((_, at, carrier)) = observations.solve(&layout) {
             let local = match carrier {
                 Carrier::Cell(CellId::Slot(slot), ..) | Carrier::Route(slot, ..) => {
                     Some(slot.local)
                 }
                 Carrier::Cell(CellId::Projected(holder, _), ..) => {
-                    out_states[&block].alloc_origin_local(*holder)
+                    observations.carrier_origins.get(holder).copied()
                 }
             };
             let diagnostics = &transfer_context.diagnostics;
@@ -701,8 +739,6 @@ impl<'a> BorrowChecker<'a> {
             }
         }
 
-        self.record_advisory_drop_sites(function, &reachable_blocks, &layout, &out_states, report)?;
-
         report
             .analysis
             .function_summaries
@@ -748,67 +784,44 @@ impl<'a> BorrowChecker<'a> {
     fn record_advisory_drop_sites(
         &self,
         function: &HirFunction,
-        reachable_blocks: &[BlockId],
+        block: &HirBlock,
         layout: &FunctionLayout,
-        out_states: &FxHashMap<BlockId, BorrowState>,
+        state: &BorrowState,
         report: &mut BorrowCheckReport,
     ) -> Result<(), BorrowCheckError> {
-        for block_id in reachable_blocks {
-            let Some(exit_state) = out_states.get(block_id) else {
-                continue;
-            };
-
-            let candidate_locals = self.drop_candidate_locals_from_state(exit_state, layout);
-            if candidate_locals.is_empty() {
-                continue;
+        let terminal = match block.terminator {
+            HirTerminator::Return(_) | HirTerminator::ReturnError(_) => {
+                Some(BorrowDropSiteKind::Return)
             }
-
-            let block = self.block_by_id_or_error(*block_id, function.id)?;
-            let mut block_sites = Vec::new();
-
-            match &block.terminator {
-                HirTerminator::Return(_) | HirTerminator::ReturnError(_) => {
-                    block_sites.push(BorrowDropSite {
-                        kind: BorrowDropSiteKind::Return,
-                        locals: candidate_locals.clone(),
-                    });
-                }
-                HirTerminator::Invoke { .. } => {}
-                HirTerminator::Break { .. } => {
-                    block_sites.push(BorrowDropSite {
-                        kind: BorrowDropSiteKind::Break,
-                        locals: candidate_locals.clone(),
-                    });
-                }
-                _ => {}
-            }
-
-            if self.block_has_region_exit_edge(block.id, block.region, function.id)? {
-                block_sites.push(BorrowDropSite {
+            HirTerminator::Break { .. } => Some(BorrowDropSiteKind::Break),
+            _ => None,
+        };
+        let region_exit = self.block_has_region_exit_edge(block, function.id)?;
+        if terminal.is_none() && !region_exit {
+            return Ok(());
+        }
+        let sites = &mut report.analysis.advisory_drop_sites;
+        let locals = self.drop_candidate_locals_from_state(state, layout);
+        if locals.is_empty() {
+            sites.remove(&block.id);
+            return Ok(());
+        }
+        let block_sites = match (region_exit, terminal) {
+            (true, Some(kind)) => vec![
+                BorrowDropSite {
                     kind: BorrowDropSiteKind::BlockExit,
-                    locals: candidate_locals,
-                });
-            }
-
-            if block_sites.is_empty() {
-                continue;
-            }
-
-            report
-                .analysis
-                .advisory_drop_sites
-                .entry(*block_id)
-                .or_default()
-                .extend(block_sites);
-        }
-
-        for sites in report.analysis.advisory_drop_sites.values_mut() {
-            sites.sort_by_key(|site| match site.kind {
-                BorrowDropSiteKind::BlockExit => 0u8,
-                BorrowDropSiteKind::Return => 1u8,
-                BorrowDropSiteKind::Break => 2u8,
-            });
-        }
+                    locals: locals.clone(),
+                },
+                BorrowDropSite { kind, locals },
+            ],
+            (true, None) => vec![BorrowDropSite {
+                kind: BorrowDropSiteKind::BlockExit,
+                locals,
+            }],
+            (false, Some(kind)) => vec![BorrowDropSite { kind, locals }],
+            (false, None) => unreachable!("blocks without drop sites were skipped"),
+        };
+        sites.insert(block.id, block_sites);
 
         Ok(())
     }
@@ -833,16 +846,14 @@ impl<'a> BorrowChecker<'a> {
 
     fn block_has_region_exit_edge(
         &self,
-        block_id: BlockId,
-        block_region: RegionId,
+        block: &HirBlock,
         function_id: FunctionId,
     ) -> Result<bool, BorrowCheckError> {
-        let block = self.block_by_id_or_error(block_id, function_id)?;
         let mut has_region_exit_edge = false;
 
         try_for_each_terminator_target(&block.terminator, |successor| {
             let successor_block = self.block_by_id_or_error(successor, function_id)?;
-            if !self.is_same_or_descendant_region(successor_block.region, block_region) {
+            if !self.is_same_or_descendant_region(successor_block.region, block.region) {
                 has_region_exit_edge = true;
             }
 
@@ -890,13 +901,13 @@ impl<'a> BorrowChecker<'a> {
     /// Keep alternatives of the fixed support separate until boundary export.
     pub(super) fn evaluate_sparse_support(
         &self,
+        context: &BorrowTransferContext<'_>,
         function: &HirFunction,
         mut entry: BorrowState,
         support: &super::metadata::ProjectedSupport<'_>,
     ) -> Result<SparseEvaluation, BorrowCheckError> {
         use super::transfer::transfer_sparse_block;
 
-        let context = self.transfer_context();
         let recurring = support.recurring_blocks();
         let acyclic = recurring.is_empty();
         entry.use_indexed_recurring_blocks(recurring);
@@ -905,12 +916,11 @@ impl<'a> BorrowChecker<'a> {
         }
         let entry_block = support.continuation(function.entry);
         let mut worklist = ForwardWorklist::with_ranks(entry_block, support.ranks());
-        let entry = Rc::new(entry);
-        let mut inputs = FxHashMap::<_, (FxHashSet<_>, Vec<_>)>::default();
-        inputs.insert(
-            entry_block,
-            (FxHashSet::from_iter([Rc::clone(&entry)]), vec![entry]),
-        );
+        let mut inputs = FxHashMap::<_, ReplayStates>::default();
+        inputs
+            .entry(entry_block)
+            .or_default()
+            .insert(Rc::new(entry), !acyclic);
         let mut result = SparseEvaluation {
             exits: FxHashMap::default(),
             retained: BTreeSet::new(),
@@ -924,9 +934,15 @@ impl<'a> BorrowChecker<'a> {
             }
             let pending = if acyclic {
                 // Every predecessor has already run in topological order.
-                inputs.remove(&block_id).expect("queued sparse inputs").1
+                inputs
+                    .remove(&block_id)
+                    .expect("queued sparse inputs")
+                    .into_pending()
             } else {
-                std::mem::take(&mut inputs.get_mut(&block_id).expect("queued sparse inputs").1)
+                inputs
+                    .get_mut(&block_id)
+                    .expect("queued sparse inputs")
+                    .take_pending()
             };
             for state in pending {
                 let view = support.block_view(block_id);
@@ -941,29 +957,40 @@ impl<'a> BorrowChecker<'a> {
                 let transfer_terminator =
                     view.transfer_terminator || view.structural_terminator.is_some();
                 for (state, invoke) in
-                    transfer_sparse_block(&context, view, block, state, &mut result.retained)?
+                    transfer_sparse_block(context, view, block, state, &mut result.retained)?
                 {
+                    if matches!(
+                        block.terminator,
+                        HirTerminator::Return(_) | HirTerminator::ReturnError(_)
+                    ) {
+                        result
+                            .exits
+                            .entry(block_id)
+                            .or_default()
+                            .insert(state, false);
+                        continue;
+                    }
+                    #[cfg(test)]
+                    result
+                        .exits
+                        .entry(block_id)
+                        .or_default()
+                        .insert(Rc::clone(&state), false);
                     self.transfer_sparse_successors(
                         &source,
                         transfer_terminator.then_some(&invoke),
-                        &state,
+                        state,
                         support,
                         |successor, incoming| {
-                            let (seen, pending) = inputs.entry(successor).or_default();
-                            if seen.insert(Rc::clone(&incoming)) {
-                                pending.push(incoming);
+                            if inputs
+                                .entry(successor)
+                                .or_default()
+                                .insert(incoming, !acyclic)
+                            {
                                 worklist.push(successor);
                             }
                         },
                     )?;
-                    if cfg!(test)
-                        || matches!(
-                            block.terminator,
-                            HirTerminator::Return(_) | HirTerminator::ReturnError(_)
-                        )
-                    {
-                        result.exits.entry(block_id).or_default().insert(state);
-                    }
                 }
             }
         }
@@ -978,7 +1005,7 @@ impl<'a> BorrowChecker<'a> {
         support: &super::metadata::ProjectedSupport<'_>,
     ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
         Ok(self
-            .evaluate_sparse_support(function, entry, support)?
+            .evaluate_sparse_support(&self.transfer_context(), function, entry, support)?
             .exits
             .into_iter()
             .map(|(block, states)| {
@@ -996,7 +1023,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         source: &ForwardEdgeSource<'_>,
         terminator_effects: Option<&InvokeTransfer>,
-        state: &Rc<BorrowState>,
+        state: Rc<BorrowState>,
         support: &super::metadata::ProjectedSupport<'_>,
         mut deliver: impl FnMut(BlockId, Rc<BorrowState>),
     ) -> Result<(), BorrowCheckError> {
@@ -1006,6 +1033,7 @@ impl<'a> BorrowChecker<'a> {
             .map(|invoke| [&invoke.success, &invoke.error].into_iter());
         let jump_rebinds = terminator_effects.is_some()
             && matches!(terminator, HirTerminator::Jump { args, .. } if !args.is_empty());
+        let mut feasible = InlineVec::Empty;
         try_for_each_terminator_target(terminator, |successor| {
             let lane = lanes.as_mut().and_then(Iterator::next);
             if lane.is_some_and(|lane| lane.unreachable) {
@@ -1013,13 +1041,25 @@ impl<'a> BorrowChecker<'a> {
             }
             if !super::transfer::access::option_edge_is_possible(
                 source.view.operations,
-                state,
+                &state,
                 &self.module.expressions,
                 terminator,
                 successor,
             ) {
                 return Ok(());
             }
+            feasible.push((successor, lane));
+            Ok::<_, BorrowCheckError>(())
+        })?;
+        let mut remaining = feasible.len();
+        let mut state = Some(state);
+        for (successor, lane) in feasible {
+            remaining -= 1;
+            let state = if remaining == 0 {
+                state.take().expect("last sparse edge owns its state")
+            } else {
+                Rc::clone(state.as_ref().expect("shared sparse output"))
+            };
             let mut deliver = |mut incoming: Rc<BorrowState>| {
                 let target = support.continuation(successor);
                 match (
@@ -1028,11 +1068,21 @@ impl<'a> BorrowChecker<'a> {
                 ) {
                     (Some(lexical), Some(mut replay)) => {
                         replay.intersect_with(lexical);
-                        Rc::make_mut(&mut incoming).kill_invisible(&replay);
+                        if !replay.covers_all(source.view.operations.local_count()) {
+                            Rc::make_mut(&mut incoming).kill_invisible(&replay);
+                        }
                     }
-                    (Some(visible), None) => Rc::make_mut(&mut incoming).kill_invisible(visible),
-                    (None, Some(visible)) => Rc::make_mut(&mut incoming).kill_invisible(&visible),
-                    (None, None) => {}
+                    (Some(visible), None)
+                        if !visible.covers_all(source.view.operations.local_count()) =>
+                    {
+                        Rc::make_mut(&mut incoming).kill_invisible(visible);
+                    }
+                    (None, Some(visible))
+                        if !visible.covers_all(source.view.operations.local_count()) =>
+                    {
+                        Rc::make_mut(&mut incoming).kill_invisible(&visible);
+                    }
+                    _ => {}
                 }
                 deliver(target, incoming);
             };
@@ -1043,7 +1093,7 @@ impl<'a> BorrowChecker<'a> {
                     ..
                 } = terminator
             {
-                let outcomes: Vec<_> = success_results
+                let outcomes: InlineVec<_> = success_results
                     .iter()
                     .chain(std::iter::once(error_result))
                     .filter_map(|&local| source.view.operations.index_of(local))
@@ -1053,18 +1103,26 @@ impl<'a> BorrowChecker<'a> {
                     Cow::Borrowed(batch),
                     &outcomes,
                     source.order,
-                    Rc::clone(state),
+                    state,
                     deliver,
                 )?;
             } else {
-                let mut incoming = Rc::clone(state);
-                if jump_rebinds || lane.is_some() {
+                let mut incoming = state;
+                let changes_outcomes = lane.is_some_and(|lane| {
+                    let operations = source.view.operations;
+                    !lane.operations.is_empty()
+                        || lane.results.iter().any(|(local, _)| operations.index_of(*local).is_some())
+                        || matches!(terminator, HirTerminator::Invoke { success_results, error_result, .. }
+                            if success_results.iter().chain(std::iter::once(error_result))
+                                .any(|&local| operations.index_of(local).is_some()))
+                });
+                if jump_rebinds || changes_outcomes {
                     self.apply_forward_edge(source, successor, lane, Rc::make_mut(&mut incoming))?;
                 }
                 deliver(incoming);
             }
-            Ok(())
-        })
+        }
+        Ok(())
     }
 
     fn apply_forward_edge(
@@ -1093,9 +1151,9 @@ impl<'a> BorrowChecker<'a> {
                     .iter()
                     .chain(std::iter::once(error_result))
                     .filter_map(|&local| view.operations.index_of(local));
-                return Ok(apply_captured_call_batch(
+                return Ok(apply_captured_call_batch_from(
                     view,
-                    batch.clone(),
+                    Cow::Borrowed(batch),
                     outcomes,
                     order,
                     state,
@@ -1287,6 +1345,15 @@ impl<'a> BorrowChecker<'a> {
     }
 }
 
+fn clone_validation_state(state: &BorrowState) -> BorrowState {
+    #[cfg(feature = "benchmark_counters")]
+    add_frontend_counter(
+        FrontendCounter::BorrowValidationRowsCloned,
+        state.validation_row_count(),
+    );
+    state.clone()
+}
+
 struct ForwardWorklist {
     ranks: Rc<FxHashMap<BlockId, usize>>,
     rpo: BinaryHeap<(usize, u32)>,
@@ -1412,9 +1479,23 @@ pub(super) fn replay_captured_sparse_support(
             .iter()
             .all(|component| component.alternatives.len() == 1)
     {
-        apply_captured_call_batch(
+        if outcomes.is_empty()
+            && batch.destinations.is_empty()
+            && batch.detachment.is_none()
+            && batch.post.posts().all(|post| {
+                post.bindings.is_empty()
+                    && post.edits.is_empty()
+                    && post.results.is_empty()
+                    && post.uncertainty.is_none()
+                    && post.result_views.is_none()
+            })
+        {
+            deliver(state);
+            return Ok(());
+        }
+        apply_captured_call_batch_from(
             view,
-            batch.into_owned(),
+            batch,
             outcomes.iter().copied(),
             order,
             Rc::make_mut(&mut state),
@@ -1422,61 +1503,67 @@ pub(super) fn replay_captured_sparse_support(
         deliver(state);
         return Ok(());
     }
-    for stratum in &batch.post {
-        let mut replay = |components| {
-            let mut branch = Rc::clone(&state);
-            apply_captured_call_batch(
-                view,
-                CapturedCallBatch {
-                    post: vec![MatchedStratum {
-                        #[cfg(test)]
-                        guard: stratum.guard.clone(),
-                        components,
-                    }],
-                    destinations: batch.destinations.clone(),
-                    member_reads: batch.member_reads.clone(),
-                    checkpoints: batch.checkpoints.clone(),
-                    detachment: batch.detachment.clone(),
-                },
-                outcomes.iter().copied(),
-                order,
-                Rc::make_mut(&mut branch),
-            )?;
-            deliver(branch);
-            Ok::<(), BorrowCheckError>(())
-        };
-        let mut varying = stratum
+    let mut replays = batch
+        .post
+        .iter()
+        .flat_map(|stratum| {
+            let mut varying = stratum
+                .components
+                .iter()
+                .enumerate()
+                .filter(|(_, component)| component.alternatives.len() > 1);
+            let selected = varying.next().filter(|_| varying.next().is_none());
+            // A single varying component retains its joint alternatives. Otherwise
+            // apply the independent product without enumerating combinations.
+            selected
+                .is_none()
+                .then_some((stratum, None))
+                .into_iter()
+                .chain(selected.into_iter().flat_map(move |(index, component)| {
+                    component
+                        .alternatives
+                        .iter()
+                        .map(move |post| (stratum, Some((index, post))))
+                }))
+        })
+        .peekable();
+    let mut base = Some(state);
+    while let Some((stratum, selected)) = replays.next() {
+        let components = stratum
             .components
             .iter()
             .enumerate()
-            .filter(|(_, component)| component.alternatives.len() > 1);
-        if let Some((index, component)) = varying.next()
-            && varying.next().is_none()
-        {
-            // A single relevant component retains its joint alternatives.
-            for post in &component.alternatives {
-                let components = stratum
-                    .components
-                    .iter()
-                    .enumerate()
-                    .map(|(at, component)| {
-                        if at == index {
-                            MatchedComponent {
-                                support: component.support,
-                                alternatives: vec![post.clone()],
-                            }
-                        } else {
-                            component.clone()
-                        }
-                    })
-                    .collect();
-                replay(components)?;
-            }
+            .map(|(index, component)| match selected {
+                Some((chosen, post)) if chosen == index => MatchedComponent {
+                    support: component.support,
+                    alternatives: vec![post.clone()],
+                },
+                _ => component.clone(),
+            })
+            .collect();
+        let mut branch = if replays.peek().is_none() {
+            base.take().expect("last replay owns its state")
         } else {
-            // The product certifies independence in this stratum. Apply it
-            // by component, without enumerating combinations of its choices.
-            replay(stratum.components.clone())?;
-        }
+            Rc::clone(base.as_ref().expect("shared replay input"))
+        };
+        apply_captured_call_batch(
+            view,
+            CapturedCallBatch {
+                post: vec![MatchedStratum {
+                    #[cfg(test)]
+                    guard: stratum.guard.clone(),
+                    components,
+                }],
+                destinations: batch.destinations.clone(),
+                member_reads: batch.member_reads.clone(),
+                checkpoints: batch.checkpoints.clone(),
+                detachment: batch.detachment.clone(),
+            },
+            outcomes.iter().copied(),
+            order,
+            Rc::make_mut(&mut branch),
+        )?;
+        deliver(branch);
     }
     Ok(())
 }
@@ -1491,16 +1578,15 @@ pub(super) fn apply_captured_call_batch(
     order: OrderKey,
     state: &mut BorrowState,
 ) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
-    apply_captured_call_batch_rekey(view, batch, outcomes, order, state, &mut |_, _| {})
+    apply_captured_call_batch_from(view, Cow::Owned(batch), outcomes, order, state)
 }
 
-fn apply_captured_call_batch_rekey(
+fn apply_captured_call_batch_from<P: CapturedPosts>(
     view: EdgeTransferView<'_>,
-    mut batch: CapturedCallBatch<impl CapturedPosts>,
+    batch: Cow<'_, CapturedCallBatch<P>>,
     outcomes: impl IntoIterator<Item = usize>,
     order: OrderKey,
     state: &mut BorrowState,
-    rekey: &mut impl FnMut(&BorrowState, AllocationRetirement),
 ) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     if batch
         .post
@@ -1516,30 +1602,49 @@ fn apply_captured_call_batch_rekey(
     }
     let layout = view.operations;
     let mut observations = ValueObservations::default();
-    for checkpoint in std::mem::take(&mut batch.checkpoints) {
-        observations.split(ObservationBoundary::Checkpoint(checkpoint));
-    }
-    observations
-        .tail
-        .read(std::mem::take(&mut batch.member_reads));
-    let mut retired = FxHashSet::default();
+    let (mut post, mut destinations, mut detachment) = match batch {
+        Cow::Owned(batch) => {
+            for checkpoint in batch.checkpoints {
+                observations.split(ObservationBoundary::Checkpoint(checkpoint));
+            }
+            observations.tail.read(batch.member_reads);
+            (
+                Cow::Owned(batch.post),
+                Cow::Owned(batch.destinations),
+                batch.detachment.map(Cow::Owned),
+            )
+        }
+        Cow::Borrowed(batch) => {
+            for checkpoint in &batch.checkpoints {
+                observations.split(ObservationBoundary::Checkpoint(checkpoint.clone()));
+            }
+            observations.tail.read(batch.member_reads.clone());
+            (
+                Cow::Borrowed(&batch.post),
+                Cow::Borrowed(&batch.destinations),
+                batch.detachment.as_ref().map(Cow::Borrowed),
+            )
+        }
+    };
+    let mut retired = SmallSet::Empty;
     // Include immediate definitions as well as the predecessor's invoke outcomes.
-    let destinations = 0..batch.destinations.len();
-    let retirement_order = outcomes.into_iter().map(Ok).chain(destinations.map(Err));
+    let slots = 0..destinations.len();
+    let retirement_order = outcomes.into_iter().map(Ok).chain(slots.map(Err));
     for next in retirement_order {
         let index = match next {
             Ok(index) => index,
-            Err(slot) => match batch.destinations[slot] {
+            Err(slot) => match destinations[slot] {
                 CapturedDestination::Define(index) => index,
                 CapturedDestination::Update { .. } => continue,
             },
         };
-        if !retired.insert(index) {
+        if retired.as_slice().binary_search(&index).is_ok() {
             continue;
         }
+        retired.insert(index);
         let wrapper = WrapperId::current(index);
-        let retained = batch.post.posts().any(|post| post.names_wrapper(wrapper))
-            || batch.destinations.iter().any(|destination| {
+        let retained = post.posts().any(|post| post.names_wrapper(wrapper))
+            || destinations.iter().any(|destination| {
                 matches!(destination, CapturedDestination::Update { address, .. }
                     if address.cells().contains(&CellId::Slot(wrapper)))
             });
@@ -1556,30 +1661,20 @@ fn apply_captured_call_batch_rekey(
         let retirement = state.retire_binding_allocation(index, order);
         state.update_local_state(index, LocalState::uninit(layout.local_count()));
         observations.after_retirement(before, state, retirement);
-        batch.post.remap(state, retirement);
-        rekey(state, retirement);
-        remap_receivers(
-            &mut batch.destinations,
-            batch.detachment.as_mut(),
-            state,
-            retirement,
-        );
+        post.to_mut().remap(state, retirement);
+        remap_receivers(&mut destinations, &mut detachment, state, retirement);
     }
 
-    let (results, receipt) = batch.post.apply(state, order);
+    let (results, receipt) = P::apply_capture(post, state, layout.local_mutable, order);
     observations.publish(receipt);
     let mut receiving = results.into_iter();
     let mut detached_result = None;
     while let Some(mut result) = receiving.next() {
-        let (actor, mut address, define) = match &batch.destinations[result.slot] {
-            CapturedDestination::Define(index) => {
-                state.update_local_state(*index, LocalState::slot(layout.local_count()));
-                (*index, state.resolve_cells(*index), true)
-            }
-            CapturedDestination::Update { actor, address } => (*actor, address.clone(), false),
+        let replaced_slot = match &destinations[result.slot] {
+            CapturedDestination::Define(_) => None,
+            CapturedDestination::Update { address, .. } => address.definite(),
         };
-        if !define
-            && let Some(CellId::Slot(wrapper)) = address.definite()
+        if let Some(CellId::Slot(wrapper)) = replaced_slot
             && !wrapper.is_call_owned()
             && layout.local_has_in_place_mutation_surface[wrapper.local]
         {
@@ -1587,19 +1682,19 @@ fn apply_captured_call_batch_rekey(
             let before = observations.before_rekey(state);
             let retirement = state.retire_slot_value(wrapper.local, order);
             observations.after_retirement(before, state, retirement);
-            rekey(state, retirement);
             result.remap(state, retirement);
-            address.remap_allocations(state, retirement);
             for pending in receiving.as_mut_slice() {
                 pending.remap(state, retirement);
             }
-            remap_receivers(
-                &mut batch.destinations,
-                batch.detachment.as_mut(),
-                state,
-                retirement,
-            );
+            remap_receivers(&mut destinations, &mut detachment, state, retirement);
         }
+        let (actor, address) = match &destinations[result.slot] {
+            CapturedDestination::Define(index) => {
+                state.update_local_state(*index, LocalState::slot(layout.local_count()));
+                (*index, Cow::Owned(state.resolve_cells(*index)))
+            }
+            CapturedDestination::Update { actor, address } => (*actor, Cow::Borrowed(address)),
+        };
         use super::transfer::typed_call::CapturedDerivation;
         let derivation = match result.derivation {
             Some(CapturedDerivation::Roots(roots)) => roots,
@@ -1607,7 +1702,7 @@ fn apply_captured_call_batch_rekey(
                 let mut roots = RootSet::empty(layout.local_count());
                 if let Some(CapturedDerivation::Wrapper(wrapper)) = source
                     && wrapper.local < layout.local_count()
-                    && !retired.contains(&wrapper.local)
+                    && retired.as_slice().binary_search(&wrapper.local).is_err()
                 {
                     roots.insert(wrapper.local);
                 }
@@ -1619,8 +1714,7 @@ fn apply_captured_call_batch_rekey(
             _ => actor,
         };
         let readonly = result.value.readonly();
-        if batch
-            .detachment
+        if detachment
             .as_ref()
             .is_some_and(|removal| removal.result == Some(result.slot))
         {
@@ -1631,7 +1725,7 @@ fn apply_captured_call_batch_rekey(
                 _ => None,
             };
         }
-        let store = TypedStore::receive_result(address, result.value, actor, readonly)
+        let store = TypedStore::receive_result(address.into_owned(), result.value, actor, readonly)
             .with_explicit_slot_payload()
             .with_slot_roots(
                 result
@@ -1641,7 +1735,7 @@ fn apply_captured_call_batch_rekey(
         observations.publish(state.publish_store(&store, order, None));
         state.mark_slot_derivation(slot, derivation);
     }
-    if let Some(detachment) = batch.detachment {
+    if let Some(detachment) = detachment {
         // Removal observes the newly installed receiver before detaching it.
         observations.publish(state.remove_alloc_element(
             &detachment.holders,
@@ -1654,18 +1748,23 @@ fn apply_captured_call_batch_rekey(
 }
 
 fn remap_receivers(
-    destinations: &mut [CapturedDestination],
-    detachment: Option<&mut super::transfer::CapturedDetachment>,
+    destinations: &mut Cow<'_, InlineVec<CapturedDestination>>,
+    detachment: &mut Option<Cow<'_, CapturedDetachment>>,
     state: &BorrowState,
     retirement: AllocationRetirement,
 ) {
-    for destination in destinations {
-        if let CapturedDestination::Update { address, .. } = destination {
-            address.remap_allocations(state, retirement);
+    if destinations
+        .iter()
+        .any(|destination| matches!(destination, CapturedDestination::Update { .. }))
+    {
+        for destination in destinations.to_mut().iter_mut() {
+            if let CapturedDestination::Update { address, .. } = destination {
+                address.remap_allocations(state, retirement);
+            }
         }
     }
     if let Some(detachment) = detachment {
-        for holder in &mut detachment.holders {
+        for holder in &mut detachment.to_mut().holders {
             retirement.remap_id(state, holder);
         }
     }

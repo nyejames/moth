@@ -9,6 +9,7 @@ use super::diagnostics::BorrowDiagnostics;
 use super::engine::BorrowChecker;
 use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
@@ -30,6 +31,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_co
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    typed::{PortId, SupportId},
     validate_public_call_summary_transition,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -40,6 +42,13 @@ mod return_alias;
 pub(super) use return_alias::ProjectedSupport;
 
 type ReturnAliasIndices = FxHashMap<FunctionId, return_alias::SparseFunction>;
+type DisplacedSupportSchemas = FxHashMap<FunctionId, return_alias::DisplacedSupportSchema>;
+
+struct SummaryIndices<'a> {
+    current: &'a ReturnAliasIndices,
+    displaced: &'a mut DisplacedSupportSchemas,
+}
+#[cfg(test)]
 type ReturnAliasCallers = FxHashMap<FunctionId, Vec<usize>>;
 
 /// `FunctionId` is stable within this module; block coordinates are not.
@@ -47,8 +56,12 @@ type ReturnAliasCallers = FxHashMap<FunctionId, Vec<usize>>;
 pub(crate) struct BorrowMetadataCache {
     bodies: FxHashMap<FunctionId, FunctionMetadata>,
     indices: ReturnAliasIndices,
+    // Retain the first displaced support descriptors while their settled row is still live.
+    prior_supports: DisplacedSupportSchemas,
     callers: FxHashMap<FunctionId, BTreeSet<usize>>,
     pending: FxHashSet<FunctionId>,
+    #[cfg(test)]
+    total_visits: FxHashMap<FunctionId, usize>,
     unindexed: BTreeSet<usize>,
     #[cfg(test)]
     visits: FxHashMap<FunctionId, usize>,
@@ -101,12 +114,9 @@ impl BorrowMetadataCache {
         }
         cache
     }
-}
 
-#[allow(dead_code, reason = "B2b.3b switches to the per-function queue")]
-impl BorrowMetadataCache {
     /// Reevaluate summaries when the sparse index inputs are unchanged.
-    pub(crate) fn enqueue(&mut self, functions: impl IntoIterator<Item = FunctionId>) {
+    pub(super) fn enqueue(&mut self, functions: impl IntoIterator<Item = FunctionId>) {
         for id in functions {
             assert!(
                 self.bodies.contains_key(&id),
@@ -122,6 +132,7 @@ impl BorrowMetadataCache {
         body.schema = None;
         self.unindexed.insert(body.position);
         self.pending.insert(id);
+        self.prior_supports.remove(&id);
         // Rewrites can narrow structural envelopes, so a replacement cannot start from
         // stale assumptions about this body, including in a local cycle.
         if let Some(index) = self.indices.remove(&id) {
@@ -131,7 +142,7 @@ impl BorrowMetadataCache {
 
     /// Apply the installer's layout receipt before enqueueing work on the new HIR. Mere
     /// renumbering invalidates coordinates, but does not reset the semantic summary.
-    pub(crate) fn apply_block_remap(&mut self, remap: &BlockIdRemap) {
+    pub(in crate::compiler_frontend) fn apply_block_remap(&mut self, remap: &BlockIdRemap) {
         for (&id, body) in &mut self.bodies {
             if body.indexed_revision == Some(body.revision)
                 && self.indices[&id].has_moved_blocks(remap)
@@ -145,7 +156,10 @@ impl BorrowMetadataCache {
 
     /// Nonlocal summary inputs can widen within one body revision. Rebuild the sparse
     /// demand schema without discarding the previous allocation summary.
-    pub(crate) fn refresh_inputs(&mut self, functions: impl IntoIterator<Item = FunctionId>) {
+    pub(in crate::compiler_frontend) fn refresh_inputs(
+        &mut self,
+        functions: impl IntoIterator<Item = FunctionId>,
+    ) {
         for id in functions {
             self.unindexed.insert(self.bodies[&id].position);
             self.pending.insert(id);
@@ -153,8 +167,31 @@ impl BorrowMetadataCache {
     }
 
     #[cfg(test)]
-    fn pending(&self) -> &FxHashSet<FunctionId> {
+    pub(in crate::compiler_frontend) fn pending(&self) -> &FxHashSet<FunctionId> {
         &self.pending
+    }
+
+    #[cfg(test)]
+    pub(in crate::compiler_frontend) fn visit_count(&self, id: FunctionId) -> usize {
+        self.total_visits.get(&id).copied().unwrap_or_default()
+    }
+
+    pub(in crate::compiler_frontend) fn work_functions<'a>(
+        &'a self,
+        module: &'a HirModule,
+    ) -> impl Iterator<Item = FunctionId> + 'a {
+        self.pending.iter().copied().chain(
+            self.unindexed
+                .iter()
+                .map(|&position| module.functions[position].id)
+                .filter(|id| !self.pending.contains(id)),
+        )
+    }
+
+    pub(in crate::compiler_frontend) fn has_work_for(&self, scope: &FxHashSet<FunctionId>) -> bool {
+        scope.iter().any(|id| {
+            self.pending.contains(id) || self.unindexed.contains(&self.bodies[id].position)
+        })
     }
 
     pub(super) fn has_work(&self) -> bool {
@@ -164,42 +201,104 @@ impl BorrowMetadataCache {
     pub(super) fn solve(
         &mut self,
         checker: &mut BorrowChecker<'_>,
-    ) -> Result<(), BorrowCheckError> {
-        self.refresh_indices(checker)?;
-        let queue = self.dependency_ready(checker.module);
+        scope: Option<&FxHashSet<FunctionId>>,
+    ) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
+        self.refresh_indices(checker, scope)?;
+        let queue = self.dependency_ready(checker.module, scope);
         #[cfg(test)]
         let on_visit = {
             self.visits.clear();
             let visits = &mut self.visits;
-            move |id| *visits.entry(id).or_default() += 1
+            let total_visits = &mut self.total_visits;
+            move |id| {
+                *visits.entry(id).or_default() += 1;
+                *total_visits.entry(id).or_default() += 1;
+            }
         };
         #[cfg(not(test))]
         let on_visit = |_| {};
+        let module = checker.module;
         let result = checker.stabilize_return_alias_summaries(
-            &self.indices,
+            SummaryIndices {
+                current: &self.indices,
+                displaced: &mut self.prior_supports,
+            },
             |id| self.callers.get(&id).into_iter().flatten(),
+            |position| scope.is_none_or(|scope| scope.contains(&module.functions[position].id)),
+            scope.is_some(),
             queue,
             on_visit,
         );
-        if result.is_ok() {
-            self.pending.clear();
+        if let Ok(changed) = &result {
+            if let Some(scope) = scope {
+                for id in scope {
+                    self.pending.remove(id);
+                }
+                // A local caller in a later global component was deliberately excluded from
+                // the scoped queue. Retain its exact work rather than activating it early.
+                for &(source, notify) in changed {
+                    if notify {
+                        for &caller in self.callers.get(&source).into_iter().flatten() {
+                            let id = module.functions[caller].id;
+                            if !scope.contains(&id) {
+                                self.pending.insert(id);
+                            }
+                        }
+                    }
+                }
+            } else {
+                self.pending.clear();
+            }
         }
         result
     }
 
-    fn refresh_indices(&mut self, checker: &BorrowChecker<'_>) -> Result<(), BorrowCheckError> {
-        while !self.unindexed.is_empty() {
-            let rebuilding = std::mem::take(&mut self.unindexed);
+    fn refresh_indices(
+        &mut self,
+        checker: &BorrowChecker<'_>,
+        scope: Option<&FxHashSet<FunctionId>>,
+    ) -> Result<(), BorrowCheckError> {
+        loop {
+            let rebuilding = if let Some(scope) = scope {
+                scope
+                    .iter()
+                    .filter_map(|id| {
+                        let position = self.bodies[id].position;
+                        self.unindexed.remove(&position).then_some(position)
+                    })
+                    .collect()
+            } else {
+                std::mem::take(&mut self.unindexed)
+            };
+            if rebuilding.is_empty() {
+                return Ok(());
+            }
             let mut changed_envelopes = FxHashSet::default();
             let callers = &mut self.callers;
             let bodies = &self.bodies;
+            let prior_supports = &mut self.prior_supports;
             return_alias::SparseFunction::build_sparse_for(
                 checker,
                 rebuilding.iter().copied(),
                 &mut self.indices,
                 |id| bodies[&id].indexed_revision == Some(bodies[&id].revision),
                 |id, before, after, changed| {
-                    update_reverse_callers(callers, bodies[&id].position, before, after);
+                    update_reverse_callers(
+                        callers,
+                        bodies[&id].position,
+                        before.as_ref().map_or(&[], |old| old.callees.as_slice()),
+                        &after.callees,
+                    );
+                    if let Some(before) = before
+                        && checker.public_call_summaries[&id]
+                            .return_alias
+                            .facts()
+                            .is_some()
+                    {
+                        prior_supports
+                            .entry(id)
+                            .or_insert_with(|| before.into_support_schema());
+                    }
                     if changed {
                         changed_envelopes.insert(id);
                     }
@@ -228,15 +327,26 @@ impl BorrowMetadataCache {
                 }
             }
         }
-        Ok(())
     }
 
-    fn dependency_ready(&self, module: &HirModule) -> VecDeque<usize> {
-        let mut roots: Vec<_> = self
-            .pending
-            .iter()
-            .map(|id| self.bodies[id].position)
-            .collect();
+    fn dependency_ready(
+        &self,
+        module: &HirModule,
+        scope: Option<&FxHashSet<FunctionId>>,
+    ) -> VecDeque<usize> {
+        let in_scope = |id: &FunctionId| scope.is_none_or(|scope| scope.contains(id));
+        let mut roots: Vec<_> = if let Some(scope) = scope {
+            scope
+                .iter()
+                .filter(|id| self.pending.contains(*id))
+                .map(|id| self.bodies[id].position)
+                .collect()
+        } else {
+            self.pending
+                .iter()
+                .map(|id| self.bodies[id].position)
+                .collect()
+        };
         roots.sort_unstable();
         let mut seen = FxHashSet::default();
         let mut stack = Vec::new();
@@ -253,7 +363,7 @@ impl BorrowMetadataCache {
             stack.push((root, self.indices[&root].callees.iter()));
             while let Some((id, callees)) = stack.last_mut() {
                 if let Some(&callee) = callees.next() {
-                    if self.pending.contains(&callee) && seen.insert(callee) {
+                    if in_scope(&callee) && self.pending.contains(&callee) && seen.insert(callee) {
                         stack.push((callee, self.indices[&callee].callees.iter()));
                     }
                 } else {
@@ -266,6 +376,35 @@ impl BorrowMetadataCache {
         }
         ready
     }
+}
+
+/// The live Known row is the per-function epoch's port high-water mark. Fixed-schema
+/// validation never changes it, and rebasing is allowed only for a strict canonical superset,
+/// even when the last extraction had no reachable continuation. A graph reset erases the
+/// mark by replacing the row with Pending.
+fn commit_allocation_transition(
+    previous: &mut PublicCallSummary,
+    next: PublicCallSummary,
+    embed_supports: impl FnOnce(&[PortId], usize) -> Option<Vec<SupportId>>,
+) -> Result<(), InfrastructureFailure> {
+    if let (Some(before), Some(after)) = (previous.return_alias.facts(), next.return_alias.facts())
+        && let Some(result) = before.validate_port_growth(after, embed_supports)
+    {
+        result?;
+        // The typed boundary checked transfer at the available schema precision.
+        // Declaration and inferred parameter mutation still use the normal widening check.
+        let prior_alias = std::mem::replace(
+            &mut previous.return_alias,
+            FunctionReturnAliasSummary::Pending,
+        );
+        let result = validate_public_call_summary_transition(previous, &next);
+        previous.return_alias = prior_alias;
+        result?;
+    } else {
+        validate_public_call_summary_transition(previous, &next)?;
+    }
+    *previous = next;
+    Ok(())
 }
 
 fn update_reverse_callers(
@@ -430,11 +569,12 @@ impl<'a> BorrowChecker<'a> {
         Ok(summaries)
     }
 
+    #[cfg(test)]
     pub(super) fn build_public_call_summaries(&mut self) -> Result<(), BorrowCheckError> {
         self.public_call_summaries =
             Self::seed_public_call_summaries(self.module, &self.diagnostics)?;
 
-        let indices = return_alias::build_sparse(self)?;
+        let indices = return_alias::SparseFunction::build_sparse(self)?;
         let mut callers = ReturnAliasCallers::default();
         for (position, function) in self.module.functions.iter().enumerate() {
             for &callee in &indices[&function.id].callees {
@@ -442,75 +582,45 @@ impl<'a> BorrowChecker<'a> {
             }
         }
         self.stabilize_return_alias_summaries(
-            &indices,
+            SummaryIndices {
+                current: &indices,
+                displaced: &mut DisplacedSupportSchemas::default(),
+            },
             |id| callers.get(&id).into_iter().flatten(),
+            |_| true,
+            false,
             (0..self.module.functions.len()).collect(),
             |_| {},
         )
-    }
-
-    pub(super) fn refresh_return_alias_summaries(
-        &mut self,
-        link_facts: &crate::compiler_frontend::hir::reachability::HirModuleLinkFacts,
-        changed_callers: &FxHashSet<FunctionId>,
-    ) -> Result<(), BorrowCheckError> {
-        let positions: FxHashMap<_, _> = self
-            .module
-            .functions
-            .iter()
-            .enumerate()
-            .map(|(position, function)| (function.id, position))
-            .collect();
-        let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
-        for (caller, callee) in link_facts.local_call_edges() {
-            callers.entry(callee).or_default().push(positions[&caller]);
-        }
-        let queue: VecDeque<_> = self
-            .module
-            .functions
-            .iter()
-            .enumerate()
-            .filter_map(|(position, function)| {
-                (changed_callers.contains(&function.id)
-                    || self.public_call_summaries[&function.id].return_alias
-                        == FunctionReturnAliasSummary::Pending)
-                    .then_some(position)
-            })
-            .collect();
-        if queue.is_empty() {
-            return Ok(());
-        }
-        let indices = return_alias::build_sparse(self)?;
-        self.stabilize_return_alias_summaries(
-            &indices,
-            |id| callers.get(&id).into_iter().flatten(),
-            queue,
-            |_| {},
-        )
+        .map(|_| ())
     }
 
     fn stabilize_return_alias_summaries<'b, I: IntoIterator<Item = &'b usize>>(
         &mut self,
-        indices: &ReturnAliasIndices,
+        indices: SummaryIndices<'_>,
         callers: impl Fn(FunctionId) -> I,
+        in_scope: impl Fn(usize) -> bool,
+        record_changes: bool,
         mut queue: VecDeque<usize>,
         mut on_visit: impl FnMut(FunctionId),
-    ) -> Result<(), BorrowCheckError> {
+    ) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
         if queue.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        let mut queued = vec![false; self.module.functions.len()];
+        let mut changed = FxHashMap::<FunctionId, bool>::default();
+        let mut queued = FxHashSet::default();
         for &position in &queue {
-            queued[position] = true;
+            queued.insert(position);
         }
         while let Some(position) = queue.pop_front() {
-            queued[position] = false;
+            queued.remove(&position);
             let function = &self.module.functions[position];
             on_visit(function.id);
             let previous = &self.public_call_summaries[&function.id];
-            let return_alias =
-                self.classify_function_return_alias(function, &indices[&function.id])?;
+            let index = &indices.current[&function.id];
+            let return_alias = self.classify_function_return_alias(function, index)?;
             if previous.return_alias == return_alias {
+                indices.displaced.remove(&function.id);
                 continue;
             }
             // Settling an empty body need not revisit callers if its executed effects and
@@ -527,17 +637,29 @@ impl<'a> BorrowChecker<'a> {
                 may_fail: previous.may_fail,
             };
             self.validate_local_allocation_summary(function, &summary)?;
-            validate_public_call_summary_transition(previous, &summary)?;
-            self.public_call_summaries.insert(function.id, summary);
+            commit_allocation_transition(
+                self.public_call_summaries
+                    .get_mut(&function.id)
+                    .expect("prior summary"),
+                summary,
+                |ports, support_count| match indices.displaced.get(&function.id) {
+                    Some(old) => old.embed_supports(index, ports),
+                    None => Some((0..support_count).map(|id| SupportId(id as u32)).collect()),
+                },
+            )?;
+            indices.displaced.remove(&function.id);
+            if record_changes {
+                *changed.entry(function.id).or_default() |= notify;
+            }
             if notify {
                 for &caller in callers(function.id) {
-                    if !std::mem::replace(&mut queued[caller], true) {
+                    if in_scope(caller) && queued.insert(caller) {
                         queue.push_back(caller);
                     }
                 }
             }
         }
-        Ok(())
+        Ok(changed.into_iter().collect())
     }
 
     pub(super) fn finalize_public_call_summary_effects(

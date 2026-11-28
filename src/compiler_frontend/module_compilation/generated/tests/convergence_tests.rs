@@ -5,8 +5,8 @@ use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows_with_projection_for_test,
-    summarize_call_allocations_with_projection,
+    BorrowCheckReport, check_borrows_with_projection_for_test, seed_call_summaries,
+    stabilize_call_metadata, summarize_call_allocations_with_projection,
 };
 use crate::compiler_frontend::ast::generic_functions::registered_type_projection;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -34,6 +34,9 @@ use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::private_failure_lane::{
+    PrivateFailureLaneReceipt, install_private_failure_lanes,
+};
 use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
 };
@@ -42,7 +45,7 @@ use crate::compiler_frontend::hir::terminators::{
     HirFallibleOperation, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
-    PublishedBoundary, assert_compiler_bug, test_sidecar,
+    PublishedBoundary, assert_compiler_bug, test_module, test_sidecar,
 };
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
@@ -62,15 +65,19 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
 use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::VecDeque;
 use std::fs;
+use std::sync::Arc;
 
 fn module_origin() -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -392,10 +399,10 @@ fn direct_callers_are_exact_across_local_and_stable_targets() {
         expected_edges.map(|(_, target)| target),
     );
 
-    let active = [public_origin].into_iter().collect();
-    let callers = direct_callers_by_target(&links, &active);
+    let callers = direct_callers_by_target(&links, |origin| origin == &public_origin);
     let sidecar_links = link_facts_for_calls(vec![generated.clone(), private.clone()]);
-    let sidecar_callers = direct_callers_by_target(&sidecar_links, &active);
+    let sidecar_callers =
+        direct_callers_by_target(&sidecar_links, |origin| origin == &public_origin);
     assert_eq!(sidecar_callers[&generated], [FunctionId(0)]);
     assert_eq!(sidecar_callers[&private], [FunctionId(0)]);
     assert_eq!(
@@ -800,6 +807,7 @@ fn installing_settled_bottom_then_retention_only_refreshes_the_direct_caller() {
         ..pending.clone()
     };
     let links = link_facts_for_calls(vec![CallTarget::Generated(Box::new(target.clone()))]);
+    let callers = direct_callers_by_target(&links, |_| false);
     let mut hir = HirModule::new();
     hir.generated_call_summaries.insert(target.clone(), pending);
 
@@ -810,9 +818,10 @@ fn installing_settled_bottom_then_retention_only_refreshes_the_direct_caller() {
 
     let widened = [(target.clone(), retaining)];
     let changes = install_convergence_summaries(&mut hir, &widened, &[], &[]);
+    assert!(changes.allocations_changed());
     assert_eq!(
-        changes.allocation_callers(&links),
-        FxHashSet::from_iter([FunctionId(0)])
+        callers[&CallTarget::Generated(Box::new(target.clone()))],
+        vec![FunctionId(0)]
     );
     assert!(!changes.failure);
     assert!(!changes.mutation);
@@ -848,13 +857,8 @@ fn failure_only_convergence_updates_use_inference_without_allocation_extraction(
         }
     );
     assert!(matches!(
-        BorrowVisit::select(
-            ConvergencePhase::Failure,
-            false,
-            &changes,
-            &HirModuleLinkFacts::default()
-        ),
-        Some((BorrowVisit::InferFailure, _))
+        BorrowVisit::select(ConvergencePhase::Failure, false, &changes),
+        Some(BorrowVisit::InferFailure)
     ));
     assert_eq!(hir.generated_call_summaries[&generated], escaping);
     assert_eq!(hir.imported_call_summaries[&public], escaping);
@@ -2218,6 +2222,368 @@ fn compile_owned_service_fixture(
     (frontend, warning_owner)
 }
 
+fn solve_fixture_metadata(
+    fixture: &PreparedHirFixture,
+    hir: &HirModule,
+    report: &mut BorrowCheckReport,
+) {
+    stabilize_call_metadata(
+        hir,
+        &fixture.hir.type_environment,
+        &fixture.packages,
+        &fixture.paths,
+        &fixture.strings,
+        &fixture.type_projection(),
+        report,
+        None,
+    )
+    .expect("fixture metadata must converge");
+}
+
+fn cold_fixture_metadata(fixture: &PreparedHirFixture, hir: &HirModule) -> BorrowCheckReport {
+    summarize_call_allocations_with_projection(
+        hir,
+        &fixture.hir.type_environment,
+        &fixture.packages,
+        &fixture.paths,
+        &fixture.strings,
+        &fixture.type_projection(),
+    )
+    .expect("cold fixture metadata must converge")
+}
+
+fn fixture_function(fixture: &PreparedHirFixture, name: &str) -> FunctionId {
+    fixture
+        .hir
+        .functions
+        .iter()
+        .find(|function| {
+            fixture.hir.side_table.resolve_function_name(
+                function.id,
+                &fixture.paths,
+                &fixture.strings,
+            ) == Some(name)
+        })
+        .expect("fixture function must exist")
+        .id
+}
+
+#[test]
+fn final_epoch_removes_stale_generated_store_in_both_orders() {
+    for base_first in [true, false] {
+        assert_generated_epoch_rebuilds_callers(base_first, true);
+    }
+}
+
+#[test]
+fn outcome_only_receipt_reschedules_already_solved_callers() {
+    assert_generated_epoch_rebuilds_callers(false, false);
+}
+
+fn assert_generated_epoch_rebuilds_callers(base_first: bool, remove_store: bool) {
+    let fixture = PreparedHirFixture::new(
+        "relay |rows ~{{I32}}, child {I32}| -> I32:\n    return writer(~rows, child)\n;\n\
+         writer |rows ~{{I32}}, child {I32}| -> I32:\n    ~rows.push(child)\n    return 5\n;\n",
+    );
+    let relay = fixture_function(&fixture, "relay");
+    let root = fixture_function(&fixture, "writer");
+    let identity = generated_identity("writer");
+    let target = CallTarget::Generated(Box::new(identity.clone()));
+    let mut base = fixture.hir.hir_module.clone();
+    let mut sidecar = test_module();
+    let executable = &mut sidecar.executable;
+    executable.hir = base.clone();
+    executable
+        .hir
+        .functions
+        .retain(|function| function.id == root);
+    executable.hir.start_function = None;
+    executable
+        .hir
+        .function_ids_by_generated
+        .insert(identity.clone(), root);
+    executable.type_environment = fixture.hir.type_environment.clone();
+
+    base.functions.retain(|function| function.id != root);
+    let call = base
+        .blocks
+        .iter_mut()
+        .flat_map(|block| &mut block.statements)
+        .find_map(|statement| match &mut statement.kind {
+            HirStatementKind::Call { target, .. } if *target == CallTarget::Local(root) => {
+                Some(target)
+            }
+            _ => None,
+        })
+        .expect("base relay calls the writer");
+    *call = target.clone();
+    base.call_result_contracts
+        .insert(target, executable.hir.functions[0].return_contract.clone());
+
+    if !remove_store {
+        let error = fixture
+            .hir
+            .type_environment
+            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::Error,
+            ))
+            .expect("the fixture has the builtin Error type");
+        executable.hir.functions[0]
+            .return_contract
+            .ordinary_mut()
+            .unwrap()
+            .set_error(Some(error));
+    }
+    let base_links = collect_module_function_link_facts(&base).unwrap();
+    sidecar.link_facts.external_package_registry = Arc::clone(&fixture.packages);
+    sidecar.link_facts.functions = collect_module_function_link_facts(&executable.hir).unwrap();
+    executable.borrow_analysis =
+        seed_call_summaries(&executable.hir, &fixture.paths, &fixture.strings).unwrap();
+    solve_fixture_metadata(&fixture, &executable.hir, &mut executable.borrow_analysis);
+    let previous = executable.borrow_analysis.analysis.public_call_summaries[&root].clone();
+    let facts = previous.return_alias.facts().unwrap();
+    assert!(stores_parameter(facts, &facts.success, 0, 1));
+    base.generated_call_summaries
+        .insert(identity.clone(), previous.clone());
+    let mut base_report = seed_call_summaries(&base, &fixture.paths, &fixture.strings).unwrap();
+    solve_fixture_metadata(&fixture, &base, &mut base_report);
+    let facts = base_report.analysis.public_call_summaries[&relay]
+        .return_alias
+        .facts()
+        .unwrap();
+    assert!(stores_parameter(facts, &facts.success, 0, 1));
+
+    let published = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
+    let request = transaction.register_requests([GeneratedRequestFacts {
+        identity: identity.clone(),
+        display_name: "writer".to_owned(),
+        call_span: None,
+    }])[0];
+    assert_eq!(
+        transaction.enter(request),
+        GeneratedRequestEntry::Materialise
+    );
+    transaction.complete(
+        request,
+        previous,
+        crate::compiler_frontend::module_compilation::GeneratedFunctionSidecar::new(
+            identity.clone(),
+            sidecar,
+        ),
+        DiagnosticBag::new(),
+    );
+    let model = ConvergenceModel::from_link_facts(&base_links, transaction.completed_link_facts());
+    let old_graph = AllocationGraph::new(&base, &base_links, &transaction, &model);
+
+    let sidecar = &mut transaction.sidecar_mut(&identity).module;
+    let hir = &mut sidecar.executable.hir;
+    let mut receipt = PrivateFailureLaneReceipt::default();
+    // Hand the driver the changed owner for this edited HIR. The real installer controls
+    // independently pin outcome classification and split/handler routing.
+    if remove_store {
+        let (block, position) = hir
+            .blocks
+            .iter_mut()
+            .find_map(|block| {
+                let position = block.statements.iter().position(|statement| {
+                    matches!(
+                        statement.kind,
+                        HirStatementKind::Call {
+                            target: CallTarget::External(
+                                ExternalFunctionId::CollectionPushGrowable
+                            ),
+                            ..
+                        }
+                    )
+                })?;
+                Some((block, position))
+            })
+            .expect("the solved writer has a collection store to remove");
+        receipt
+            .producer_splits
+            .insert((root, block.statements.remove(position).id));
+    } else {
+        hir.functions[0]
+            .return_contract
+            .ordinary_mut()
+            .unwrap()
+            .set_error(None);
+        receipt.outcome_changes.insert(root);
+    }
+    receipt.block_remap = hir.compact_block_ids();
+    receipt.link_facts_need_refresh = true;
+    sidecar.link_facts.functions = collect_module_function_link_facts(hir).unwrap();
+    let final_graph = AllocationGraph::new(&base, &base_links, &transaction, &model);
+    let receipts = [
+        PrivateFailureLaneReceipt {
+            block_remap: base.compact_block_ids(),
+            ..Default::default()
+        },
+        receipt,
+    ];
+    reset_final_call_metadata(
+        &mut base,
+        &mut transaction,
+        &mut base_report,
+        &model,
+        &old_graph,
+        &final_graph,
+        &receipts,
+    );
+    for summary in [
+        transaction.summary(&identity).unwrap(),
+        &base.generated_call_summaries[&identity],
+        &base_report.analysis.public_call_summaries[&relay],
+        generated_root_summary(&identity, &transaction.sidecar(&identity).module),
+    ] {
+        assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Pending);
+    }
+    assert!(base_report.metadata.pending().contains(&relay));
+
+    if base_first {
+        // Settle the caller at bottom first so only the real stable notification can requeue it.
+        solve_fixture_metadata(&fixture, &base, &mut base_report);
+        let facts = base_report.analysis.public_call_summaries[&relay]
+            .return_alias
+            .facts()
+            .unwrap();
+        assert!(facts.is_transfer_bottom());
+    }
+    let directives = StyleDirectiveRegistry::built_ins();
+    let sources = Arc::new(SourceDatabase::empty());
+    let mut compiler = CompilerFrontend::new(
+        Default::default(),
+        fixture.strings.clone(),
+        fixture.paths.fork_source().fork_for_module(),
+        &directives,
+        &fixture.packages,
+        None,
+        &sources,
+    );
+    stabilize_final_call_metadata(
+        &mut compiler,
+        &mut base,
+        &fixture.hir.type_environment,
+        &mut transaction,
+        &mut base_report,
+        &mut DiagnosticBag::new(),
+        &model,
+        &final_graph,
+        &fixture.type_projection(),
+        #[cfg(feature = "timers")]
+        None,
+    )
+    .expect("the final allocation graph must converge through its production scheduler");
+
+    let sidecar = &transaction.sidecar(&identity).module.executable;
+    let root_summary = &sidecar.borrow_analysis.analysis.public_call_summaries[&root];
+    let facts = root_summary.return_alias.facts().unwrap();
+    assert!(facts.success.can_return());
+    assert_eq!(stores_parameter(facts, &facts.success, 0, 1), !remove_store);
+    assert_eq!(
+        sidecar.borrow_analysis.analysis.public_call_summaries,
+        cold_fixture_metadata(&fixture, &sidecar.hir)
+            .analysis
+            .public_call_summaries
+    );
+    assert_eq!(transaction.summary(&identity), Some(root_summary));
+    assert_eq!(
+        base.generated_call_summaries[&identity].return_alias,
+        root_summary.return_alias,
+    );
+    assert_eq!(
+        base_report.analysis.public_call_summaries,
+        cold_fixture_metadata(&fixture, &base)
+            .analysis
+            .public_call_summaries
+    );
+}
+
+fn final_entry_fixture() -> (PreparedHirFixture, BorrowCheckReport) {
+    let mut fixture = PreparedHirFixture::new("value = \"plain\"\n~[:[value]]\n");
+    let mut report = seed_call_summaries(&fixture.hir, &fixture.paths, &fixture.strings).unwrap();
+    infer_builtin_failure_summaries(&fixture.hir, &mut report);
+    let receipt = install_private_failure_lanes(
+        &mut fixture.hir.hir_module,
+        &report,
+        &mut fixture.hir.type_environment,
+        &fixture.packages,
+    )
+    .unwrap();
+    assert_eq!(
+        receipt.outcome_changes,
+        FxHashSet::from_iter([fixture.hir.start_function.unwrap()])
+    );
+    (fixture, report)
+}
+
+fn apply_clean_install(fixture: &mut PreparedHirFixture, report: &mut BorrowCheckReport) {
+    let links = collect_module_function_link_facts(&fixture.hir).unwrap();
+    let published = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
+    let model = ConvergenceModel::from_link_facts(&links, []);
+    let old_graph = AllocationGraph::new(&fixture.hir, &links, &transaction, &model);
+    let receipt = install_private_failure_lanes(
+        &mut fixture.hir.hir_module,
+        report,
+        &mut fixture.hir.type_environment,
+        &fixture.packages,
+    )
+    .unwrap();
+    assert!(receipt.outcome_changes.is_empty());
+    assert!(receipt.producer_splits.is_empty());
+    assert!(receipt.newly_executable_handlers.is_empty());
+    assert!(receipt.implicit_failure_retargets.is_empty());
+    assert!(!receipt.link_facts_need_refresh);
+    let final_graph = AllocationGraph::new(&fixture.hir, &links, &transaction, &model);
+    reset_final_call_metadata(
+        &mut fixture.hir.hir_module,
+        &mut transaction,
+        report,
+        &model,
+        &old_graph,
+        &final_graph,
+        &[receipt],
+    );
+}
+
+#[test]
+fn clean_install_queues_no_work_for_settled_metadata() {
+    let (mut fixture, mut report) = final_entry_fixture();
+    solve_fixture_metadata(&fixture, &fixture.hir, &mut report);
+    let start = fixture.hir.start_function.unwrap();
+    let settled = report.analysis.public_call_summaries.clone();
+    assert_eq!(report.metadata.visit_count(start), 1);
+    apply_clean_install(&mut fixture, &mut report);
+    assert!(report.metadata.pending().is_empty());
+    solve_fixture_metadata(&fixture, &fixture.hir, &mut report);
+    assert_eq!(report.metadata.visit_count(start), 1);
+    assert_eq!(report.analysis.public_call_summaries, settled);
+}
+
+#[test]
+fn clean_install_still_solves_pending_final_bodies_once() {
+    let (mut fixture, mut report) = final_entry_fixture();
+    let start = fixture.hir.start_function.unwrap();
+    assert_eq!(report.metadata.visit_count(start), 0);
+    assert_eq!(
+        report.analysis.public_call_summaries[&start].return_alias,
+        FunctionReturnAliasSummary::Pending
+    );
+    apply_clean_install(&mut fixture, &mut report);
+    assert_eq!(report.metadata.pending(), &FxHashSet::from_iter([start]));
+    solve_fixture_metadata(&fixture, &fixture.hir, &mut report);
+    assert!(report.metadata.pending().is_empty());
+    assert_eq!(report.metadata.visit_count(start), 1);
+    assert_eq!(
+        report.analysis.public_call_summaries,
+        cold_fixture_metadata(&fixture, &fixture.hir)
+            .analysis
+            .public_call_summaries
+    );
+}
+
 fn assert_final_allocation_facts_match_cold(
     frontend: &ProjectFrontendCompilation,
     strings: &StringTable,
@@ -2387,17 +2753,8 @@ fn assert_final_allocation_facts_match_cold(
     }
 }
 
-#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn entry_and_routed_catch_metadata_do_not_requeue_allocation_extraction() {
-    use crate::compiler_frontend::instrumentation::{
-        capture_counters_for_test, frontend_counter_test_values, lock_counter_test,
-        reset_frontend_counters,
-    };
-
-    let _guard = lock_counter_test();
-    let _capture = capture_counters_for_test();
-    reset_frontend_counters();
     const SOURCE: &str = r#"sample |ready Bool| -> I32, Error!:
     if ready:
         return 1
@@ -2414,18 +2771,18 @@ result = sample(true) catch then 0
     else {
         panic!("infallible entry fixture should compile");
     };
-    let (hir, entry) = frontend
+    let (executable, entry) = frontend
         .successful_module_views()
         .find_map(|module| {
             let hir = &module.executable.hir;
             let start = hir.start_function?;
             let entry = hir.functions.iter().find(|function| function.id == start)?;
-            Some((hir, entry))
+            Some((&module.executable, entry))
         })
         .expect("the fixture must publish an entry");
     assert!(entry.return_contract.ordinary().unwrap().error().is_none());
     assert!(
-        hir.blocks.iter().any(|block| matches!(
+        executable.hir.blocks.iter().any(|block| matches!(
             &block.terminator,
             HirTerminator::Invoke {
                 operation: HirFallibleOperation::Call {
@@ -2437,13 +2794,85 @@ result = sample(true) catch then 0
         )),
         "the typed catch keeps its already-routed call"
     );
+    for function in &executable.hir.functions {
+        assert_eq!(
+            executable.borrow_analysis.metadata.visit_count(function.id),
+            1
+        );
+    }
+}
+
+#[test]
+fn forward_ordered_base_sidecar_chain_extracts_without_revisits() {
+    const SOURCE: &str = "top |value I32| -> I32:\n    return middle(\"tag\", value)\n;\n\
+        middle type T |tag T, value I32| -> I32:\n    return leaf(value)\n;\n\
+        leaf |value I32| -> I32:\n    return value\n;\n\
+        ~[:[top(7)]]\n";
+    let (outcome, _) = compile_owned_service_fixture(SOURCE, false, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = outcome
+    else {
+        panic!("the forward-ordered caller chain must compile");
+    };
+    let base = frontend.project.successful_module_views().next().unwrap();
+    let sidecar = frontend.project.generated.sidecars().next().unwrap();
+    assert_eq!(sidecar.identity.declaration().defining_name(), "middle");
+    let private_id = |name| {
+        base.executable
+            .hir
+            .function_ids_by_private_origin
+            .iter()
+            .find(|(identity, _)| identity.defining_name() == name)
+            .map(|(_, &id)| id)
+            .unwrap()
+    };
+    let top = private_id("top");
+    let leaf = private_id("leaf");
+    let root = sidecar.module.executable.hir.function_ids_by_generated[&sidecar.identity];
+    let position = |id| {
+        base.executable
+            .hir
+            .functions
+            .iter()
+            .position(|function| function.id == id)
+            .unwrap()
+    };
+    assert!(position(top) < position(leaf));
+    assert!(
+        base.link_facts.functions.direct_call_edges().any(|(caller, target)| {
+            caller == top && matches!(target, CallTarget::Generated(identity) if *identity == sidecar.identity)
+        })
+    );
+    assert!(
+        sidecar
+            .module
+            .link_facts
+            .functions
+            .direct_call_edges()
+            .any(|(caller, target)| {
+                caller == root
+                    && matches!(target, CallTarget::ModulePrivate(identity)
+                if base.executable.hir.function_ids_by_private_origin.get(&identity) == Some(&leaf))
+            })
+    );
+
+    let mut extractions = 0;
+    let mut revisits = 0;
+    for executable in [&base.executable, &sidecar.module.executable] {
+        for function in &executable.hir.functions {
+            let visits = executable.borrow_analysis.metadata.visit_count(function.id);
+            extractions += usize::from(visits != 0);
+            revisits += visits.saturating_sub(1);
+        }
+    }
     assert_eq!(
-        frontend_counter_test_values(&[
-            FrontendCounter::ConvergenceInitialBaseBorrowPasses,
-            FrontendCounter::ConvergenceBaseBorrowPasses,
-        ]),
-        vec![1, 0],
-        "narrowing entry metadata and draining routed catch records must not rerun extraction"
+        extractions,
+        base.executable.hir.functions.len() + sidecar.module.executable.hir.functions.len()
+    );
+    assert_eq!(
+        revisits, 0,
+        "acyclic callers must wait for their pending callees"
     );
 }
 

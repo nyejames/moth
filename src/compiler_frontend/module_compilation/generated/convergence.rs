@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
 };
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -43,7 +44,7 @@ use crate::compiler_frontend::hir::failure_facts::{
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::private_failure_lane::{
-    PrivateFailureLaneInstallation, install_private_failure_lanes,
+    PrivateFailureLaneReceipt, install_private_failure_lanes,
 };
 use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
@@ -59,7 +60,7 @@ use crate::compiler_frontend::module_compilation::external_imports::{
 };
 use crate::compiler_frontend::public_call_summary::{
     PublicCallMutationEffect, PublicCallSummary, PublicCallSummaryTransition,
-    same_typed_allocation_transfer_as, validate_public_call_summary_transition,
+    validate_public_call_summary_transition,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -73,7 +74,7 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
 use crate::compiler_frontend::module_compilation::stages::{
-    check_borrows, refresh_call_allocations, refresh_call_mutation_effects,
+    check_borrows, refresh_call_mutation_effects, stabilize_call_metadata,
 };
 use crate::timed_stage_attributed;
 
@@ -263,6 +264,20 @@ impl ConvergenceModel {
         (0..self.nodes.len()).map(ConvergenceNodeId)
     }
 
+    fn generated_nodes(
+        &self,
+    ) -> impl Iterator<Item = (ConvergenceNodeId, &GeneratedFunctionIdentity)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, record)| match &record.node {
+                ConvergenceNode::BaseModule => None,
+                ConvergenceNode::Generated(identity) => {
+                    Some((ConvergenceNodeId(index), identity.as_ref()))
+                }
+            })
+    }
+
     pub(crate) fn generated_callees(
         &self,
         node: ConvergenceNodeId,
@@ -389,15 +404,14 @@ impl ConvergenceModel {
 
 /// Local targets are scoped to this HIR. Stable targets keep their HIR spelling so a summary
 /// change can look up the same key in the base and every sidecar.
-#[allow(dead_code, reason = "B2b.3b switches to the per-function queue")]
 fn direct_callers_by_target(
     link_facts: &HirModuleLinkFacts,
-    active_public_origins: &FxHashSet<OriginFunctionId>,
+    is_active_public_origin: impl Fn(&OriginFunctionId) -> bool,
 ) -> FxHashMap<CallTarget, Vec<FunctionId>> {
     let mut callers_by_target = FxHashMap::<_, Vec<_>>::default();
     for (caller, target) in link_facts.direct_call_edges() {
         match &target {
-            CallTarget::CrossModule(origin) if !active_public_origins.contains(origin) => continue,
+            CallTarget::CrossModule(origin) if !is_active_public_origin(origin) => continue,
             CallTarget::External(_) => continue,
             CallTarget::Local(_)
             | CallTarget::CrossModule(_)
@@ -414,6 +428,441 @@ fn direct_callers_by_target(
         callers.dedup();
     }
     callers_by_target
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct AllocationFunction(ConvergenceNodeId, FunctionId);
+
+struct StableAllocationInput {
+    owner: ConvergenceNodeId,
+    target: CallTarget,
+    callers: Vec<FunctionId>,
+}
+
+/// Function identities for allocation convergence. A stable target is resolved to the active
+/// source of its summary, but its spelling is retained to address each installed HIR input.
+#[derive(Default)]
+struct AllocationGraph {
+    callers: FxHashMap<AllocationFunction, Vec<AllocationFunction>>,
+    stable_inputs: FxHashMap<AllocationFunction, Vec<StableAllocationInput>>,
+}
+
+impl AllocationGraph {
+    fn new(
+        base: &HirModule,
+        links: &HirModuleLinkFacts,
+        transaction: &GeneratedFunctionTransaction<'_>,
+        model: &ConvergenceModel,
+    ) -> Self {
+        let generated_roots: FxHashMap<_, _> = model
+            .generated_nodes()
+            .map(|(owner, identity)| {
+                let hir = &transaction.sidecar(identity).module.executable.hir;
+                (
+                    identity,
+                    AllocationFunction(owner, hir.function_ids_by_generated[identity]),
+                )
+            })
+            .collect();
+        let mut graph = Self::default();
+        let mut add_owner =
+            |owner, links: &HirModuleLinkFacts| {
+                for (target, callers) in direct_callers_by_target(links, |origin| {
+                    base.function_ids_by_origin.contains_key(origin)
+                }) {
+                    let source = match &target {
+                        CallTarget::Local(id) => Some(AllocationFunction(owner, *id)),
+                        CallTarget::CrossModule(origin) => base
+                            .function_ids_by_origin
+                            .get(origin)
+                            .map(|&id| AllocationFunction(ConvergenceNodeId(0), id)),
+                        CallTarget::ModulePrivate(identity) => base
+                            .function_ids_by_private_origin
+                            .get(identity)
+                            .map(|&id| AllocationFunction(ConvergenceNodeId(0), id)),
+                        CallTarget::Generated(identity) => {
+                            generated_roots.get(identity.as_ref()).copied()
+                        }
+                        CallTarget::External(_) => None,
+                    };
+                    let Some(source) = source else { continue };
+                    graph
+                        .callers
+                        .entry(source)
+                        .or_default()
+                        .extend(callers.iter().map(|&id| AllocationFunction(owner, id)));
+                    if !matches!(target, CallTarget::Local(_)) {
+                        graph.stable_inputs.entry(source).or_default().push(
+                            StableAllocationInput {
+                                owner,
+                                target,
+                                callers,
+                            },
+                        );
+                    }
+                }
+            };
+        add_owner(ConvergenceNodeId(0), links);
+        for (owner, identity) in model.generated_nodes() {
+            add_owner(
+                owner,
+                &transaction.sidecar(identity).module.link_facts.functions,
+            );
+        }
+        for callers in graph.callers.values_mut() {
+            callers.sort_unstable_by_key(|&AllocationFunction(owner, id)| (owner, id.0));
+            callers.dedup();
+        }
+        graph
+    }
+
+    fn callers(&self, source: AllocationFunction) -> impl Iterator<Item = AllocationFunction> + '_ {
+        self.callers.get(&source).into_iter().flatten().copied()
+    }
+
+    fn inputs(&self, source: AllocationFunction) -> impl Iterator<Item = &StableAllocationInput> {
+        self.stable_inputs.get(&source).into_iter().flatten()
+    }
+
+    /// SCCs of the forward work closure, with every dependency component before its callers.
+    /// Two iterative DFS passes keep deep authored call chains off the thread stack.
+    fn dependency_components(
+        &self,
+        mut roots: Vec<AllocationFunction>,
+    ) -> VecDeque<Vec<AllocationFunction>> {
+        roots.sort_unstable_by_key(|&AllocationFunction(owner, id)| (owner, id.0));
+        let mut visited = FxHashSet::default();
+        let mut finished = Vec::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            if !visited.insert(root) {
+                continue;
+            }
+            stack.push((root, self.callers(root)));
+            while let Some((function, callers)) = stack.last_mut() {
+                if let Some(caller) = callers.next() {
+                    if visited.insert(caller) {
+                        stack.push((caller, self.callers(caller)));
+                    }
+                } else {
+                    finished.push(*function);
+                    stack.pop();
+                }
+            }
+        }
+        let mut dependencies = FxHashMap::<_, Vec<_>>::default();
+        for &source in &finished {
+            for caller in self.callers(source) {
+                dependencies.entry(caller).or_default().push(source);
+            }
+        }
+        let mut components = VecDeque::new();
+        let mut pending = Vec::new();
+        for root in finished.into_iter().rev() {
+            if !visited.remove(&root) {
+                continue;
+            }
+            let mut component = vec![root];
+            pending.push(root);
+            while let Some(function) = pending.pop() {
+                for &callee in dependencies.get(&function).into_iter().flatten() {
+                    if visited.remove(&callee) {
+                        pending.push(callee);
+                        component.push(callee);
+                    }
+                }
+            }
+            components.push_back(component);
+        }
+        components
+    }
+}
+
+fn allocation_owner_mut<'a>(
+    hir: &'a mut HirModule,
+    report: &'a mut BorrowCheckReport,
+    transaction: &'a mut GeneratedFunctionTransaction<'_>,
+    model: &ConvergenceModel,
+    owner: ConvergenceNodeId,
+) -> (&'a mut HirModule, &'a mut BorrowCheckReport) {
+    match model.node(owner).expect("allocation input owner") {
+        ConvergenceNode::BaseModule => (hir, report),
+        ConvergenceNode::Generated(identity) => {
+            let executable = &mut transaction.sidecar_mut(identity).module.executable;
+            (&mut executable.hir, &mut executable.borrow_analysis)
+        }
+    }
+}
+
+fn installed_allocation_input_mut<'a>(
+    hir: &'a mut HirModule,
+    target: &CallTarget,
+) -> Option<&'a mut PublicCallSummary> {
+    match target {
+        CallTarget::Generated(identity) => hir.generated_call_summaries.get_mut(identity.as_ref()),
+        CallTarget::CrossModule(origin) => hir.imported_call_summaries.get_mut(origin),
+        CallTarget::ModulePrivate(identity) => hir.module_private_call_summaries.get_mut(identity),
+        CallTarget::Local(_) | CallTarget::External(_) => None,
+    }
+}
+
+fn reset_final_call_metadata(
+    hir: &mut HirModule,
+    transaction: &mut GeneratedFunctionTransaction<'_>,
+    report: &mut BorrowCheckReport,
+    model: &ConvergenceModel,
+    old_edges: &AllocationGraph,
+    final_edges: &AllocationGraph,
+    receipts: &[PrivateFailureLaneReceipt],
+) {
+    let mut dirty = vec![FxHashMap::default(); receipts.len()];
+    let old = (!std::ptr::eq(old_edges, final_edges)).then_some(old_edges);
+    let mut pending = Vec::new();
+    for (index, receipt) in receipts.iter().enumerate() {
+        for id in receipt.changed_functions() {
+            if dirty[index].insert(id, true).is_none() {
+                pending.push(AllocationFunction(ConvergenceNodeId(index), id));
+            }
+        }
+    }
+    while let Some(source) = pending.pop() {
+        for caller in final_edges
+            .callers(source)
+            .chain(old.into_iter().flat_map(|graph| graph.callers(source)))
+        {
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                dirty[caller.0.index()].entry(caller.1)
+            {
+                entry.insert(false);
+                pending.push(caller);
+            }
+        }
+        for input in final_edges
+            .inputs(source)
+            .chain(old.into_iter().flat_map(|graph| graph.inputs(source)))
+        {
+            let (caller_hir, caller_report) =
+                allocation_owner_mut(hir, report, transaction, model, input.owner);
+            caller_report
+                .metadata
+                .refresh_inputs(input.callers.iter().copied());
+            if let Some(summary) = installed_allocation_input_mut(caller_hir, &input.target) {
+                summary.reset_graph_payload();
+            }
+        }
+    }
+    reset_module_call_metadata(report, &dirty[0], &receipts[0]);
+    let mut dirty_roots = Vec::new();
+    for (owner, identity) in model.generated_nodes() {
+        let executable = &mut transaction.sidecar_mut(identity).module.executable;
+        let functions = &dirty[owner.index()];
+        let root = executable.hir.function_ids_by_generated[identity];
+        if functions.contains_key(&root) {
+            dirty_roots.push(identity);
+        }
+        reset_module_call_metadata(
+            &mut executable.borrow_analysis,
+            functions,
+            &receipts[owner.index()],
+        );
+    }
+    transaction.reset_graph_payloads(dirty_roots);
+}
+
+fn reset_module_call_metadata(
+    report: &mut BorrowCheckReport,
+    dirty: &FxHashMap<FunctionId, bool>,
+    receipt: &PrivateFailureLaneReceipt,
+) {
+    for (&id, &rewritten) in dirty {
+        if rewritten {
+            report.invalidate_call_metadata([id]);
+        } else {
+            report.reset_call_metadata(id);
+        }
+    }
+    // Pruning an unreachable suffix does not invalidate any indexed CFG block.
+    if receipt.block_remap.renumbered() {
+        report.metadata.apply_block_remap(&receipt.block_remap);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stabilize_final_call_metadata(
+    compiler: &mut CompilerFrontend<'_>,
+    hir: &mut HirModule,
+    types: &TypeEnvironment,
+    transaction: &mut GeneratedFunctionTransaction<'_>,
+    report: &mut BorrowCheckReport,
+    warnings: &mut DiagnosticBag,
+    model: &ConvergenceModel,
+    graph: &AllocationGraph,
+    base_projection: &CanonicalTypeProjectionContext<'_>,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> Result<(), PreparedFailure> {
+    if model.node_count() == 1 && graph.stable_inputs.is_empty() {
+        return timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendBorrowConverge,
+            timing_context,
+            stabilize_call_metadata(
+                compiler,
+                hir,
+                types,
+                warnings,
+                None,
+                base_projection,
+                report,
+                None,
+            )
+        )
+        .map(|_| ());
+    }
+    let mut roots: Vec<_> = report
+        .metadata
+        .work_functions(hir)
+        .map(|id| AllocationFunction(ConvergenceNodeId(0), id))
+        .collect();
+    for (owner, identity) in model.generated_nodes() {
+        let executable = &transaction.sidecar(identity).module.executable;
+        roots.extend(
+            executable
+                .borrow_analysis
+                .metadata
+                .work_functions(&executable.hir)
+                .map(|id| AllocationFunction(owner, id)),
+        );
+    }
+    let mut components = graph.dependency_components(roots);
+    let registry = Arc::clone(compiler.external_package_registry);
+    while let Some(mut component) = components.pop_front() {
+        // Consecutive acyclic work in one module can share a checker. A stable self-module
+        // edge needs an installed-input handoff, so do not batch past its source.
+        if let [first] = component.as_slice() {
+            let owner = first.0;
+            while {
+                let last = *component.last().expect("nonempty component");
+                !graph.callers(last).any(|caller| caller == last)
+                    && !graph.inputs(last).any(|input| input.owner == owner)
+                    && matches!(components.front().map(Vec::as_slice), Some([next]) if next.0 == owner)
+            } {
+                component.push(components.pop_front().expect("next component")[0]);
+            }
+        }
+        component.sort_unstable_by_key(|function| function.0);
+        let scopes: Vec<_> = component
+            .chunk_by(|left, right| left.0 == right.0)
+            .map(|group| {
+                (
+                    group[0].0,
+                    group.iter().map(|function| function.1).collect(),
+                )
+            })
+            .collect();
+        // A cross-HIR SCC runs each member module in turn. Exact transfer changes enqueue only
+        // the callers at that stable target; dependencies outside the SCC have already settled.
+        loop {
+            for (owner, scope) in &scopes {
+                let node = model.node(*owner).expect("allocation scope owner");
+                let changed = match node {
+                    ConvergenceNode::BaseModule => timed_stage_attributed!(
+                        crate::timing::TimingMetric::FrontendBorrowConverge,
+                        timing_context,
+                        stabilize_call_metadata(
+                            compiler,
+                            hir,
+                            types,
+                            warnings,
+                            None,
+                            base_projection,
+                            report,
+                            Some(scope),
+                        )
+                    )?,
+                    ConvergenceNode::Generated(identity) => {
+                        let source_owner = FrozenIdentityHandle::for_domain(
+                            identity.declaration().module_origin().package().clone(),
+                        );
+                        let (sidecar, warnings) = transaction.sidecar_and_warnings_mut(identity);
+                        let executable = &mut sidecar.module.executable;
+                        timed_stage_attributed!(
+                            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
+                            timing_context,
+                            crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
+                                &executable.type_environment, &registry, |projection| {
+                                    stabilize_call_metadata(
+                                        compiler, &executable.hir, &executable.type_environment,
+                                        warnings, Some(&source_owner), projection, &mut executable.borrow_analysis, Some(scope),
+                                    )
+                                },
+                            )
+                        )?
+                    }
+                };
+                for (id, notify) in changed {
+                    let mut inputs = graph.inputs(AllocationFunction(*owner, id)).peekable();
+                    let has_inputs = inputs.peek().is_some();
+                    let mut return_alias = match node {
+                        ConvergenceNode::BaseModule => has_inputs.then(|| {
+                            report.analysis.public_call_summaries[&id]
+                                .return_alias
+                                .clone()
+                        }),
+                        ConvergenceNode::Generated(identity) => {
+                            let module = &transaction.sidecar(identity).module;
+                            if module.executable.hir.function_ids_by_generated[identity.as_ref()]
+                                != id
+                            {
+                                continue;
+                            }
+                            let summary = generated_root_summary(identity, module).clone();
+                            // The shared local solver already validated this transition, including
+                            // any allocation schema growth. Publish the exact authoritative row.
+                            let return_alias = has_inputs.then(|| summary.return_alias.clone());
+                            *transaction.summary_mut(identity) = summary;
+                            return_alias
+                        }
+                    };
+                    while let Some(input) = inputs.next() {
+                        let (caller_hir, caller_report) =
+                            allocation_owner_mut(hir, report, transaction, model, input.owner);
+                        let installed = installed_allocation_input_mut(caller_hir, &input.target)
+                            .expect(
+                                "stable allocation input was installed during failure inference",
+                            );
+                        if inputs.peek().is_some() {
+                            installed
+                                .return_alias
+                                .clone_from(return_alias.as_ref().expect("stable input summary"));
+                        } else {
+                            installed.return_alias =
+                                return_alias.take().expect("last input owns its summary");
+                        }
+                        if notify {
+                            caller_report
+                                .metadata
+                                .refresh_inputs(input.callers.iter().copied());
+                        }
+                    }
+                }
+            }
+            if !scopes.iter().any(|(owner, scope)| {
+                let caller_report = match model.node(*owner).expect("allocation scope owner") {
+                    ConvergenceNode::BaseModule => &*report,
+                    ConvergenceNode::Generated(identity) => {
+                        &transaction
+                            .sidecar(identity)
+                            .module
+                            .executable
+                            .borrow_analysis
+                    }
+                };
+                caller_report.metadata.has_work_for(scope)
+            }) {
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether convergence must find a materialised summary for one collected call target.
@@ -594,38 +1043,117 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     let mut first_visits = convergence_model.node_count();
     loop {
         let Some(node_id) = convergence_queue.pop_front() else {
-            phase = match phase {
-                ConvergencePhase::Failure => {
-                    if install_convergence_lanes(
-                        compiler,
-                        hir_module,
-                        function_link_facts,
-                        generated_transaction,
-                        &borrow_analysis,
-                        type_environment,
-                        warnings,
-                        &convergence_model,
-                        #[cfg(feature = "timers")]
-                        timing_context,
-                    )? {
-                        // Newly routed handlers may add executable dependencies. Node
-                        // identities stay stable because installation doesn't add sidecars.
-                        convergence_model = ConvergenceModel::for_active_transaction(
-                            hir_module,
-                            function_link_facts,
-                            generated_transaction,
-                            &base_public_origins,
-                            &base_private_identities,
-                        );
-                    }
-                    // Declaration contracts and escape proofs survive the rewrite. Body
-                    // allocation facts are still pending, so no pre-rewrite CFG facts enter
-                    // the final-HIR fixed point, even across base/sidecar recursion.
-                    ConvergencePhase::Allocation
+            if matches!(phase, ConvergencePhase::Diagnostics) {
+                break;
+            }
+            let receipts = install_convergence_lanes(
+                compiler,
+                hir_module,
+                generated_transaction,
+                &borrow_analysis,
+                type_environment,
+                warnings,
+                &convergence_model,
+                #[cfg(feature = "timers")]
+                timing_context,
+            )?;
+            // Capture old executable edges before replacing any block-indexed link facts.
+            let links_changed = receipts
+                .iter()
+                .any(|receipt| receipt.link_facts_need_refresh);
+            let old_edges = links_changed.then(|| {
+                AllocationGraph::new(
+                    hir_module,
+                    function_link_facts,
+                    generated_transaction,
+                    &convergence_model,
+                )
+            });
+            if receipts[0].link_facts_need_refresh {
+                *function_link_facts = collect_module_function_link_facts(hir_module)
+                    .map_err(PreparedFailure::from)?;
+            }
+            for (node, identity) in convergence_model.generated_nodes() {
+                if receipts[node.index()].link_facts_need_refresh {
+                    let module = &mut generated_transaction.sidecar_mut(identity).module;
+                    module.link_facts.functions =
+                        collect_module_function_link_facts(&module.executable.hir)
+                            .map_err(PreparedFailure::from)?;
                 }
-                ConvergencePhase::Allocation => ConvergencePhase::Diagnostics,
-                ConvergencePhase::Diagnostics => break,
-            };
+            }
+            if receipts
+                .iter()
+                .any(|receipt| !receipt.newly_executable_handlers.is_empty())
+            {
+                convergence_model = ConvergenceModel::for_active_transaction(
+                    hir_module,
+                    function_link_facts,
+                    generated_transaction,
+                    &base_public_origins,
+                    &base_private_identities,
+                );
+            }
+            let edges = AllocationGraph::new(
+                hir_module,
+                function_link_facts,
+                generated_transaction,
+                &convergence_model,
+            );
+            reset_final_call_metadata(
+                hir_module,
+                generated_transaction,
+                &mut borrow_analysis,
+                &convergence_model,
+                old_edges.as_ref().unwrap_or(&edges),
+                &edges,
+                &receipts,
+            );
+            for (index, receipt) in receipts.iter().enumerate() {
+                if receipt.newly_executable_handlers.is_empty() {
+                    continue;
+                }
+                // A routed handler can expose Invoke/NeverCall targets that did not need
+                // an installed contract in the earlier failure-inference graph.
+                let owner = ConvergenceNodeId(index);
+                let inputs = direct_convergence_summaries(
+                    &convergence_model,
+                    owner,
+                    generated_transaction,
+                    hir_module,
+                    &borrow_analysis,
+                )
+                .map_err(PreparedFailure::from)?;
+                let hir = match convergence_model.node(owner).expect("receipt owner") {
+                    ConvergenceNode::BaseModule => &mut *hir_module,
+                    ConvergenceNode::Generated(identity) => {
+                        &mut generated_transaction
+                            .sidecar_mut(identity)
+                            .module
+                            .executable
+                            .hir
+                    }
+                };
+                install_convergence_summaries(
+                    hir,
+                    &inputs.generated,
+                    &inputs.active_public,
+                    &inputs.module_private,
+                );
+            }
+            stabilize_final_call_metadata(
+                compiler,
+                hir_module,
+                type_environment,
+                generated_transaction,
+                &mut borrow_analysis,
+                warnings,
+                &convergence_model,
+                &edges,
+                base_projection,
+                #[cfg(feature = "timers")]
+                timing_context,
+            )?;
+            phase = ConvergencePhase::Diagnostics;
             first_visits = convergence_model.node_count();
             for node_id in convergence_model.all_node_ids() {
                 enqueue_convergence_node(node_id, &mut convergence_queue, &mut queued_nodes);
@@ -658,16 +1186,14 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     &direct_summaries.active_public,
                     &direct_summaries.module_private,
                 );
-                let Some((visit, changed_callers)) =
-                    BorrowVisit::select(phase, first_visit, &input_changes, function_link_facts)
-                else {
+                let Some(visit) = BorrowVisit::select(phase, first_visit, &input_changes) else {
                     continue;
                 };
                 if let BorrowVisit::Check = visit {
                     increment_convergence_counter(
                         FrontendCounter::ConvergenceInitialBaseBorrowPasses,
                     );
-                } else if matches!(visit, BorrowVisit::Summarize) && !first_visit {
+                } else if matches!(visit, BorrowVisit::RefreshMutation) {
                     increment_convergence_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
                 }
                 let previous_summaries = timed_stage_attributed!(
@@ -680,13 +1206,11 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         warnings,
                         None,
                         &mut borrow_analysis,
-                        (function_link_facts, &changed_callers, base_projection),
-                        !matches!(visit, BorrowVisit::Summarize)
-                            || convergence_model.node_count() != 1,
+                        base_projection,
+                        true,
                     )
                 )?;
                 let Some(previous_summaries) = previous_summaries else {
-                    // The local solver validated every transition and there are no sidecars.
                     continue;
                 };
                 let summary_changes = base_summary_changes(
@@ -718,15 +1242,11 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         &direct_summaries.active_public,
                         &direct_summaries.module_private,
                     );
-                    let links = &sidecar.module.link_facts.functions;
-                    let Some((visit, changed_callers)) =
-                        BorrowVisit::select(phase, first_visit, &input_changes, links)
+                    let Some(visit) = BorrowVisit::select(phase, first_visit, &input_changes)
                     else {
                         continue;
                     };
-                    if matches!(visit, BorrowVisit::Check)
-                        || (matches!(visit, BorrowVisit::Summarize) && !first_visit)
-                    {
+                    if matches!(visit, BorrowVisit::Check | BorrowVisit::RefreshMutation) {
                         increment_convergence_counter(
                             FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
                         );
@@ -745,7 +1265,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                                 sidecar_warnings,
                                 Some(&source_identity_handle),
                                 &mut executable.borrow_analysis,
-                                (links, &changed_callers, projection),
+                                projection,
                                 false,
                             ),
                         )
@@ -985,7 +1505,7 @@ fn reachable_generated_sidecars(
     reachable
 }
 
-/// Validate inferred failure boundaries, then install lanes once and refresh rewritten link facts.
+/// Validate inferred failure boundaries, then install lanes once and retain each exact receipt.
 #[allow(
     clippy::too_many_arguments,
     reason = "lane installation needs the existing convergence owners without taking ownership"
@@ -993,26 +1513,19 @@ fn reachable_generated_sidecars(
 fn install_convergence_lanes(
     compiler: &mut CompilerFrontend<'_>,
     hir: &mut HirModule,
-    link_facts: &mut HirModuleLinkFacts,
     transaction: &mut GeneratedFunctionTransaction<'_>,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
     model: &ConvergenceModel,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<bool, PreparedFailure> {
+) -> Result<Vec<PrivateFailureLaneReceipt>, PreparedFailure> {
     validate_builtin_failure_boundaries(compiler, hir, report, type_environment, warnings, None)?;
-    for node_id in model.generated_node_ids() {
-        let Some(ConvergenceNode::Generated(identity)) = model.node(node_id) else {
-            crate::compiler_bug!(
-                CompilerStage::ProjectBuildAssembly,
-                "generated convergence node has no generated identity"
-            );
-        };
-        let (sidecar, sidecar_warnings) = transaction.sidecar_and_warnings_mut(identity);
+    for (_, identity) in model.generated_nodes() {
         let source_owner = FrozenIdentityHandle::for_domain(
             identity.declaration().module_origin().package().clone(),
         );
+        let (sidecar, sidecar_warnings) = transaction.sidecar_and_warnings_mut(identity);
         let executable = &sidecar.module.executable;
         validate_builtin_failure_boundaries(
             compiler,
@@ -1024,52 +1537,44 @@ fn install_convergence_lanes(
         )?;
     }
 
-    let mut changed = install_validated_failure_lanes(
+    let mut receipts = Vec::with_capacity(model.node_count());
+    receipts.push(install_validated_failure_lanes(
         compiler,
         hir,
-        link_facts,
         report,
         type_environment,
         None,
         #[cfg(feature = "timers")]
         timing_context,
-    )?;
-    for node_id in model.generated_node_ids() {
-        let Some(ConvergenceNode::Generated(identity)) = model.node(node_id) else {
-            crate::compiler_bug!(
-                CompilerStage::ProjectBuildAssembly,
-                "generated convergence node has no generated identity"
-            );
-        };
+    )?);
+    for (_, identity) in model.generated_nodes() {
         let source_owner = FrozenIdentityHandle::for_domain(
             identity.declaration().module_origin().package().clone(),
         );
         let sidecar = transaction.sidecar_mut(identity);
         let executable = &mut sidecar.module.executable;
-        changed |= install_validated_failure_lanes(
+        receipts.push(install_validated_failure_lanes(
             compiler,
             &mut executable.hir,
-            &mut sidecar.module.link_facts.functions,
             &executable.borrow_analysis,
             &mut executable.type_environment,
             Some(&source_owner),
             #[cfg(feature = "timers")]
             timing_context,
-        )?;
+        )?);
     }
-    Ok(changed)
+    Ok(receipts)
 }
 
 fn install_validated_failure_lanes(
     compiler: &mut CompilerFrontend<'_>,
     hir: &mut HirModule,
-    link_facts: &mut HirModuleLinkFacts,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
     source_owner: Option<&FrozenIdentityHandle>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<bool, PreparedFailure> {
-    let installation = timed_stage_attributed!(
+) -> Result<PrivateFailureLaneReceipt, PreparedFailure> {
+    timed_stage_attributed!(
         if source_owner.is_some() {
             crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck
         } else {
@@ -1096,24 +1601,17 @@ fn install_validated_failure_lanes(
             )
         }
         HirConstructionFailure::Infrastructure(error) => PreparedFailure::from(error),
-    })?;
-    if installation == PrivateFailureLaneInstallation::Unchanged {
-        return Ok(false);
-    }
-    *link_facts = collect_module_function_link_facts(hir).map_err(PreparedFailure::from)?;
-    Ok(installation == PrivateFailureLaneInstallation::Rewritten)
+    })
 }
 
 #[derive(Clone, Copy)]
 enum ConvergencePhase {
     Failure,
-    Allocation,
     Diagnostics,
 }
 
 #[derive(Clone, Copy)]
 enum BorrowVisit {
-    Summarize,
     InferFailure,
     Check,
     RefreshMutation,
@@ -1123,26 +1621,14 @@ impl BorrowVisit {
     fn select(
         phase: ConvergencePhase,
         first_visit: bool,
-        changes: &CallInputChanges<'_>,
-        links: &HirModuleLinkFacts,
-    ) -> Option<(Self, FxHashSet<FunctionId>)> {
-        let mut callers = FxHashSet::default();
-        let visit = match phase {
-            ConvergencePhase::Failure if first_visit || changes.failure => Self::InferFailure,
-            ConvergencePhase::Allocation => {
-                if !first_visit {
-                    callers = changes.allocation_callers(links);
-                    if callers.is_empty() {
-                        return None;
-                    }
-                }
-                Self::Summarize
-            }
-            ConvergencePhase::Diagnostics if first_visit => Self::Check,
-            ConvergencePhase::Diagnostics if changes.mutation => Self::RefreshMutation,
-            _ => return None,
-        };
-        Some((visit, callers))
+        changes: &CallInputChanges,
+    ) -> Option<Self> {
+        match phase {
+            ConvergencePhase::Failure if first_visit || changes.failure => Some(Self::InferFailure),
+            ConvergencePhase::Diagnostics if first_visit => Some(Self::Check),
+            ConvergencePhase::Diagnostics if changes.mutation => Some(Self::RefreshMutation),
+            _ => None,
+        }
     }
 
     #[allow(
@@ -1157,37 +1643,16 @@ impl BorrowVisit {
         warnings: &mut DiagnosticBag,
         owner: Option<&FrozenIdentityHandle>,
         report: &mut BorrowCheckReport,
-        allocation_inputs: (
-            &HirModuleLinkFacts,
-            &FxHashSet<FunctionId>,
-            &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
-        ),
+        projection: &CanonicalTypeProjectionContext<'_>,
         compare_base_summaries: bool,
     ) -> Result<Option<FxHashMap<FunctionId, PublicCallSummary>>, PreparedFailure> {
         let previous =
             compare_base_summaries.then(|| report.analysis.public_call_summaries.clone());
         match self {
-            Self::Summarize => {
-                refresh_call_allocations(
-                    compiler,
-                    hir,
-                    types,
-                    warnings,
-                    owner,
-                    allocation_inputs,
-                    report,
-                )?;
-            }
             Self::InferFailure => infer_builtin_failure_summaries(hir, report),
-            Self::Check => check_borrows(
-                compiler,
-                hir,
-                types,
-                warnings,
-                owner,
-                report,
-                allocation_inputs.2,
-            )?,
+            Self::Check => {
+                check_borrows(compiler, hir, types, warnings, owner, report, projection)?
+            }
             Self::RefreshMutation => {
                 refresh_call_mutation_effects(compiler, hir, types, warnings, owner, report)?;
             }
@@ -1321,94 +1786,77 @@ pub(crate) fn direct_convergence_summaries(
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct CallInputChanges<'a> {
-    generated: FxHashSet<&'a GeneratedFunctionIdentity>,
-    public: FxHashSet<&'a OriginFunctionId>,
-    private: FxHashSet<&'a ModulePrivateExecutableIdentity>,
+struct CallInputChanges {
+    #[cfg(test)]
+    allocation: bool,
     failure: bool,
     mutation: bool,
 }
 
-impl CallInputChanges<'_> {
+#[cfg(test)]
+impl CallInputChanges {
     fn allocations_changed(&self) -> bool {
-        !self.generated.is_empty() || !self.public.is_empty() || !self.private.is_empty()
-    }
-
-    fn allocation_callers(&self, links: &HirModuleLinkFacts) -> FxHashSet<FunctionId> {
-        if !self.allocations_changed() {
-            return FxHashSet::default();
-        }
-        links.callers_of(&self.generated, &self.public, &self.private)
+        self.allocation
     }
 }
 
 /// Install exact inputs for the two analyses that consume the call contract. Escape bits are
 /// installed too, but only failure inference reads them before lane delivery is rewritten.
-pub(crate) fn install_convergence_summaries<'a>(
+fn install_convergence_summaries(
     hir: &mut HirModule,
-    generated_summaries: &'a [(GeneratedFunctionIdentity, PublicCallSummary)],
-    active_public_summaries: &'a [(OriginFunctionId, PublicCallSummary)],
-    private_summaries: &'a [(ModulePrivateExecutableIdentity, PublicCallSummary)],
-) -> CallInputChanges<'a> {
-    let mut failure = false;
-    let mut mutation = false;
+    generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
+    active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
+    private_summaries: &[(ModulePrivateExecutableIdentity, PublicCallSummary)],
+) -> CallInputChanges {
+    let mut changes = CallInputChanges::default();
     // Keep latent and validation-only inputs until link pruning. The lists contain only
     // direct generated dependencies and active-base origins; fixed provider leaves stay put.
-    let generated = install_call_inputs(
+    install_call_inputs(
         &mut hir.generated_call_summaries,
         generated_summaries,
-        &mut failure,
-        &mut mutation,
+        &mut changes,
     );
-    let public = install_call_inputs(
+    install_call_inputs(
         &mut hir.imported_call_summaries,
         active_public_summaries,
-        &mut failure,
-        &mut mutation,
+        &mut changes,
     );
-    let private = install_call_inputs(
+    install_call_inputs(
         &mut hir.module_private_call_summaries,
         private_summaries,
-        &mut failure,
-        &mut mutation,
+        &mut changes,
     );
-    CallInputChanges {
-        generated,
-        public,
-        private,
-        failure,
-        mutation,
-    }
+    changes
 }
 
-fn install_call_inputs<'a, K: Clone + Eq + std::hash::Hash>(
+fn install_call_inputs<K: Clone + Eq + std::hash::Hash>(
     installed: &mut FxHashMap<K, PublicCallSummary>,
-    incoming: &'a [(K, PublicCallSummary)],
-    failure: &mut bool,
-    mutation: &mut bool,
-) -> FxHashSet<&'a K> {
-    let mut allocations = FxHashSet::default();
+    incoming: &[(K, PublicCallSummary)],
+    changes: &mut CallInputChanges,
+) {
     for (target, summary) in incoming {
         let Some(previous) = installed.get_mut(target) else {
             installed.insert(target.clone(), summary.clone());
-            allocations.insert(target);
-            *failure |= summary.escapes_builtin_failure;
-            *mutation = true;
+            #[cfg(test)]
+            {
+                changes.allocation = true;
+            }
+            changes.failure |= summary.escapes_builtin_failure;
+            changes.mutation = true;
             continue;
         };
-        if !same_typed_allocation_transfer_as(
-            previous.return_alias.facts(),
-            summary.return_alias.facts(),
-        ) {
-            previous.return_alias.clone_from(&summary.return_alias);
-            allocations.insert(target);
-        } else if std::mem::discriminant(&previous.return_alias)
-            != std::mem::discriminant(&summary.return_alias)
+        #[cfg(test)]
         {
-            // Equal transfer does not erase the difference between pending and proved bottom.
+            changes.allocation |= !previous
+                .return_alias
+                .same_allocation_transfer_as(&summary.return_alias);
+        }
+        // Retain the distinction between a pending seed and a proved bottom contract.
+        if previous.return_alias != summary.return_alias {
             previous.return_alias.clone_from(&summary.return_alias);
         }
         if previous.parameters != summary.parameters {
+            #[cfg(test)]
             if previous.parameters.len() != summary.parameters.len()
                 || previous
                     .parameters
@@ -1418,18 +1866,17 @@ fn install_call_inputs<'a, K: Clone + Eq + std::hash::Hash>(
                         old.access != new.access || old.transfer_effect != new.transfer_effect
                     })
             {
-                allocations.insert(target);
+                changes.allocation = true;
             }
-            *mutation = true;
+            changes.mutation = true;
             previous.parameters.clone_from(&summary.parameters);
         }
-        *failure |= previous.escapes_builtin_failure != summary.escapes_builtin_failure;
+        changes.failure |= previous.escapes_builtin_failure != summary.escapes_builtin_failure;
         previous.escapes_builtin_failure = summary.escapes_builtin_failure;
         previous.uses_fast_semantics = summary.uses_fast_semantics;
         previous.may_trap = summary.may_trap;
         previous.may_fail = summary.may_fail;
     }
-    allocations
 }
 
 /// Resolve a semantic pending-call contributor against its retained summary.
@@ -1923,20 +2370,14 @@ pub(crate) fn base_summary_changes(
         public: hir
             .function_ids_by_origin
             .iter()
-            .filter_map(|(origin, function_id)| {
-                widened_functions
-                    .contains(function_id)
-                    .then_some(origin.clone())
-            })
+            .filter(|(_, function_id)| widened_functions.contains(*function_id))
+            .map(|(origin, _)| origin.clone())
             .collect(),
         module_private: hir
             .function_ids_by_private_origin
             .iter()
-            .filter_map(|(identity, function_id)| {
-                widened_functions
-                    .contains(function_id)
-                    .then_some(identity.clone())
-            })
+            .filter(|(_, function_id)| widened_functions.contains(*function_id))
+            .map(|(identity, _)| identity.clone())
             .collect(),
     };
     changes.public.sort_unstable();
@@ -2037,7 +2478,7 @@ fn increment_convergence_counter(counter: FrontendCounter) {
     add_frontend_counter(counter, 1);
 }
 
-pub(crate) fn generated_root_summary<'a>(
+pub(super) fn generated_root_summary<'a>(
     identity: &GeneratedFunctionIdentity,
     module: &'a Module,
 ) -> &'a PublicCallSummary {

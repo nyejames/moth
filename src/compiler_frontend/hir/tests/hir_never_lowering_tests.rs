@@ -512,9 +512,7 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
         HirBuiltinFailureBoundary, HirFunctionFailureFacts,
     };
     use crate::compiler_frontend::hir::ids::{BlockId, RegionId};
-    use crate::compiler_frontend::hir::private_failure_lane::{
-        PrivateFailureLaneInstallation, install_private_failure_lanes,
-    };
+    use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
 
     let mut module = HirModule::new();
     module.functions.push(HirFunction {
@@ -560,18 +558,16 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
     let mut type_environment = TypeEnvironment::new();
     let external_packages = super::ExternalPackageRegistry::new();
 
-    let installation = install_private_failure_lanes(
+    let receipt = install_private_failure_lanes(
         &mut module,
         &report,
         &mut type_environment,
         &external_packages,
     )
     .expect("a closed Never boundary is not a private failure lane candidate");
-    assert_eq!(
-        installation,
-        PrivateFailureLaneInstallation::Unchanged,
-        "lane installation must not rewrite a Never-only module"
-    );
+    assert!(!receipt.link_facts_need_refresh);
+    assert_eq!(receipt.changed_functions().next(), None);
+    assert_eq!(receipt.block_remap.get(BlockId(0)), Some(BlockId(0)));
     assert_eq!(
         module.functions[0].return_contract,
         HirFunctionReturnContract::Never,
@@ -584,10 +580,8 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
 }
 
 #[test]
-fn entry_narrowing_and_unreachable_handler_pruning_are_metadata_only() {
-    use crate::compiler_frontend::hir::private_failure_lane::{
-        PrivateFailureLaneInstallation, install_private_failure_lanes,
-    };
+fn entry_narrowing_reports_only_the_outcome_change_even_with_handler_pruning() {
+    use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
     use crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries;
     use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
     use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -626,10 +620,14 @@ fn entry_narrowing_and_unreachable_handler_pruning_are_metadata_only() {
         .expect("fixture must pass borrow checking");
         infer_builtin_failure_summaries(&module, &mut report);
 
-        let installation =
+        let receipt =
             install_private_failure_lanes(&mut module, &report, &mut type_environment, &registry)
                 .expect("installation should leave valid HIR");
-        assert_eq!(installation, PrivateFailureLaneInstallation::MetadataOnly);
+        assert_eq!(receipt.outcome_changes, [start].into_iter().collect());
+        assert!(receipt.producer_splits.is_empty());
+        assert!(receipt.newly_executable_handlers.is_empty());
+        assert!(receipt.implicit_failure_retargets.is_empty());
+        assert!(receipt.link_facts_need_refresh);
         assert!(
             !module.functions[start.0 as usize]
                 .return_contract
@@ -1070,9 +1068,7 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
     use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
     use crate::compiler_frontend::hir::hir_side_table::HirLocation;
     use crate::compiler_frontend::hir::ids::RegionId;
-    use crate::compiler_frontend::hir::private_failure_lane::{
-        PrivateFailureLaneInstallation, install_private_failure_lanes,
-    };
+    use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
     use crate::compiler_frontend::hir::regions::HirRegion;
     use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
@@ -1218,14 +1214,24 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         .expect("fixture builtin Error identity should register");
     let external_packages = super::ExternalPackageRegistry::new();
 
-    let installation = install_private_failure_lanes(
+    let receipt = install_private_failure_lanes(
         &mut module,
         &report,
         &mut type_environment,
         &external_packages,
     )
     .expect("lane split should produce valid HIR");
-    assert_eq!(installation, PrivateFailureLaneInstallation::Rewritten);
+    assert_eq!(
+        receipt.outcome_changes,
+        [FunctionId(2)].into_iter().collect()
+    );
+    assert_eq!(
+        receipt.producer_splits,
+        [(FunctionId(0), HirNodeId(0))].into_iter().collect()
+    );
+    assert!(receipt.newly_executable_handlers.is_empty());
+    assert!(receipt.implicit_failure_retargets.is_empty());
+    assert!(receipt.link_facts_need_refresh);
 
     let HirTerminator::Invoke { success, .. } = &module.blocks[0].terminator else {
         panic!("the private producer should be split into an Invoke");

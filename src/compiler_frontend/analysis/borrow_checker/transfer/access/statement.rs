@@ -23,7 +23,8 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     Demand, selected_members,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    CapturedCallBatch, CapturedDestination, CapturedDetachment, InvokeLane, InvokeLayerOp,
+    CapturedCallBatch, CapturedDestination, CapturedDetachment, InlineVec, InvokeLane,
+    InvokeLayerOp,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -60,6 +61,7 @@ mod typed_argument_tests {
             choices: &module.choices,
             expressions: &module.expressions,
             type_environment: &types,
+            typed_call_cache: Default::default(),
             type_projection:
                 crate::compiler_frontend::ast::generic_functions::registered_type_projection(
                     &types, &packages,
@@ -220,6 +222,7 @@ mod typed_argument_tests {
             choices: &module.choices,
             expressions: &module.expressions,
             type_environment: &types,
+            typed_call_cache: Default::default(),
             type_projection:
                 crate::compiler_frontend::ast::generic_functions::registered_type_projection(
                     &types, &packages,
@@ -684,7 +687,7 @@ fn transfer_target_call(
     result_transfer: CallResultTransfer,
 ) -> Result<(), BorrowCheckError> {
     let semantics = resolve_call_semantics(input.context, target, args.len())?;
-    let arguments: Vec<_> = args
+    let arguments: InlineVec<_> = args
         .iter()
         .copied()
         .zip(semantics.arg_effects())
@@ -966,9 +969,8 @@ fn transfer_call_arguments_and_result(
     // WHAT: only a retained result that may alias an argument reads these roots.
     // WHY: `Fresh` results and calls without a result never inspect them, so building the sets
     //      would walk every argument expression for no consumer.
-    let mut arg_value_roots = Vec::new();
+    let mut arg_value_roots = InlineVec::Empty;
     if retains_success || retains_error {
-        arg_value_roots.reserve(args.len());
         actuals.capture_derivations(input);
         for arg in args {
             let argument_location = input
@@ -1039,11 +1041,10 @@ fn plan_executed_call_arguments(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
     storage: CallStorage,
-) -> Result<Vec<Option<CallAccessPlan>>, BorrowCheckError> {
-    let mut plans = Vec::new();
+) -> Result<InlineVec<Option<CallAccessPlan>>, BorrowCheckError> {
+    let mut plans = InlineVec::Empty;
     if input.validation.is_some() {
         let args = actuals.arguments();
-        plans.reserve(args.len());
         for (index, arg) in args.iter().enumerate() {
             increment_frontend_counter(FrontendCounter::BorrowArgumentPlansScanned);
             let location = input
@@ -1181,11 +1182,16 @@ fn transfer_typed_user_call(
         );
     }
     let mut actuals = CallActuals::new(args);
-    let mut retained = vec![false; args.len()];
+    let mut retained = None;
     if let Some(facts) = facts
         && !terminal
         && input.validation.is_some()
     {
+        let mut mark_retained = |parameter| {
+            let slots: &mut InlineVec<bool> =
+                retained.get_or_insert_with(|| (0..args.len()).map(|_| false).collect());
+            slots[parameter] = true;
+        };
         let mut uses_opaque_sources = false;
         for lane in std::iter::once(&facts.success).chain(error.iter().map(|_| &facts.error)) {
             lane.visit_compatible(|_| Ok::<_, BorrowCheckError>(None), |_, product| {
@@ -1206,7 +1212,7 @@ fn transfer_typed_user_call(
                             EntryPort::Value { parameter, .. } => *parameter,
                             EntryPort::Edge(..) => unreachable!("typed edge holder is an entry value"),
                         };
-                        retained[parameter] = true;
+                        mark_retained(parameter);
                     });
                 }
                 Ok(())
@@ -1217,7 +1223,7 @@ fn transfer_typed_user_call(
             // even when its known prefix does not name a source explicitly.
             for port in &facts.ports {
                 if let EntryPort::Value { parameter, .. } = *port {
-                    retained[parameter] = true;
+                    mark_retained(parameter);
                 }
             }
         }
@@ -1228,7 +1234,7 @@ fn transfer_typed_user_call(
         facts,
         CallStorage::User,
         error.is_some(),
-        |index| retained[index],
+        |index| retained.as_ref().is_some_and(|slots| slots[index]),
         |_, _, _| {},
     )?;
     let Some(facts) = facts else {
@@ -1242,37 +1248,40 @@ fn transfer_typed_user_call(
         return Ok(());
     }
     let mut entries = capture_typed_actuals(input, &mut actuals, &facts.ports)?;
-    let parameters: Vec<_> = args
+    let parameters: InlineVec<_> = args
         .iter()
         .map(|actual| input.context.expressions.expression(actual.argument).ty)
         .collect();
-    let mut roots = vec![None; args.len()];
-    for (port, capture) in facts.ports.iter().zip(&mut entries) {
-        let parameter = match port {
-            EntryPort::Wrapper(parameter)
-            | EntryPort::Immediate(parameter)
-            | EntryPort::Terminal(parameter)
-            | EntryPort::Value { parameter, .. } => *parameter,
-            EntryPort::Edge(..) => continue,
-        };
-        if !retained[parameter] {
-            continue;
+    if let Some(retained) = retained {
+        let mut roots: Option<InlineVec<Option<RootSet>>> = None;
+        for (port, capture) in facts.ports.iter().zip(&mut entries) {
+            let parameter = match port {
+                EntryPort::Wrapper(parameter)
+                | EntryPort::Immediate(parameter)
+                | EntryPort::Terminal(parameter)
+                | EntryPort::Value { parameter, .. } => *parameter,
+                EntryPort::Edge(..) => continue,
+            };
+            if !retained[parameter] {
+                continue;
+            }
+            let roots = roots.get_or_insert_with(|| (0..args.len()).map(|_| None).collect());
+            let argument = args[parameter].argument;
+            if roots[parameter].is_none() {
+                roots[parameter] = Some(call_argument_value_roots(
+                    input.context,
+                    input.view,
+                    input.validation.as_ref().map(|sink| sink.layout),
+                    input.state,
+                    argument,
+                    input
+                        .context
+                        .diagnostics
+                        .value_error_span(argument, input.location),
+                )?);
+            }
+            capture.roots.clone_from(&roots[parameter]);
         }
-        let argument = args[parameter].argument;
-        if roots[parameter].is_none() {
-            roots[parameter] = Some(call_argument_value_roots(
-                input.context,
-                input.view,
-                input.validation.as_ref().map(|sink| sink.layout),
-                input.state,
-                argument,
-                input
-                    .context
-                    .diagnostics
-                    .value_error_span(argument, input.location),
-            )?);
-        }
-        capture.roots.clone_from(&roots[parameter]);
     }
     let checkpoints = std::mem::take(&mut input.stats.invoke.success.checkpoints);
     let success = capture_typed_user_lane(
@@ -1342,7 +1351,7 @@ fn capture_typed_user_lane(
     let types = destinations
         .clone()
         .map(|destination| input.context.local_types[&destination.local()])
-        .collect::<Vec<_>>();
+        .collect::<InlineVec<_>>();
     let post = match_call_actuals(input, entries, parameters, &types, lane, error)?;
     if post.is_empty() {
         return Ok(None);
@@ -1559,7 +1568,7 @@ fn capture_call_continuations(
 fn check_call_arguments(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
-    mut plans: Vec<Option<CallAccessPlan>>,
+    mut plans: InlineVec<Option<CallAccessPlan>>,
     storage: CallStorage,
     mut retains_argument: impl FnMut(usize) -> bool,
     on_edge: bool,
@@ -1843,7 +1852,7 @@ fn capture_typed_builtin_element_batch(
     }
     let capture = capture_builtin_element(input, result, storage, &mut member_reads, receiver);
     let mut post = call_results::CapturedPost::default();
-    let mut destinations = Vec::new();
+    let mut destinations = InlineVec::Empty;
     let mut result_index = None;
     if let Some(destination) = result {
         let (roots, derivation) = if matches!(storage, CallStorage::Get) {

@@ -174,10 +174,6 @@ pub(crate) struct BlockIdRemap {
 }
 
 impl BlockIdRemap {
-    #[allow(
-        dead_code,
-        reason = "B2b.3b uses the remap to invalidate moved sparse coordinates"
-    )]
     pub(crate) fn get(&self, before: BlockId) -> Option<BlockId> {
         if self.before_to_after.is_empty() {
             ((before.0 as usize) < self.retained_count).then_some(before)

@@ -91,6 +91,40 @@ fn named_function<'a>(checker: &BorrowChecker<'a>, name: &str) -> &'a HirFunctio
 }
 
 #[test]
+fn sparse_support_embedding_follows_renumbered_descriptors() {
+    use crate::compiler_frontend::public_call_summary::typed::SupportId;
+
+    let fixture = ResultFixture::new("leaf |x I32| -> I32:\n    return x\n;\n");
+    let (checker, mut indices) = fixture.indexed();
+    let old = indices
+        .remove(&named_function(&checker, "leaf").id)
+        .unwrap();
+    assert!(!old.result_supports.is_empty());
+    assert!(!old.operations_by_support.is_empty());
+    let shifted = |support: SupportId| SupportId(support.0 + 1);
+    let mut next = old.clone();
+    next.support_count += 1;
+    for support in next
+        .port_supports
+        .iter_mut()
+        .chain(next.result_supports.values_mut())
+        .chain(next.envelope.values_mut())
+    {
+        *support = shifted(*support);
+    }
+    next.operations_by_support = std::mem::take(&mut next.operations_by_support)
+        .into_iter()
+        .map(|((support, block), positions)| ((shifted(support), block), positions))
+        .collect();
+    let ports: Vec<_> = (0..old.ports.len()).map(|id| PortId(id as u32)).collect();
+    let expected: Vec<_> = (0..old.support_count)
+        .map(|id| shifted(SupportId(id as u32)))
+        .collect();
+    let old = old.into_support_schema();
+    assert_eq!(old.embed_supports(&next, &ports), Some(expected));
+}
+
+#[test]
 fn sparse_forward_transfer_executes_admitted_entry_roles_without_validation() {
     use crate::compiler_frontend::analysis::borrow_checker::state::{
         AddressSet, BindingSpec, BindingTarget, CellId, Coverage, FieldKey, RootSet, WrapperId,
@@ -777,7 +811,7 @@ forward |take Bool| -> !:
                 .iter()
                 .position(|function| function.id == caller)
                 .unwrap();
-            let indices = super::super::build_sparse(checker).unwrap();
+            let indices = SparseFunction::build_sparse(checker).unwrap();
             let callees = &indices[&caller].callees;
             assert_eq!(callees.len(), 3);
             for callee in ["ordinary", "fallible", "stop"] {
@@ -1399,7 +1433,7 @@ fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinate
         EdgeTransferView { operations },
         CapturedCallBatch {
             post,
-            destinations: vec![CapturedDestination::Define(4)],
+            destinations: [CapturedDestination::Define(4)].into_iter().collect(),
             member_reads: Default::default(),
             checkpoints: Vec::new(),
             detachment: None,
@@ -1570,7 +1604,7 @@ probe || -> I32:
             .expect("probe calls unwrap_link");
         let report = fixture
             .checker()
-            .run(None)
+            .run_cold()
             .expect("the caller can read the returned payload after the call");
         assert_eq!(
             report
@@ -2059,7 +2093,7 @@ stop |dest ~I32, value ~I32| -> !:
     ] {
         let forward = named_function(&checker, forward);
         let leaf = named_function(&checker, leaf);
-        let indices = super::super::build_sparse(&checker).unwrap();
+        let indices = SparseFunction::build_sparse(&checker).unwrap();
         let classify = |checker: &BorrowChecker<'_>, function: &HirFunction| {
             let FunctionReturnAliasSummary::Known(facts) = checker
                 .classify_function_return_alias(function, &indices[&function.id])
@@ -2222,7 +2256,7 @@ outer || -> !:
                 .expect("the outer call is terminal, with no receiving locals");
             let report = fixture
                 .checker()
-                .run(None)
+                .run_cold()
                 .expect("independent arguments are legal on a terminating call");
             let value = checker.module.expressions.values(args)[1];
             assert_eq!(

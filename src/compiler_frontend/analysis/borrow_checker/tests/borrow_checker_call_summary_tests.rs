@@ -5,7 +5,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::problem::{EventKind, from_hir};
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, check_borrows, refresh_call_allocations, seed_call_summaries,
+    BorrowCheckError, check_borrows, seed_call_summaries, stabilize_call_metadata,
 };
 use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
@@ -47,7 +47,6 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
-use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
@@ -2418,22 +2417,23 @@ fn call_reservations_distinguish_projected_cells_and_fresh_values() {
         let mut summaries = seed_call_summaries(&hir, &path_fork, &string_table)
             .expect("the fixture's declarations should seed call summaries");
         infer_builtin_failure_summaries(&hir, &mut summaries);
-        install_private_failure_lanes(&mut hir, &summaries, &mut types, &registry)
+        let receipt = install_private_failure_lanes(&mut hir, &summaries, &mut types, &registry)
             .expect("the fixture's private call lanes should be finalized");
-        let links = collect_module_function_link_facts(&hir).expect("the fixture's call links");
+        summaries.metadata.apply_block_remap(&receipt.block_remap);
         let result =
             crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
                 &types,
                 &registry,
                 |projection| {
-                    refresh_call_allocations(
+                    stabilize_call_metadata(
                         &hir,
                         &types,
                         &registry,
                         &path_fork,
                         &string_table,
-                        (&links, &Default::default(), projection),
+                        projection,
                         &mut summaries,
+                        None,
                     )
                     .expect("call allocation summaries should converge before validation");
                     check_borrows(
@@ -2442,7 +2442,7 @@ fn call_reservations_distinguish_projected_cells_and_fresh_values() {
                         &registry,
                         &path_fork,
                         &string_table,
-                        Some((summaries.analysis.public_call_summaries, projection)),
+                        (summaries.analysis.public_call_summaries, projection),
                     )
                 },
             );

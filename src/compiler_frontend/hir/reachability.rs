@@ -206,6 +206,7 @@ impl HirModuleLinkFacts {
             .flat_map(|block| block.direct_facts.reachable_external_calls.iter())
     }
 
+    #[cfg(test)]
     pub(crate) fn local_call_edges(&self) -> impl Iterator<Item = (FunctionId, FunctionId)> + '_ {
         self.blocks.iter().flat_map(|block| {
             block
@@ -217,6 +218,7 @@ impl HirModuleLinkFacts {
     }
 
     /// Return owners with executable calls to an updated non-local allocation contract.
+    #[cfg(test)]
     pub(crate) fn callers_of(
         &self,
         generated: &FxHashSet<&GeneratedFunctionIdentity>,

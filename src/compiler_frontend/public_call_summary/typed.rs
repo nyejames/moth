@@ -10,6 +10,7 @@ use super::{
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -704,6 +705,31 @@ impl Lane {
         }
     }
 
+    fn visit_unresolved_result_slots(&self, visit: &mut impl FnMut(usize)) {
+        match self {
+            Self::Bottom => {}
+            Self::Returning(product) => {
+                for post in product
+                    .components()
+                    .iter()
+                    .flat_map(|component| &component.alternatives)
+                {
+                    if let Coverage::Unresolved(Footprint::Locations(locations)) = &post.coverage {
+                        for location in locations {
+                            if let OutputPort::Result(slot) = location {
+                                visit(*slot);
+                            }
+                        }
+                    }
+                }
+            }
+            Self::Decision(test) => {
+                test.no.visit_unresolved_result_slots(visit);
+                test.yes.visit_unresolved_result_slots(visit);
+            }
+        }
+    }
+
     /// A partial actual can admit both arms, but it cannot admit inconsistent
     /// combinations of the same typed observations.
     pub(crate) fn visit_compatible<E>(
@@ -1059,6 +1085,179 @@ struct LayoutCheck<'a, L: Layout> {
     error: bool,
 }
 
+/// Re-express a lane in the embedded port and support tables.
+fn remap_lane(lane: &Lane, ports: &[PortId], supports: &[SupportId]) -> Lane {
+    struct Remap<'a> {
+        ports: &'a [PortId],
+        supports: &'a [SupportId],
+    }
+
+    impl Remap<'_> {
+        fn port(&self, port: &mut PortId) {
+            *port = self.ports[port.0 as usize];
+        }
+
+        fn ports(&self, ports: &mut [PortId]) {
+            for port in &mut *ports {
+                self.port(port);
+            }
+            ports.sort_unstable();
+        }
+
+        fn object(&self, object: &mut ObjectRef) {
+            if let ObjectRef::Entry(port) = object {
+                self.port(port);
+            }
+        }
+
+        fn cell(&self, cell: &mut CellPort) {
+            match cell {
+                CellPort::Terminal(port) => self.port(port),
+                CellPort::Slot(object) | CellPort::Edge(object, _) => self.object(object),
+            }
+        }
+
+        fn route(&self, access: &mut PathAccess, dependencies: &mut [ReceiverDependency]) {
+            match &mut access.derived_from {
+                Some(Derivation::Entry(port)) => self.port(port),
+                Some(Derivation::Retained(object)) => self.object(object),
+                None => {}
+            }
+            for dependency in &mut *dependencies {
+                match dependency {
+                    ReceiverDependency::Known(objects) => {
+                        for object in &mut *objects {
+                            self.object(object);
+                        }
+                        objects.sort_unstable();
+                    }
+                    ReceiverDependency::Unresolved(bound) => self.ports(&mut bound.roots),
+                }
+            }
+            dependencies.sort_unstable();
+        }
+
+        fn value(&self, value: &mut ValueRef) {
+            match &mut value.source {
+                ValueSource::Allocation(object) => self.object(object),
+                ValueSource::Scalar(ScalarSource::EntryValue(port)) => self.port(port),
+                ValueSource::Scalar(ScalarSource::Unresolved(ScalarSourceBound::Values(ports))) => {
+                    self.ports(ports);
+                }
+                ValueSource::Scalar(ScalarSource::Unresolved(ScalarSourceBound::Reach(bound))) => {
+                    self.ports(&mut bound.roots);
+                }
+                ValueSource::Scalar(ScalarSource::Independent) => {}
+            }
+            self.route(&mut value.access, &mut value.dependencies);
+        }
+
+        fn post(&self, post: &mut Post) {
+            for (target, edit) in &mut post.bindings {
+                self.object(target);
+                let route = match edit {
+                    BindingPost::OwnSlot => continue,
+                    BindingPost::Link(object, route) => {
+                        self.object(object);
+                        route
+                    }
+                    BindingPost::Projected(cell, route) => {
+                        self.cell(cell);
+                        route
+                    }
+                };
+                self.route(&mut route.access, &mut route.dependencies);
+            }
+            for (target, edit) in &mut post.cells {
+                self.cell(target);
+                let (CellPost::Replace(values) | CellPost::WeakJoin(values)) = edit;
+                for value in values.iter_mut().flatten() {
+                    self.value(value);
+                }
+                values.sort_unstable();
+            }
+            for (target, edit) in &mut post.families {
+                self.object(&mut target.receiver);
+                let (FamilyPost::Extend(members) | FamilyPost::ReplaceAll(members)) = edit;
+                for (value, _) in &mut *members {
+                    self.value(value);
+                }
+                members.sort_unstable();
+            }
+            for (_, value) in &mut post.results {
+                self.value(value);
+            }
+            for (object, _, _) in &mut post.retained {
+                self.object(object);
+            }
+            match &mut post.coverage {
+                Coverage::Complete => {}
+                Coverage::Unresolved(Footprint::WritableReach(bound)) => {
+                    self.ports(&mut bound.roots);
+                }
+                Coverage::Unresolved(Footprint::Locations(outputs)) => {
+                    for output in &mut *outputs {
+                        match output {
+                            OutputPort::Result(_) => {}
+                            OutputPort::Binding(object) => self.object(object),
+                            OutputPort::Cell(cell) => self.cell(cell),
+                            OutputPort::Family(family) => self.object(&mut family.receiver),
+                        }
+                    }
+                    outputs.sort_unstable();
+                }
+            }
+            post.bindings.sort_unstable();
+            post.cells.sort_unstable();
+            post.families.sort_unstable();
+            post.retained.sort_unstable();
+        }
+
+        fn visit(&self, lane: &Lane, path: &mut Vec<Literal>, output: &mut Lane) {
+            match lane {
+                Lane::Bottom => {}
+                Lane::Returning(product) => {
+                    if let Some(guard) = Guard::new(path.iter().copied()) {
+                        let mut components = product.components().to_vec();
+                        for component in &mut components {
+                            component.support = self.supports[component.support.0 as usize];
+                            for post in &mut component.alternatives {
+                                self.post(post);
+                            }
+                        }
+                        let mapped = Lane::guarded(
+                            guard,
+                            Product::new(components).expect("embedded typed supports"),
+                        );
+                        *output = output.union(&mapped);
+                    }
+                }
+                Lane::Decision(test) => {
+                    let mut predicate = test.predicate;
+                    match &mut predicate {
+                        Predicate::Role(port, _) | Predicate::Writable(port) => self.port(port),
+                        Predicate::Equal(_, left, right) | Predicate::DerivedFrom(left, right) => {
+                            self.port(left);
+                            self.port(right);
+                        }
+                    }
+                    // Renumbering can reorder decisions; reconstruct the ordered diagram
+                    // through the same canonical guarded union as ordinary extraction.
+                    for (truth, arm) in [(false, &test.no), (true, &test.yes)] {
+                        path.push((predicate, truth));
+                        self.visit(arm, path, output);
+                        path.pop();
+                    }
+                }
+            }
+        }
+    }
+
+    let mut output = Lane::Bottom;
+    Remap { ports, supports }.visit(lane, &mut Vec::new(), &mut output);
+    output
+}
+
 impl TypedCallAllocationFacts {
     pub(crate) fn shape<'a>(
         &'a self,
@@ -1076,11 +1275,118 @@ impl TypedCallAllocationFacts {
     }
 
     pub(crate) fn contains_transfer(&self, previous: &Self) -> bool {
-        (previous.is_transfer_bottom()
-            || (previous.ports == self.ports && previous.support_count == self.support_count))
-            && sorted_subset(&previous.may_retain, &self.may_retain)
-            && lane_contains(&self.success, &previous.success, &mut Vec::new())
-            && lane_contains(&self.error, &previous.error, &mut Vec::new())
+        previous.ports == self.ports
+            && previous.support_count == self.support_count
+            && self.contains_embedded_transfer(previous, None)
+    }
+
+    fn contains_embedded_transfer(
+        &self,
+        previous: &Self,
+        embedding: Option<(&[PortId], &[SupportId])>,
+    ) -> bool {
+        if !sorted_subset(&previous.may_retain, &self.may_retain) {
+            return false;
+        }
+        let mut path = Vec::new();
+        [
+            (&self.success, &previous.success),
+            (&self.error, &previous.error),
+        ]
+        .into_iter()
+        .all(|(upper, lower)| match embedding {
+            Some((ports, supports)) => {
+                lane_contains(upper, &remap_lane(lower, ports, supports), &mut path)
+            }
+            None => lane_contains(upper, lower, &mut path),
+        })
+    }
+
+    /// Check a strict canonical port superset. `None` is not a growth transition.
+    pub(in crate::compiler_frontend) fn validate_port_growth(
+        &self,
+        next: &Self,
+        embed_supports: impl FnOnce(&[PortId], usize) -> Option<Vec<SupportId>>,
+    ) -> Option<Result<(), InfrastructureFailure>> {
+        if self.ports.len() >= next.ports.len() {
+            return None;
+        }
+        fn keys(ports: &[EntryPort]) -> impl Iterator<Item = (&EntryPort, Option<CallField>)> {
+            ports.iter().map(|port| match port {
+                EntryPort::Edge(holder, field) => (&ports[holder.0 as usize], Some(*field)),
+                _ => (port, None),
+            })
+        }
+        let embedding: Vec<_> = if next.ports.starts_with(&self.ports) {
+            (0..self.ports.len()).map(|id| PortId(id as u32)).collect()
+        } else {
+            // An edge identity names its canonical value holder, not that holder's ordinal.
+            let next_ids: FxHashMap<_, _> = keys(&next.ports)
+                .enumerate()
+                .map(|(id, key)| (key, PortId(id as u32)))
+                .collect();
+            keys(&self.ports)
+                .map(|key| next_ids.get(&key).copied())
+                .collect::<Option<_>>()?
+        };
+
+        let Some(supports) = embed_supports(&embedding, self.support_count) else {
+            // A genuine split or merge has no unique embedding for guarded rows.
+            // Retain the schema-independent lower bounds in that case.
+            return Some(self.validate_schema_independent_transition(next));
+        };
+        debug_assert_eq!(supports.len(), self.support_count);
+        debug_assert!(
+            supports
+                .iter()
+                .all(|id| (id.0 as usize) < next.support_count)
+        );
+
+        let identity = embedding
+            .iter()
+            .enumerate()
+            .all(|(old, new)| old == new.0 as usize)
+            && supports
+                .iter()
+                .enumerate()
+                .all(|(old, new)| old == new.0 as usize);
+        let remap = (!identity).then_some((embedding.as_slice(), supports.as_slice()));
+        Some(if next.contains_embedded_transfer(self, remap) {
+            Ok(())
+        } else {
+            Err(allocation_error("typed call postconditions narrowed"))
+        })
+    }
+
+    /// Keep the transfer facts whose identities survive a port/support schema expansion.
+    /// A support can split or merge, so guarded rows are not comparable by their old ordinals.
+    pub(in crate::compiler_frontend) fn validate_schema_independent_transition(
+        &self,
+        next: &Self,
+    ) -> Result<(), InfrastructureFailure> {
+        if !sorted_subset(&self.may_retain, &next.may_retain) {
+            return Err(allocation_error("typed call postconditions narrowed"));
+        }
+        let mut unresolved = BTreeSet::new();
+        for (before, after) in [(&self.success, &next.success), (&self.error, &next.error)] {
+            if before.can_return() && !after.can_return() {
+                return Err(allocation_error("typed call postconditions narrowed"));
+            }
+            // Explicit result slots are declaration coordinates, unlike guards and
+            // footprints tied to entry ports. Compare may-unresolved coverage by slot.
+            before.visit_unresolved_result_slots(&mut |slot| {
+                unresolved.insert(slot);
+            });
+            if !unresolved.is_empty() {
+                after.visit_unresolved_result_slots(&mut |slot| {
+                    unresolved.remove(&slot);
+                });
+                if !unresolved.is_empty() {
+                    return Err(allocation_error("typed call postconditions narrowed"));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn lane(&self, error: bool) -> &Lane {

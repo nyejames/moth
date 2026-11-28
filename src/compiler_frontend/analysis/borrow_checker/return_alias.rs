@@ -13,17 +13,8 @@ use std::cell::OnceCell;
 
 #[path = "return_alias/result_paths.rs"]
 mod result_paths;
-pub(super) use result_paths::SparseFunction;
-
-pub(super) fn build_sparse(
-    checker: &BorrowChecker<'_>,
-) -> Result<
-    rustc_hash::FxHashMap<crate::compiler_frontend::hir::ids::FunctionId, SparseFunction>,
-    BorrowCheckError,
-> {
-    SparseFunction::build_sparse(checker)
-}
 pub(in crate::compiler_frontend::analysis::borrow_checker) use result_paths::ProjectedSupport;
+pub(super) use result_paths::{DisplacedSupportSchema, SparseFunction};
 
 struct LocalCallLayout<'a, 'hir> {
     checker: &'a BorrowChecker<'hir>,

@@ -18,7 +18,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows as run_borrow_checker,
+    BorrowCheckReport, check_borrows_cold as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::ast_nodes::AstFunctionIdentity;
@@ -770,7 +770,6 @@ impl<'a> CompilerFrontend<'a> {
             self.external_package_registry.as_ref(),
             &self.path_fork,
             &self.string_table,
-            None,
         ) {
             Ok(report) => Ok(report),
             Err(error) => match error.into_draft_or_infrastructure() {

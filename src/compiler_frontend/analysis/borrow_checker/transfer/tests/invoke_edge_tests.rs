@@ -22,7 +22,7 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::{
 fn call_batch(post: CapturedPost, destinations: Vec<CapturedDestination>) -> CapturedCallBatch {
     CapturedCallBatch {
         post,
-        destinations,
+        destinations: destinations.into_iter().collect(),
         member_reads: Default::default(),
         checkpoints: Vec::new(),
         detachment: None,
@@ -426,7 +426,7 @@ fn family_replacement_replays_clear_only_and_refill_in_both_lane_orders() {
                         (&layout).into(),
                         CapturedCallBatch {
                             post: batches[lane].1.clone(),
-                            destinations: Vec::new(),
+                            destinations: Default::default(),
                             member_reads: Default::default(),
                             checkpoints: Vec::new(),
                             detachment: None,

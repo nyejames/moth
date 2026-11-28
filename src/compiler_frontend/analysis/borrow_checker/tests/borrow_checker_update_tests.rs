@@ -2239,6 +2239,7 @@ fn transfer_isolated_statement(
             checker.path_fork,
             checker.string_table,
         ),
+        typed_call_cache: Default::default(),
     };
     let isolated_block = HirBlock {
         id: original_block.id,

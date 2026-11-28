@@ -8,8 +8,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{LoopStepFailureCause, NumericFailureMode};
 use crate::compiler_frontend::hir::private_failure_lane::{
-    PrivateFailureLaneInstallation, PrivateFailureLaneReceipt, install_private_failure_lanes,
-    install_private_failure_lanes_with_receipt,
+    PrivateFailureLaneReceipt, install_private_failure_lanes,
 };
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{
@@ -98,7 +97,7 @@ impl LaneFixture {
     }
 
     fn install_with_receipt(&mut self) -> PrivateFailureLaneReceipt {
-        install_private_failure_lanes_with_receipt(
+        install_private_failure_lanes(
             &mut self.hir,
             &self.report,
             &mut self.type_environment,
@@ -270,17 +269,6 @@ fn lane_receipt_reports_outcome_only_entry_narrowing() {
         .hir
         .start_function
         .expect("fixture must have an entry");
-    let mut legacy_hir = fixture.hir.clone();
-    assert_eq!(
-        install_private_failure_lanes(
-            &mut legacy_hir,
-            &fixture.report,
-            &mut fixture.type_environment,
-            &fixture.registry,
-        )
-        .expect("legacy lane installation must succeed"),
-        PrivateFailureLaneInstallation::MetadataOnly,
-    );
 
     let receipt = fixture.install_with_receipt();
     assert_eq!(receipt.outcome_changes, FxHashSet::from_iter([start]));

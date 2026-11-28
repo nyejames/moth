@@ -6,9 +6,8 @@
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, check_borrows as check_hir_borrows,
-    refresh_call_allocations as update_allocation_facts,
     refresh_call_mutation_effects as finalize_mutation_effects,
-    seed_call_summaries as seed_contracts,
+    seed_call_summaries as seed_contracts, stabilize_call_metadata as stabilize_allocation_facts,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::Ast;
@@ -17,7 +16,6 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -58,27 +56,28 @@ pub(in crate::compiler_frontend::module_compilation) fn seed_call_summaries(
     compiler.prepare_borrow_check_result(result, type_environment, warnings, frozen_identity_handle)
 }
 
-pub(in crate::compiler_frontend::module_compilation) fn refresh_call_allocations(
+#[allow(clippy::too_many_arguments)]
+pub(in crate::compiler_frontend::module_compilation) fn stabilize_call_metadata(
     compiler: &mut CompilerFrontend<'_>,
     hir: &HirModule,
     types: &TypeEnvironment,
     warnings: &mut DiagnosticBag,
     owner: Option<&FrozenIdentityHandle>,
-    inputs: (
-        &HirModuleLinkFacts,
-        &FxHashSet<FunctionId>,
-        &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
-    ),
+    projection: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<
+        '_,
+    >,
     report: &mut BorrowCheckReport,
-) -> Result<(), PreparedFailure> {
-    let result = update_allocation_facts(
+    scope: Option<&FxHashSet<FunctionId>>,
+) -> Result<Vec<(FunctionId, bool)>, PreparedFailure> {
+    let result = stabilize_allocation_facts(
         hir,
         types,
         compiler.external_package_registry.as_ref(),
         &compiler.path_fork,
         &compiler.string_table,
-        inputs,
+        projection,
         report,
+        scope,
     );
     compiler.prepare_borrow_check_result(result, types, warnings, owner)
 }
@@ -100,10 +99,10 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
         compiler.external_package_registry.as_ref(),
         &compiler.path_fork,
         &compiler.string_table,
-        Some((
+        (
             std::mem::take(&mut report.analysis.public_call_summaries),
             projection,
-        )),
+        ),
     );
     let checked = compiler.prepare_borrow_check_result(
         result,

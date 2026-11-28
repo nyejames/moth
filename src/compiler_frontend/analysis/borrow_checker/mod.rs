@@ -64,41 +64,53 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Validates against the converged contracts, computing local contracts for standalone callers.
+/// Validate against the already-converged contracts without replaying extraction.
 pub(in crate::compiler_frontend) fn check_borrows(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-    converged: Option<(
+    (summaries, projection): (
         FxHashMap<FunctionId, PublicCallSummary>,
         &CanonicalTypeProjectionContext<'_>,
-    )>,
+    ),
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    let checker = BorrowChecker::new(
+    BorrowChecker::new(
         module,
         type_environment,
         external_package_registry,
         path_fork,
         string_table,
-    );
-    if let Some((summaries, projection)) = converged {
-        checker
-            .with_type_projection(projection)
-            .run(Some(summaries))
-    } else {
-        checker.run(None)
-    }
+    )
+    .with_type_projection(projection)
+    .run(summaries)
 }
 
-/// Cold allocation extraction used to check the production refresh against final HIR.
+#[cfg(test)]
+pub(in crate::compiler_frontend) fn check_borrows_cold(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .run_cold()
+}
+
+/// Cold allocation extraction used to check exact convergence against final HIR.
 #[cfg(test)]
 pub(in crate::compiler_frontend) fn summarize_call_allocations(
     module: &HirModule,
@@ -159,7 +171,7 @@ pub(in crate::compiler_frontend) fn check_borrows_with_projection_for_test(
         string_table,
     )
     .with_type_projection(projection)
-    .run(None)
+    .run_cold()
 }
 
 /// Create declaration contracts for failure inference. Extracting from provisional bodies
@@ -178,10 +190,7 @@ pub(in crate::compiler_frontend) fn seed_call_summaries(
     Ok(report)
 }
 
-#[allow(
-    dead_code,
-    reason = "B2b.3b runs the exact queue after applying the installer receipt"
-)]
+#[allow(clippy::too_many_arguments)]
 pub(in crate::compiler_frontend) fn stabilize_call_metadata(
     module: &HirModule,
     type_environment: &TypeEnvironment,
@@ -190,9 +199,13 @@ pub(in crate::compiler_frontend) fn stabilize_call_metadata(
     string_table: &StringTable,
     projection: &CanonicalTypeProjectionContext<'_>,
     report: &mut BorrowCheckReport,
-) -> Result<(), BorrowCheckError> {
-    if !report.metadata.has_work() {
-        return Ok(());
+    scope: Option<&FxHashSet<FunctionId>>,
+) -> Result<Vec<(FunctionId, bool)>, BorrowCheckError> {
+    if !scope.map_or_else(
+        || report.metadata.has_work(),
+        |scope| report.metadata.has_work_for(scope),
+    ) {
+        return Ok(Vec::new());
     }
     let mut checker = BorrowChecker::new(
         module,
@@ -203,36 +216,9 @@ pub(in crate::compiler_frontend) fn stabilize_call_metadata(
     )
     .with_type_projection(projection);
     checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
-    let result = report.metadata.solve(&mut checker);
+    let result = report.metadata.solve(&mut checker, scope);
     report.analysis.public_call_summaries = checker.public_call_summaries;
     result
-}
-
-pub(in crate::compiler_frontend) fn refresh_call_allocations(
-    module: &HirModule,
-    type_environment: &TypeEnvironment,
-    external_package_registry: &ExternalPackageRegistry,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-    inputs: (
-        &HirModuleLinkFacts,
-        &FxHashSet<FunctionId>,
-        &CanonicalTypeProjectionContext<'_>,
-    ),
-    report: &mut BorrowCheckReport,
-) -> Result<(), BorrowCheckError> {
-    let mut checker = BorrowChecker::new(
-        module,
-        type_environment,
-        external_package_registry,
-        path_fork,
-        string_table,
-    )
-    .with_type_projection(inputs.2);
-    checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
-    checker.refresh_return_alias_summaries(inputs.0, inputs.1)?;
-    report.analysis.public_call_summaries = checker.public_call_summaries;
-    Ok(())
 }
 
 /// Widen call mutation effects from already-validated reaches, without replaying transfer.

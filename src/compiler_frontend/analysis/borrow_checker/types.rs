@@ -23,9 +23,8 @@ pub(crate) struct BorrowCheckReport {
 }
 
 impl BorrowCheckReport {
-    /// Reset graph facts for the exact dirty closure while preserving converged declarations
-    /// and failure inference in the report's sole summary map.
-    #[allow(dead_code)] // B2b.3b drives the exact dirty closure from installer receipts.
+    /// Reset graph facts and discard the index for rewritten bodies, preserving declaration
+    /// and failure-inference facts.
     pub(crate) fn invalidate_call_metadata(
         &mut self,
         functions: impl IntoIterator<Item = FunctionId>,
@@ -38,6 +37,16 @@ impl BorrowCheckReport {
                 .expect("seeded declaration")
                 .reset_graph_payload();
         }
+    }
+
+    /// A dirty caller must solve again, but its coordinates did not necessarily change.
+    pub(in crate::compiler_frontend) fn reset_call_metadata(&mut self, id: FunctionId) {
+        self.metadata.enqueue([id]);
+        self.analysis
+            .public_call_summaries
+            .get_mut(&id)
+            .expect("seeded declaration")
+            .reset_graph_payload();
     }
 
     /// Validation produces fresh final facts, not a new metadata convergence epoch.

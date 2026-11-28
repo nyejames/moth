@@ -83,6 +83,16 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct SparseFunction
     total: bool,
 }
 
+/// The support descriptors needed to compare a still-live summary after its index is rebuilt.
+#[derive(Debug, Clone)]
+pub(in crate::compiler_frontend::analysis::borrow_checker::metadata) struct DisplacedSupportSchema {
+    port_supports: Vec<SupportId>,
+    support_count: usize,
+    result_supports: BTreeMap<(bool, usize), SupportId>,
+    operations_by_support: BTreeMap<(SupportId, BlockId), Box<[usize]>>,
+    envelope: BTreeMap<(usize, Box<[CallField]>, DemandKind), SupportId>,
+}
+
 /// Transfer coordinates are unchanged when a callee's structural envelope widens.
 #[derive(Debug)]
 struct SparseTransferIndex {
@@ -1057,8 +1067,12 @@ impl SparseFunction {
                             entry_allocations.entry(value.id).or_insert(*port);
                         }
                     }
-                    let evaluated =
-                        checker.evaluate_sparse_support(function, entry.clone(), &projected)?;
+                    let evaluated = checker.evaluate_sparse_support(
+                        &context,
+                        function,
+                        entry.clone(),
+                        &projected,
+                    )?;
                     may_retain.extend(evaluated.retained.into_iter().filter_map(|index| {
                         self.transfer
                             .parameters
@@ -4034,6 +4048,98 @@ impl SparseFunction {
             .any(|&id| remap.get(id) != Some(id))
     }
 
+    pub(in crate::compiler_frontend::analysis::borrow_checker::metadata) fn into_support_schema(
+        self,
+    ) -> DisplacedSupportSchema {
+        DisplacedSupportSchema {
+            port_supports: self.port_supports,
+            support_count: self.support_count,
+            result_supports: self.result_supports,
+            operations_by_support: self.operations_by_support,
+            envelope: self.envelope,
+        }
+    }
+}
+
+impl DisplacedSupportSchema {
+    /// Match old support descriptors in the new schema. New anchors may be added, but
+    /// every old support must keep a unique image and each old site's membership must agree.
+    pub(in crate::compiler_frontend::analysis::borrow_checker::metadata) fn embed_supports(
+        &self,
+        next: &SparseFunction,
+        port_embedding: &[PortId],
+    ) -> Option<Vec<SupportId>> {
+        if self.support_count > next.support_count
+            || self.port_supports.len() != port_embedding.len()
+        {
+            return None;
+        }
+        let mut image = vec![None; self.support_count];
+        let mut preimage = vec![None; next.support_count];
+        let mut bind = |old: SupportId, new: SupportId| {
+            let image = &mut image[old.0 as usize];
+            let preimage = &mut preimage[new.0 as usize];
+            if image.is_some_and(|id| id != new) || preimage.is_some_and(|id| id != old) {
+                return None;
+            }
+            *image = Some(new);
+            *preimage = Some(old);
+            Some(())
+        };
+        for (&before, &port) in self.port_supports.iter().zip(port_embedding) {
+            bind(before, *next.port_supports.get(port.0 as usize)?)?;
+        }
+        for (slot, &before) in &self.result_supports {
+            bind(before, *next.result_supports.get(slot)?)?;
+        }
+        for (key, &before) in &self.envelope {
+            bind(before, *next.envelope.get(key)?)?;
+        }
+
+        // Build each support's descriptor over the old sites only. New operation demands
+        // can introduce sites, but cannot change membership at an already indexed site.
+        let mut old_sites = FxHashSet::default();
+        let mut previous = vec![Vec::new(); self.support_count];
+        for (&(support, block), positions) in &self.operations_by_support {
+            let descriptor = &mut previous[support.0 as usize];
+            for &position in positions.iter() {
+                let site = (block, position);
+                old_sites.insert(site);
+                descriptor.push(site);
+            }
+        }
+        let mut current = vec![Vec::new(); next.support_count];
+        for (&(support, block), positions) in &next.operations_by_support {
+            current[support.0 as usize].extend(
+                positions
+                    .iter()
+                    .map(|&position| (block, position))
+                    .filter(|site| old_sites.contains(site)),
+            );
+        }
+        let mut unmatched = FxHashMap::default();
+        for (id, sites) in current.iter().enumerate() {
+            if preimage[id].is_none() {
+                unmatched
+                    .entry(sites.as_slice())
+                    .and_modify(|candidate| *candidate = None)
+                    .or_insert(Some(SupportId(id as u32)));
+            }
+        }
+        for (image, sites) in image.iter_mut().zip(&previous) {
+            if let Some(id) = *image {
+                if sites != &current[id.0 as usize] {
+                    return None;
+                }
+            } else {
+                *image = Some(unmatched.remove(sites.as_slice())??);
+            }
+        }
+        image.into_iter().collect()
+    }
+}
+
+impl SparseFunction {
     #[cfg(test)]
     pub(in crate::compiler_frontend::analysis::borrow_checker) fn entry_ports(
         &self,
@@ -4041,7 +4147,8 @@ impl SparseFunction {
         &self.ports
     }
 
-    pub(super) fn build_sparse(
+    #[cfg(test)]
+    pub(in crate::compiler_frontend::analysis::borrow_checker::metadata) fn build_sparse(
         checker: &BorrowChecker<'_>,
     ) -> Result<FxHashMap<FunctionId, SparseFunction>, BorrowCheckError> {
         let mut indices = FxHashMap::default();
@@ -4060,7 +4167,7 @@ impl SparseFunction {
         positions: impl IntoIterator<Item = usize>,
         indices: &mut FxHashMap<FunctionId, Self>,
         reuse_coordinates: impl Fn(FunctionId) -> bool,
-        mut on_build: impl FnMut(FunctionId, &[FunctionId], &[FunctionId], bool),
+        mut on_build: impl FnMut(FunctionId, Option<Self>, &Self, bool),
     ) -> Result<(), BorrowCheckError> {
         let mut fields = FxHashMap::default();
         for layout in &checker.module.structs {
@@ -4137,7 +4244,12 @@ impl SparseFunction {
             builder.collect_call_roots()?;
             let mut index = builder.seal(Rc::clone(&transfer_indices[position]));
             index.counts.record(index.ports.len());
-            let previous = indices.get(&snapshot.function.id);
+            let id = snapshot.function.id;
+            let entry = indices.entry(id);
+            let previous = match &entry {
+                Entry::Occupied(entry) => Some(entry.get()),
+                Entry::Vacant(_) => None,
+            };
             if let Some(old) = previous {
                 // Work evidence includes the previous visits, not just the
                 // final reduced graph.
@@ -4152,12 +4264,13 @@ impl SparseFunction {
                     || old.result_supports != index.result_supports
                     || old.total != index.total
             });
-            on_build(
-                snapshot.function.id,
-                previous.map_or(&[], |old| old.callees.as_slice()),
-                &index.callees,
-                changed,
-            );
+            match entry {
+                Entry::Occupied(mut entry) => {
+                    let previous = entry.insert(index);
+                    on_build(id, Some(previous), entry.get(), changed);
+                }
+                Entry::Vacant(entry) => on_build(id, None, entry.insert(index), changed),
+            }
             if changed && let Some(callers) = callers.get(&snapshot.function.id) {
                 for &caller in callers {
                     if !std::mem::replace(&mut pending[caller], true) {
@@ -4165,7 +4278,6 @@ impl SparseFunction {
                     }
                 }
             }
-            indices.insert(snapshot.function.id, index);
         }
         Ok(())
     }

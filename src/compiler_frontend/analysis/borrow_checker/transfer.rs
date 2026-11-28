@@ -39,6 +39,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 pub(super) use access::{call_member_result, call_member_writes};
@@ -57,6 +58,135 @@ use facts::{
 #[path = "transfer/tests/value_fact_buffer_tests.rs"]
 mod value_fact_buffer_tests;
 
+/// Ordered scratch that needs no allocation for zero or one item.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(super) enum InlineVec<T> {
+    #[default]
+    Empty,
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> InlineVec<T> {
+    pub(super) fn push(&mut self, value: T) {
+        match self {
+            Self::Empty => *self = Self::One(value),
+            Self::Many(values) => values.push(value),
+            Self::One(_) => {
+                let Self::One(first) = std::mem::take(self) else {
+                    unreachable!()
+                };
+                *self = Self::Many(vec![first, value]);
+            }
+        }
+    }
+
+    pub(super) fn pop(&mut self) -> Option<T> {
+        match self {
+            Self::Many(values) => values.pop(),
+            _ => match std::mem::take(self) {
+                Self::One(value) => Some(value),
+                _ => None,
+            },
+        }
+    }
+}
+
+impl<T> Deref for InlineVec<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        match self {
+            Self::Empty => &[],
+            Self::One(value) => std::slice::from_ref(value),
+            Self::Many(values) => values,
+        }
+    }
+}
+
+impl<T> DerefMut for InlineVec<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        match self {
+            Self::Empty => &mut [],
+            Self::One(value) => std::slice::from_mut(value),
+            Self::Many(values) => values,
+        }
+    }
+}
+
+impl<T> FromIterator<T> for InlineVec<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(values: I) -> Self {
+        let mut values = values.into_iter();
+        match (values.next(), values.next()) {
+            (None, _) => Self::Empty,
+            (Some(first), None) => Self::One(first),
+            (Some(first), Some(second)) => {
+                Self::Many([first, second].into_iter().chain(values).collect())
+            }
+        }
+    }
+}
+
+impl<T> IntoIterator for InlineVec<T> {
+    type Item = T;
+    type IntoIter = std::iter::Chain<std::option::IntoIter<T>, std::vec::IntoIter<T>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let (one, many) = match self {
+            Self::Empty => (None, Vec::new()),
+            Self::One(value) => (Some(value), Vec::new()),
+            Self::Many(values) => (None, values),
+        };
+        one.into_iter().chain(many)
+    }
+}
+
+/// Pending replay inputs retain first-arrival order. A singleton does not
+/// need hashing, and only blocks that may revisit keep processed keys alive.
+#[derive(Default)]
+pub(super) struct ReplayStates {
+    pending: InlineVec<Rc<BorrowState>>,
+    seen: FxHashSet<Rc<BorrowState>>,
+}
+
+impl ReplayStates {
+    pub(super) fn insert(&mut self, state: Rc<BorrowState>, revisits: bool) -> bool {
+        if !revisits && self.seen.is_empty() {
+            if let InlineVec::One(first) = &self.pending {
+                if first == &state {
+                    return false;
+                }
+                self.seen.insert(Rc::clone(first));
+            } else {
+                self.pending.push(state);
+                return true;
+            }
+        }
+        if !self.seen.insert(Rc::clone(&state)) {
+            return false;
+        }
+        self.pending.push(state);
+        true
+    }
+
+    pub(super) fn take_pending(&mut self) -> InlineVec<Rc<BorrowState>> {
+        std::mem::take(&mut self.pending)
+    }
+
+    pub(super) fn into_pending(self) -> InlineVec<Rc<BorrowState>> {
+        self.pending
+    }
+}
+
+impl IntoIterator for ReplayStates {
+    type Item = Rc<BorrowState>;
+    type IntoIter = <InlineVec<Self::Item> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_pending().into_iter()
+    }
+}
+
 pub(super) struct BorrowTransferContext<'a> {
     // WHAT: shared lookup/diagnostic tables for one function transfer pass.
     // WHY: avoids repeated module scans while statements/terminators are analyzed.
@@ -74,6 +204,7 @@ pub(super) struct BorrowTransferContext<'a> {
     pub type_projection:
         crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'a>,
     pub diagnostics: BorrowDiagnostics<'a>,
+    pub typed_call_cache: typed_call::TypedCallCache,
 }
 
 /// The storage queries use local indices, not validation's dense liveness tables.
@@ -144,14 +275,9 @@ pub(super) fn transfer_sparse_block(
     block: &HirBlock,
     state: Rc<BorrowState>,
     retained: &mut BTreeSet<usize>,
-) -> Result<Vec<(Rc<BorrowState>, InvokeTransfer)>, BorrowCheckError> {
+) -> Result<InlineVec<(Rc<BorrowState>, InvokeTransfer)>, BorrowCheckError> {
     assert_eq!(block.statements.len(), view.statement_orders.len());
-    let mut states = vec![state];
-    let mut next = Vec::new();
-    // The shared allocation interner is excluded from equality and hashing.
-    // Semantic rows are only mutated through Rc::make_mut while keys are shared.
-    #[allow(clippy::mutable_key_type)]
-    let mut seen = FxHashSet::default();
+    let mut states = InlineVec::One(state);
     let mut structural = view.structural_calls.iter().peekable();
     for &position in view.statement_positions {
         while let Some(&&(at, argc)) = structural.peek() {
@@ -167,7 +293,7 @@ pub(super) fn transfer_sparse_block(
             )
             .expect("indexed statement call");
             if !sparse_structural_call(context, target, argc, false)? {
-                return Ok(Vec::new());
+                return Ok(InlineVec::Empty);
             }
         }
         let statement = &block.statements[position];
@@ -176,7 +302,8 @@ pub(super) fn transfer_sparse_block(
             .call_components
             .and_then(|calls| calls.get(&position))
             .map(Vec::as_slice);
-        for mut state in states.drain(..) {
+        let mut next = ReplayStates::default();
+        for mut state in states {
             let mut stats = BlockTransferStats {
                 sparse: true,
                 ..Default::default()
@@ -205,18 +332,15 @@ pub(super) fn transfer_sparse_block(
                         order,
                         state,
                         |branch| {
-                            if seen.insert(Rc::clone(&branch)) {
-                                next.push(branch);
-                            }
+                            next.insert(branch, false);
                         },
                     )?;
-                } else if seen.insert(Rc::clone(&state)) {
-                    next.push(state);
+                } else {
+                    next.insert(state, false);
                 }
             }
         }
-        std::mem::swap(&mut states, &mut next);
-        seen.clear();
+        states = next.into_pending();
         if states.is_empty() {
             break;
         }
@@ -228,11 +352,11 @@ pub(super) fn transfer_sparse_block(
             )
             .expect("indexed statement call");
             if !sparse_structural_call(context, target, argc, false)? {
-                return Ok(Vec::new());
+                return Ok(InlineVec::Empty);
             }
         }
     }
-    let mut exits = Vec::with_capacity(states.len());
+    let mut exits = InlineVec::Empty;
     let call_components = view
         .call_components
         .and_then(|calls| calls.get(&view.statement_orders.len()))
@@ -354,7 +478,7 @@ pub(super) struct CapturedDetachment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CapturedCallBatch<Post = typed_call::CapturedPost> {
     pub post: Post,
-    pub destinations: Vec<CapturedDestination>,
+    pub destinations: InlineVec<CapturedDestination>,
     pub member_reads: Demand,
     pub checkpoints: Vec<ObservationCheckpoint>,
     pub detachment: Option<CapturedDetachment>,

@@ -14,7 +14,7 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BorrowTransferContext, InvokeLane, InvokeLayerOp,
+    BorrowTransferContext, InlineVec, InvokeLane, InvokeLayerOp,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, project_type_id_to_canonical_identity,
@@ -28,6 +28,8 @@ use crate::compiler_frontend::hir::statements::HirLocalDestination;
 use crate::compiler_frontend::public_call_summary::{CallField, CallFieldHir};
 use crate::compiler_frontend::public_call_summary::{allocation_error, typed};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -328,12 +330,33 @@ impl Default for EntryCapture {
     }
 }
 
+type ReachTypes = FxHashMap<TypeId, ReachType>;
+type CallSite = (crate::compiler_frontend::hir::ids::BlockId, OrderKey, bool);
+type RetainedTypes = BTreeMap<typed::ObjectRef, (typed::StorageKind, Option<TypeId>)>;
+
+#[derive(Default)]
+pub(in crate::compiler_frontend::analysis::borrow_checker) struct TypedCallCache {
+    types: RefCell<FxHashMap<InlineVec<TypeId>, Rc<ReachTypes>>>,
+    lanes: RefCell<FxHashMap<CallSite, InlineVec<PreparedLane>>>,
+}
+
+struct PreparedLane {
+    layout: Rc<ReachLayout>,
+    results: InlineVec<TypeId>,
+    entry_types: InlineVec<TypeId>,
+    parameters: InlineVec<TypeId>,
+    selection: Option<Vec<typed::SupportId>>,
+    projected: Option<typed::Lane>,
+    retained: RetainedTypes,
+}
+
 struct CallerMatch<'a, 'hir> {
     state: &'a BorrowState,
     context: &'a BorrowTransferContext<'hir>,
     actuals: &'a [EntryCapture],
-    retained: BTreeMap<typed::ObjectRef, EntryCapture>,
+    retained: BTreeMap<&'a typed::ObjectRef, EntryCapture>,
     result_types: &'a [TypeId],
+    local_mutable: &'a [bool],
     reach: Rc<ReachLayout>,
 }
 
@@ -364,6 +387,10 @@ impl MatchInput for CallerMatch<'_, '_> {
         Some(&self.reach)
     }
 
+    fn local_mutable(&self) -> &[bool] {
+        self.local_mutable
+    }
+
     fn field_value_type(&self, holder: TypeId, selector: CallField) -> Option<TypeId> {
         boundary_child(self.context, holder, selector)
             .ok()
@@ -376,87 +403,93 @@ impl MatchInput for CallerMatch<'_, '_> {
 }
 
 pub(super) fn match_call_actuals(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
     entries: &[EntryCapture],
     parameters: &[TypeId],
     result_types: &[TypeId],
     lane: &typed::Lane,
     error: bool,
 ) -> Result<MatchedLane, BorrowCheckError> {
-    let projected = input
-        .call_components
-        .map(|supports| lane.project_supports(supports));
-    let lane = projected.as_ref().unwrap_or(lane);
     let context = input.context;
-    let types = context.type_environment;
-    let mut reachable: Vec<_> = entries.iter().filter_map(|entry| entry.ty).collect();
-    reachable.extend_from_slice(parameters);
-    reachable.extend_from_slice(result_types);
-    let mut layout = ReachLayout {
-        types: FxHashMap::default(),
-        local_mutable: input.view.local_mutable.to_vec(),
-        error,
-        scope: 1,
-    };
-    while let Some(ty) = reachable.pop() {
-        if layout.types.contains_key(&ty) {
-            continue;
-        }
-        let allocation = heap_type(context, ty)?;
-        let mut children = Vec::new();
-        if allocation {
-            CallField::for_each_child(ty, types, |selector, child| {
-                let (key, _) = boundary_child(context, ty, selector)?;
-                children.push((key, child));
-                reachable.push(child);
-                Ok::<(), BorrowCheckError>(())
-            })?;
-        }
-        let identity =
-            project_type_id_to_canonical_identity(ty, types, &context.type_projection).ok();
-        layout.types.insert(
-            ty,
-            ReachType {
-                identity,
-                allocation,
-                children,
-            },
-        );
-    }
-    let mut retained = BTreeMap::new();
-    lane.visit_compatible(
-        |_| Ok::<_, BorrowCheckError>(None),
-        |_, product| {
-            for post in product
-                .components()
-                .iter()
-                .flat_map(|component| &component.alternatives)
-            {
-                for (object, kind, identity) in &post.retained {
-                    retained.entry(object.clone()).or_insert_with(|| {
-                        (
-                            *kind,
-                            retained_type(
-                                context,
-                                parameters,
-                                result_types,
-                                object,
-                                identity,
-                                &layout,
-                            ),
-                        )
-                    });
+    let selected = input.call_components;
+    let site = (input.block_id, input.current_order, error);
+    let mut cache = context.typed_call_cache.lanes.borrow_mut();
+    let shapes = cache.entry(site).or_default();
+    let matching = shapes.iter().position(|shape| {
+        shape
+            .entry_types
+            .iter()
+            .copied()
+            .eq(entries.iter().filter_map(|entry| entry.ty))
+            && &*shape.results == result_types
+            && &*shape.parameters == parameters
+            && shape.selection.as_deref() == selected
+    });
+    let shape = if let Some(index) = matching {
+        &shapes[index]
+    } else {
+        let types = reachable_call_types(context, entries, parameters, result_types)?;
+        // Guard collapse affects feasibility and correlated result rows. Keep
+        // canonical projection for guarded lanes, once per stable call shape.
+        let projected = selected.and_then(|supports| {
+            matches!(lane, typed::Lane::Decision(_)).then(|| lane.project_supports(supports))
+        });
+        let effective_lane = projected.as_ref().unwrap_or(lane);
+        let selection = selected.filter(|_| projected.is_none());
+        let mut retained = RetainedTypes::new();
+        effective_lane.visit_compatible(
+            |_| Ok::<_, BorrowCheckError>(None),
+            |_, product| {
+                for post in selected_components(product, selection)
+                    .flat_map(|component| &component.alternatives)
+                {
+                    for (object, kind, identity) in &post.retained {
+                        if !retained.contains_key(object) {
+                            retained.insert(
+                                object.clone(),
+                                (
+                                    *kind,
+                                    retained_type(
+                                        context,
+                                        parameters,
+                                        result_types,
+                                        object,
+                                        identity,
+                                        &types,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
                 }
-            }
-            Ok(())
-        },
-    )?;
-    let retained = retained
-        .into_iter()
-        .filter_map(|(object, (kind, ty))| {
+                Ok(())
+            },
+        )?;
+        shapes.push(PreparedLane {
+            layout: Rc::new(ReachLayout {
+                types,
+                error,
+                scope: 1,
+            }),
+            results: result_types.iter().copied().collect(),
+            entry_types: entries.iter().filter_map(|entry| entry.ty).collect(),
+            parameters: parameters.iter().copied().collect(),
+            selection: selected.map(<[_]>::to_vec),
+            projected,
+            retained,
+        });
+        shapes.last().expect("installed call shape")
+    };
+    let lane = shape.projected.as_ref().unwrap_or(lane);
+    let selection = selected.filter(|_| shape.projected.is_none());
+    // No retained rows means no retained IDs to resolve.
+    let retained = shape
+        .retained
+        .iter()
+        .filter_map(|(object, &(kind, ty))| {
             let ty = ty?;
             let summarized = matches!(object, typed::ObjectRef::Family(..));
-            let node = input.state.call_export_coordinate(&object);
+            let node = input.state.call_export_coordinate(object);
             let capture = match kind {
                 typed::StorageKind::Allocation => {
                     let id = input.state.call_site_id(
@@ -508,17 +541,68 @@ pub(super) fn match_call_actuals(
             Some((object, capture))
         })
         .collect();
-    Ok(match_typed_lane(
+    match_selected_lane(
         &CallerMatch {
             state: input.state,
             context,
             actuals: entries,
             retained,
             result_types,
-            reach: Rc::new(layout),
+            local_mutable: input.view.local_mutable,
+            reach: Rc::clone(&shape.layout),
         },
         lane,
-    )?)
+        selection,
+    )
+    .map_err(Into::into)
+}
+
+fn reachable_call_types(
+    context: &BorrowTransferContext<'_>,
+    entries: &[EntryCapture],
+    parameters: &[TypeId],
+    results: &[TypeId],
+) -> Result<Rc<ReachTypes>, BorrowCheckError> {
+    let roots: InlineVec<_> = entries
+        .iter()
+        .filter_map(|entry| entry.ty)
+        .chain(parameters.iter().chain(results).copied())
+        .collect();
+    let mut cache = context.typed_call_cache.types.borrow_mut();
+    if let Some(layout) = cache.get(&roots) {
+        return Ok(Rc::clone(layout));
+    }
+    let types = context.type_environment;
+    let mut reachable = roots.clone();
+    let mut layout = FxHashMap::default();
+    while let Some(ty) = reachable.pop() {
+        if layout.contains_key(&ty) {
+            continue;
+        }
+        let allocation = heap_type(context, ty)?;
+        let mut children = Vec::new();
+        if allocation {
+            CallField::for_each_child(ty, types, |selector, child| {
+                let (key, _) = boundary_child(context, ty, selector)?;
+                children.push((key, child));
+                reachable.push(child);
+                Ok::<(), BorrowCheckError>(())
+            })?;
+        }
+        let identity =
+            project_type_id_to_canonical_identity(ty, types, &context.type_projection).ok();
+        layout.insert(
+            ty,
+            ReachType {
+                identity,
+                allocation,
+                children,
+            },
+        );
+    }
+    let layout = Rc::new(layout);
+    cache.insert(roots, Rc::clone(&layout));
+    Ok(layout)
 }
 
 fn retained_type(
@@ -527,7 +611,7 @@ fn retained_type(
     results: &[TypeId],
     object: &typed::ObjectRef,
     identity: &CanonicalTypeIdentity,
-    layout: &ReachLayout,
+    layout: &ReachTypes,
 ) -> Option<TypeId> {
     use typed::{ExportPort, ObjectRef};
     let endpoint = match object {
@@ -551,7 +635,6 @@ fn retained_type(
         Some(ty)
     } else {
         layout
-            .types
             .iter()
             .find_map(|(&ty, shape)| (shape.identity.as_ref() == Some(identity)).then_some(ty))
     }
@@ -573,6 +656,10 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) trait MatchInput {
     fn reach_layout(&self) -> Option<&Rc<ReachLayout>> {
         None
     }
+    fn local_mutable(&self) -> &[bool] {
+        &[]
+    }
+
     fn field_value_type(&self, _holder: TypeId, _selector: CallField) -> Option<TypeId> {
         None
     }
@@ -682,8 +769,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct ReachType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct ReachLayout {
-    pub types: FxHashMap<TypeId, ReachType>,
-    pub local_mutable: Vec<bool>,
+    pub types: Rc<ReachTypes>,
     pub error: bool,
     pub scope: u32,
 }
@@ -730,11 +816,17 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct CorrelatedResu
 }
 
 impl CorrelatedResultViews {
-    fn install(self, state: &mut BorrowState, order: OrderKey, results: &mut [CapturedResult]) {
+    fn install(
+        &self,
+        state: &mut BorrowState,
+        mutable: &[bool],
+        order: OrderKey,
+        results: &mut [CapturedResult],
+    ) {
         let root = state.call_row_view_id(order, self.layout.error, self.support.0, self.row);
         let mut pending = Vec::new();
         let mut seen = FxHashSet::default();
-        for (slot, ty) in self.results {
+        for &(slot, ty) in &self.results {
             let Some(result) = results.iter_mut().find(|result| result.slot == slot) else {
                 continue;
             };
@@ -751,7 +843,7 @@ impl CorrelatedResultViews {
                     continue;
                 }
                 let mut child_graph = ResolvedPlace::from_values(&values, Vec::new());
-                step_graph(state, &self.layout.local_mutable, &mut child_graph, key);
+                step_graph(state, mutable, &mut child_graph, key);
                 if !child_graph.views.is_empty() {
                     for child_view in child_graph.views {
                         state.link_view(view, key, child_view);
@@ -804,13 +896,14 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct MatchedCompone
 }
 
 pub(in crate::compiler_frontend::analysis::borrow_checker) trait CapturedPosts:
-    Sized
+    Clone
 {
     fn posts(&self) -> impl Iterator<Item = &CapturedPost>;
     fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement);
-    fn apply(
-        self,
+    fn apply_capture(
+        post: Cow<'_, Self>,
         state: &mut BorrowState,
+        mutable: &[bool],
         order: OrderKey,
     ) -> (Vec<CapturedResult>, PublicationCarriers);
 }
@@ -824,13 +917,16 @@ impl CapturedPosts for CapturedPost {
         CapturedPost::remap(self, state, retirement);
     }
 
-    fn apply(
-        mut self,
+    fn apply_capture(
+        mut post: Cow<'_, Self>,
         state: &mut BorrowState,
+        mutable: &[bool],
         order: OrderKey,
     ) -> (Vec<CapturedResult>, PublicationCarriers) {
-        self.weaken_collisions(state);
-        CapturedPost::apply(self, state, order)
+        if post.has_collisions(state) {
+            post.to_mut().weaken_writes();
+        }
+        Self::apply_post(post, state, mutable, order)
     }
 }
 
@@ -853,12 +949,31 @@ impl CapturedPosts for MatchedLane {
         }
     }
 
-    fn apply(
-        self,
+    fn apply_capture(
+        lane: Cow<'_, Self>,
         state: &mut BorrowState,
+        mutable: &[bool],
         order: OrderKey,
     ) -> (Vec<CapturedResult>, PublicationCarriers) {
-        join_captured_alternatives(state, self, |mut stratum, state| {
+        if let Cow::Borrowed(lane) = &lane
+            && let [stratum] = lane.as_slice()
+            && let [component] = stratum.components.as_slice()
+            && let [post] = component.alternatives.as_slice()
+        {
+            let (mut results, receipt) =
+                CapturedPost::apply_capture(Cow::Borrowed(post), state, mutable, order);
+            if results.windows(2).any(|pair| pair[0].slot >= pair[1].slot) {
+                // Same slot order and last-write rule as the product merge.
+                results = results
+                    .into_iter()
+                    .map(|row| (row.slot, row))
+                    .collect::<BTreeMap<_, _>>()
+                    .into_values()
+                    .collect();
+            }
+            return (results, receipt);
+        }
+        join_captured_alternatives(state, lane.into_owned(), |mut stratum, state| {
             weaken_product_collisions(state, &mut stratum.components);
             let mut results = BTreeMap::new();
             let mut receipt = PublicationCarriers::default();
@@ -867,7 +982,7 @@ impl CapturedPosts for MatchedLane {
             for component in stratum.components {
                 let (component_results, changes) =
                     join_captured_alternatives(state, component.alternatives, |post, state| {
-                        post.apply(state, order)
+                        CapturedPost::apply_post(Cow::Owned(post), state, mutable, order)
                     });
                 for result in component_results {
                     results.insert(result.slot, result);
@@ -924,16 +1039,34 @@ fn same_derivation(left: Option<&CapturedDerivation>, right: Option<&CapturedDer
     }
 }
 
+#[cfg(test)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) fn match_typed_lane(
     input: &impl MatchInput,
     lane: &typed::Lane,
+) -> Result<MatchedLane, InfrastructureFailure> {
+    match_selected_lane(input, lane, None)
+}
+
+fn selected_components<'a>(
+    product: &'a typed::Product,
+    selection: Option<&'a [typed::SupportId]>,
+) -> impl Iterator<Item = &'a typed::Component> {
+    product.components().iter().filter(move |component| {
+        selection.is_none_or(|supports| supports.contains(&component.support))
+    })
+}
+
+fn match_selected_lane(
+    input: &impl MatchInput,
+    lane: &typed::Lane,
+    selection: Option<&[typed::SupportId]>,
 ) -> Result<MatchedLane, InfrastructureFailure> {
     let mut strata = Vec::new();
     lane.visit_compatible(
         |predicate| observe_typed_guard(input, predicate),
         |path, product| {
             if let Some(presentation) = guard_presentation(input, path, &[])? {
-                let mut components = capture_product(&presentation, path, product)?;
+                let mut components = capture_product(&presentation, path, product, selection)?;
                 weaken_product_collisions(input.state(), &mut components);
                 strata.push(MatchedStratum {
                     #[cfg(test)]
@@ -951,10 +1084,11 @@ fn capture_product(
     input: &GuardPresentation<'_, impl MatchInput>,
     guard: &[typed::Literal],
     product: &typed::Product,
+    selection: Option<&[typed::SupportId]>,
 ) -> Result<Vec<MatchedComponent>, InfrastructureFailure> {
-    let mut components = Vec::with_capacity(product.components().len());
+    let mut components = Vec::new();
     let mut owners = FxHashMap::default();
-    for component in product.components() {
+    for component in selected_components(product, selection) {
         let mut alternatives = Vec::with_capacity(component.alternatives.len());
         for post in &component.alternatives {
             let mut capture = |presentation: &GuardPresentation<'_, _>| {
@@ -1143,6 +1277,9 @@ impl<I: MatchInput> MatchInput for GuardPresentation<'_, I> {
     }
     fn reach_layout(&self) -> Option<&Rc<ReachLayout>> {
         self.input.reach_layout()
+    }
+    fn local_mutable(&self) -> &[bool] {
+        self.input.local_mutable()
     }
     fn field_value_type(&self, holder: TypeId, selector: CallField) -> Option<TypeId> {
         self.input.field_value_type(holder, selector)
@@ -2499,6 +2636,7 @@ fn capture_reach_bindings(
 fn visit_typed_values(
     state: &BorrowState,
     layout: &ReachLayout,
+    mutable: &[bool],
     roots: Vec<(TypeId, CapturedValue)>,
     deep: bool,
     mut visit: impl FnMut(TypeId, &CapturedValue),
@@ -2549,7 +2687,7 @@ fn visit_typed_values(
             let mut graph = ResolvedPlace::from_capture(capture);
             if endpoint.allocation {
                 // Preserve the observed source permissions while collecting possible values.
-                state.step_resolved(&mut graph, key, &layout.local_mutable);
+                state.step_resolved(&mut graph, key, mutable);
                 pending.push((child, capture_graph_values(graph), ancestry.clone()));
             } else {
                 let scalar = state.capture_scalar_projection(&graph, key);
@@ -2578,6 +2716,7 @@ fn visit_bound_values(
     visit_typed_values(
         input.state(),
         layout,
+        input.local_mutable(),
         roots,
         bound.region != typed::ReachKind::Cell,
         |ty, value| {
@@ -2597,20 +2736,28 @@ impl CapturedReach {
     fn apply(
         self,
         state: &mut BorrowState,
+        mutable: &[bool],
         order: OrderKey,
     ) -> (PublicationCarriers, Vec<(usize, CapturedValue)>) {
         let mut opaque = OpaqueInputs {
             scope: self.layout.scope,
             ..Default::default()
         };
-        visit_typed_values(state, &self.layout, self.sources, true, |ty, value| {
-            state.extend_possible_dependencies(value, &mut opaque.dependencies);
-            opaque
-                .inputs
-                .entry(ty)
-                .or_default()
-                .extend(value.values.iter().copied());
-        });
+        visit_typed_values(
+            state,
+            &self.layout,
+            mutable,
+            self.sources,
+            true,
+            |ty, value| {
+                state.extend_possible_dependencies(value, &mut opaque.dependencies);
+                opaque
+                    .inputs
+                    .entry(ty)
+                    .or_default()
+                    .extend(value.values.iter().copied());
+            },
+        );
         for values in opaque.inputs.values_mut() {
             values.sort_unstable();
             values.dedup();
@@ -2648,7 +2795,7 @@ impl CapturedReach {
                     && let Some(address) = &root.address
                 {
                     let mut resolved = state.resolve_captured_allocs(address, None);
-                    state.mark_alloc_provenance_readonly(&self.layout.local_mutable, &mut resolved);
+                    state.mark_alloc_provenance_readonly(mutable, &mut resolved);
                     capture_graph_values(resolved)
                 } else {
                     root.value
@@ -2685,7 +2832,7 @@ impl CapturedReach {
                         && (!recursive || state.has_captured_projection(stored.id, key))
                     {
                         let mut graph = ResolvedPlace::from_values(&[stored], Vec::new());
-                        step_graph(state, &self.layout.local_mutable, &mut graph, key);
+                        step_graph(state, mutable, &mut graph, key);
                         pending.push((child, capture_graph_values(graph), ancestry.clone()));
                     }
                 }
@@ -3233,39 +3380,50 @@ impl CapturedEdit {
     }
 
     fn apply(
-        self,
+        mut edit: Cow<'_, Self>,
         state: &mut BorrowState,
         order: OrderKey,
         possible: bool,
     ) -> PublicationCarriers {
-        match self {
-            Self::Cell(store) => {
-                let store = if possible {
-                    store.without_kill()
-                } else {
-                    store
+        let owned = matches!(&edit, Cow::Owned(_));
+        if let Cow::Owned(Self::Family { receivers, .. }) = &mut edit {
+            receivers.sort_unstable();
+            receivers.dedup();
+        }
+        match edit.as_ref() {
+            Self::Cell(store) if !possible => state.publish_store(store, order, None),
+            Self::Cell(_) => {
+                let Self::Cell(store) = edit.into_owned() else {
+                    unreachable!()
                 };
-                state.publish_store(&store, order, None)
+                state.publish_store(&store.without_kill(), order, None)
             }
             Self::Family {
-                mut receivers,
+                receivers,
                 coverage,
                 key,
                 replace,
                 members,
             } => {
-                receivers.sort_unstable();
-                receivers.dedup();
+                let mut canonical;
+                let receivers = if !owned && receivers.windows(2).any(|pair| pair[0] >= pair[1]) {
+                    canonical = receivers.clone();
+                    canonical.sort_unstable();
+                    canonical.dedup();
+                    &canonical
+                } else {
+                    receivers
+                };
                 state.publish_family_members(
-                    &receivers,
+                    receivers,
                     if possible {
                         Coverage::Partial
                     } else {
-                        coverage
+                        *coverage
                     },
-                    key,
-                    replace,
-                    &members,
+                    *key,
+                    *replace,
+                    members,
                 )
             }
         }
@@ -3393,22 +3551,25 @@ impl CapturedPost {
         &mut self,
         state: &BorrowState,
     ) {
+        if self.has_collisions(state) {
+            self.weaken_writes();
+        }
+    }
+
+    fn has_collisions(&self, state: &BorrowState) -> bool {
         let mut bindings = FxHashSet::default();
         let duplicate = self
             .bindings
             .iter()
             .any(|binding| !bindings.insert(binding.target));
         if duplicate {
-            self.weaken_writes();
-            return;
+            return true;
         }
         let writes: Vec<_> = self
             .write_footprints(false)
             .map(|write| (0, write))
             .collect();
-        if !overlapping_owners(state, &writes, |_, _| true).is_empty() {
-            self.weaken_writes();
-        }
+        !overlapping_owners(state, &writes, |_, _| true).is_empty()
     }
 
     fn weaken_writes(&mut self) {
@@ -3499,45 +3660,78 @@ impl CapturedPost {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::compiler_frontend::analysis::borrow_checker) fn apply(
         self,
         state: &mut BorrowState,
+        mutable: &[bool],
         order: OrderKey,
     ) -> (Vec<CapturedResult>, PublicationCarriers) {
-        let Self {
-            bindings,
-            edits,
-            mut results,
-            uncertainty,
-            result_views,
-        } = self;
+        Self::apply_post(Cow::Owned(self), state, mutable, order)
+    }
+
+    fn apply_post(
+        post: Cow<'_, Self>,
+        state: &mut BorrowState,
+        mutable: &[bool],
+        order: OrderKey,
+    ) -> (Vec<CapturedResult>, PublicationCarriers) {
+        let (bindings, edits, mut results, uncertainty, result_views) = match post {
+            Cow::Owned(post) => (
+                Cow::Owned(post.bindings),
+                Cow::Owned(post.edits),
+                post.results,
+                post.uncertainty.map(Cow::Owned),
+                post.result_views.map(Cow::Owned),
+            ),
+            Cow::Borrowed(post) => (
+                Cow::Borrowed(post.bindings.as_slice()),
+                Cow::Borrowed(post.edits.as_slice()),
+                post.results.clone(),
+                post.uncertainty.as_ref().map(Cow::Borrowed),
+                post.result_views.as_ref().map(Cow::Borrowed),
+            ),
+        };
         let mut receipt = PublicationCarriers::default();
         let links = SmallSet::from_iter(bindings.iter().filter_map(|binding| {
             (binding.replace == Replacement::Must
                 && matches!(&binding.update, BindingEdit::Link { .. }))
             .then_some(binding.target)
         }));
-        for edit in bindings {
-            receipt.append(edit.apply(state, false));
+        for edit in capture_rows(bindings) {
+            receipt.append(edit.into_owned().apply(state, false));
         }
         for &wrapper in links.as_slice() {
             state.refresh_captured_link_derivation(wrapper);
         }
-        for edit in edits {
-            receipt.append(edit.apply(state, order, false));
+        for edit in capture_rows(edits) {
+            receipt.append(CapturedEdit::apply(edit, state, order, false));
         }
         if let Some(unknown) = uncertainty {
             // Unknown suffixes operate on the prefix's state, and cannot
             // establish a definite replacement of their own.
-            for edit in unknown.bindings {
-                receipt.append(edit.apply(state, true));
+            let (bindings, edits, mut suffix_results, reach) = match unknown {
+                Cow::Owned(unknown) => (
+                    Cow::Owned(unknown.bindings),
+                    Cow::Owned(unknown.edits),
+                    unknown.results,
+                    unknown.reach,
+                ),
+                Cow::Borrowed(unknown) => (
+                    Cow::Borrowed(unknown.bindings.as_slice()),
+                    Cow::Borrowed(unknown.edits.as_slice()),
+                    unknown.results.clone(),
+                    unknown.reach.clone(),
+                ),
+            };
+            for edit in capture_rows(bindings) {
+                receipt.append(edit.into_owned().apply(state, true));
             }
-            for edit in unknown.edits {
-                receipt.append(edit.apply(state, order, true));
+            for edit in capture_rows(edits) {
+                receipt.append(CapturedEdit::apply(edit, state, order, true));
             }
-            let mut suffix_results = unknown.results;
-            if let Some(reach) = unknown.reach {
-                let (suffix_receipt, bounded_results) = reach.apply(state, order);
+            if let Some(reach) = reach {
+                let (suffix_receipt, bounded_results) = reach.apply(state, mutable, order);
                 receipt.append(suffix_receipt);
                 suffix_results.extend(bounded_results);
             }
@@ -3558,10 +3752,21 @@ impl CapturedPost {
             results.sort_unstable_by_key(|result| result.slot);
         }
         if let Some(views) = result_views {
-            views.install(state, order, &mut results);
+            views.install(state, mutable, order, &mut results);
         }
         (results, receipt)
     }
+}
+
+fn capture_rows<T: Clone>(rows: Cow<'_, [T]>) -> impl Iterator<Item = Cow<'_, T>> {
+    let (borrowed, owned) = match rows {
+        Cow::Borrowed(rows) => (rows, Vec::new()),
+        Cow::Owned(rows) => (&[][..], rows),
+    };
+    borrowed
+        .iter()
+        .map(Cow::Borrowed)
+        .chain(owned.into_iter().map(Cow::Owned))
 }
 
 fn union_optional_roots(target: &mut Option<RootSet>, source: Option<RootSet>) {
@@ -3760,8 +3965,8 @@ fn heap_type(context: &BorrowTransferContext<'_>, ty: TypeId) -> Result<bool, Bo
 /// Resolve arguments on demand and share their entry values across both Invoke lanes.
 pub(super) struct CallActuals<'a> {
     args: &'a [CallArgumentTransfer],
-    entries: Vec<Option<CallActual>>,
-    derivations: Vec<RootSet>,
+    entries: InlineVec<Option<CallActual>>,
+    derivations: InlineVec<RootSet>,
 }
 
 struct CallActual {
@@ -3775,7 +3980,7 @@ impl<'a> CallActuals<'a> {
         Self {
             args,
             entries: (0..args.len()).map(|_| None).collect(),
-            derivations: Vec::new(),
+            derivations: InlineVec::Empty,
         }
     }
 
@@ -3787,14 +3992,18 @@ impl<'a> CallActuals<'a> {
         &mut self,
         input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
     ) {
-        self.derivations.extend(self.args.iter().map(|arg| {
-            super::alias_derivation_roots_from_expression(
-                input.view,
-                input.state,
-                input.context.expressions,
-                arg.argument,
-            )
-        }));
+        self.derivations = self
+            .args
+            .iter()
+            .map(|arg| {
+                super::alias_derivation_roots_from_expression(
+                    input.view,
+                    input.state,
+                    input.context.expressions,
+                    arg.argument,
+                )
+            })
+            .collect();
     }
 
     fn argument(

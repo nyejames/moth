@@ -561,6 +561,9 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
         fn reach_layout(&self) -> Option<&Rc<ReachLayout>> {
             Some(self.layout)
         }
+        fn local_mutable(&self) -> &[bool] {
+            &[true; 4]
+        }
         fn field_value_type(&self, holder: TypeId, field: CallField) -> Option<TypeId> {
             let key = self.field(holder, field)?;
             self.layout
@@ -616,8 +619,8 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
             ),
         ]
         .into_iter()
-        .collect(),
-        local_mutable: vec![true; 4],
+        .collect::<rustc_hash::FxHashMap<_, _>>()
+        .into(),
         error: false,
         scope: 1,
     });
@@ -714,7 +717,7 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
         ..Default::default()
     }]);
     let mut locations_state = state.clone();
-    typed_test_post(&partial_input, &graph_lane).apply(&mut locations_state, 5);
+    typed_test_post(&partial_input, &graph_lane).apply(&mut locations_state, &[true; 4], 5);
     let targets = locations_state
         .resolve_alloc_path(0, &[true; 4], [edge])
         .ids;
@@ -724,7 +727,7 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
             && !targets.contains(&outside)
     );
     let mut reach_state = state.clone();
-    typed_test_post(&partial_input, &partial_reach).apply(&mut reach_state, 5);
+    typed_test_post(&partial_input, &partial_reach).apply(&mut reach_state, &[true; 4], 5);
     let graph = |id| ResolvedPlace::from_values(&[stored(id)], Vec::new());
     assert!(
         reach_state
@@ -740,7 +743,7 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
             .iter()
             .all(|alt| alt.deps.is_empty())
     );
-    typed_test_post(&input(&[]), &lane).apply(&mut state, 5);
+    typed_test_post(&input(&[]), &lane).apply(&mut state, &[true; 4], 5);
     let touched = |id| {
         let graph = graph(id);
         state
@@ -1197,10 +1200,12 @@ fn typed_lane_matches_inlined_transfer_on_both_outcomes() {
                 view,
                 CapturedCallBatch {
                     post: matched,
-                    destinations: vec![CapturedDestination::Update {
+                    destinations: [CapturedDestination::Update {
                         actor: 3,
                         address: destination.clone(),
-                    }],
+                    }]
+                    .into_iter()
+                    .collect(),
                     member_reads: Default::default(),
                     checkpoints: Vec::new(),
                     detachment: None,
@@ -3861,6 +3866,7 @@ probe |rows ~{Holder}| -> I32:\n\
         type_environment: types,
         type_projection: fixture.type_projection(),
         diagnostics: BorrowDiagnostics::new(module, &fixture.paths, &fixture.strings),
+        typed_call_cache: Default::default(),
     };
     let mut state = BorrowState::new_uninitialized(layout.local_count());
     let rows = layout.index_of(probe.params[0]).unwrap();

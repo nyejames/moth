@@ -5,8 +5,8 @@
 //!      independent of borrow-checker internals.
 
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, BorrowCheckReport, check_borrows, check_borrows_with_projection_for_test,
-    summarize_call_allocations_with_projection,
+    BorrowCheckError, BorrowCheckReport, check_borrows_cold,
+    check_borrows_with_projection_for_test, summarize_call_allocations_with_projection,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
@@ -68,13 +68,12 @@ pub(crate) fn run_borrow_checker_with_types(
     path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    check_borrows(
+    check_borrows_cold(
         module,
         type_environment,
         external_package_registry,
         path_fork,
         string_table,
-        None,
     )
 }
 

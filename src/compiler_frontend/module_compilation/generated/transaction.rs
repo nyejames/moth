@@ -310,7 +310,7 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         (sidecar, warnings)
     }
 
-    pub(crate) fn summary_mut(
+    pub(super) fn summary_mut(
         &mut self,
         identity: &GeneratedFunctionIdentity,
     ) -> &mut PublicCallSummary {
@@ -332,10 +332,6 @@ impl<'a> GeneratedFunctionTransaction<'a> {
     }
 
     /// Reset the authoritative unpublished roots before callers read final-graph inputs.
-    #[allow(
-        dead_code,
-        reason = "B2b.3b starts a new graph epoch after lane installation"
-    )]
     pub(super) fn reset_graph_payloads<'identity>(
         &mut self,
         dirty_roots: impl IntoIterator<Item = &'identity GeneratedFunctionIdentity>,
