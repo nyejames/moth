@@ -244,16 +244,13 @@ impl HirModuleLinkFacts {
             .collect()
     }
 
-    /// Return the validated HIR call targets in deterministic block and call-site order.
-    ///
-    /// WHAT: exposes the existing per-function link-fact call extraction to transient build
-    ///       observations that need topology without rescanning HIR or source.
-    /// WHY: convergence derives its read-only dependency model from the same validated call
-    ///      targets that already own backend reachability facts. Yielding owned targets avoids an
-    ///      intermediate vector and a second retained call graph. Caller identity stays on the
-    ///      internal block facts because convergence models each module as one node; per-function
-    ///      ownership is validated through backend-selection reachability.
+    /// Return retained non-external targets in block order, without an intermediate call list.
     pub(crate) fn direct_call_targets(&self) -> impl Iterator<Item = CallTarget> + '_ {
+        self.direct_call_edges().map(|(_, target)| target)
+    }
+
+    /// Retain each executable call's owner so convergence can route changes to exact callers.
+    pub(crate) fn direct_call_edges(&self) -> impl Iterator<Item = (FunctionId, CallTarget)> + '_ {
         self.blocks.iter().flat_map(|block| {
             let facts = &block.direct_facts;
             facts
@@ -282,6 +279,7 @@ impl HirModuleLinkFacts {
                         .cloned()
                         .map(|identity| CallTarget::Generated(Box::new(identity))),
                 )
+                .map(move |target| (block.function_id, target))
         })
     }
 }

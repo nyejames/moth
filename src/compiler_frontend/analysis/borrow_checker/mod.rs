@@ -174,7 +174,38 @@ pub(in crate::compiler_frontend) fn seed_call_summaries(
         module,
         &diagnostics::BorrowDiagnostics::new(module, path_fork, string_table),
     )?;
+    report.metadata = metadata::BorrowMetadataCache::bootstrap(module);
     Ok(report)
+}
+
+#[allow(
+    dead_code,
+    reason = "B2b.3b runs the exact queue after applying the installer receipt"
+)]
+pub(in crate::compiler_frontend) fn stabilize_call_metadata(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    projection: &CanonicalTypeProjectionContext<'_>,
+    report: &mut BorrowCheckReport,
+) -> Result<(), BorrowCheckError> {
+    if !report.metadata.has_work() {
+        return Ok(());
+    }
+    let mut checker = BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .with_type_projection(projection);
+    checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
+    let result = report.metadata.solve(&mut checker);
+    report.analysis.public_call_summaries = checker.public_call_summaries;
+    result
 }
 
 pub(in crate::compiler_frontend) fn refresh_call_allocations(

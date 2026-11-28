@@ -105,12 +105,13 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
             projection,
         )),
     );
-    *report = compiler.prepare_borrow_check_result(
+    let checked = compiler.prepare_borrow_check_result(
         result,
         type_environment,
         warnings,
         frozen_identity_handle,
     )?;
+    report.replace_validation(checked);
     Ok(())
 }
 

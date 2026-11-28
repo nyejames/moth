@@ -289,6 +289,18 @@ pub(crate) struct PublicCallSummary {
     pub may_fail: bool,
 }
 
+impl PublicCallSummary {
+    /// Invalidate body-derived borrow facts without discarding declaration or failure facts.
+    pub(crate) fn reset_graph_payload(&mut self) {
+        // A different graph needs a new solve. A solved summary with bottom lanes would
+        // instead claim that neither continuation is reachable.
+        self.return_alias = FunctionReturnAliasSummary::Pending;
+        for parameter in &mut self.parameters {
+            parameter.mutation = PublicCallMutationEffect::NoWrite;
+        }
+    }
+}
+
 /// The result of validating one retained call-summary transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicCallSummaryTransition {

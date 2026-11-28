@@ -255,6 +255,11 @@ fn stores_parameter(
 }
 
 fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
+    collect_module_function_link_facts(&hir_for_calls(targets))
+        .expect("test HIR should produce link facts")
+}
+
+fn hir_for_calls(targets: Vec<CallTarget>) -> HirModule {
     let mut module = HirModule::new();
     module.functions.push(HirFunction {
         id: FunctionId(0),
@@ -291,7 +296,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
             kind: RuntimeFailureKind::NoMatchFallback,
         },
     });
-    collect_module_function_link_facts(&module).expect("test HIR should produce link facts")
+    module
 }
 
 fn base_hir(
@@ -332,6 +337,78 @@ fn report(
     let mut report = BorrowCheckReport::default();
     report.analysis.public_call_summaries.extend(summaries);
     report
+}
+
+#[test]
+fn direct_callers_are_exact_across_local_and_stable_targets() {
+    let local = CallTarget::Local(FunctionId(0));
+    let private = CallTarget::ModulePrivate(private_identity("helper"));
+    let public_origin = origin("active");
+    let public = CallTarget::CrossModule(public_origin.clone());
+    let provider = CallTarget::CrossModule(origin("provider"));
+    let generated = CallTarget::Generated(Box::new(generated_identity("callee")));
+    let mut hir = hir_for_calls(vec![
+        generated.clone(),
+        private.clone(),
+        public.clone(),
+        provider.clone(),
+        local.clone(),
+        CallTarget::External(ExternalFunctionId::Synthetic(1)),
+    ]);
+    let mut second = hir.functions[0].clone();
+    second.id = FunctionId(1);
+    second.entry = BlockId(1);
+    hir.function_provenance
+        .insert(second.id, Default::default());
+    hir.functions.push(second);
+
+    let mut generated_call_block = hir.blocks[0].clone();
+    generated_call_block.statements.truncate(1);
+    generated_call_block.id = BlockId(1);
+    hir.blocks.push(generated_call_block.clone());
+    generated_call_block.id = BlockId(2);
+    hir.blocks.push(generated_call_block);
+    hir.blocks[0].terminator = HirTerminator::Jump {
+        target: BlockId(2),
+        args: Vec::new(),
+    };
+
+    let links = collect_module_function_link_facts(&hir).unwrap();
+    let expected_edges = [
+        (FunctionId(0), local.clone()),
+        (FunctionId(0), public.clone()),
+        (FunctionId(0), provider),
+        (FunctionId(0), private.clone()),
+        (FunctionId(0), generated.clone()),
+        (FunctionId(1), generated.clone()),
+        (FunctionId(0), generated.clone()),
+    ];
+    assert_eq!(
+        links.direct_call_edges().collect::<Vec<_>>(),
+        expected_edges
+    );
+    assert_eq!(
+        links.direct_call_targets().collect::<Vec<_>>(),
+        expected_edges.map(|(_, target)| target),
+    );
+
+    let active = [public_origin].into_iter().collect();
+    let callers = direct_callers_by_target(&links, &active);
+    let sidecar_links = link_facts_for_calls(vec![generated.clone(), private.clone()]);
+    let sidecar_callers = direct_callers_by_target(&sidecar_links, &active);
+    assert_eq!(sidecar_callers[&generated], [FunctionId(0)]);
+    assert_eq!(sidecar_callers[&private], [FunctionId(0)]);
+    assert_eq!(
+        callers,
+        [
+            (local, vec![FunctionId(0)]),
+            (private, vec![FunctionId(0)]),
+            (public, vec![FunctionId(0)]),
+            (generated, vec![FunctionId(0), FunctionId(1)]),
+        ]
+        .into_iter()
+        .collect(),
+    );
 }
 
 #[test]

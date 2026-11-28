@@ -1,28 +1,31 @@
-//! Private failure lane producer-selection tests.
-//!
-//! WHAT: proves lane installation splits only trapping numeric operations that carry the
-//!       shared failure code set, leaving code-less traps (`F64` negation) untouched.
-//! WHY: the installer cannot re-derive AST failure facts; it must consult the same code
-//!      set or it would route a dead error edge for an operation the frontend calls
-//!      infallible (and, on Wasm, report recoverable numeric failure for exact arithmetic).
+//! Private failure lane producer selection and exact transfer-input receipts.
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
-use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{LoopStepFailureCause, NumericFailureMode};
-use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
+use crate::compiler_frontend::hir::private_failure_lane::{
+    PrivateFailureLaneInstallation, PrivateFailureLaneReceipt, install_private_failure_lanes,
+    install_private_failure_lanes_with_receipt,
+};
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureCause,
+};
+use crate::compiler_frontend::hir::utils::collect_structural_blocks;
 use crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
-use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::tests::borrow_fixture_support::run_prepared_borrow_checker;
+use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
+use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 fn function_id_by_name(
-    module: &crate::compiler_frontend::hir::module::HirModule,
+    module: &HirModule,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
@@ -41,10 +44,7 @@ fn function_id_by_name(
         .id
 }
 
-fn numeric_op_modes(
-    module: &crate::compiler_frontend::hir::module::HirModule,
-    operator: NumericOperator,
-) -> Vec<NumericFailureMode> {
+fn numeric_op_modes(module: &HirModule, operator: NumericOperator) -> Vec<NumericFailureMode> {
     module
         .blocks
         .iter()
@@ -58,22 +58,73 @@ fn numeric_op_modes(
         .collect()
 }
 
+struct LaneFixture {
+    hir: HirModule,
+    type_environment: TypeEnvironment,
+    report: BorrowCheckReport,
+    registry: Arc<ExternalPackageRegistry>,
+    path_fork: PathInternerFork,
+    string_table: StringTable,
+}
+
+impl LaneFixture {
+    fn new(source: &str) -> Self {
+        let prepared = PreparedHirFixture::new(source);
+        let mut report = run_prepared_borrow_checker(&prepared)
+            .expect("lane fixtures must pass borrow checking");
+        let hir = prepared.hir.hir_module;
+        infer_builtin_failure_summaries(&hir, &mut report);
+        Self {
+            hir,
+            type_environment: prepared.hir.type_environment,
+            report,
+            registry: prepared.packages,
+            path_fork: prepared.paths,
+            string_table: prepared.strings,
+        }
+    }
+
+    fn function_id(&self, name: &str) -> FunctionId {
+        function_id_by_name(&self.hir, &self.path_fork, &self.string_table, name)
+    }
+
+    fn entry(&self, id: FunctionId) -> BlockId {
+        self.hir
+            .functions
+            .iter()
+            .find(|function| function.id == id)
+            .expect("fixture function must exist")
+            .entry
+    }
+
+    fn install_with_receipt(&mut self) -> PrivateFailureLaneReceipt {
+        install_private_failure_lanes_with_receipt(
+            &mut self.hir,
+            &self.report,
+            &mut self.type_environment,
+            &self.registry,
+        )
+        .expect("lane installation must succeed")
+    }
+}
+
 fn install_lanes(
     source: &str,
 ) -> (
-    crate::compiler_frontend::hir::module::HirModule,
-    crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    HirModule,
+    TypeEnvironment,
     BorrowCheckReport,
     PathInternerFork,
     StringTable,
 ) {
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let mut type_environment = ast.type_environment.clone();
-    let registry = default_external_package_registry(&mut string_table);
-    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
-    let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("lane fixtures must pass borrow checking");
-    infer_builtin_failure_summaries(&hir, &mut report);
+    let LaneFixture {
+        mut hir,
+        mut type_environment,
+        report,
+        registry,
+        path_fork,
+        string_table,
+    } = LaneFixture::new(source);
     let numeric_producers = hir
         .blocks
         .iter()
@@ -103,13 +154,7 @@ fn install_lanes(
             "installation preserves numeric producer identity, span and success destination"
         );
     }
-    (
-        hir.hir_module,
-        type_environment,
-        report,
-        path_fork,
-        string_table,
-    )
+    (hir, type_environment, report, path_fork, string_table)
 }
 
 #[test]
@@ -163,10 +208,13 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
             false,
         ),
     ] {
-        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-        let mut type_environment = ast.type_environment.clone();
-        let registry = default_external_package_registry(&mut string_table);
-        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+        let LaneFixture {
+            mut hir,
+            mut type_environment,
+            report,
+            registry,
+            ..
+        } = LaneFixture::new(source);
         let start = hir.start_function.expect("normal roots must have a start");
         let function = hir
             .functions
@@ -188,9 +236,6 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
             error_slot.is_some(),
             "lowering retains the AST builtin Error slot"
         );
-        let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-            .expect("start fixtures must pass borrow checking");
-        infer_builtin_failure_summaries(&hir, &mut report);
         install_private_failure_lanes(&mut hir, &report, &mut type_environment, &registry)
             .expect("start narrowing must leave valid native HIR");
         let function = hir
@@ -216,6 +261,227 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
             if escapes { error_slot } else { None }
         );
     }
+}
+
+#[test]
+fn lane_receipt_reports_outcome_only_entry_narrowing() {
+    let mut fixture = LaneFixture::new("value = \"plain\"\n~[:[value]]\n");
+    let start = fixture
+        .hir
+        .start_function
+        .expect("fixture must have an entry");
+    let mut legacy_hir = fixture.hir.clone();
+    assert_eq!(
+        install_private_failure_lanes(
+            &mut legacy_hir,
+            &fixture.report,
+            &mut fixture.type_environment,
+            &fixture.registry,
+        )
+        .expect("legacy lane installation must succeed"),
+        PrivateFailureLaneInstallation::MetadataOnly,
+    );
+
+    let receipt = fixture.install_with_receipt();
+    assert_eq!(receipt.outcome_changes, FxHashSet::from_iter([start]));
+    assert!(receipt.producer_splits.is_empty());
+    assert!(receipt.newly_executable_handlers.is_empty());
+    assert!(receipt.implicit_failure_retargets.is_empty());
+    assert!(!receipt.block_remap.renumbered());
+    for block in &fixture.hir.blocks {
+        assert_eq!(receipt.block_remap.get(block.id), Some(block.id));
+    }
+    assert_eq!(
+        receipt
+            .block_remap
+            .get(BlockId(fixture.hir.blocks.len() as u32)),
+        None
+    );
+}
+
+#[test]
+fn lane_receipt_reports_splits_but_only_newly_executable_handlers() {
+    let mut fixture = LaneFixture::new(
+        "double |value I32| -> I32:\n    return value * 2\n;\n\
+         recover |value I32| -> I32:\n    return double(value) catch then -1\n;\n\
+         shared |value I32| -> I32:\n\
+             return double(value) + value * 1000000 catch then -1\n;\n",
+    );
+    let double = fixture.function_id("double");
+    let recover = fixture.function_id("recover");
+    let shared = fixture.function_id("shared");
+    let start = fixture
+        .hir
+        .start_function
+        .expect("fixture must have an entry");
+    let handler_for = |owner| {
+        fixture
+            .hir
+            .catch_handlers
+            .iter()
+            .find(|record| record.owner == owner)
+            .expect("fixture must retain the catch record")
+            .handler
+            .block
+    };
+    let new_handler = handler_for(recover);
+    let old_handler = handler_for(shared);
+    assert!(
+        !collect_structural_blocks(&fixture.hir, fixture.entry(recover)).contains(&new_handler)
+    );
+    assert!(collect_structural_blocks(&fixture.hir, fixture.entry(shared)).contains(&old_handler));
+
+    let mut producers: FxHashSet<_> = fixture
+        .hir
+        .catch_protected_calls
+        .iter()
+        .map(|record| (record.owner, record.statement))
+        .collect();
+    assert_eq!(producers.len(), 2);
+    let multiply = fixture.hir.blocks[fixture.entry(double).0 as usize]
+        .statements
+        .iter()
+        .find(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::NumericOp { op, .. } if op.operator == NumericOperator::Multiply
+            )
+        })
+        .expect("double must lower to a multiply producer");
+    producers.insert((double, multiply.id));
+
+    let receipt = fixture.install_with_receipt();
+    assert_eq!(
+        receipt.outcome_changes,
+        FxHashSet::from_iter([start, double])
+    );
+    assert_eq!(receipt.producer_splits, producers);
+    assert_eq!(
+        receipt.newly_executable_handlers,
+        FxHashSet::from_iter([(recover, new_handler)])
+    );
+    assert!(receipt.implicit_failure_retargets.is_empty());
+    let installed_handler = receipt
+        .block_remap
+        .get(new_handler)
+        .expect("handler survives");
+    assert!(
+        collect_structural_blocks(&fixture.hir, fixture.entry(recover))
+            .contains(&installed_handler)
+    );
+}
+
+#[test]
+fn lane_receipt_reports_implicit_conversion_failure_retargets() {
+    let mut fixture = LaneFixture::new(
+        "parse_count |text String| -> I32:\n    return cast text\n;\n\
+         adjust |extra I8| -> U8:\n\
+             total ~U8 = 250\n    ~total += extra\n    return total\n;\n",
+    );
+    let parse = fixture.function_id("parse_count");
+    let adjust = fixture.function_id("adjust");
+    let start = fixture
+        .hir
+        .start_function
+        .expect("fixture must have an entry");
+    let retargets: FxHashSet<_> = [parse, adjust]
+        .into_iter()
+        .map(|owner| {
+            let block = collect_structural_blocks(&fixture.hir, fixture.entry(owner))
+                .into_iter()
+                .find(|id| {
+                    matches!(
+                        fixture.hir.blocks[id.0 as usize].terminator,
+                        HirTerminator::RuntimeFailure {
+                            cause: Some(RuntimeFailureCause::AuthoredCastConversion { .. }),
+                            ..
+                        } if owner == parse
+                    ) || matches!(
+                        fixture.hir.blocks[id.0 as usize].terminator,
+                        HirTerminator::RuntimeFailure {
+                            cause: Some(RuntimeFailureCause::StoreConversion { .. }),
+                            ..
+                        } if owner == adjust
+                    )
+                })
+                .expect("fixture must lower to an implicit conversion failure");
+            (owner, block)
+        })
+        .collect();
+
+    let receipt = fixture.install_with_receipt();
+    assert_eq!(
+        receipt.outcome_changes,
+        FxHashSet::from_iter([start, parse, adjust])
+    );
+    // Mixed U8 + I8 widens before the checked store; neither conversion is an installer split.
+    assert!(receipt.producer_splits.is_empty());
+    assert!(receipt.newly_executable_handlers.is_empty());
+    assert_eq!(receipt.implicit_failure_retargets, retargets);
+    for (_, block) in retargets {
+        let installed = receipt
+            .block_remap
+            .get(block)
+            .expect("failure block survives");
+        assert!(matches!(
+            fixture.hir.blocks[installed.0 as usize].terminator,
+            HirTerminator::ReturnError(_)
+        ));
+    }
+}
+
+#[test]
+fn lane_receipt_reports_prune_only_compaction_without_dirtying_transfer_inputs() {
+    // The forward calls leave a provisional handler; inference proves both calls infallible.
+    // The typed escaping call keeps the entry's Error slot, so installation only prunes.
+    let mut fixture = LaneFixture::new(
+        "mixed |left I32, right I32| -> Bool:\n\
+             return calm(left) < calm(right) catch then true\n;\n\
+         plain |value I32| -> I32:\n    return value\n;\n\
+         calm |value I32| -> I32:\n    return value\n;\n\
+         load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
+         value = load()!\n~[:[value]]\n",
+    );
+    let mixed = fixture.function_id("mixed");
+    let handler = fixture
+        .hir
+        .catch_handlers
+        .iter()
+        .find(|record| record.owner == mixed)
+        .expect("fixture must retain the provisional handler")
+        .handler
+        .block;
+    let reachable: FxHashSet<_> = fixture
+        .hir
+        .functions
+        .iter()
+        .flat_map(|function| collect_structural_blocks(&fixture.hir, function.entry))
+        .collect();
+    assert!(!reachable.contains(&handler));
+    let old_count = fixture.hir.blocks.len();
+
+    let receipt = fixture.install_with_receipt();
+    assert!(receipt.outcome_changes.is_empty());
+    assert!(receipt.producer_splits.is_empty());
+    assert!(receipt.newly_executable_handlers.is_empty());
+    assert!(receipt.implicit_failure_retargets.is_empty());
+    assert!(receipt.link_facts_need_refresh);
+    assert!(receipt.block_remap.renumbered());
+    assert_eq!(receipt.block_remap.get(handler), None);
+    let mut next = 0;
+    let mut moved = false;
+    for before in (0..old_count as u32).map(BlockId) {
+        if reachable.contains(&before) {
+            let after = BlockId(next);
+            assert_eq!(receipt.block_remap.get(before), Some(after));
+            moved |= before != after;
+            next += 1;
+        } else {
+            assert_eq!(receipt.block_remap.get(before), None);
+        }
+    }
+    assert!(moved, "pruning must renumber a retained block");
+    assert_eq!(next as usize, fixture.hir.blocks.len());
 }
 
 #[test]
@@ -303,13 +569,14 @@ fn fast_traps_never_join_the_private_failure_lane() {
     let source = "failer |value I32| -> I32:\n    return value * 2\n;\n\
          $fast_math\n\
          divide |value I32, divisor I32| -> I32:\n    bumped = failer(value)\n    return value // divisor\n;\n";
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let mut type_environment = ast.type_environment.clone();
-    let registry = default_external_package_registry(&mut string_table);
-    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
-    let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("lane fixtures must pass borrow checking");
-    infer_builtin_failure_summaries(&hir, &mut report);
+    let LaneFixture {
+        mut hir,
+        mut type_environment,
+        report,
+        registry,
+        path_fork,
+        string_table,
+    } = LaneFixture::new(source);
     let divide = function_id_by_name(&hir, &path_fork, &string_table, "divide");
     assert!(
         report.analysis.public_call_summaries[&divide].escapes_builtin_failure,
@@ -360,13 +627,14 @@ fn fast_range_guards_and_ordinal_never_join_the_private_failure_lane() {
          \x20   ;\n\
          \x20   return bumped\n\
          ;\n";
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let mut type_environment = ast.type_environment.clone();
-    let registry = default_external_package_registry(&mut string_table);
-    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
-    let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("lane fixtures must pass borrow checking");
-    infer_builtin_failure_summaries(&hir, &mut report);
+    let LaneFixture {
+        mut hir,
+        mut type_environment,
+        report,
+        registry,
+        path_fork,
+        string_table,
+    } = LaneFixture::new(source);
     let looper = function_id_by_name(&hir, &path_fork, &string_table, "looper");
     assert!(
         report.analysis.public_call_summaries[&looper].escapes_builtin_failure,

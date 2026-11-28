@@ -387,6 +387,35 @@ impl ConvergenceModel {
     }
 }
 
+/// Local targets are scoped to this HIR. Stable targets keep their HIR spelling so a summary
+/// change can look up the same key in the base and every sidecar.
+#[allow(dead_code, reason = "B2b.3b switches to the per-function queue")]
+fn direct_callers_by_target(
+    link_facts: &HirModuleLinkFacts,
+    active_public_origins: &FxHashSet<OriginFunctionId>,
+) -> FxHashMap<CallTarget, Vec<FunctionId>> {
+    let mut callers_by_target = FxHashMap::<_, Vec<_>>::default();
+    for (caller, target) in link_facts.direct_call_edges() {
+        match &target {
+            CallTarget::CrossModule(origin) if !active_public_origins.contains(origin) => continue,
+            CallTarget::External(_) => continue,
+            CallTarget::Local(_)
+            | CallTarget::CrossModule(_)
+            | CallTarget::ModulePrivate(_)
+            | CallTarget::Generated(_) => {}
+        }
+        let callers = callers_by_target.entry(target).or_default();
+        if callers.last() != Some(&caller) {
+            callers.push(caller);
+        }
+    }
+    for callers in callers_by_target.values_mut() {
+        callers.sort_unstable_by_key(|caller| caller.0);
+        callers.dedup();
+    }
+    callers_by_target
+}
+
 /// Whether convergence must find a materialised summary for one collected call target.
 ///
 /// WHAT: runtime contributors and catch candidates require an exact summary; assertion-message

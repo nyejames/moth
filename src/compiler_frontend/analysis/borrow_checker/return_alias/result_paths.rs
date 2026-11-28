@@ -58,11 +58,12 @@ mod result_paths_tests;
 
 /// A HIR revision owns these coordinates. Published contracts use the typed
 /// ports, not the local, operation or block IDs of the producer.
+#[derive(Debug, Clone)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct SparseFunction {
     pub(super) ports: Vec<EntryPort>,
     pub(super) port_supports: Vec<SupportId>,
     pub(super) support_count: usize,
-    pub callees: Vec<FunctionId>,
+    pub(in crate::compiler_frontend::analysis::borrow_checker::metadata) callees: Vec<FunctionId>,
     result_supports: BTreeMap<(bool, usize), SupportId>,
     ports_by_support: Vec<Vec<PortId>>,
     pub(super) guards: Vec<Predicate>,
@@ -83,6 +84,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct SparseFunction
 }
 
 /// Transfer coordinates are unchanged when a callee's structural envelope widens.
+#[derive(Debug)]
 struct SparseTransferIndex {
     local_ids: Vec<LocalId>,
     local_indices: FxHashMap<LocalId, usize>,
@@ -103,6 +105,7 @@ struct SparseTransferIndex {
     blocks: FxHashMap<BlockId, SparseBlockOrders>,
 }
 
+#[derive(Debug)]
 struct SparseBlockOrders {
     statements: Box<[i32]>,
     operands: Box<[Box<[usize]>]>,
@@ -1929,13 +1932,13 @@ impl ProjectedSupport<'_> {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ResultSource {
     parameter: usize,
     input: Box<[CallField]>,
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ResultSources(BTreeMap<Box<[CallField]>, BTreeSet<ResultSource>>);
 
 impl ResultSources {
@@ -2019,7 +2022,7 @@ enum ResultDemand {
     Place(IndexedPlace),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum CompatibilityConstraint {
     Equality(IdentityKind, Vec<PortId>),
     Reach(Vec<PortId>),
@@ -4020,60 +4023,101 @@ impl SparseCfg {
 }
 
 impl SparseFunction {
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn has_moved_blocks(
+        &self,
+        remap: &crate::compiler_frontend::hir::module::BlockIdRemap,
+    ) -> bool {
+        // Successors, ranks, operation sites and region exits all refer to blocks indexed here.
+        self.transfer
+            .blocks
+            .keys()
+            .any(|&id| remap.get(id) != Some(id))
+    }
+
+    #[cfg(test)]
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn entry_ports(
+        &self,
+    ) -> &[EntryPort] {
+        &self.ports
+    }
+
     pub(super) fn build_sparse(
         checker: &BorrowChecker<'_>,
     ) -> Result<FxHashMap<FunctionId, SparseFunction>, BorrowCheckError> {
+        let mut indices = FxHashMap::default();
+        Self::build_sparse_for(
+            checker,
+            0..checker.module.functions.len(),
+            &mut indices,
+            |_| false,
+            |_, _, _, _| {},
+        )?;
+        Ok(indices)
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn build_sparse_for(
+        checker: &BorrowChecker<'_>,
+        positions: impl IntoIterator<Item = usize>,
+        indices: &mut FxHashMap<FunctionId, Self>,
+        reuse_coordinates: impl Fn(FunctionId) -> bool,
+        mut on_build: impl FnMut(FunctionId, &[FunctionId], &[FunctionId], bool),
+    ) -> Result<(), BorrowCheckError> {
         let mut fields = FxHashMap::default();
         for layout in &checker.module.structs {
             for (position, field) in layout.fields.iter().enumerate() {
                 fields.insert(field.id, CallField::Field(position as u32));
             }
         }
-        let snapshots = checker
-            .module
-            .functions
-            .iter()
-            .map(|function| Snapshot::collect(checker, function))
+        let snapshots = positions
+            .into_iter()
+            .map(|position| Snapshot::collect(checker, &checker.module.functions[position]))
             .collect::<Result<Vec<_>, _>>()?;
         let transfer_indices = snapshots
             .iter()
-            .map(|snapshot| SparseTransferIndex::new(checker, snapshot).map(Rc::new))
+            .map(|snapshot| {
+                if reuse_coordinates(snapshot.function.id)
+                    && let Some(index) = indices.get(&snapshot.function.id)
+                {
+                    return Ok(Rc::clone(&index.transfer));
+                }
+                SparseTransferIndex::new(checker, snapshot).map(Rc::new)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
         for (caller, snapshot) in snapshots.iter().enumerate() {
             for call in &snapshot.calls {
                 if let CallTarget::Local(target) = call.target {
-                    callers.entry(*target).or_default().push(caller);
+                    let owners = callers.entry(*target).or_default();
+                    if owners.last() != Some(&caller) {
+                        owners.push(caller);
+                    }
                 }
             }
         }
         // Acyclic callees supply their structural envelope before any caller
         // reads it. Only cycles need provisional rows and revisits.
-        let positions: FxHashSet<_> = snapshots
-            .iter()
-            .map(|snapshot| snapshot.function.id)
-            .collect();
         let mut unscheduled_dependencies = vec![0; snapshots.len()];
-        for (&callee, edges) in &callers {
-            if positions.contains(&callee) {
-                for &caller in edges {
-                    unscheduled_dependencies[caller] += 1;
-                }
+        for snapshot in &snapshots {
+            for &caller in callers.get(&snapshot.function.id).into_iter().flatten() {
+                unscheduled_dependencies[caller] += 1;
             }
         }
-        let mut ready: VecDeque<_> = unscheduled_dependencies
-            .iter()
-            .enumerate()
-            .filter_map(|(position, &count)| (count == 0).then_some(position))
-            .collect();
         let mut work = VecDeque::with_capacity(snapshots.len());
-        while let Some(position) = ready.pop_front() {
-            work.push_back(position);
+        work.extend(
+            unscheduled_dependencies
+                .iter()
+                .enumerate()
+                .filter_map(|(position, &count)| (count == 0).then_some(position)),
+        );
+        // Scan the ready prefix in FIFO order, retaining it as the build order.
+        let mut next = 0;
+        while let Some(&position) = work.get(next) {
+            next += 1;
             if let Some(caller_edges) = callers.get(&snapshots[position].function.id) {
                 for &caller in caller_edges {
                     unscheduled_dependencies[caller] -= 1;
                     if unscheduled_dependencies[caller] == 0 {
-                        ready.push_back(caller);
+                        work.push_back(caller);
                     }
                 }
             }
@@ -4085,11 +4129,10 @@ impl SparseFunction {
                 .filter_map(|(position, &count)| (count != 0).then_some(position)),
         );
         let mut pending = vec![true; snapshots.len()];
-        let mut indices = FxHashMap::<FunctionId, SparseFunction>::default();
         while let Some(position) = work.pop_front() {
             pending[position] = false;
             let snapshot = &snapshots[position];
-            let mut builder = DemandBuilder::new(checker, snapshot, &fields, &indices);
+            let mut builder = DemandBuilder::new(checker, snapshot, &fields, indices);
             builder.collect_roots();
             builder.collect_call_roots()?;
             let mut index = builder.seal(Rc::clone(&transfer_indices[position]));
@@ -4102,12 +4145,20 @@ impl SparseFunction {
             } else {
                 index.counts += snapshot.counts;
             }
-            if previous.is_none_or(|old| {
+            let changed = previous.is_none_or(|old| {
                 old.envelope != index.envelope
                     || old.result_sources != index.result_sources
+                    // Callers project result rows by the callee's exact support ordinal.
+                    || old.result_supports != index.result_supports
                     || old.total != index.total
-            }) && let Some(callers) = callers.get(&snapshot.function.id)
-            {
+            });
+            on_build(
+                snapshot.function.id,
+                previous.map_or(&[], |old| old.callees.as_slice()),
+                &index.callees,
+                changed,
+            );
+            if changed && let Some(callers) = callers.get(&snapshot.function.id) {
                 for &caller in callers {
                     if !std::mem::replace(&mut pending[caller], true) {
                         work.push_back(caller);
@@ -4116,7 +4167,20 @@ impl SparseFunction {
             }
             indices.insert(snapshot.function.id, index);
         }
-        Ok(indices)
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl SparseFunction {
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn only_result_supports_changed(
+        &self,
+        prior: &Self,
+    ) -> bool {
+        self.envelope == prior.envelope
+            && self.result_sources == prior.result_sources
+            && self.total == prior.total
+            && self.result_supports != prior.result_supports
     }
 }
 

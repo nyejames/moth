@@ -3,6 +3,7 @@
 //! WHAT: defines the immutable analysis records produced while validating HIR borrows.
 //! WHY: transfer and diagnostics need a shared vocabulary for states, facts, and summaries.
 
+use super::metadata::BorrowMetadataCache;
 #[cfg(test)]
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
@@ -14,6 +15,7 @@ use rustc_hash::FxHashMap;
 pub(crate) struct BorrowCheckReport {
     pub analysis: BorrowAnalysis,
     pub stats: BorrowCheckStats,
+    pub(crate) metadata: BorrowMetadataCache,
     /// Declaring arena used for canonical projection of the base module. Its stable identities
     /// are keyed by dense type IDs, which do not change when executable strings and paths remap.
     #[cfg(test)]
@@ -21,6 +23,29 @@ pub(crate) struct BorrowCheckReport {
 }
 
 impl BorrowCheckReport {
+    /// Reset graph facts for the exact dirty closure while preserving converged declarations
+    /// and failure inference in the report's sole summary map.
+    #[allow(dead_code)] // B2b.3b drives the exact dirty closure from installer receipts.
+    pub(crate) fn invalidate_call_metadata(
+        &mut self,
+        functions: impl IntoIterator<Item = FunctionId>,
+    ) {
+        for id in functions {
+            self.metadata.invalidate_body(id);
+            self.analysis
+                .public_call_summaries
+                .get_mut(&id)
+                .expect("seeded declaration")
+                .reset_graph_payload();
+        }
+    }
+
+    /// Validation produces fresh final facts, not a new metadata convergence epoch.
+    pub(crate) fn replace_validation(&mut self, checked: Self) {
+        self.analysis = checked.analysis;
+        self.stats = checked.stats;
+    }
+
     pub(crate) fn borrow_facts(&self) -> &BorrowAnalysis {
         &self.analysis
     }
