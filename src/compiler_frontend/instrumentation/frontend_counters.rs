@@ -155,6 +155,18 @@ pub(crate) enum FrontendCounter {
     BorrowOperandSharingRows,
     BorrowOperandReachRows,
     BorrowReachIndexMaintenanceRows,
+    BorrowPublisherGroupRowsInspected,
+    BorrowPublisherGroupRowsMoved,
+    BorrowRetirementWrapperRows,
+    BorrowRetirementCellRows,
+    BorrowRetirementAllocationRows,
+    BorrowRetirementLocalRows,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowValidationRowsCloned,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowValidationRowsJoined,
+    #[cfg(feature = "benchmark_counters")]
+    BorrowValidationDenseLayoutSlots,
     BorrowOptionalTransferOverlapCalls,
     ConvergenceInitialBaseBorrowPasses,
     ConvergenceBaseBorrowPasses,
@@ -445,6 +457,15 @@ mod detailed {
     static BORROW_OPERAND_SHARING_ROWS: AtomicUsize = AtomicUsize::new(0);
     static BORROW_OPERAND_REACH_ROWS: AtomicUsize = AtomicUsize::new(0);
     static BORROW_REACH_INDEX_MAINTENANCE_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_PUBLISHER_GROUP_ROWS_INSPECTED: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_PUBLISHER_GROUP_ROWS_MOVED: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_RETIREMENT_WRAPPER_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_RETIREMENT_CELL_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_RETIREMENT_ALLOCATION_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_RETIREMENT_LOCAL_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_VALIDATION_ROWS_CLONED: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_VALIDATION_ROWS_JOINED: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_VALIDATION_DENSE_LAYOUT_SLOTS: AtomicUsize = AtomicUsize::new(0);
     static BORROW_OPTIONAL_TRANSFER_OVERLAP_CALLS: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_INITIAL_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
@@ -719,6 +740,15 @@ mod detailed {
             FrontendCounter::BorrowOperandSharingRows,
             FrontendCounter::BorrowOperandReachRows,
             FrontendCounter::BorrowReachIndexMaintenanceRows,
+            FrontendCounter::BorrowPublisherGroupRowsInspected,
+            FrontendCounter::BorrowPublisherGroupRowsMoved,
+            FrontendCounter::BorrowRetirementWrapperRows,
+            FrontendCounter::BorrowRetirementCellRows,
+            FrontendCounter::BorrowRetirementAllocationRows,
+            FrontendCounter::BorrowRetirementLocalRows,
+            FrontendCounter::BorrowValidationRowsCloned,
+            FrontendCounter::BorrowValidationRowsJoined,
+            FrontendCounter::BorrowValidationDenseLayoutSlots,
             FrontendCounter::BorrowOptionalTransferOverlapCalls,
             FrontendCounter::ConvergenceInitialBaseBorrowPasses,
             FrontendCounter::ConvergenceBaseBorrowPasses,
@@ -1031,6 +1061,19 @@ mod detailed {
             FrontendCounter::BorrowOperandReachRows => &BORROW_OPERAND_REACH_ROWS,
             FrontendCounter::BorrowReachIndexMaintenanceRows => {
                 &BORROW_REACH_INDEX_MAINTENANCE_ROWS
+            }
+            FrontendCounter::BorrowPublisherGroupRowsInspected => {
+                &BORROW_PUBLISHER_GROUP_ROWS_INSPECTED
+            }
+            FrontendCounter::BorrowPublisherGroupRowsMoved => &BORROW_PUBLISHER_GROUP_ROWS_MOVED,
+            FrontendCounter::BorrowRetirementWrapperRows => &BORROW_RETIREMENT_WRAPPER_ROWS,
+            FrontendCounter::BorrowRetirementCellRows => &BORROW_RETIREMENT_CELL_ROWS,
+            FrontendCounter::BorrowRetirementAllocationRows => &BORROW_RETIREMENT_ALLOCATION_ROWS,
+            FrontendCounter::BorrowRetirementLocalRows => &BORROW_RETIREMENT_LOCAL_ROWS,
+            FrontendCounter::BorrowValidationRowsCloned => &BORROW_VALIDATION_ROWS_CLONED,
+            FrontendCounter::BorrowValidationRowsJoined => &BORROW_VALIDATION_ROWS_JOINED,
+            FrontendCounter::BorrowValidationDenseLayoutSlots => {
+                &BORROW_VALIDATION_DENSE_LAYOUT_SLOTS
             }
             FrontendCounter::BorrowOptionalTransferOverlapCalls => {
                 &BORROW_OPTIONAL_TRANSFER_OVERLAP_CALLS
@@ -1466,6 +1509,19 @@ mod detailed {
             FrontendCounter::BorrowOperandReachRows => "borrow_operand_reach_rows",
             FrontendCounter::BorrowReachIndexMaintenanceRows => {
                 "borrow_reach_index_maintenance_rows"
+            }
+            FrontendCounter::BorrowPublisherGroupRowsInspected => {
+                "borrow_publisher_group_rows_inspected"
+            }
+            FrontendCounter::BorrowPublisherGroupRowsMoved => "borrow_publisher_group_rows_moved",
+            FrontendCounter::BorrowRetirementWrapperRows => "borrow_retirement_wrapper_rows",
+            FrontendCounter::BorrowRetirementCellRows => "borrow_retirement_cell_rows",
+            FrontendCounter::BorrowRetirementAllocationRows => "borrow_retirement_allocation_rows",
+            FrontendCounter::BorrowRetirementLocalRows => "borrow_retirement_local_rows",
+            FrontendCounter::BorrowValidationRowsCloned => "borrow_validation_rows_cloned",
+            FrontendCounter::BorrowValidationRowsJoined => "borrow_validation_rows_joined",
+            FrontendCounter::BorrowValidationDenseLayoutSlots => {
+                "borrow_validation_dense_layout_slots"
             }
             FrontendCounter::BorrowOptionalTransferOverlapCalls => {
                 "borrow_optional_transfer_overlap_calls"

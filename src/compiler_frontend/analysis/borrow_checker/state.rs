@@ -11,11 +11,13 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 mod allocation_layer;
 
 use allocation_layer::AllocationLayer;
+pub(super) use allocation_layer::cyclic_blocks;
 pub(super) use allocation_layer::{
     AllocId, AllocationRetirement, FieldKey, PlaceResolution, ResolvedPlace, StoredValue,
 };
@@ -539,10 +541,84 @@ pub(super) struct StoreReceipt {
     pub replaced: [Option<(CellId, ValueAlternatives)>; 2],
 }
 
+/// Keep entry and exit coordinates separate: the same key can name two occurrences.
+#[derive(Debug, Default)]
+pub(super) struct PublicationCarriers {
+    pub definite_old: Vec<(CellId, ValueAlternatives)>,
+    pub introduced: Vec<(CellId, ValueAlternatives)>,
+}
+
+impl PublicationCarriers {
+    pub(super) fn record(
+        &mut self,
+        entry_cell: CellId,
+        old: &[ValueAlt],
+        exit_cell: CellId,
+        incoming: &[ValueAlt],
+        definite: bool,
+    ) {
+        if definite {
+            Self::add(
+                &mut self.definite_old,
+                entry_cell,
+                old.iter().filter(|alt| !alt.deps.is_empty()),
+            );
+        }
+        Self::add(
+            &mut self.introduced,
+            exit_cell,
+            incoming.iter().filter(|alt| {
+                !alt.deps.is_empty()
+                    && (definite
+                        || !old.iter().any(|old| {
+                            let same_kind = match (old.kind, alt.kind) {
+                                (ValueKind::Allocation(a), ValueKind::Allocation(b)) => {
+                                    a.id == b.id
+                                }
+                                (a, b) => a == b,
+                            };
+                            same_kind && old.deps == alt.deps
+                        }))
+            }),
+        );
+    }
+
+    fn add<'a>(
+        rows: &mut Vec<(CellId, ValueAlternatives)>,
+        cell: CellId,
+        values: impl Iterator<Item = &'a ValueAlt>,
+    ) {
+        let mut values = values.peekable();
+        if values.peek().is_none() {
+            return;
+        }
+        let existing = match rows.binary_search_by_key(&cell, |row| row.0) {
+            Ok(index) => {
+                let existing = &mut rows[index].1;
+                existing.extend(values.cloned());
+                existing
+            }
+            Err(index) => {
+                rows.insert(index, (cell, values.cloned().collect()));
+                &mut rows[index].1
+            }
+        };
+        existing.sort_unstable();
+        existing.dedup();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Replacement {
     May,
     Must,
+}
+
+/// The snapshots describe the final member occurrences, not executed insertions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FamilyMember {
+    pub value: CapturedValue,
+    pub at_most_once: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1080,15 +1156,43 @@ impl FunctionLayout {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(super) struct BorrowState {
     // One lattice state per function-local index.
     locals: Vec<LocalState>,
+    value_root_users: BTreeSet<(usize, usize)>,
+    derivation_users: BTreeSet<(usize, usize)>,
     // Allocation identities for values stored by reference inside other values.
     layer: AllocationLayer,
 }
 
+impl PartialEq for BorrowState {
+    fn eq(&self, other: &Self) -> bool {
+        self.locals == other.locals && self.layer == other.layer
+    }
+}
+
+impl Eq for BorrowState {}
+
+fn index_roots(map: &mut BTreeSet<(usize, usize)>, owner: usize, roots: &RootSet, insert: bool) {
+    for root in roots.iter_ones() {
+        if insert {
+            map.insert((root, owner));
+        } else {
+            map.remove(&(root, owner));
+        }
+    }
+}
+
 impl BorrowState {
+    #[cfg(feature = "benchmark_counters")]
+    pub(super) fn validation_row_count(&self) -> usize {
+        self.locals.len()
+            + self.value_root_users.len()
+            + self.derivation_users.len()
+            + self.layer.row_count()
+    }
+
     pub(super) fn new_uninitialized(local_count: usize) -> Self {
         let locals = (0..local_count)
             .map(|_| LocalState::uninit(local_count))
@@ -1096,16 +1200,24 @@ impl BorrowState {
 
         Self {
             locals,
+            value_root_users: BTreeSet::new(),
+            derivation_users: BTreeSet::new(),
             layer: AllocationLayer::new(),
         }
     }
 
     pub(super) fn initialize_parameter(&mut self, local_index: usize) {
+        self.initialize_entry_binding(local_index, BindingSpec::Slot);
+    }
+
+    /// Entry anchors are chosen by admission; linking to one must not flatten its route.
+    pub(super) fn initialize_entry_binding(&mut self, local: usize, binding: BindingSpec) {
+        let capacity = self.locals.len();
         self.set_binding(
-            local_index,
-            BindingSpec::Slot,
-            RootSet::empty(self.locals.len()),
-            RootSet::empty(self.locals.len()),
+            local,
+            binding,
+            RootSet::empty(capacity),
+            RootSet::empty(capacity),
         );
     }
 
@@ -1195,7 +1307,46 @@ impl BorrowState {
 
     pub(super) fn update_local_state(&mut self, local_index: usize, new_state: LocalState) {
         self.remove_current_row(local_index);
-        self.locals[local_index] = new_state;
+        self.set_local_value_roots(local_index, new_state.value_roots);
+        self.set_local_derivation(local_index, new_state.derived_from_roots);
+        self.locals[local_index].init = new_state.init;
+        self.refresh_linked_observations(WrapperId::current(local_index));
+    }
+
+    fn set_local_value_roots(&mut self, local: usize, roots: RootSet) {
+        let old = std::mem::replace(&mut self.locals[local].value_roots, roots);
+        index_roots(&mut self.value_root_users, local, &old, false);
+        index_roots(
+            &mut self.value_root_users,
+            local,
+            &self.locals[local].value_roots,
+            true,
+        );
+    }
+
+    fn set_local_derivation(&mut self, local: usize, roots: RootSet) {
+        let old = std::mem::replace(&mut self.locals[local].derived_from_roots, roots);
+        index_roots(&mut self.derivation_users, local, &old, false);
+        index_roots(
+            &mut self.derivation_users,
+            local,
+            &self.locals[local].derived_from_roots,
+            true,
+        );
+    }
+
+    fn rebuild_local_incidence(&mut self) {
+        self.value_root_users.clear();
+        self.derivation_users.clear();
+        for (local, state) in self.locals.iter().enumerate() {
+            index_roots(&mut self.value_root_users, local, &state.value_roots, true);
+            index_roots(
+                &mut self.derivation_users,
+                local,
+                &state.derived_from_roots,
+                true,
+            );
+        }
     }
 
     fn join_local_facts(&mut self, other: &Self) -> bool {
@@ -1224,6 +1375,9 @@ impl BorrowState {
                 .derived_from_roots
                 .intersect_with(&right.derived_from_roots);
         }
+        if changed {
+            self.rebuild_local_incidence();
+        }
         changed
     }
 
@@ -1246,6 +1400,7 @@ impl BorrowState {
                 local.derived_from_roots.intersect_with(visible_mask);
             }
         }
+        self.rebuild_local_incidence();
     }
 
     #[cfg(any(test, feature = "show_borrow_checker"))]
@@ -1321,325 +1476,407 @@ impl LocalState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(super) struct RootSet {
-    // WHAT: Copy-on-write words; clones share the allocation until an update writes. `Some` holds
-    // exactly `ceil(bit_len / 64)` words with at least one non-zero word, and `None` is the empty
-    // set and owns no allocation. `is_empty` is `words.is_none()`, so an update that clears the
-    // last bit must store `None`.
-    // WHY: borrow states clone every local's root set at block and edge joins, and most of those
-    // clones are never updated, so a shared buffer avoids copying words that no rule will change.
-    // Most locals hold no roots, so an empty set carries no buffer and its clone, drop, emptiness
-    // test and joins stay O(1) instead of walking zeroed words.
-    words: Option<Rc<[u64]>>,
+    bits: RootBits,
     bit_len: usize,
 }
+
+/// A captured route usually names one root, irrespective of the function's width.
+/// Sparse storage pays only for present roots; dense masks retain word-wise operations.
+#[derive(Debug, Clone)]
+enum RootBits {
+    Empty,
+    One(usize),
+    Sparse(Rc<Vec<usize>>),
+    Dense(Rc<[u64]>),
+}
+
+impl PartialEq for RootSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.bit_len == other.bit_len
+            && match (&self.bits, &other.bits) {
+                (RootBits::Empty, RootBits::Empty) => true,
+                (RootBits::One(a), RootBits::One(b)) => a == b,
+                (RootBits::Sparse(a), RootBits::Sparse(b)) => Rc::ptr_eq(a, b) || a == b,
+                (RootBits::Dense(a), RootBits::Dense(b)) => Rc::ptr_eq(a, b) || a == b,
+                _ => self.iter_ones().eq(other.iter_ones()),
+            }
+    }
+}
+
+impl Eq for RootSet {}
 
 impl RootSet {
     pub(super) fn empty(bit_len: usize) -> Self {
         Self {
-            words: None,
+            bits: RootBits::Empty,
             bit_len,
         }
     }
 
     pub(super) fn full(bit_len: usize) -> Self {
-        let word_len = bit_len.div_ceil(64);
-        let tail = match bit_len % 64 {
-            0 => u64::MAX,
-            remainder => (1u64 << remainder) - 1,
+        let bits = match bit_len {
+            0 => RootBits::Empty,
+            1 => RootBits::One(0),
+            _ => {
+                let words = bit_len.div_ceil(64);
+                RootBits::Dense(
+                    (0..words)
+                        .map(|i| {
+                            if i + 1 == words {
+                                Self::tail_word(bit_len)
+                            } else {
+                                u64::MAX
+                            }
+                        })
+                        .collect(),
+                )
+            }
         };
-        Self {
-            // WHY: a zero-width universe has no bits, and every set without bits is `None`.
-            // An exact-length iterator collects straight into the shared buffer, so the words
-            // are written once instead of being built in a `Vec` and copied.
-            words: (word_len != 0).then(|| {
-                (0..word_len)
-                    .map(|index| {
-                        if index + 1 == word_len {
-                            tail
-                        } else {
-                            u64::MAX
-                        }
-                    })
-                    .collect()
-            }),
-            bit_len,
-        }
+        Self { bits, bit_len }
     }
 
-    /// Whether every index below `local_count` is a member and the set spans that universe.
-    ///
-    /// WHY: the engine narrows every CFG edge against a block's visibility mask, and that sweep is
-    /// O(locals). A mask covering every local hides none and removes no root bit, so callers can
-    /// skip the sweep instead of rewriting every local for no change.
+    fn tail_word(bit_len: usize) -> u64 {
+        u64::MAX >> ((64 - bit_len % 64) % 64)
+    }
+
     pub(super) fn covers_all(&self, local_count: usize) -> bool {
-        if self.bit_len != local_count {
-            return false;
+        self.bit_len == local_count
+            && match &self.bits {
+                RootBits::Empty => local_count == 0,
+                RootBits::One(_) => local_count == 1,
+                RootBits::Sparse(roots) => roots.len() == local_count,
+                RootBits::Dense(words) => words.split_last().is_some_and(|(tail, rest)| {
+                    *tail == Self::tail_word(local_count)
+                        && rest.iter().all(|&word| word == u64::MAX)
+                }),
+            }
+    }
+
+    fn dense_limit(&self) -> usize {
+        self.bit_len.div_ceil(64).max(2)
+    }
+
+    fn dense_from_roots(bit_len: usize, roots: impl Iterator<Item = usize>) -> RootBits {
+        let mut words: Rc<[u64]> = std::iter::repeat_n(0, bit_len.div_ceil(64)).collect();
+        let buffer = Rc::get_mut(&mut words).expect("newly allocated root mask");
+        for bit in roots {
+            buffer[bit / 64] |= 1 << (bit % 64);
         }
-        let word_len = local_count.div_ceil(64);
-        let words = self.word_slice();
-        // A set with no words is an empty set; it covers every index only when there are none.
-        if words.len() != word_len {
-            return false;
-        }
-        let Some((tail, leading)) = words.split_last() else {
-            return word_len == 0;
+        RootBits::Dense(words)
+    }
+
+    /// A once-dense mask can become a sparsely retained route after narrowing.
+    fn compact_dense(&mut self) {
+        let RootBits::Dense(words) = &self.bits else {
+            return;
         };
-        let tail_bits = match local_count % 64 {
-            0 => u64::MAX,
-            remainder => (1u64 << remainder) - 1,
+        let limit = self.dense_limit();
+        let mut count = 0;
+        for word in words.iter() {
+            count += word.count_ones() as usize;
+            if count >= limit {
+                return;
+            }
+        }
+        self.bits = match count {
+            0 => RootBits::Empty,
+            1 => RootBits::One(self.iter_ones().next().expect("one surviving root")),
+            _ => RootBits::Sparse(Rc::new(self.iter_ones().collect())),
         };
-        *tail == tail_bits && leading.iter().all(|word| *word == u64::MAX)
     }
 
-    /// The words as a slice, with the empty set viewed as having none.
-    fn word_slice(&self) -> &[u64] {
-        self.words.as_deref().unwrap_or(&[])
-    }
-
-    /// Mutable words, allocated for an empty set and copied first when a clone still shares them.
-    ///
-    /// WHY: the combinators test whether an update changes any bit before calling this on shared
-    /// words, so a no-op update never copies them.
-    fn words_mut(&mut self) -> &mut [u64] {
-        let word_len = self.bit_len.div_ceil(64);
-        let words = self
-            .words
-            .get_or_insert_with(|| std::iter::repeat_n(0, word_len).collect());
-        if Rc::strong_count(words) != 1 {
-            *words = Rc::from(&words[..]);
-        }
-        // Invariant: this private allocation never has weak references, so `Rc::get_mut` fails
-        // only while the strong count is above one, and the copy above leaves exactly one owner.
-        Rc::get_mut(words).expect("root words are unshared before mutation")
-    }
-
-    /// Whether any clone still shares this set's words. Only shared words need the change tests
-    /// that keep no-op updates from copying; unshared words are written in place either way.
-    fn words_are_shared(&self) -> bool {
-        self.words
-            .as_ref()
-            .is_some_and(|words| Rc::strong_count(words) != 1)
-    }
-
-    pub(super) fn insert(&mut self, bit_index: usize) {
-        if bit_index >= self.bit_len {
+    pub(super) fn insert(&mut self, bit: usize) {
+        if bit >= self.bit_len {
             return;
         }
-
-        // WHY: only a shared buffer needs the bit test to avoid a copy of unchanged words; an
-        // unshared write is idempotent and costs a read anyway.
-        if self.words_are_shared() && self.contains(bit_index) {
-            return;
+        let limit = self.dense_limit();
+        match &mut self.bits {
+            RootBits::Empty => self.bits = RootBits::One(bit),
+            RootBits::One(old) if *old != bit => {
+                let ordered = [(*old).min(bit), (*old).max(bit)];
+                self.bits = if limit == 2 {
+                    Self::dense_from_roots(self.bit_len, ordered.into_iter())
+                } else {
+                    RootBits::Sparse(Rc::new(ordered.to_vec()))
+                };
+            }
+            RootBits::One(_) => {}
+            RootBits::Sparse(roots) => {
+                let Err(at) = roots.binary_search(&bit) else {
+                    return;
+                };
+                if roots.len() + 1 >= limit {
+                    self.bits =
+                        Self::dense_from_roots(self.bit_len, roots.iter().copied().chain([bit]));
+                } else {
+                    Rc::make_mut(roots).insert(at, bit);
+                }
+            }
+            RootBits::Dense(words) => {
+                let (word, mask) = (bit / 64, 1 << (bit % 64));
+                if words[word] & mask == 0 {
+                    Rc::make_mut(words)[word] |= mask;
+                }
+            }
         }
-
-        let word_index = bit_index / 64;
-        let bit_offset = bit_index % 64;
-        self.words_mut()[word_index] |= 1u64 << bit_offset;
     }
 
-    pub(super) fn remove(&mut self, bit_index: usize) {
-        if !self.contains(bit_index) {
+    pub(super) fn remove(&mut self, bit: usize) {
+        if !self.contains(bit) {
             return;
         }
-        let word_index = bit_index / 64;
-        let bit_offset = bit_index % 64;
-        self.words_mut()[word_index] &= !(1u64 << bit_offset);
-        // The empty set owns no words.
-        if self.word_slice().iter().all(|word| *word == 0) {
-            self.words = None;
+        match &mut self.bits {
+            RootBits::One(_) => self.clear(),
+            RootBits::Sparse(roots) => {
+                let at = roots.binary_search(&bit).expect("present sparse root");
+                if roots.len() == 2 {
+                    self.bits = RootBits::One(roots[1 - at]);
+                } else {
+                    Rc::make_mut(roots).remove(at);
+                }
+            }
+            RootBits::Dense(words) => {
+                Rc::make_mut(words)[bit / 64] &= !(1 << (bit % 64));
+                self.compact_dense();
+            }
+            RootBits::Empty => unreachable!(),
         }
     }
 
-    pub(super) fn contains(&self, bit_index: usize) -> bool {
-        if bit_index >= self.bit_len {
-            return false;
-        }
-
-        let word_index = bit_index / 64;
-        let bit_offset = bit_index % 64;
-        self.word_slice()
-            .get(word_index)
-            .is_some_and(|word| (*word & (1u64 << bit_offset)) != 0)
+    pub(super) fn contains(&self, bit: usize) -> bool {
+        bit < self.bit_len
+            && match &self.bits {
+                RootBits::Empty => false,
+                RootBits::One(root) => bit == *root,
+                RootBits::Sparse(roots) => roots.binary_search(&bit).is_ok(),
+                RootBits::Dense(words) => words[bit / 64] & (1 << (bit % 64)) != 0,
+            }
     }
 
     /// Returns whether any bit was added.
     pub(super) fn union_with(&mut self, other: &Self) -> bool {
-        let Some(other_words) = other.words.as_ref() else {
+        if other.is_empty() {
             return false;
-        };
-
-        // WHY: the first bit into an empty set shares the other set's buffer instead of copying
-        // it, and copy-on-write copies it later only if either side is written.
-        if self.words.is_none() {
-            self.words = Some(Rc::clone(other_words));
-            return true;
         }
-
-        // WHY: a share test keeps a no-op union from copying shared words; unshared words are
-        // written in place by the loop below, which reports the same change flag.
-        if self.words_are_shared() {
-            let adds_bits = self
-                .word_slice()
-                .iter()
-                .zip(other_words.iter())
-                .any(|(left, right)| right & !left != 0);
-            if !adds_bits {
-                return false;
+        if self.bit_len == other.bit_len {
+            if self.is_empty() {
+                self.bits.clone_from(&other.bits);
+                return true;
+            }
+            if let RootBits::Dense(right) = &other.bits {
+                if let RootBits::Dense(left) = &mut self.bits {
+                    if !left.iter().zip(right.iter()).any(|(&a, &b)| b & !a != 0) {
+                        return false;
+                    }
+                    for (a, b) in Rc::make_mut(left).iter_mut().zip(right.iter()) {
+                        *a |= *b;
+                    }
+                    return true;
+                }
+                let before = std::mem::replace(&mut self.bits, RootBits::Dense(Rc::clone(right)));
+                // A dense donor necessarily has more roots than the sparse receiver.
+                let old = Self {
+                    bits: before,
+                    bit_len: self.bit_len,
+                };
+                for bit in old.iter_ones() {
+                    self.insert(bit);
+                }
+                return true;
             }
         }
-
+        let bit_len = self.bit_len;
         let mut changed = false;
-        for (left, right) in self.words_mut().iter_mut().zip(other_words.iter()) {
-            let next = *left | *right;
-            changed |= next != *left;
-            *left = next;
+        for bit in other.iter_ones().take_while(|&bit| bit < bit_len) {
+            if !self.contains(bit) {
+                self.insert(bit);
+                changed = true;
+            }
         }
         changed
     }
 
-    /// Keep only roots `other` also holds, reporting whether any root was removed.
     pub(super) fn intersect_with(&mut self, other: &Self) -> bool {
-        // WHY: an empty set has nothing to mask, and an empty mask leaves no bit, so neither case
-        // reads or copies words.
-        if self.words.is_none() {
+        if !self.has_members_outside(other) {
             return false;
         }
-        let Some(other_words) = other.words.as_ref() else {
-            self.words = None;
+        if self.bit_len != other.bit_len {
+            *self = self.survivors(|bit| other.contains(bit));
             return true;
-        };
-
-        // WHY: an unshared buffer is masked in place; only shared words need the removal test
-        // first, so that a mask that removes nothing never copies them.
-        if self.words_are_shared() {
-            let removes_bits = self
-                .word_slice()
-                .iter()
-                .zip(other_words.iter())
-                .any(|(left, right)| left & !right != 0);
-            if !removes_bits {
-                return false;
+        }
+        match (&mut self.bits, &other.bits) {
+            (RootBits::Dense(left), RootBits::Dense(right)) => {
+                for (a, b) in Rc::make_mut(left).iter_mut().zip(right.iter()) {
+                    *a &= *b;
+                }
+                self.compact_dense();
             }
+            (RootBits::Dense(_), _) => {
+                let mut kept = Self::empty(self.bit_len);
+                for bit in other.iter_ones().filter(|&bit| self.contains(bit)) {
+                    kept.insert(bit);
+                }
+                *self = kept;
+            }
+            (RootBits::Sparse(roots), _) => {
+                Rc::make_mut(roots).retain(|&bit| other.contains(bit));
+                self.collapse_sparse();
+            }
+            _ => self.clear(),
         }
-
-        // WHY: a mask can remove every bit, so the surviving bits are gathered while masking; an
-        // empty result drops the buffer, keeping `None` as the only empty representation.
-        let mut surviving = 0u64;
-        let mut removed = false;
-        for (left, right) in self.words_mut().iter_mut().zip(other_words.iter()) {
-            let next = *left & *right;
-            removed |= next != *left;
-            *left = next;
-            surviving |= next;
-        }
-        if surviving == 0 {
-            self.words = None;
-        }
-        removed
+        true
     }
 
     fn has_members_outside(&self, other: &Self) -> bool {
-        debug_assert_eq!(self.bit_len, other.bit_len);
-        match (self.words.as_deref(), other.words.as_deref()) {
-            (None, _) => false,
-            (Some(_), None) => true,
-            (Some(left), Some(right)) => left.iter().zip(right).any(|(&a, &b)| a & !b != 0),
+        match (&self.bits, &other.bits) {
+            (RootBits::Empty, _) => false,
+            (_, RootBits::Empty) => true,
+            (RootBits::Dense(left), RootBits::Dense(right)) if self.bit_len == other.bit_len => {
+                left.iter().zip(right.iter()).any(|(&a, &b)| a & !b != 0)
+            }
+            _ => self.iter_ones().any(|bit| !other.contains(bit)),
+        }
+    }
+
+    fn survivors(&self, keep: impl Fn(usize) -> bool) -> Self {
+        let mut kept = Self::empty(self.bit_len);
+        for bit in self.iter_ones().filter(|&bit| keep(bit)) {
+            kept.insert(bit);
+        }
+        kept
+    }
+
+    fn collapse_sparse(&mut self) {
+        if let RootBits::Sparse(roots) = &self.bits {
+            match roots.as_slice() {
+                [] => self.clear(),
+                [one] => self.bits = RootBits::One(*one),
+                _ => {}
+            }
         }
     }
 
     pub(super) fn clear(&mut self) {
-        // WHY: dropping the buffer clears the set without copying or zeroing words that a clone
-        // may still share.
-        self.words = None;
+        self.bits = RootBits::Empty;
     }
 
     pub(super) fn subtract_with(&mut self, other: &Self) {
-        // WHY: an empty set has nothing to remove and an empty subtrahend removes nothing, so
-        // neither case reads or copies words.
-        let Some(other_words) = other.words.as_ref() else {
-            return;
-        };
-        if self.words.is_none() {
+        if self.is_empty() || other.is_empty() {
             return;
         }
-
-        // WHY: unshared words subtract in place; only shared words need the test for bits that
-        // `other` would actually remove.
-        if self.words_are_shared() {
-            let removes_bits = self
-                .word_slice()
-                .iter()
-                .zip(other_words.iter())
-                .any(|(left, right)| left & right != 0);
-            if !removes_bits {
-                return;
+        let bit_len = self.bit_len;
+        match (&mut self.bits, &other.bits) {
+            (RootBits::Dense(left), RootBits::Dense(right)) => {
+                if !left.iter().zip(right.iter()).any(|(&a, &b)| a & b != 0) {
+                    return;
+                }
+                for (a, b) in Rc::make_mut(left).iter_mut().zip(right.iter()) {
+                    *a &= !*b;
+                }
+                self.compact_dense();
             }
-        }
-
-        let mut surviving = 0u64;
-        for (left, right) in self.words_mut().iter_mut().zip(other_words.iter()) {
-            *left &= !*right;
-            surviving |= *left;
-        }
-        if surviving == 0 {
-            self.words = None;
+            (RootBits::Dense(left), _) => {
+                let mut changed = false;
+                for bit in other.iter_ones().take_while(|&bit| bit < bit_len) {
+                    let (word, mask) = (bit / 64, 1 << (bit % 64));
+                    if left[word] & mask != 0 {
+                        Rc::make_mut(left)[word] &= !mask;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.compact_dense();
+                }
+            }
+            (RootBits::Sparse(roots), _) => {
+                if roots.iter().any(|&bit| other.contains(bit)) {
+                    Rc::make_mut(roots).retain(|&bit| !other.contains(bit));
+                    self.collapse_sparse();
+                }
+            }
+            (RootBits::One(bit), _) if other.contains(*bit) => self.clear(),
+            _ => {}
         }
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.words.is_none()
+        matches!(self.bits, RootBits::Empty)
     }
 
-    /// Width of the universe this set indexes.
     pub(super) fn bit_len(&self) -> usize {
         self.bit_len
     }
 
     pub(super) fn iter_ones(&self) -> RootSetIter<'_> {
-        let words = self.word_slice();
-        RootSetIter {
-            words,
-            bit_len: self.bit_len,
-            word_index: 0,
-            current_word: words.first().copied().unwrap_or(0),
+        match &self.bits {
+            RootBits::Empty => RootSetIter::Sparse([].iter()),
+            RootBits::One(bit) => RootSetIter::Sparse(std::slice::from_ref(bit).iter()),
+            RootBits::Sparse(roots) => RootSetIter::Sparse(roots.iter()),
+            RootBits::Dense(words) => RootSetIter::Dense {
+                words: words.iter().enumerate(),
+                offset: 0,
+                current: 0,
+            },
         }
     }
 }
 
-pub(super) struct RootSetIter<'a> {
-    words: &'a [u64],
-    bit_len: usize,
-    word_index: usize,
-    current_word: u64,
+pub(super) enum RootSetIter<'a> {
+    Sparse(std::slice::Iter<'a, usize>),
+    Dense {
+        words: std::iter::Enumerate<std::slice::Iter<'a, u64>>,
+        offset: usize,
+        current: u64,
+    },
 }
 
-impl<'a> Iterator for RootSetIter<'a> {
+impl Iterator for RootSetIter<'_> {
     type Item = usize;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.word_index >= self.words.len() {
-                return None;
-            }
-
-            if self.current_word != 0 {
-                let trailing = self.current_word.trailing_zeros() as usize;
-                let bit_index = self.word_index * 64 + trailing;
-                self.current_word &= self.current_word - 1;
-
-                if bit_index < self.bit_len {
-                    return Some(bit_index);
+    fn next(&mut self) -> Option<usize> {
+        match self {
+            Self::Sparse(roots) => roots.next().copied(),
+            Self::Dense {
+                words,
+                offset,
+                current,
+            } => {
+                while *current == 0 {
+                    let (word, bits) = words.next()?;
+                    *offset = word * 64;
+                    *current = *bits;
                 }
-
-                continue;
-            }
-
-            self.word_index += 1;
-            if self.word_index < self.words.len() {
-                self.current_word = self.words[self.word_index];
+                let bit = *offset + current.trailing_zeros() as usize;
+                *current &= *current - 1;
+                Some(bit)
             }
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn wide_root_routes_remain_sparse_and_fold_back_after_narrowing() {
+    let width = 8192;
+    let mut route = RootSet::empty(width);
+    route.insert(width - 1);
+    assert!(matches!(route.bits, RootBits::One(8191)));
+    let mut other = RootSet::empty(width);
+    other.insert(63);
+    assert!(route.union_with(&other));
+    assert!(matches!(&route.bits, RootBits::Sparse(roots) if roots.as_slice() == [63, 8191]));
+    let mut dense = RootSet::full(width);
+    assert!(dense.intersect_with(&route));
+    assert_eq!(dense, route);
+    assert!(matches!(&dense.bits, RootBits::Sparse(roots) if roots.len() == 2));
+    let mut complement = RootSet::full(width);
+    complement.subtract_with(&route);
+    let mut dense_difference = RootSet::full(width);
+    dense_difference.subtract_with(&complement);
+    assert_eq!(dense_difference, route);
+    assert!(matches!(&dense_difference.bits, RootBits::Sparse(roots) if roots.len() == 2));
+    dense.subtract_with(&other);
+    assert!(matches!(dense.bits, RootBits::One(8191)));
 }

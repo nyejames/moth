@@ -11,10 +11,10 @@
 
 use super::{
     AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, BoundaryBinding,
-    CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, Init, LocalState, OWN_SLOT,
-    OrderKey, Origin, Replacement, RootSet, SmallSet, StoreReceipt, TypedStore, TypedWrite,
-    ValueAlt, ValueAlternatives, ValueKind, WrapperAge, WrapperId, remap_invoke_capture,
-    remap_value_alternatives,
+    CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, FamilyMember, Init, LocalState,
+    OWN_SLOT, OrderKey, Origin, PublicationCarriers, Replacement, RootSet, SmallSet, StoreReceipt,
+    TypedStore, TypedWrite, ValueAlt, ValueAlternatives, ValueKind, WrapperAge, WrapperId,
+    remap_invoke_capture, remap_value_alternatives,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::BlockId;
@@ -24,8 +24,8 @@ use crate::compiler_frontend::instrumentation::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
-use std::ops::{ControlFlow, Deref};
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::{ControlFlow, RangeInclusive};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,7 +54,7 @@ pub(in super::super) enum FieldKey {
     MapKey,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum AllocBase {
     /// The allocation a binding currently owns or observes through its roots.
     Root(u32),
@@ -92,11 +92,19 @@ struct AllocInfo {
 }
 
 /// Per-function interner shared by every state of one analysis.
+#[cfg_attr(test, derive(Clone))]
 #[derive(Debug, Default)]
 pub(in super::super) struct AllocTable {
     infos: Vec<AllocInfo>,
     index: FxHashMap<AllocKey, AllocId>,
-    cyclic_blocks: Option<FxHashSet<BlockId>>,
+    cyclic_blocks: Option<RecurringBlocks>,
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
+enum RecurringBlocks {
+    Local(FxHashSet<BlockId>),
+    Shared(Rc<FxHashSet<BlockId>>),
 }
 
 impl AllocTable {
@@ -136,9 +144,13 @@ impl AllocTable {
         block: BlockId,
         successors: &FxHashMap<BlockId, Vec<BlockId>>,
     ) -> bool {
-        self.cyclic_blocks
-            .get_or_insert_with(|| cyclic_blocks(successors))
-            .contains(&block)
+        match self
+            .cyclic_blocks
+            .get_or_insert_with(|| RecurringBlocks::Local(cyclic_blocks(successors)))
+        {
+            RecurringBlocks::Local(blocks) => blocks.contains(&block),
+            RecurringBlocks::Shared(blocks) => blocks.contains(&block),
+        }
     }
 
     fn copied_node(&mut self, graph: AllocId, source: AllocId, singular: bool) -> AllocId {
@@ -205,6 +217,62 @@ fn stored_value_kind(id: AllocId, writable: bool) -> ValueKind {
     }
 }
 
+fn holder_group_range(holder: AllocId) -> RangeInclusive<(AllocId, FieldKey)> {
+    (holder, FieldKey::Field(0))..=(holder, FieldKey::MapKey)
+}
+
+fn paired_allocations(
+    pairs: &BTreeSet<(AllocId, AllocId)>,
+    first: AllocId,
+) -> impl Iterator<Item = AllocId> + '_ {
+    pairs
+        .range((first, AllocId::MIN)..=(first, AllocId::MAX))
+        .map(|&(_, second)| second)
+}
+
+fn remove_hash_bucket_member<K: Eq + std::hash::Hash, V: Ord>(
+    buckets: &mut FxHashMap<K, BTreeSet<V>>,
+    key: K,
+    member: &V,
+) {
+    if let std::collections::hash_map::Entry::Occupied(mut bucket) = buckets.entry(key) {
+        bucket.get_mut().remove(member);
+        if bucket.get().is_empty() {
+            bucket.remove();
+        }
+    }
+}
+
+fn index_base_rows<T: Copy + Ord>(
+    table: &AllocTable,
+    index: &mut BTreeSet<(AllocBase, T)>,
+    owner: T,
+    ids: impl IntoIterator<Item = AllocId>,
+    insert: bool,
+) {
+    for id in ids.into_iter().filter(|&id| id != AllocId::EMPTY) {
+        let row = (table.base(id), owner);
+        if insert {
+            index.insert(row);
+        } else {
+            index.remove(&row);
+        }
+    }
+}
+
+fn value_allocations(value: &ValueAlt) -> impl Iterator<Item = AllocId> + '_ {
+    let stored = match value.kind {
+        ValueKind::Allocation(stored) => Some(stored.id),
+        _ => None,
+    };
+    stored.into_iter().chain(
+        value
+            .deps
+            .iter()
+            .flat_map(|dep| dep.entries.as_slice().iter().copied()),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Observation {
     local: usize,
@@ -212,6 +280,28 @@ struct Observation {
     views: Vec<AllocId>,
     alternatives: ValueAlternatives,
     readonly: bool,
+}
+
+/// Projected holders can overlap across bases; a different selector never overlaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ObservationRoute {
+    Incomplete,
+    Slot(WrapperId),
+    Selector(FieldKey),
+}
+
+fn observation_routes(address: &AddressSet) -> BTreeSet<ObservationRoute> {
+    if address.coverage != Coverage::Complete {
+        return [ObservationRoute::Incomplete].into_iter().collect();
+    }
+    address
+        .cells()
+        .iter()
+        .map(|cell| match *cell {
+            CellId::Slot(slot) => ObservationRoute::Slot(slot),
+            CellId::Projected(_, key) => ObservationRoute::Selector(key),
+        })
+        .collect()
 }
 
 struct ResolvedCells {
@@ -255,7 +345,8 @@ impl ResolvedCells {
 /// Explicit rows own storage facts. The indices contain only direct links.
 #[derive(Debug, Default)]
 struct EdgeRows {
-    rows: Vec<Edge>,
+    groups: BTreeMap<(AllocId, FieldKey), Vec<Edge>>,
+    by_base: FxHashMap<AllocBase, BTreeSet<(AllocId, FieldKey)>>,
     children: BTreeSet<(AllocId, AllocId)>,
     incoming: BTreeSet<(AllocId, AllocId, FieldKey)>,
 }
@@ -264,58 +355,79 @@ impl Clone for EdgeRows {
     fn clone(&self) -> Self {
         add_frontend_counter(
             FrontendCounter::BorrowReachIndexMaintenanceRows,
-            self.children.len() + self.incoming.len(),
+            self.incidence_row_count(),
         );
         Self {
-            rows: self.rows.clone(),
+            groups: self.groups.clone(),
+            by_base: self.by_base.clone(),
             children: self.children.clone(),
             incoming: self.incoming.clone(),
         }
     }
 }
 
-impl Deref for EdgeRows {
-    type Target = [Edge];
-
-    fn deref(&self) -> &[Edge] {
-        &self.rows
-    }
-}
-
 impl EdgeRows {
-    fn for_holder(&self, id: AllocId) -> &[Edge] {
-        let start = self.rows.partition_point(|edge| edge.holder < id);
-        let len = self.rows[start..].partition_point(|edge| edge.holder == id);
-        &self.rows[start..start + len]
+    fn iter(&self) -> impl Iterator<Item = &Edge> {
+        self.groups.values().flatten()
     }
 
-    fn group_range(&self, holder: AllocId, key: FieldKey) -> std::ops::Range<usize> {
-        let start = self
-            .rows
-            .partition_point(|edge| (edge.holder, edge.key) < (holder, key));
-        let len =
-            self.rows[start..].partition_point(|edge| (edge.holder, edge.key) == (holder, key));
-        start..start + len
+    fn incidence_row_count(&self) -> usize {
+        self.children.len()
+            + self.incoming.len()
+            + self.by_base.values().map(BTreeSet::len).sum::<usize>()
+    }
+
+    #[cfg(feature = "benchmark_counters")]
+    fn stored_row_count(&self) -> usize {
+        self.groups.values().map(Vec::len).sum::<usize>() + self.incidence_row_count()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    fn holder_groups(&self, id: AllocId) -> impl Iterator<Item = &[Edge]> {
+        self.groups
+            .range(holder_group_range(id))
+            .map(|(_, rows)| rows.as_slice())
+    }
+
+    fn for_holder(&self, id: AllocId) -> impl Iterator<Item = &Edge> {
+        self.holder_groups(id).flatten()
     }
 
     fn group(&self, holder: AllocId, key: FieldKey) -> &[Edge] {
-        &self.rows[self.group_range(holder, key)]
+        self.groups.get(&(holder, key)).map_or(&[], Vec::as_slice)
     }
 
     fn has_outgoing(&self, holder: AllocId) -> bool {
-        !self.for_holder(holder).is_empty() || self.children_of(holder).next().is_some()
+        self.holder_groups(holder).next().is_some() || self.children_of(holder).next().is_some()
     }
 
     fn children_of(&self, parent: AllocId) -> impl Iterator<Item = AllocId> + '_ {
-        self.children
-            .range((parent, AllocId(0))..=(parent, AllocId::EMPTY))
-            .map(|&(_, child)| child)
+        paired_allocations(&self.children, parent)
+    }
+
+    fn incoming_holders(&self, held: AllocId) -> impl Iterator<Item = AllocId> + '_ {
+        self.incoming
+            .range(
+                (held, AllocId::MIN, FieldKey::Field(0))..=(held, AllocId::MAX, FieldKey::MapKey),
+            )
+            .map(|&(_, holder, _)| holder)
     }
 
     fn index_edge(&mut self, table: &AllocTable, edge: Edge) {
         increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+        let group = (edge.holder, edge.key);
+        let holder_base = table.base(edge.holder);
+        self.by_base.entry(holder_base).or_default().insert(group);
         if edge.held != AllocId::EMPTY {
             self.incoming.insert((edge.held, edge.holder, edge.key));
+            let base = table.base(edge.held);
+            if base != holder_base {
+                increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+                self.by_base.entry(base).or_default().insert(group);
+            }
         }
         let mut current = edge.holder;
         while let Some((parent, _)) = table.parent(current) {
@@ -339,22 +451,49 @@ impl EdgeRows {
         }
     }
 
-    fn insert(&mut self, table: &RefCell<AllocTable>, edge: Edge, distinct_occurrence: bool) {
-        match self
-            .rows
-            .binary_search_by_key(&edge.sort_key(), Edge::sort_key)
-        {
+    fn insert(&mut self, table: &AllocTable, edge: Edge, distinct_occurrence: bool) -> bool {
+        let rows = self.groups.entry((edge.holder, edge.key)).or_default();
+        match rows.binary_search_by_key(&edge.held, |row| {
+            increment_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsInspected);
+            row.held
+        }) {
             Ok(position) => {
-                let existing = &mut self.rows[position];
+                let existing = &mut rows[position];
+                let before = *existing;
                 existing.writable &= edge.writable;
-                // A copied graph fact describes the same already-counted occurrence.
+                // Copied facts describe the same already-counted occurrence.
                 existing.single &= edge.single && !distinct_occurrence;
+                *existing != before
             }
             Err(position) => {
-                self.index_edge(&table.borrow(), edge);
-                self.rows.insert(position, edge);
+                let moved = if rows.len() == rows.capacity() {
+                    rows.len()
+                } else {
+                    rows.len() - position
+                };
+                add_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsMoved, moved + 1);
+                rows.insert(position, edge);
+                self.index_edge(table, edge);
+                true
             }
         }
+    }
+
+    fn take_group(&mut self, table: &AllocTable, holder: AllocId, key: FieldKey) -> Vec<Edge> {
+        let Some(rows) = self.groups.remove(&(holder, key)) else {
+            return Vec::new();
+        };
+        let group = (holder, key);
+        for edge in &rows {
+            increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+            if edge.held != AllocId::EMPTY {
+                self.incoming.remove(&(edge.held, holder, key));
+                remove_hash_bucket_member(&mut self.by_base, table.base(edge.held), &group);
+            }
+        }
+        remove_hash_bucket_member(&mut self.by_base, table.base(holder), &group);
+        self.prune_path(table, holder);
+        rows
     }
 
     fn remove_group(
@@ -364,44 +503,65 @@ impl EdgeRows {
         key: FieldKey,
         empty_only: bool,
     ) {
-        let std::ops::Range { start, end } = self.group_range(holder, key);
-        let start = if empty_only {
-            start + self.rows[start..end].partition_point(|e| e.held != AllocId::EMPTY)
-        } else {
-            start
-        };
-        if start != end {
-            add_frontend_counter(
-                FrontendCounter::BorrowReachIndexMaintenanceRows,
-                end - start,
-            );
-            for edge in self.rows.drain(start..end) {
-                if edge.held != AllocId::EMPTY {
-                    self.incoming.remove(&(edge.held, edge.holder, edge.key));
-                }
+        if empty_only {
+            let Some(rows) = self.groups.get_mut(&(holder, key)) else {
+                return;
+            };
+            increment_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsInspected);
+            if !rows.last().is_some_and(|row| row.held == AllocId::EMPTY) {
+                return;
             }
-            self.prune_path(&table.borrow(), holder);
+            if rows.len() > 1 {
+                rows.pop();
+                return;
+            }
         }
+        let rows = self.take_group(&table.borrow(), holder, key);
+        add_frontend_counter(
+            FrontendCounter::BorrowPublisherGroupRowsInspected,
+            rows.len(),
+        );
     }
 
-    fn edit(
+    fn rebase(
         &mut self,
         table: &mut AllocTable,
-        update: impl FnOnce(&mut Vec<Edge>, &mut AllocTable),
+        only: Option<AllocBase>,
+        replacement: &impl Fn(AllocBase) -> Option<AllocBase>,
+        rename: impl Fn(AllocId, &mut AllocTable) -> AllocId,
     ) {
-        update(&mut self.rows, table);
-        self.reindex(table);
-    }
-
-    fn reindex(&mut self, table: &AllocTable) {
-        add_frontend_counter(
-            FrontendCounter::BorrowReachIndexMaintenanceRows,
-            self.children.len() + self.incoming.len(),
-        );
-        self.children.clear();
-        self.incoming.clear();
-        for index in 0..self.rows.len() {
-            self.index_edge(table, self.rows[index]);
+        let mut affected = BTreeSet::new();
+        if let Some(base) = only {
+            increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+            if let Some(groups) = self.by_base.get(&base) {
+                add_frontend_counter(
+                    FrontendCounter::BorrowReachIndexMaintenanceRows,
+                    groups.len(),
+                );
+                affected.extend(groups);
+            }
+        } else {
+            for (&base, groups) in &self.by_base {
+                increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+                if replacement(base).is_some() {
+                    add_frontend_counter(
+                        FrontendCounter::BorrowReachIndexMaintenanceRows,
+                        groups.len(),
+                    );
+                    affected.extend(groups);
+                }
+            }
+        }
+        // Remove in the original coordinates before merging any colliding destinations.
+        let mut moved = Vec::new();
+        for (holder, key) in affected {
+            moved.extend(self.take_group(table, holder, key));
+        }
+        for mut edge in moved {
+            edge.holder = rename(edge.holder, table);
+            edge.held = rename(edge.held, table);
+            edge.single &= edge.held == AllocId::EMPTY || table.singular(edge.held);
+            self.insert(table, edge, true);
         }
     }
 }
@@ -433,32 +593,54 @@ impl PartialEq for SharingPairs {
 
 impl Eq for SharingPairs {}
 
-impl Deref for SharingPairs {
-    type Target = [(AllocId, AllocId, bool)];
-
-    fn deref(&self) -> &Self::Target {
-        &self.rows
-    }
-}
-
 impl SharingPairs {
+    fn iter(&self) -> impl Iterator<Item = &(AllocId, AllocId, bool)> {
+        self.rows.iter()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    #[cfg(feature = "benchmark_counters")]
+    fn stored_row_count(&self) -> usize {
+        self.rows.len() + self.positive_by_right.len()
+    }
+
+    fn search(&self, pair: (AllocId, AllocId)) -> Result<usize, usize> {
+        self.rows.binary_search_by_key(&pair, |&(a, b, _)| (a, b))
+    }
+
+    fn get(&self, left: AllocId, right: AllocId) -> Option<bool> {
+        self.search(ordered_pair(left, right))
+            .ok()
+            .map(|index| self.rows[index].2)
+    }
+
+    fn nontrivial_positive(left: AllocId, right: AllocId, positive: bool) -> bool {
+        positive && left != right
+    }
+
     fn union(&mut self, left: AllocId, right: AllocId, may_share: bool) {
         let (left, right) = ordered_pair(left, right);
-        match self
-            .rows
-            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
-        {
+        match self.search((left, right)) {
             Ok(index) => self.rows[index].2 |= may_share,
             Err(index) => self.rows.insert(index, (left, right, may_share)),
         }
-        if may_share && left != right {
+        if Self::nontrivial_positive(left, right, may_share) {
             increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
             self.positive_by_right.insert((right, left));
         }
     }
 
-    fn edit(&mut self, update: impl FnOnce(&mut Vec<(AllocId, AllocId, bool)>)) {
-        update(&mut self.rows);
+    fn remove(&mut self, left: AllocId, right: AllocId) -> bool {
+        let index = self.search((left, right)).expect("indexed sharing pair");
+        self.positive_by_right.remove(&(right, left));
+        self.rows.remove(index).2
+    }
+
+    fn retain(&mut self, keep: impl FnMut(&(AllocId, AllocId, bool)) -> bool) {
+        self.rows.retain(keep);
         add_frontend_counter(
             FrontendCounter::BorrowReachIndexMaintenanceRows,
             self.positive_by_right.len() + self.rows.len(),
@@ -466,38 +648,276 @@ impl SharingPairs {
         self.positive_by_right.clear();
         self.positive_by_right
             .extend(self.rows.iter().filter_map(|&(left, right, positive)| {
-                (positive && left != right).then_some((right, left))
+                Self::nontrivial_positive(left, right, positive).then_some((right, left))
             }));
+    }
+
+    fn visit_incidence(
+        &self,
+        id: AllocId,
+        mut each: impl FnMut((AllocId, AllocId)) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+        let start = self.rows.partition_point(|&(left, _, _)| {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            left < id
+        });
+        for &(left, right, positive) in self.rows[start..]
+            .iter()
+            .take_while(|&&(left, _, _)| left == id)
+        {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            if Self::nontrivial_positive(left, right, positive) {
+                each((left, right))?;
+            }
+        }
+        for left in paired_allocations(&self.positive_by_right, id) {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            each((left, id))?;
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SharingRow {
+    Member(AllocId, AllocId),
+    Projection(AllocId, FieldKey, AllocId),
+    Binding(WrapperId, AllocId),
+    Pair(AllocId, AllocId),
+}
+
+impl SharingRow {
+    fn map_ids(self, mut map: impl FnMut(AllocId) -> AllocId) -> Self {
+        match self {
+            Self::Member(a, b) => Self::Member(map(a), map(b)),
+            Self::Projection(a, key, b) => Self::Projection(map(a), key, map(b)),
+            Self::Binding(owner, id) => Self::Binding(owner, map(id)),
+            Self::Pair(a, b) => {
+                let (a, b) = ordered_pair(map(a), map(b));
+                Self::Pair(a, b)
+            }
+        }
     }
 }
 
 /// A view names an occurrence, not a new allocation. Its members give ordinary provenance,
 /// while a projection can name a new occurrence even when both paths have the same members.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 struct SharingLayer {
-    members: Vec<(AllocId, AllocId)>,
-    projections: Vec<(AllocId, FieldKey, AllocId)>,
+    members: BTreeSet<(AllocId, AllocId)>,
+    member_views: BTreeSet<(AllocId, AllocId)>,
+    projections: BTreeMap<(AllocId, FieldKey), BTreeSet<AllocId>>,
     bindings: Vec<(WrapperId, AllocId)>,
     pairs: SharingPairs,
+    by_base: BTreeMap<AllocBase, BTreeSet<SharingRow>>,
 }
 
+impl PartialEq for SharingLayer {
+    fn eq(&self, other: &Self) -> bool {
+        self.members == other.members
+            && self.projections == other.projections
+            && self.bindings == other.bindings
+            && self.pairs == other.pairs
+    }
+}
+
+impl Eq for SharingLayer {}
+
 impl SharingLayer {
-    fn members(&self, view: AllocId) -> impl Iterator<Item = AllocId> + '_ {
-        let start = self.members.partition_point(|(key, _)| *key < view);
-        self.members[start..]
+    fn index_row(
+        by_base: &mut BTreeMap<AllocBase, BTreeSet<SharingRow>>,
+        table: &AllocTable,
+        row: SharingRow,
+        insert: bool,
+    ) {
+        row.map_ids(|id| {
+            if id != AllocId::EMPTY {
+                let base = table.base(id);
+                if insert {
+                    by_base.entry(base).or_default().insert(row);
+                } else if let Some(rows) = by_base.get_mut(&base) {
+                    rows.remove(&row);
+                    if rows.is_empty() {
+                        by_base.remove(&base);
+                    }
+                }
+            }
+            id
+        });
+    }
+
+    fn edit_row(&mut self, table: &AllocTable, row: SharingRow, share: bool, insert: bool) -> bool {
+        Self::index_row(&mut self.by_base, table, row, insert);
+        match (row, insert) {
+            (SharingRow::Member(view, id), true) => self.insert_member(view, id),
+            (SharingRow::Member(view, id), false) => {
+                self.members.remove(&(view, id));
+                self.member_views.remove(&(id, view));
+            }
+            (SharingRow::Projection(holder, key, held), true) => {
+                return self
+                    .projections
+                    .entry((holder, key))
+                    .or_default()
+                    .insert(held);
+            }
+            (SharingRow::Projection(holder, key, held), false) => {
+                let group = self
+                    .projections
+                    .get_mut(&(holder, key))
+                    .expect("indexed projection");
+                group.remove(&held);
+                if group.is_empty() {
+                    self.projections.remove(&(holder, key));
+                }
+            }
+            (SharingRow::Binding(owner, view), true) => {
+                insert_fact(&mut self.bindings, (owner, view))
+            }
+            (SharingRow::Binding(owner, view), false) => {
+                let index = self
+                    .bindings
+                    .binary_search(&(owner, view))
+                    .expect("indexed view binding");
+                self.bindings.remove(index);
+            }
+            (SharingRow::Pair(a, b), true) => self.pairs.union(a, b, share),
+            (SharingRow::Pair(a, b), false) => return self.pairs.remove(a, b),
+        }
+        false
+    }
+
+    fn clear_projection(&mut self, table: &AllocTable, view: AllocId, key: FieldKey) {
+        if let Some(removed) = self.projections.remove(&(view, key)) {
+            add_frontend_counter(
+                FrontendCounter::BorrowPublisherGroupRowsInspected,
+                removed.len(),
+            );
+            for held in removed {
+                Self::index_row(
+                    &mut self.by_base,
+                    table,
+                    SharingRow::Projection(view, key, held),
+                    false,
+                );
+            }
+        }
+    }
+
+    fn retain_binding_owners(&mut self, table: &AllocTable, keep: impl Fn(WrapperId) -> bool) {
+        self.bindings.retain(|&(slot, view)| {
+            let keep = keep(slot);
+            if !keep {
+                Self::index_row(
+                    &mut self.by_base,
+                    table,
+                    SharingRow::Binding(slot, view),
+                    false,
+                );
+            }
+            keep
+        });
+    }
+
+    fn retain_live_views(&mut self, table: &AllocTable, live: &FxHashSet<AllocId>) {
+        self.members.retain(|&(view, _)| live.contains(&view));
+        self.member_views.retain(|&(_, view)| live.contains(&view));
+        self.projections
+            .retain(|&(holder, _), _| live.contains(&holder));
+        self.pairs
+            .retain(|&(a, b, _)| live.contains(&a) && live.contains(&b));
+        self.rebuild_bases(table);
+    }
+
+    fn rebuild_bases(&mut self, table: &AllocTable) {
+        self.by_base = self.rebuild_incidence(table);
+    }
+
+    fn rebuild_incidence(&self, table: &AllocTable) -> BTreeMap<AllocBase, BTreeSet<SharingRow>> {
+        let mut by_base = BTreeMap::new();
+        let rows = self
+            .members
             .iter()
-            .take_while(move |(key, _)| *key == view)
-            .map(|(_, id)| *id)
+            .map(|&(a, b)| SharingRow::Member(a, b))
+            .chain(self.projections.iter().flat_map(|(&(a, key), children)| {
+                children
+                    .iter()
+                    .map(move |&b| SharingRow::Projection(a, key, b))
+            }))
+            .chain(
+                self.bindings
+                    .iter()
+                    .map(|&(slot, view)| SharingRow::Binding(slot, view)),
+            )
+            .chain(self.pairs.iter().map(|&(a, b, _)| SharingRow::Pair(a, b)));
+        for row in rows {
+            Self::index_row(&mut by_base, table, row, true);
+        }
+        by_base
+    }
+
+    fn rebase(
+        &mut self,
+        table: &mut AllocTable,
+        only: Option<AllocBase>,
+        affected: impl Fn(AllocBase) -> bool,
+        rename: impl Fn(AllocId, &mut AllocTable) -> AllocId,
+    ) {
+        let rows: BTreeSet<_> = if let Some(base) = only {
+            self.by_base
+                .get(&base)
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect()
+        } else {
+            self.by_base
+                .iter()
+                .filter(|(base, _)| affected(**base))
+                .flat_map(|(_, rows)| rows.iter().copied())
+                .collect()
+        };
+        let moved: Vec<_> = rows
+            .into_iter()
+            .map(|row| {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
+                let shares = self.edit_row(table, row, false, false);
+                (row, shares)
+            })
+            .collect();
+        for (row, shares) in moved {
+            let row = row.map_ids(|id| rename(id, table));
+            self.edit_row(table, row, shares, true);
+        }
+    }
+
+    fn members(&self, view: AllocId) -> impl Iterator<Item = AllocId> + '_ {
+        paired_allocations(&self.members, view)
+    }
+
+    fn insert_member(&mut self, view: AllocId, id: AllocId) {
+        if self.members.insert((view, id)) {
+            self.member_views.insert((id, view));
+        }
+    }
+
+    fn views_for(&self, id: AllocId) -> impl Iterator<Item = AllocId> + '_ {
+        paired_allocations(&self.member_views, id)
     }
 
     fn projections(&self, view: AllocId, key: FieldKey) -> impl Iterator<Item = AllocId> + '_ {
-        let start = self
-            .projections
-            .partition_point(|&(holder, field, _)| (holder, field) < (view, key));
-        self.projections[start..]
-            .iter()
-            .take_while(move |&&(holder, field, _)| (holder, field) == (view, key))
-            .map(|&(_, _, child)| child)
+        self.projections
+            .get(&(view, key))
+            .into_iter()
+            .flatten()
+            .copied()
+    }
+
+    fn projected_by(&self, view: AllocId) -> impl Iterator<Item = (FieldKey, AllocId)> + '_ {
+        self.projections
+            .range(holder_group_range(view))
+            .flat_map(|(&(_, key), children)| children.iter().map(move |&child| (key, child)))
     }
 
     fn bindings(&self, local: WrapperId) -> impl Iterator<Item = AllocId> + '_ {
@@ -508,19 +928,23 @@ impl SharingLayer {
             .map(|(_, view)| *view)
     }
 
-    fn clear_bindings(&mut self, local: WrapperId) {
+    fn clear_bindings(&mut self, table: &AllocTable, local: WrapperId) {
         let range = slot_group(&self.bindings, local, |&(owner, _)| owner);
         if !range.is_empty() {
+            for &(_, view) in &self.bindings[range.clone()] {
+                Self::index_row(
+                    &mut self.by_base,
+                    table,
+                    SharingRow::Binding(local, view),
+                    false,
+                );
+            }
             drop(self.bindings.drain(range));
         }
     }
 
     fn possible_pair(&self, left: AllocId, right: AllocId) -> Option<bool> {
-        let (left, right) = ordered_pair(left, right);
-        self.pairs
-            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
-            .ok()
-            .map(|index| self.pairs[index].2)
+        self.pairs.get(left, right)
     }
 
     fn is_empty(&self) -> bool {
@@ -554,26 +978,37 @@ fn slot_group<T>(
     start..start + count
 }
 
+type BoundRow = (WrapperId, AllocId, bool);
+
 /// Explicit heap and slot contents, plus the sparse wrapper relation.
 #[derive(Debug, Clone)]
 pub(in super::super) struct AllocationLayer {
     table: Rc<RefCell<AllocTable>>,
     edges: EdgeRows,
     /// A missing current slot payload is described by its ordinary value roots.
-    bound: Vec<(WrapperId, AllocId, bool)>,
+    bound: BTreeMap<WrapperId, Vec<BoundRow>>,
+    bound_by_base: BTreeSet<(AllocBase, WrapperId)>,
     /// Exceptional contents, by cell; dependency-free allocation edges stay compact.
-    contents: Vec<(CellId, ValueAlternatives)>,
+    contents: BTreeMap<CellId, ValueAlternatives>,
+    cells_by_base: FxHashMap<AllocBase, BTreeSet<CellId>>,
     wrappers: Vec<BindingRow>,
-    may_have_value_routes: bool,
-    observations: Vec<Observation>,
+    wrapper_users: BTreeSet<(WrapperId, WrapperId)>,
+    wrappers_by_base: BTreeSet<(AllocBase, WrapperId)>,
+    slot_root_users: BTreeSet<(usize, usize)>,
+    route_rows: usize,
+    observations: BTreeMap<usize, Observation>,
+    observations_by_base: BTreeSet<(AllocBase, usize)>,
+    observation_routes: BTreeMap<usize, BTreeSet<ObservationRoute>>,
+    observations_by_route: BTreeSet<(ObservationRoute, usize)>,
     /// (Result binding, former holder) pairs whose reachable graphs are disjoint on every path.
-    detached: Vec<(u32, AllocId)>,
+    detached: BTreeSet<(u32, AllocId)>,
+    detached_by_base: BTreeSet<(AllocBase, u32, AllocId)>,
     sharing: SharingLayer,
 }
 
 impl PartialEq for AllocationLayer {
     fn eq(&self, other: &Self) -> bool {
-        self.edges.rows == other.edges.rows
+        self.edges.groups == other.edges.groups
             && self.bound == other.bound
             && self.contents == other.contents
             && self.wrappers == other.wrappers
@@ -590,12 +1025,21 @@ impl AllocationLayer {
         Self {
             table: Rc::new(RefCell::new(AllocTable::default())),
             edges: EdgeRows::default(),
-            bound: Vec::new(),
-            contents: Vec::new(),
+            bound: BTreeMap::new(),
+            bound_by_base: BTreeSet::new(),
+            contents: BTreeMap::new(),
+            cells_by_base: FxHashMap::default(),
             wrappers: Vec::new(),
-            may_have_value_routes: false,
-            observations: Vec::new(),
-            detached: Vec::new(),
+            wrapper_users: BTreeSet::new(),
+            wrappers_by_base: BTreeSet::new(),
+            slot_root_users: BTreeSet::new(),
+            route_rows: 0,
+            observations: BTreeMap::new(),
+            observations_by_base: BTreeSet::new(),
+            observation_routes: BTreeMap::new(),
+            observations_by_route: BTreeSet::new(),
+            detached: BTreeSet::new(),
+            detached_by_base: BTreeSet::new(),
             sharing: SharingLayer::default(),
         }
     }
@@ -610,33 +1054,215 @@ impl AllocationLayer {
             && self.sharing.is_empty()
     }
 
+    #[cfg(feature = "benchmark_counters")]
+    pub(super) fn row_count(&self) -> usize {
+        self.edges.stored_row_count()
+            + self.bound.values().map(Vec::len).sum::<usize>()
+            + self.bound_by_base.len()
+            + self.contents.values().map(Vec::len).sum::<usize>()
+            + self.wrappers.len()
+            + self.wrapper_users.len()
+            + self.wrappers_by_base.len()
+            + self.slot_root_users.len()
+            + self
+                .cells_by_base
+                .values()
+                .map(BTreeSet::len)
+                .sum::<usize>()
+            + self.observations.len()
+            + self.observations_by_base.len()
+            + self.observations_by_route.len() * 2
+            + self.detached.len()
+            + self.detached_by_base.len()
+            + self.sharing.members.len()
+            + self.sharing.member_views.len()
+            + self
+                .sharing
+                .projections
+                .values()
+                .map(BTreeSet::len)
+                .sum::<usize>()
+            + self.sharing.bindings.len()
+            + self.sharing.pairs.stored_row_count()
+            + self
+                .sharing
+                .by_base
+                .values()
+                .map(BTreeSet::len)
+                .sum::<usize>()
+    }
+
+    fn edit_wrapper_incidence(
+        users: &mut BTreeSet<(WrapperId, WrapperId)>,
+        route_rows: &mut usize,
+        row: &BindingRow,
+        insert: bool,
+    ) {
+        if !row.routes.is_empty() {
+            if insert {
+                *route_rows += 1;
+            } else {
+                *route_rows -= 1;
+            }
+        }
+        let mut record = |target: WrapperId| {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
+            if insert {
+                users.insert((target, row.wrapper));
+            } else {
+                users.remove(&(target, row.wrapper));
+            }
+        };
+        for alt in row.alts.as_slice() {
+            if let BindingTarget::Link(target) = alt.target {
+                record(target);
+            }
+            if let Some(origin) = alt.origin {
+                record(origin.wrapper);
+                if let Some(owner) = origin.owner {
+                    record(owner);
+                }
+            }
+        }
+    }
+
+    fn wrapper_users(&self, target: WrapperId) -> impl Iterator<Item = WrapperId> + '_ {
+        let min = WrapperId::current(0);
+        let max = WrapperId::current(usize::MAX).retired(|_| true);
+        increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
+        self.wrapper_users
+            .range((target, min)..=(target, max))
+            .map(|&(_, user)| {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
+                user
+            })
+    }
+
+    fn replace_wrappers(&mut self, rows: Vec<BindingRow>) {
+        self.wrappers = rows;
+        self.rebuild_wrapper_incidence();
+    }
+
+    fn retain_wrappers(&mut self, keep: impl Fn(WrapperId) -> bool) {
+        let table = self.table.borrow();
+        self.wrappers.retain(|row| {
+            let keep = keep(row.wrapper);
+            if !keep {
+                Self::edit_wrapper_incidence(
+                    &mut self.wrapper_users,
+                    &mut self.route_rows,
+                    row,
+                    false,
+                );
+                Self::index_wrapper_slot_roots(&mut self.slot_root_users, row, false);
+                Self::index_wrapper_allocations(&table, &mut self.wrappers_by_base, row, false);
+            }
+            keep
+        });
+    }
+
+    fn rebuild_wrapper_incidence(&mut self) {
+        self.wrapper_users.clear();
+        self.slot_root_users.clear();
+        self.wrappers_by_base.clear();
+        let table = self.table.borrow();
+        self.route_rows = 0;
+        for row in &self.wrappers {
+            Self::edit_wrapper_incidence(&mut self.wrapper_users, &mut self.route_rows, row, true);
+            Self::index_wrapper_slot_roots(&mut self.slot_root_users, row, true);
+            Self::index_wrapper_allocations(&table, &mut self.wrappers_by_base, row, true);
+        }
+    }
+
+    fn index_wrapper_slot_roots(
+        users: &mut BTreeSet<(usize, usize)>,
+        row: &BindingRow,
+        insert: bool,
+    ) {
+        if row.wrapper.age == WrapperAge::Current
+            && row.has_slot()
+            && let Some(roots) = &row.slot_roots
+        {
+            super::index_roots(users, row.wrapper.local, roots, insert);
+        }
+    }
+
     fn contents(&self, cell: CellId) -> &[ValueAlt] {
-        self.contents
-            .binary_search_by_key(&cell, |row| row.0)
-            .ok()
-            .map_or(&[], |index| self.contents[index].1.as_slice())
+        increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
+        self.contents.get(&cell).map_or(&[], Vec::as_slice)
     }
 
     fn take_contents(&mut self, cell: CellId) -> Option<(CellId, ValueAlternatives)> {
-        let index = self
-            .contents
-            .binary_search_by_key(&cell, |row| row.0)
-            .ok()?;
-        Some(self.contents.remove(index))
+        increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
+        let row = self.contents.remove_entry(&cell)?;
+        Self::edit_cell_incidence(
+            &self.table.borrow(),
+            &mut self.cells_by_base,
+            cell,
+            &row.1,
+            false,
+        );
+        Some(row)
+    }
+
+    fn edit_cell_incidence(
+        table: &AllocTable,
+        by_base: &mut FxHashMap<AllocBase, BTreeSet<CellId>>,
+        cell: CellId,
+        values: &[ValueAlt],
+        insert: bool,
+    ) {
+        let mut record = |id| {
+            if id == AllocId::EMPTY {
+                return;
+            }
+            increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
+            let base = table.base(id);
+            if insert {
+                by_base.entry(base).or_default().insert(cell);
+            } else {
+                remove_hash_bucket_member(by_base, base, &cell);
+            }
+        };
+        if let CellId::Projected(holder, _) = cell {
+            record(holder);
+        }
+        values.iter().flat_map(value_allocations).for_each(record);
+    }
+
+    fn replace_contents(&mut self, contents: BTreeMap<CellId, ValueAlternatives>) {
+        let table = self.table.borrow();
+        self.cells_by_base.clear();
+        for (&cell, values) in &contents {
+            Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, values, true);
+        }
+        self.contents = contents;
+    }
+
+    fn retain_contents(&mut self, keep: impl Fn(CellId, &AllocTable) -> bool) {
+        let table = self.table.borrow();
+        self.contents.retain(|&cell, values| {
+            let keeps = keep(cell, &table);
+            if !keeps {
+                Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, values, false);
+            }
+            keeps
+        });
     }
 
     fn set_contents(&mut self, cell: CellId, mut alternatives: ValueAlternatives) {
         alternatives.sort_unstable();
         alternatives.dedup();
-        match self.contents.binary_search_by_key(&cell, |row| row.0) {
-            Ok(index) if alternatives.is_empty() => {
-                self.contents.remove(index);
-            }
-            Ok(index) => self.contents[index].1 = alternatives,
-            Err(index) if !alternatives.is_empty() => {
-                self.contents.insert(index, (cell, alternatives))
-            }
-            Err(_) => {}
+        self.take_contents(cell);
+        if !alternatives.is_empty() {
+            Self::edit_cell_incidence(
+                &self.table.borrow(),
+                &mut self.cells_by_base,
+                cell,
+                &alternatives,
+                true,
+            );
+            self.contents.insert(cell, alternatives);
         }
     }
 
@@ -720,14 +1346,205 @@ impl AllocationLayer {
     }
 
     fn bound_of(&self, local: WrapperId) -> &[(WrapperId, AllocId, bool)] {
-        &self.bound[slot_group(&self.bound, local, |&(owner, _, _)| owner)]
+        self.bound
+            .get(&local)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn index_bound(
+        table: &AllocTable,
+        index: &mut BTreeSet<(AllocBase, WrapperId)>,
+        rows: &[BoundRow],
+        insert: bool,
+    ) {
+        for &(owner, id, _) in rows {
+            index_base_rows(table, index, owner, [id], insert);
+        }
+    }
+
+    fn set_bound(&mut self, owner: WrapperId, rows: Vec<BoundRow>) {
+        let old = self.bound.remove(&owner);
+        if old.is_none() && rows.is_empty() {
+            return;
+        }
+        let table = self.table.borrow();
+        if let Some(old) = old {
+            Self::index_bound(&table, &mut self.bound_by_base, &old, false);
+        }
+        if !rows.is_empty() {
+            Self::index_bound(&table, &mut self.bound_by_base, &rows, true);
+            self.bound.insert(owner, rows);
+        }
+    }
+
+    fn replace_bound(&mut self, mut rows: BTreeMap<WrapperId, Vec<BoundRow>>) -> bool {
+        for group in rows.values_mut() {
+            normalize_bindings(group);
+        }
+        if self.bound == rows {
+            return false;
+        }
+        let table = self.table.borrow();
+        self.bound_by_base.clear();
+        for group in rows.values() {
+            Self::index_bound(&table, &mut self.bound_by_base, group, true);
+        }
+        self.bound = rows;
+        true
+    }
+
+    fn retain_bound(&mut self, keep: impl Fn(WrapperId) -> bool) {
+        let table = self.table.borrow();
+        self.bound.retain(|&slot, rows| {
+            let keep = keep(slot);
+            if !keep {
+                Self::index_bound(&table, &mut self.bound_by_base, rows, false);
+            }
+            keep
+        });
+    }
+
+    fn extend_bound(&mut self, owner: WrapperId, rows: impl IntoIterator<Item = BoundRow>) {
+        let group = self.bound.entry(owner).or_default();
+        let start = group.len();
+        group.extend(rows);
+        Self::index_bound(
+            &self.table.borrow(),
+            &mut self.bound_by_base,
+            &group[start..],
+            true,
+        );
+        normalize_bindings(group);
+        if group.is_empty() {
+            self.bound.remove(&owner);
+        }
+    }
+
+    fn index_wrapper_allocations(
+        table: &AllocTable,
+        index: &mut BTreeSet<(AllocBase, WrapperId)>,
+        row: &BindingRow,
+        insert: bool,
+    ) {
+        let targets = row
+            .alts
+            .as_slice()
+            .iter()
+            .filter_map(|alt| match alt.target {
+                BindingTarget::Projected(holder, _) => Some(holder),
+                _ => None,
+            });
+        let routes = row.routes.iter().flat_map(|(cell, deps)| {
+            let target = match cell {
+                CellId::Projected(holder, _) => Some(*holder),
+                _ => None,
+            };
+            target.into_iter().chain(
+                deps.iter()
+                    .flat_map(|dep| dep.entries.as_slice().iter().copied()),
+            )
+        });
+        index_base_rows(table, index, row.wrapper, targets.chain(routes), insert);
     }
 
     fn observation(&self, local: usize) -> Option<&Observation> {
-        self.observations
-            .binary_search_by_key(&local, |entry| entry.local)
-            .ok()
-            .map(|index| &self.observations[index])
+        self.observations.get(&local)
+    }
+
+    fn index_observation(
+        table: &AllocTable,
+        by_base: &mut BTreeSet<(AllocBase, usize)>,
+        entry: &Observation,
+        insert: bool,
+    ) {
+        let ids = entry
+            .values
+            .iter()
+            .map(|value| value.id)
+            .chain(entry.views.iter().copied())
+            .chain(entry.alternatives.iter().flat_map(value_allocations));
+        index_base_rows(table, by_base, entry.local, ids, insert);
+    }
+
+    fn set_observation(&mut self, local: usize, entry: Option<Observation>) {
+        let old = self.observations.remove(&local);
+        if old.is_none() && entry.is_none() {
+            return;
+        }
+        self.remove_observation_routes(local);
+        let table = self.table.borrow();
+        if let Some(old) = old {
+            Self::index_observation(&table, &mut self.observations_by_base, &old, false);
+        }
+        if let Some(entry) = entry {
+            Self::index_observation(&table, &mut self.observations_by_base, &entry, true);
+            self.observations.insert(local, entry);
+        }
+    }
+
+    fn remove_observation_routes(&mut self, local: usize) {
+        if let Some(old) = self.observation_routes.remove(&local) {
+            for route in old {
+                self.observations_by_route.remove(&(route, local));
+            }
+        }
+    }
+
+    fn set_observation_routes(&mut self, local: usize, routes: BTreeSet<ObservationRoute>) {
+        self.remove_observation_routes(local);
+        self.observations_by_route
+            .extend(routes.iter().map(|&route| (route, local)));
+        self.observation_routes.insert(local, routes);
+    }
+
+    fn clear_observations(&mut self) {
+        self.observations.clear();
+        self.observations_by_base.clear();
+        self.observation_routes.clear();
+        self.observations_by_route.clear();
+    }
+
+    fn retain_observations(&mut self, keep: impl Fn(&Observation) -> bool) {
+        let removed: Vec<_> = self
+            .observations
+            .values()
+            .filter(|entry| !keep(entry))
+            .map(|entry| entry.local)
+            .collect();
+        for local in removed {
+            self.set_observation(local, None);
+        }
+    }
+
+    fn join_observations(
+        &mut self,
+        other: &Self,
+        mut merge: impl FnMut(&mut Observation, &Observation) -> bool,
+    ) -> bool {
+        let table = self.table.borrow();
+        let mut removed = Vec::new();
+        let mut changed = false;
+        let by_base = &mut self.observations_by_base;
+        self.observations.retain(|&local, row| {
+            let Some(incoming) = other.observation(local) else {
+                Self::index_observation(&table, by_base, row, false);
+                removed.push(local);
+                return false;
+            };
+            if row != incoming {
+                Self::index_observation(&table, by_base, row, false);
+                changed |= merge(row, incoming);
+                Self::index_observation(&table, by_base, row, true);
+            }
+            true
+        });
+        drop(table);
+        changed |= !removed.is_empty();
+        for local in removed {
+            self.remove_observation_routes(local);
+        }
+        changed
     }
 
     fn projected_holders(&self) -> impl Iterator<Item = AllocId> + '_ {
@@ -745,7 +1562,8 @@ impl AllocationLayer {
     }
 
     fn insert_edge(&mut self, edge: Edge, distinct_occurrence: bool) {
-        self.edges.insert(&self.table, edge, distinct_occurrence);
+        self.edges
+            .insert(&self.table.borrow(), edge, distinct_occurrence);
     }
 
     /// Whether `descendant` is `ancestor` or a lazy descendant still held through every step.
@@ -904,7 +1722,8 @@ impl AllocationLayer {
                 || (edge.held != AllocId::EMPTY && table.base(edge.held) == base)
         }) || self
             .bound
-            .iter()
+            .values()
+            .flatten()
             .any(|&(_, id, _)| id != AllocId::EMPTY && table.base(id) == base)
             || self
                 .projected_holders()
@@ -980,16 +1799,7 @@ impl AllocationLayer {
                 }
             }
             for &view in &route.views {
-                let start = self
-                    .sharing
-                    .projections
-                    .partition_point(|(holder, _, _)| *holder < view);
-                keys.extend(
-                    self.sharing.projections[start..]
-                        .iter()
-                        .take_while(|(holder, _, _)| *holder == view)
-                        .map(|(_, key, _)| *key),
-                );
+                keys.extend(self.sharing.projected_by(view).map(|(key, _)| key));
             }
             keys.sort_unstable();
             keys.dedup();
@@ -1114,63 +1924,162 @@ impl AllocationLayer {
         }
     }
 
-    fn refers_to_allocations(&self, mentions: impl Fn(AllocId) -> bool) -> bool {
-        let dependencies_mention = |deps: &DependencySet| {
-            deps.iter()
-                .any(|dep| dep.entries.as_slice().iter().copied().any(&mentions))
-        };
-        let value_mentions = |value: &ValueAlt| {
-            matches!(value.kind, ValueKind::Allocation(value) if mentions(value.id))
-                || dependencies_mention(&value.deps)
-        };
-        let cell_mentions = |cell| matches!(cell, CellId::Projected(holder, _) if mentions(holder));
-        self.edges
+    fn edit_detachment(
+        facts: &mut BTreeSet<(u32, AllocId)>,
+        by_base: &mut BTreeSet<(AllocBase, u32, AllocId)>,
+        table: &AllocTable,
+        key: (u32, AllocId),
+        insert: bool,
+    ) {
+        let (owner, holder) = key;
+        if insert {
+            facts.insert(key);
+        } else {
+            facts.remove(&key);
+        }
+        if holder != AllocId::EMPTY {
+            let incidence = (table.base(holder), owner, holder);
+            if insert {
+                by_base.insert(incidence);
+            } else {
+                by_base.remove(&incidence);
+            }
+        }
+    }
+
+    fn clear_detachments(&mut self, owner: usize) {
+        let table = self.table.borrow();
+        let owner = owner as u32;
+        while let Some(&key) = self
+            .detached
+            .range((owner, AllocId::MIN)..=(owner, AllocId::MAX))
+            .next()
+        {
+            Self::edit_detachment(
+                &mut self.detached,
+                &mut self.detached_by_base,
+                &table,
+                key,
+                false,
+            );
+        }
+    }
+
+    fn retain_detachment_owners(&mut self, keep: impl Fn(u32) -> bool) {
+        let removed: Vec<_> = self
+            .detached
             .iter()
-            .any(|edge| mentions(edge.holder) || mentions(edge.held))
-            || self.bound.iter().any(|(_, id, _)| mentions(*id))
-            || self.projected_holders().any(&mentions)
-            || self.observations.iter().any(|entry| {
-                entry.values.iter().any(|value| mentions(value.id))
-                    || entry.views.iter().copied().any(&mentions)
-                    || entry.alternatives.iter().any(value_mentions)
-            })
-            || self
-                .contents
-                .iter()
-                .any(|(cell, values)| cell_mentions(*cell) || values.iter().any(value_mentions))
-            || self.wrappers.iter().any(|row| {
-                row.routes
-                    .iter()
-                    .any(|(cell, deps)| cell_mentions(*cell) || dependencies_mention(deps))
-            })
-            || self
-                .sharing
-                .members
-                .iter()
-                .any(|&(view, id)| mentions(view) || mentions(id))
-            || self
-                .sharing
-                .projections
-                .iter()
-                .any(|&(from, _, to)| mentions(from) || mentions(to))
-            || self
-                .sharing
-                .bindings
-                .iter()
-                .any(|&(_, view)| mentions(view))
-            || self
-                .sharing
-                .pairs
-                .iter()
-                .any(|&(left, right, _)| mentions(left) || mentions(right))
+            .copied()
+            .filter(|&(owner, _)| !keep(owner))
+            .collect();
+        let table = self.table.borrow();
+        for key in removed {
+            Self::edit_detachment(
+                &mut self.detached,
+                &mut self.detached_by_base,
+                &table,
+                key,
+                false,
+            );
+        }
     }
 
     /// Rebase only allocations named by this layer, not every key in the shared interner.
-    fn rename_bases(&mut self, replacement: impl Fn(AllocBase) -> Option<AllocBase>) {
+    fn rename_bases(
+        &mut self,
+        only: Option<AllocBase>,
+        replacement: impl Fn(AllocBase) -> Option<AllocBase>,
+    ) {
         let mut table = self.table.borrow_mut();
-        let mentions = |id: AllocId| id != AllocId::EMPTY && replacement(table.base(id)).is_some();
-        self.detached.retain(|(_, holder)| !mentions(*holder));
-        if !self.refers_to_allocations(mentions) {
+        let detached = if let Some(base) = only {
+            self.detached_by_base
+                .range((base, 0, AllocId::MIN)..=(base, u32::MAX, AllocId::MAX))
+                .map(|&(_, owner, holder)| (owner, holder))
+                .collect::<Vec<_>>()
+        } else {
+            self.detached_by_base
+                .iter()
+                .filter(|&&(base, _, _)| replacement(base).is_some())
+                .map(|&(_, owner, holder)| (owner, holder))
+                .collect()
+        };
+        for key in detached {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
+            Self::edit_detachment(
+                &mut self.detached,
+                &mut self.detached_by_base,
+                &table,
+                key,
+                false,
+            );
+        }
+        let affected = |base| {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
+            replacement(base).is_some()
+        };
+        let has_edges = if let Some(base) = only {
+            self.edges.by_base.contains_key(&base)
+        } else {
+            self.edges.by_base.keys().copied().any(affected)
+        };
+        let cells: BTreeSet<_> = if let Some(base) = only {
+            self.cells_by_base
+                .get(&base)
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect()
+        } else {
+            self.cells_by_base
+                .iter()
+                .filter(|(base, _)| affected(**base))
+                .flat_map(|(_, cells)| cells.iter().copied())
+                .collect()
+        };
+        let observations: Vec<_> = if let Some(base) = only {
+            self.observations_by_base
+                .range((base, 0)..=(base, usize::MAX))
+                .map(|&(_, local)| local)
+                .collect()
+        } else {
+            self.observations_by_base
+                .iter()
+                .filter(|&&(base, _)| affected(base))
+                .map(|&(_, local)| local)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        };
+        let sharing = only.map_or_else(
+            || self.sharing.by_base.keys().copied().any(affected),
+            |base| self.sharing.by_base.contains_key(&base),
+        );
+        let select = |index: &BTreeSet<(AllocBase, WrapperId)>| -> BTreeSet<_> {
+            if let Some(base) = only {
+                index
+                    .range(
+                        (base, WrapperId::current(0))
+                            ..=(base, WrapperId::current(usize::MAX).retired(|_| true)),
+                    )
+                    .map(|&(_, owner)| owner)
+                    .collect()
+            } else {
+                index
+                    .iter()
+                    .filter(|&&(base, _)| affected(base))
+                    .map(|&(_, owner)| owner)
+                    .collect()
+            }
+        };
+        let bound = select(&self.bound_by_base);
+        let wrappers = select(&self.wrappers_by_base);
+        if !has_edges
+            && cells.is_empty()
+            && observations.is_empty()
+            && !sharing
+            && bound.is_empty()
+            && wrappers.is_empty()
+        {
             return;
         }
         let rename = |id: AllocId, table: &mut AllocTable| {
@@ -1181,43 +2090,47 @@ impl AllocationLayer {
             }
             id
         };
-        self.edges.edit(&mut table, |edges, table| {
-            for edge in edges.iter_mut() {
-                edge.holder = rename(edge.holder, table);
-                edge.held = rename(edge.held, table);
-                if edge.held != AllocId::EMPTY && !table.singular(edge.held) {
-                    edge.single = false;
+        if has_edges {
+            self.edges.rebase(&mut table, only, &replacement, rename);
+        }
+        for owner in bound {
+            let rows = self.bound.get_mut(&owner).expect("indexed slot payload");
+            add_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows, rows.len());
+            Self::index_bound(&table, &mut self.bound_by_base, rows, false);
+            for (_, id, _) in rows.iter_mut() {
+                *id = rename(*id, &mut table);
+            }
+            normalize_bindings(rows);
+            Self::index_bound(&table, &mut self.bound_by_base, rows, true);
+        }
+        let mut pending = Vec::with_capacity(cells.len());
+        for cell in cells {
+            if let Some(values) = self.contents.remove(&cell) {
+                Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, &values, false);
+                pending.push((cell, values));
+            }
+        }
+        for (cell, mut alternatives) in pending {
+            let cell = cell.remap(|wrapper| wrapper, |id| rename(id, &mut table));
+            remap_value_alternatives(&mut alternatives, |id| rename(id, &mut table));
+            Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, &alternatives, true);
+            match self.contents.entry(cell) {
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    merge_alternatives(entry.get_mut(), alternatives);
+                }
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(alternatives);
                 }
             }
-            edges.sort_by_key(Edge::sort_key);
-            edges.dedup_by(|later, earlier| {
-                if later.sort_key() != earlier.sort_key() {
-                    return false;
-                }
-                earlier.writable &= later.writable;
-                earlier.single = false;
-                true
-            });
-        });
-        for (_, id, _) in &mut self.bound {
-            *id = rename(*id, &mut table);
         }
-        normalize_bindings(&mut self.bound);
-        for (cell, alternatives) in &mut self.contents {
-            if let CellId::Projected(holder, _) = cell {
-                *holder = rename(*holder, &mut table);
-            }
-            remap_value_alternatives(alternatives, |id| rename(id, &mut table));
-        }
-        self.contents.sort_unstable_by_key(|row| row.0);
-        self.contents.dedup_by(|later, earlier| {
-            if later.0 != earlier.0 {
-                return false;
-            }
-            merge_alternatives(&mut earlier.1, std::mem::take(&mut later.1));
-            true
-        });
-        for row in &mut self.wrappers {
+        for owner in wrappers {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
+            let index = self
+                .wrappers
+                .binary_search_by_key(&owner, |row| row.wrapper)
+                .expect("indexed wrapper");
+            let row = &mut self.wrappers[index];
+            Self::index_wrapper_allocations(&table, &mut self.wrappers_by_base, row, false);
             row.alts.remap(|alt| match alt.target {
                 BindingTarget::Projected(holder, key) => BindingAlt {
                     target: BindingTarget::Projected(rename(holder, &mut table), key),
@@ -1234,8 +2147,15 @@ impl AllocationLayer {
             }
             row.routes.sort_unstable();
             row.routes.dedup();
+            Self::index_wrapper_allocations(&table, &mut self.wrappers_by_base, row, true);
         }
-        for entry in &mut self.observations {
+        for local in observations {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
+            let entry = self
+                .observations
+                .get_mut(&local)
+                .expect("indexed observation");
+            Self::index_observation(&table, &mut self.observations_by_base, entry, false);
             for value in &mut entry.values {
                 value.id = rename(value.id, &mut table);
             }
@@ -1244,38 +2164,11 @@ impl AllocationLayer {
             }
             remap_value_alternatives(&mut entry.alternatives, |id| rename(id, &mut table));
             normalize_observation(entry);
+            Self::index_observation(&table, &mut self.observations_by_base, entry, true);
         }
-        for (view, id) in &mut self.sharing.members {
-            *view = rename(*view, &mut table);
-            *id = rename(*id, &mut table);
+        if sharing {
+            self.sharing.rebase(&mut table, only, affected, rename);
         }
-        self.sharing.members.sort_unstable();
-        self.sharing.members.dedup();
-        for (holder, _, child) in &mut self.sharing.projections {
-            *holder = rename(*holder, &mut table);
-            *child = rename(*child, &mut table);
-        }
-        self.sharing.projections.sort_unstable();
-        self.sharing.projections.dedup();
-        for (_, view) in &mut self.sharing.bindings {
-            *view = rename(*view, &mut table);
-        }
-        self.sharing.bindings.sort_unstable();
-        self.sharing.bindings.dedup();
-        self.sharing.pairs.edit(|pairs| {
-            for (left, right, _) in pairs.iter_mut() {
-                (*left, *right) =
-                    ordered_pair(rename(*left, &mut table), rename(*right, &mut table));
-            }
-            pairs.sort_unstable();
-            pairs.dedup_by(|right, left| {
-                if (left.0, left.1) != (right.0, right.1) {
-                    return false;
-                }
-                left.2 |= right.2;
-                true
-            });
-        });
     }
 }
 
@@ -1585,9 +2478,9 @@ impl BorrowState {
     pub(in super::super) fn allocation_observer_locals(&self) -> impl Iterator<Item = usize> + '_ {
         self.layer
             .bound
-            .chunk_by(|left, right| left.0 == right.0)
-            .filter_map(|group| (group[0].0.age == WrapperAge::Current).then_some(group[0].0.local))
-            .chain(self.layer.observations.iter().map(|entry| entry.local))
+            .keys()
+            .filter_map(|slot| (slot.age == WrapperAge::Current).then_some(slot.local))
+            .chain(self.layer.observations.keys().copied())
             // A lazy, unnamed owner can still reach an explicitly stored descendant.
             .chain(
                 self.layer
@@ -1598,23 +2491,65 @@ impl BorrowState {
     }
 
     fn put_binding_row(&mut self, row: BindingRow) {
-        self.layer.may_have_value_routes |= !row.routes.is_empty();
-        match self
-            .layer
+        let wrapper = row.wrapper;
+        let layer = &mut self.layer;
+        let table = layer.table.borrow();
+        match layer
             .wrappers
             .binary_search_by_key(&row.wrapper, |row| row.wrapper)
         {
             Ok(index) => {
-                let removed_routes =
-                    row.routes.is_empty() && !self.layer.wrappers[index].routes.is_empty();
-                self.layer.wrappers[index] = row;
-                if removed_routes {
-                    self.layer.may_have_value_routes =
-                        self.layer.wrappers.iter().any(|row| !row.routes.is_empty());
-                }
+                let old = std::mem::replace(&mut layer.wrappers[index], row);
+                AllocationLayer::index_wrapper_allocations(
+                    &table,
+                    &mut layer.wrappers_by_base,
+                    &old,
+                    false,
+                );
+                AllocationLayer::index_wrapper_allocations(
+                    &table,
+                    &mut layer.wrappers_by_base,
+                    &layer.wrappers[index],
+                    true,
+                );
+                AllocationLayer::index_wrapper_slot_roots(&mut layer.slot_root_users, &old, false);
+                AllocationLayer::index_wrapper_slot_roots(
+                    &mut layer.slot_root_users,
+                    &layer.wrappers[index],
+                    true,
+                );
+                AllocationLayer::edit_wrapper_incidence(
+                    &mut layer.wrapper_users,
+                    &mut layer.route_rows,
+                    &old,
+                    false,
+                );
+                AllocationLayer::edit_wrapper_incidence(
+                    &mut layer.wrapper_users,
+                    &mut layer.route_rows,
+                    &layer.wrappers[index],
+                    true,
+                );
             }
-            Err(index) => self.layer.wrappers.insert(index, row),
+            Err(index) => {
+                AllocationLayer::index_wrapper_slot_roots(&mut layer.slot_root_users, &row, true);
+                AllocationLayer::index_wrapper_allocations(
+                    &table,
+                    &mut layer.wrappers_by_base,
+                    &row,
+                    true,
+                );
+                AllocationLayer::edit_wrapper_incidence(
+                    &mut layer.wrapper_users,
+                    &mut layer.route_rows,
+                    &row,
+                    true,
+                );
+                layer.wrappers.insert(index, row);
+            }
         }
+        drop(table);
+        self.refresh_linked_observations(wrapper);
     }
 
     pub(super) fn remove_current_row(&mut self, local: usize) {
@@ -1623,12 +2558,23 @@ impl BorrowState {
             .layer
             .wrappers
             .binary_search_by_key(&wrapper, |row| row.wrapper)
-            && !self.layer.wrappers.remove(index).routes.is_empty()
         {
-            self.layer.may_have_value_routes =
-                self.layer.wrappers.iter().any(|row| !row.routes.is_empty());
+            let old = self.layer.wrappers.remove(index);
+            AllocationLayer::index_wrapper_allocations(
+                &self.layer.table.borrow(),
+                &mut self.layer.wrappers_by_base,
+                &old,
+                false,
+            );
+            AllocationLayer::index_wrapper_slot_roots(&mut self.layer.slot_root_users, &old, false);
+            AllocationLayer::edit_wrapper_incidence(
+                &mut self.layer.wrapper_users,
+                &mut self.layer.route_rows,
+                &old,
+                false,
+            );
         }
-        self.layer.observations.retain(|entry| entry.local != local);
+        self.layer.set_observation(local, None);
         self.layer.take_contents(CellId::Slot(wrapper));
     }
 
@@ -1723,20 +2669,20 @@ impl BorrowState {
             if old.coverage == Coverage::Partial {
                 row.coverage = Coverage::Partial;
             }
+            let mut derivation = derivation;
             if self.binding(local).mode().contains(LocalMode::ALIAS) {
-                self.locals[local]
-                    .derived_from_roots
-                    .intersect_with(&derivation);
-            } else {
-                self.locals[local].derived_from_roots = derivation;
+                derivation.intersect_with(&self.locals[local].derived_from_roots);
             }
+            self.set_local_derivation(local, derivation);
         } else {
-            self.locals[local].derived_from_roots = derivation;
+            self.set_local_derivation(local, derivation);
         }
         if preserve_slot {
             row.union_alts(&[OWN_SLOT]);
             row.slot_roots = Some(self.slot_roots(wrapper).clone());
-            self.locals[local].value_roots.union_with(&roots);
+            let mut merged = roots;
+            merged.union_with(&self.locals[local].value_roots);
+            self.set_local_value_roots(local, merged);
         } else {
             row.alts = SmallSet::from_iter(
                 row.alts
@@ -1746,19 +2692,18 @@ impl BorrowState {
                     .filter(|alt| alt.target != BindingTarget::OwnSlot),
             );
             self.clear_slot_payload(wrapper);
-            self.locals[local].value_roots = roots;
+            self.set_local_value_roots(local, roots);
         }
         self.put_binding_row(row);
     }
 
-    pub(in super::super) fn mark_slot_derivation(&mut self, local: usize, roots: RootSet) {
+    pub(in super::super) fn mark_slot_derivation(&mut self, local: usize, mut roots: RootSet) {
         let mode = self.binding_mode(local);
         if mode.contains(LocalMode::SLOT) {
             if mode.contains(LocalMode::ALIAS) {
-                self.locals[local].derived_from_roots.intersect_with(&roots);
-            } else {
-                self.locals[local].derived_from_roots = roots;
+                roots.intersect_with(&self.locals[local].derived_from_roots);
             }
+            self.set_local_derivation(local, roots);
         }
     }
 
@@ -1789,6 +2734,7 @@ impl BorrowState {
         let mut parents = Vec::new();
         let mut frame = self.resolution_frame(row, aliases_only, readonly(wrapper));
         loop {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
             if let Some(alt) = frame.alternatives.next() {
                 let cell = match alt.target {
                     BindingTarget::OwnSlot if frame.aliases_only => continue,
@@ -1979,6 +2925,19 @@ impl BorrowState {
         self.layer.is_empty()
     }
 
+    pub(in super::super) fn use_indexed_recurring_blocks(&self, blocks: Rc<FxHashSet<BlockId>>) {
+        self.layer.table.borrow_mut().cyclic_blocks = Some(RecurringBlocks::Shared(blocks));
+    }
+
+    #[cfg(test)]
+    pub(in super::super) fn shares_test_recurring_index(
+        &self,
+        index: &Rc<FxHashSet<BlockId>>,
+    ) -> bool {
+        matches!(&self.layer.table.borrow().cyclic_blocks,
+            Some(RecurringBlocks::Shared(blocks)) if Rc::ptr_eq(blocks, index))
+    }
+
     /// Whether `block` lies on a CFG cycle, from the layout's successor lists.
     ///
     /// WHY: one construction in an acyclic block builds at most one allocation per call, so its
@@ -2035,21 +2994,43 @@ impl BorrowState {
     }
 
     pub(in super::super) fn add_view_member(&mut self, view: AllocId, id: AllocId) {
-        insert_fact(&mut self.layer.sharing.members, (view, id));
+        self.layer.sharing.edit_row(
+            &self.layer.table.borrow(),
+            SharingRow::Member(view, id),
+            false,
+            true,
+        );
     }
 
     pub(in super::super) fn relate_views(&mut self, a: AllocId, b: AllocId, may_share: bool) {
-        self.layer.sharing.pairs.union(a, b, may_share);
+        let (a, b) = ordered_pair(a, b);
+        self.layer.sharing.edit_row(
+            &self.layer.table.borrow(),
+            SharingRow::Pair(a, b),
+            may_share,
+            true,
+        );
     }
 
     pub(in super::super) fn link_view(&mut self, holder: AllocId, key: FieldKey, held: AllocId) {
-        insert_fact(&mut self.layer.sharing.projections, (holder, key, held));
+        increment_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsInspected);
+        if self.layer.sharing.edit_row(
+            &self.layer.table.borrow(),
+            SharingRow::Projection(holder, key, held),
+            false,
+            true,
+        ) {
+            increment_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsMoved);
+        }
     }
 
     fn bind_slot_views(&mut self, local: WrapperId, views: &[AllocId]) {
-        self.layer.sharing.clear_bindings(local);
+        let table = self.layer.table.borrow();
+        self.layer.sharing.clear_bindings(&table, local);
         for &view in views {
-            insert_fact(&mut self.layer.sharing.bindings, (local, view));
+            self.layer
+                .sharing
+                .edit_row(&table, SharingRow::Binding(local, view), false, true);
         }
     }
 
@@ -2085,29 +3066,7 @@ impl BorrowState {
             increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
             each((member, member))?;
         }
-        let pairs = &self.layer.sharing.pairs;
-        increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
-        let start = pairs.partition_point(|&(left, _, _)| {
-            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
-            left < id
-        });
-        for &(left, right, positive) in pairs[start..]
-            .iter()
-            .take_while(|&&(left, _, _)| left == id)
-        {
-            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
-            if positive && left != right {
-                each((left, right))?;
-            }
-        }
-        for &(right, left) in pairs
-            .positive_by_right
-            .range((id, AllocId(0))..=(id, AllocId::EMPTY))
-        {
-            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
-            each((left, right))?;
-        }
-        std::ops::ControlFlow::Continue(())
+        self.layer.sharing.pairs.visit_incidence(id, each)
     }
 
     // The call index adds paths to argument targets without enumerating the state's interner.
@@ -2147,9 +3106,7 @@ impl BorrowState {
                 visit(parent)?;
             }
             increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
-            for &(_, holder, _) in self.layer.edges.incoming.range(
-                (id, AllocId(0), FieldKey::Field(0))..=(id, AllocId::EMPTY, FieldKey::MapKey),
-            ) {
+            for holder in self.layer.edges.incoming_holders(id) {
                 increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
                 visit(holder)?;
             }
@@ -2241,13 +3198,155 @@ impl BorrowState {
     }
 
     #[cfg(test)]
+    pub(in super::super) fn independent_test_state(&self) -> Self {
+        let mut state = self.clone();
+        state.layer.table = Rc::new(RefCell::new(self.layer.table.borrow().clone()));
+        state
+    }
+
+    #[cfg(test)]
+    pub(in super::super) fn canonical_test_allocations(
+        &self,
+        vocabulary: &mut BTreeMap<String, AllocId>,
+    ) -> impl Fn(AllocId) -> AllocId + use<> {
+        let table = self.layer.table.borrow();
+        let mut keys = Vec::<String>::with_capacity(table.infos.len());
+        let mut ids = Vec::with_capacity(table.infos.len());
+        for info in &table.infos {
+            let key_of = |id: AllocId| {
+                if id == AllocId::EMPTY {
+                    "<empty>"
+                } else {
+                    keys[id.0 as usize].as_str()
+                }
+            };
+            let name = match info.key {
+                AllocKey::Base(base) => format!("{base:?}"),
+                AllocKey::Child(parent, selector) => {
+                    format!("child({},{selector:?})", key_of(parent))
+                }
+                AllocKey::Copied(graph, source) => {
+                    format!("copy({},{})", key_of(graph), key_of(source))
+                }
+                AllocKey::CopiedOccurrence(graph, source) => {
+                    format!("occurrence({},{})", key_of(graph), key_of(source))
+                }
+                AllocKey::CopyPair(graph, a, b) => {
+                    let (a, b) = (key_of(a), key_of(b));
+                    format!("pair({},{},{})", key_of(graph), a.min(b), a.max(b))
+                }
+            };
+            let next = AllocId(vocabulary.len() as u32);
+            ids.push(*vocabulary.entry(name.clone()).or_insert(next));
+            keys.push(name);
+        }
+        move |id| {
+            if id == AllocId::EMPTY {
+                id
+            } else {
+                ids[id.0 as usize]
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in super::super) fn canonical_test_edge_rows(
+        &self,
+        map: impl Fn(AllocId) -> AllocId,
+    ) -> Vec<String> {
+        let layer = &self.layer;
+        let mut rows = vec![format!("locals {:?}", self.locals)];
+        for edge in layer.edges.iter() {
+            rows.push(format!(
+                "edge {:?} {:?} {:?} {} {}",
+                map(edge.holder),
+                edge.key,
+                map(edge.held),
+                edge.writable,
+                edge.single
+            ));
+        }
+        for &(slot, id, readonly) in layer.bound.values().flatten() {
+            rows.push(format!("bound {slot:?} {:?} {readonly}", map(id)));
+        }
+        for (&cell, values) in &layer.contents {
+            let mut values = values.clone();
+            remap_value_alternatives(&mut values, &map);
+            rows.push(format!(
+                "cell {:?} {values:?}",
+                cell.remap(|slot| slot, &map)
+            ));
+        }
+        for row in &layer.wrappers {
+            let mut row = row.clone();
+            row.alts.remap(|mut alt| {
+                if let BindingTarget::Projected(holder, key) = alt.target {
+                    alt.target = BindingTarget::Projected(map(holder), key);
+                }
+                alt
+            });
+            for (cell, deps) in &mut row.routes {
+                *cell = cell.remap(|slot| slot, &map);
+                super::remap_dependencies(deps, &map);
+            }
+            row.routes.sort_unstable();
+            rows.push(format!("wrapper {row:?}"));
+        }
+        for entry in layer.observations.values() {
+            let mut entry = entry.clone();
+            for value in &mut entry.values {
+                value.id = map(value.id);
+            }
+            for view in &mut entry.views {
+                *view = map(*view);
+            }
+            remap_value_alternatives(&mut entry.alternatives, &map);
+            normalize_observation(&mut entry);
+            rows.push(format!("observation {entry:?}"));
+        }
+        for &(local, id) in &layer.detached {
+            rows.push(format!("detached {local} {:?}", map(id)));
+        }
+        for &(view, member) in &layer.sharing.members {
+            rows.push(format!("member {:?} {:?}", map(view), map(member)));
+        }
+        for (&(holder, key), children) in &layer.sharing.projections {
+            for &child in children {
+                rows.push(format!(
+                    "projection {:?} {key:?} {:?}",
+                    map(holder),
+                    map(child)
+                ));
+            }
+        }
+        for &(slot, view) in &layer.sharing.bindings {
+            rows.push(format!("view {slot:?} {:?}", map(view)));
+        }
+        for &(a, b, share) in layer.sharing.pairs.iter() {
+            rows.push(format!("pair {:?} {share}", ordered_pair(map(a), map(b))));
+        }
+        rows.sort_unstable();
+        rows
+    }
+
+    #[cfg(test)]
     pub(in super::super) fn assert_allocation_incidence(&self) {
         let table = self.layer.table.borrow();
         let mut children = BTreeSet::new();
         let mut incoming = BTreeSet::new();
+        let mut bases = FxHashMap::<_, BTreeSet<_>>::default();
         for edge in self.layer.edges.iter() {
+            let group = (edge.holder, edge.key);
+            bases
+                .entry(table.base(edge.holder))
+                .or_default()
+                .insert(group);
             if edge.held != AllocId::EMPTY {
                 incoming.insert((edge.held, edge.holder, edge.key));
+                bases
+                    .entry(table.base(edge.held))
+                    .or_default()
+                    .insert(group);
             }
             let mut id = edge.holder;
             while let Some((parent, _)) = table.parent(id) {
@@ -2259,12 +3358,217 @@ impl BorrowState {
         }
         assert_eq!(self.layer.edges.children, children);
         assert_eq!(self.layer.edges.incoming, incoming);
+        assert_eq!(self.layer.edges.by_base, bases);
         let pairs = &self.layer.sharing.pairs;
         let expected_pairs: BTreeSet<_> = pairs
             .iter()
             .filter_map(|&(left, right, shares)| (shares && left != right).then_some((right, left)))
             .collect();
         assert_eq!(pairs.positive_by_right, expected_pairs);
+        assert_eq!(
+            self.layer.sharing.member_views,
+            self.layer
+                .sharing
+                .members
+                .iter()
+                .map(|&(view, id)| (id, view))
+                .collect(),
+        );
+        let mut sharing = BTreeMap::<_, BTreeSet<_>>::new();
+        let mut sharing_row = |row, ids: &[AllocId]| {
+            for &id in ids {
+                if id != AllocId::EMPTY {
+                    sharing.entry(table.base(id)).or_default().insert(row);
+                }
+            }
+        };
+        for &(view, member) in &self.layer.sharing.members {
+            sharing_row(SharingRow::Member(view, member), &[view, member]);
+        }
+        for (&(holder, key), children) in &self.layer.sharing.projections {
+            for &child in children {
+                sharing_row(SharingRow::Projection(holder, key, child), &[holder, child]);
+            }
+        }
+        for &(slot, view) in &self.layer.sharing.bindings {
+            sharing_row(SharingRow::Binding(slot, view), &[view]);
+        }
+        for &(a, b, _) in pairs.iter() {
+            sharing_row(SharingRow::Pair(a, b), &[a, b]);
+        }
+        assert_eq!(self.layer.sharing.by_base, sharing);
+        let detached = self
+            .layer
+            .detached
+            .iter()
+            .filter_map(|&(owner, holder)| {
+                (holder != AllocId::EMPTY).then(|| (table.base(holder), owner, holder))
+            })
+            .collect();
+        assert_eq!(self.layer.detached_by_base, detached);
+        let expected_routes: BTreeMap<_, _> = self
+            .layer
+            .observations
+            .keys()
+            .map(|&local| {
+                let address = self.resolve_cells(local);
+                let mut routes = BTreeSet::new();
+                if address.coverage == Coverage::Complete {
+                    for &cell in address.cells() {
+                        routes.insert(match cell {
+                            CellId::Slot(slot) => ObservationRoute::Slot(slot),
+                            CellId::Projected(_, selector) => ObservationRoute::Selector(selector),
+                        });
+                    }
+                } else {
+                    routes.insert(ObservationRoute::Incomplete);
+                }
+                (local, routes)
+            })
+            .collect();
+        assert_eq!(self.layer.observation_routes, expected_routes);
+        let expected_reverse = expected_routes
+            .iter()
+            .flat_map(|(&local, routes)| routes.iter().map(move |&route| (route, local)))
+            .collect();
+        assert_eq!(self.layer.observations_by_route, expected_reverse);
+
+        let mut observations = BTreeSet::new();
+        for (&local, row) in &self.layer.observations {
+            let mut add = |id| {
+                if id != AllocId::EMPTY {
+                    observations.insert((table.base(id), local));
+                }
+            };
+            for value in &row.values {
+                add(value.id);
+            }
+            for &id in &row.views {
+                add(id);
+            }
+            for alternative in &row.alternatives {
+                if let ValueKind::Allocation(value) = alternative.kind {
+                    add(value.id);
+                }
+                for dep in &alternative.deps {
+                    for &id in dep.entries.as_slice() {
+                        add(id);
+                    }
+                }
+            }
+        }
+        assert_eq!(self.layer.observations_by_base, observations);
+        let bounds = self
+            .layer
+            .bound
+            .values()
+            .flatten()
+            .filter_map(|&(slot, id, _)| (id != AllocId::EMPTY).then(|| (table.base(id), slot)))
+            .collect();
+        assert_eq!(self.layer.bound_by_base, bounds);
+        let mut wrappers = BTreeSet::new();
+        for row in &self.layer.wrappers {
+            let mut add = |id| {
+                if id != AllocId::EMPTY {
+                    wrappers.insert((table.base(id), row.wrapper));
+                }
+            };
+            for alt in row.alts.as_slice() {
+                if let BindingTarget::Projected(holder, _) = alt.target {
+                    add(holder);
+                }
+            }
+            for (cell, deps) in &row.routes {
+                if let CellId::Projected(holder, _) = *cell {
+                    add(holder);
+                }
+                for dep in deps {
+                    for &id in dep.entries.as_slice() {
+                        add(id);
+                    }
+                }
+            }
+        }
+        assert_eq!(self.layer.wrappers_by_base, wrappers);
+        let wrapper_rows = self.layer.wrappers.iter();
+        let mut expected_users = BTreeSet::new();
+        let mut expected_slots = BTreeSet::new();
+        for row in wrapper_rows {
+            for alt in row.alts.as_slice() {
+                let link = match alt.target {
+                    BindingTarget::Link(target) => Some(target),
+                    _ => None,
+                };
+                for target in [
+                    link,
+                    alt.origin.map(|origin| origin.wrapper),
+                    alt.origin.and_then(|origin| origin.owner),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    expected_users.insert((target, row.wrapper));
+                }
+            }
+            if row.wrapper.age == WrapperAge::Current
+                && row.has_slot()
+                && let Some(roots) = &row.slot_roots
+            {
+                expected_slots.extend(roots.iter_ones().map(|root| (root, row.wrapper.local)));
+            }
+        }
+        assert_eq!(expected_users, self.layer.wrapper_users);
+        assert_eq!(expected_slots, self.layer.slot_root_users);
+        assert_eq!(
+            self.layer.route_rows,
+            self.layer
+                .wrappers
+                .iter()
+                .filter(|row| !row.routes.is_empty())
+                .count()
+        );
+        let mut cells = FxHashMap::<_, BTreeSet<_>>::default();
+        for (&cell, values) in &self.layer.contents {
+            let holder = match cell {
+                CellId::Projected(holder, _) => Some(holder),
+                CellId::Slot(_) => None,
+            };
+            let stored = values.iter().filter_map(|value| match value.kind {
+                ValueKind::Allocation(stored) => Some(stored.id),
+                _ => None,
+            });
+            let dependencies = values
+                .iter()
+                .flat_map(|value| &value.deps)
+                .flat_map(|dependency| dependency.entries.as_slice().iter().copied());
+            for id in holder
+                .into_iter()
+                .chain(stored)
+                .chain(dependencies)
+                .filter(|&id| id != AllocId::EMPTY)
+            {
+                cells.entry(table.base(id)).or_default().insert(cell);
+            }
+        }
+        assert_eq!(cells, self.layer.cells_by_base);
+        let value_roots = self
+            .locals
+            .iter()
+            .enumerate()
+            .flat_map(|(local, row)| row.value_roots.iter_ones().map(move |root| (root, local)))
+            .collect::<BTreeSet<_>>();
+        let derivation = self
+            .locals
+            .iter()
+            .enumerate()
+            .flat_map(|(local, row)| {
+                row.derived_from_roots
+                    .iter_ones()
+                    .map(move |root| (root, local))
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(value_roots, self.value_root_users);
+        assert_eq!(derivation, self.derivation_users);
     }
 
     /// The pre-index traversal is an independent oracle over authoritative rows.
@@ -2925,16 +4229,14 @@ impl BorrowState {
     ) {
         let slot = WrapperId::current(local_index);
         self.clear_slot_payload(slot);
-        self.layer
-            .detached
-            .retain(|(owner, _)| *owner != local_index as u32);
-        self.layer
-            .bound
-            .extend(ids.iter().map(|&id| (slot, id, readonly)));
+        self.layer.clear_detachments(local_index);
         if ids.is_empty() {
-            self.layer.bound.push((slot, AllocId::EMPTY, readonly));
+            self.layer
+                .set_bound(slot, vec![(slot, AllocId::EMPTY, readonly)]);
+        } else {
+            self.layer
+                .extend_bound(slot, ids.iter().map(|&id| (slot, id, readonly)));
         }
-        normalize_bindings(&mut self.layer.bound);
     }
 
     pub(in super::super) fn has_layer_binding(&self, local: usize) -> bool {
@@ -2945,7 +4247,7 @@ impl BorrowState {
     }
 
     pub(in super::super) fn has_value_alternatives(&self) -> bool {
-        !self.layer.contents.is_empty() || self.layer.may_have_value_routes
+        !self.layer.contents.is_empty() || self.layer.route_rows != 0
     }
 
     fn clear_slot_payload(&mut self, slot: WrapperId) {
@@ -2956,21 +4258,23 @@ impl BorrowState {
     }
 
     fn clear_slot_allocation(&mut self, slot: WrapperId) {
-        let range = slot_group(&self.layer.bound, slot, |&(owner, _, _)| owner);
-        if !range.is_empty() {
-            drop(self.layer.bound.drain(range));
+        self.layer.set_bound(slot, Vec::new());
+        if !self.layer.sharing.bindings.is_empty() {
+            self.layer
+                .sharing
+                .clear_bindings(&self.layer.table.borrow(), slot);
         }
-        self.layer.sharing.clear_bindings(slot);
     }
 
     pub(in super::super) fn detached_holders(
         &self,
         local: usize,
     ) -> impl Iterator<Item = AllocId> + '_ {
+        let local = local as u32;
         self.layer
             .detached
-            .iter()
-            .filter_map(move |&(owner, holder)| (owner == local as u32).then_some(holder))
+            .range((local, AllocId::MIN)..=(local, AllocId::MAX))
+            .map(|&(_, holder)| holder)
     }
 
     pub(in super::super) fn bind_detached_holders(
@@ -2978,27 +4282,29 @@ impl BorrowState {
         local: usize,
         holders: impl IntoIterator<Item = AllocId>,
     ) {
-        self.layer
-            .detached
-            .retain(|(owner, _)| *owner != local as u32);
-        self.layer
-            .detached
-            .extend(holders.into_iter().map(|holder| (local as u32, holder)));
-        self.layer.detached.sort_unstable();
+        self.layer.clear_detachments(local);
+        let table = self.layer.table.borrow();
+        for holder in holders {
+            AllocationLayer::edit_detachment(
+                &mut self.layer.detached,
+                &mut self.layer.detached_by_base,
+                &table,
+                (local as u32, holder),
+                true,
+            );
+        }
     }
 
     pub(in super::super) fn invalidate_detachments(&mut self) {
         self.layer.detached.clear();
+        self.layer.detached_by_base.clear();
     }
 
     pub(in super::super) fn detached_from(&self, local: usize, holders: &[AllocId]) -> bool {
         !holders.is_empty()
-            && holders.iter().all(|&holder| {
-                self.layer
-                    .detached
-                    .binary_search(&(local as u32, holder))
-                    .is_ok()
-            })
+            && holders
+                .iter()
+                .all(|&holder| self.layer.detached.contains(&(local as u32, holder)))
     }
 
     fn graphs_overlap(&self, left: &[AllocId], right: &[AllocId]) -> bool {
@@ -3012,7 +4318,7 @@ impl BorrowState {
     }
 
     fn proves_detached(&self, (local, holder): (u32, AllocId)) -> bool {
-        self.layer.detached.binary_search(&(local, holder)).is_ok()
+        self.layer.detached.contains(&(local, holder))
             || !self.graphs_overlap(&[holder], &self.local_alloc_ids(local as usize).0)
     }
 
@@ -3082,62 +4388,85 @@ impl BorrowState {
             return false;
         }
         let wrapper = WrapperId::current(local_index);
-        if self.layer.wrappers.iter().any(|row| {
-            row.alts
-                .as_slice()
-                .iter()
-                .any(|alt| alt.target == BindingTarget::Link(wrapper))
-        }) {
+        if self.has_link_to(wrapper, false) {
             return false;
         }
         !self.has_explicit_root_references(local_index)
     }
 
+    fn has_link_to(&self, target: WrapperId, other_only: bool) -> bool {
+        self.layer.wrapper_users(target).any(|user| {
+            (!other_only || user != target)
+                && self.binding_row(user).is_some_and(|row| {
+                    row.alts
+                        .as_slice()
+                        .iter()
+                        .any(|alt| alt.target == BindingTarget::Link(target))
+                })
+        })
+    }
+
     fn has_explicit_root_references(&self, local: usize) -> bool {
-        if self
-            .layer
-            .detached
-            .iter()
-            .any(|&(owner, _)| owner as usize == local)
-        {
+        if self.detached_holders(local).next().is_some() {
             return true;
         }
         if self.layer.is_empty() {
             return false;
         }
-        let table = self.layer.table.borrow();
         let root = AllocBase::Root(local as u32);
-        // Absence proves there is no explicit ID. Presence alone says nothing about this edge.
-        table.index.contains_key(&AllocKey::Base(root)) && {
-            let mentions = |id| id != AllocId::EMPTY && table.base(id) == root;
-            self.layer
-                .detached
-                .iter()
-                .any(|&(_, holder)| mentions(holder))
-                || self.layer.refers_to_allocations(mentions)
-        }
+        self.layer.edges.by_base.contains_key(&root)
+            || self.layer.cells_by_base.contains_key(&root)
+            || self
+                .layer
+                .observations_by_base
+                .range((root, 0)..=(root, usize::MAX))
+                .next()
+                .is_some()
+            || self.layer.sharing.by_base.contains_key(&root)
+            || self
+                .layer
+                .bound_by_base
+                .range(
+                    (root, WrapperId::current(0))
+                        ..=(root, WrapperId::current(usize::MAX).retired(|_| true)),
+                )
+                .next()
+                .is_some()
+            || self
+                .layer
+                .wrappers_by_base
+                .range(
+                    (root, WrapperId::current(0))
+                        ..=(root, WrapperId::current(usize::MAX).retired(|_| true)),
+                )
+                .next()
+                .is_some()
+            || self
+                .layer
+                .detached_by_base
+                .range((root, 0, AllocId::MIN)..=(root, u32::MAX, AllocId::MAX))
+                .next()
+                .is_some()
     }
 
     fn can_rebind_uninitialised(&self, local: usize) -> bool {
         self.has_pristine_alloc_binding(local)
-            && !self.locals.iter().enumerate().any(|(observer, binding)| {
-                observer != local
-                    && binding.value_roots.contains(local)
-                    && self
-                        .slot_roots(WrapperId::current(observer))
-                        .contains(local)
-                    && self.binding_mode(observer).contains(LocalMode::SLOT)
-            })
-            && !self.layer.wrappers.iter().any(|row| {
-                let observer = row.wrapper.local;
-                observer != local
-                    && row.wrapper.age == WrapperAge::Current
-                    && row.has_slot()
-                    && row
-                        .slot_roots
-                        .as_ref()
-                        .is_some_and(|roots| roots.contains(local))
-            })
+            && !self
+                .value_root_users
+                .range((local, 0)..=(local, usize::MAX))
+                .any(|&(_, observer)| {
+                    increment_frontend_counter(FrontendCounter::BorrowRetirementLocalRows);
+                    observer != local
+                        && self
+                            .slot_roots(WrapperId::current(observer))
+                            .contains(local)
+                        && self.binding_mode(observer).contains(LocalMode::SLOT)
+                })
+            && !self
+                .layer
+                .slot_root_users
+                .range((local, 0)..=(local, usize::MAX))
+                .any(|&(_, observer)| observer != local)
     }
 
     /// A captured entry can retain an old wrapper even without another named link to it.
@@ -3225,11 +4554,15 @@ impl BorrowState {
                 }
             }
             if !values.is_empty() {
-                self.layer.bound.extend(values);
-                normalize_bindings(&mut self.layer.bound);
+                self.layer.extend_bound(prior, values);
             }
             for view in views {
-                insert_fact(&mut self.layer.sharing.bindings, (prior, view));
+                self.layer.sharing.edit_row(
+                    &self.layer.table.borrow(),
+                    SharingRow::Binding(prior, view),
+                    false,
+                    true,
+                );
             }
             row.slot_roots = Some(RootSet::empty(self.locals.len()));
         }
@@ -3246,8 +4579,30 @@ impl BorrowState {
         self.put_binding_row(row);
     }
 
-    fn age_wrappers(&mut self, retires: impl Fn(usize) -> bool) {
-        for row in &mut self.layer.wrappers {
+    fn age_wrappers(
+        &mut self,
+        locals: impl IntoIterator<Item = usize>,
+        retires: impl Fn(usize) -> bool,
+    ) {
+        let users: BTreeSet<_> = locals
+            .into_iter()
+            .flat_map(|local| self.layer.wrapper_users(WrapperId::current(local)))
+            .collect();
+        let layer = &mut self.layer;
+        for user in users {
+            let Ok(index) = layer
+                .wrappers
+                .binary_search_by_key(&user, |row| row.wrapper)
+            else {
+                continue;
+            };
+            let row = &mut layer.wrappers[index];
+            AllocationLayer::edit_wrapper_incidence(
+                &mut layer.wrapper_users,
+                &mut layer.route_rows,
+                row,
+                false,
+            );
             row.alts.remap(|alt| {
                 let target = match alt.target {
                     BindingTarget::Link(source) => BindingTarget::Link(source.retired(&retires)),
@@ -3264,6 +4619,12 @@ impl BorrowState {
                     ..alt
                 }
             });
+            AllocationLayer::edit_wrapper_incidence(
+                &mut layer.wrapper_users,
+                &mut layer.route_rows,
+                row,
+                true,
+            );
         }
     }
 
@@ -3274,28 +4635,23 @@ impl BorrowState {
     ) {
         // Root-only snapshots need an override before the old allocation is renamed.
         // Whole links are not snapshots and still load the cell.
-        let first = self.layer.bound.len();
         for observer in observers {
             let slot = WrapperId::current(observer);
             let roots = self.slot_roots(slot);
             if !observes_retired(roots)
                 || !self.binding_mode(observer).contains(LocalMode::SLOT)
-                || self.layer.bound[..first]
-                    .binary_search_by_key(&slot, |&(owner, _, _)| owner)
-                    .is_ok()
+                || !self.layer.bound_of(slot).is_empty()
             {
                 continue;
             }
             let roots = roots.clone();
             let mut table = self.layer.table.borrow_mut();
-            self.layer.bound.extend(
-                roots
-                    .iter_ones()
-                    .map(|root| (slot, table.root(root), false)),
-            );
-        }
-        if self.layer.bound.len() != first {
-            normalize_bindings(&mut self.layer.bound);
+            let values: Vec<_> = roots
+                .iter_ones()
+                .map(|root| (slot, table.root(root), false))
+                .collect();
+            drop(table);
+            self.layer.set_bound(slot, values);
         }
     }
 
@@ -3305,11 +4661,19 @@ impl BorrowState {
         local: usize,
         order: OrderKey,
     ) -> AllocationRetirement {
-        self.freeze_slot_observers(
-            (0..self.locals.len()).filter(|&observer| observer != local),
-            |roots| roots.contains(local),
-        );
-        self.layer.rename_bases(|base| {
+        let observers = self
+            .value_root_users
+            .range((local, 0)..=(local, usize::MAX))
+            .chain(
+                self.layer
+                    .slot_root_users
+                    .range((local, 0)..=(local, usize::MAX)),
+            )
+            .filter_map(|&(_, observer)| (observer != local).then_some(observer))
+            .collect::<BTreeSet<_>>();
+        self.freeze_slot_observers(observers.into_iter(), |roots| roots.contains(local));
+        let root = AllocBase::Root(local as u32);
+        self.layer.rename_bases(Some(root), |base| {
             (base == AllocBase::Root(local as u32)).then_some(AllocBase::Old(local as u32, order))
         });
         self.invalidate_observations(
@@ -3319,9 +4683,7 @@ impl BorrowState {
         // The publisher still needs the old occurrence until the replacement is committed.
         // Retirement of the wrapper instead removes it with the Current row.
         self.clear_slot_allocation(WrapperId::current(local));
-        self.layer
-            .detached
-            .retain(|&(owner, _)| owner != local as u32);
+        self.layer.clear_detachments(local);
         AllocationRetirement {
             local,
             order,
@@ -3336,24 +4698,21 @@ impl BorrowState {
         order: OrderKey,
     ) -> AllocationRetirement {
         let current = WrapperId::current(local);
-        if self.locals[local].init != Init::No
-            && self.layer.wrappers.iter().any(|row| {
-                row.wrapper != current
-                    && row
-                        .alts
-                        .as_slice()
-                        .iter()
-                        .any(|alt| alt.target == BindingTarget::Link(current))
-            })
-        {
+        if self.locals[local].init != Init::No && self.has_link_to(current, true) {
             self.materialize_prior(current);
         }
-        self.retain_observations_with_unchanged_route(|wrapper| wrapper == current);
+        self.invalidate_observation_routes([current]);
         let retirement = self.retire_slot_value(local, order);
-        self.age_wrappers(|index| index == local);
+        self.age_wrappers([local], |index| index == local);
         self.remove_current_row(local);
-        for state in &mut self.locals {
-            state.derived_from_roots.remove(local);
+        while let Some(&key) = self
+            .derivation_users
+            .range((local, 0)..=(local, usize::MAX))
+            .next()
+        {
+            increment_frontend_counter(FrontendCounter::BorrowRetirementLocalRows);
+            self.locals[key.1].derived_from_roots.remove(local);
+            self.derivation_users.remove(&key);
         }
         AllocationRetirement {
             wrapper: true,
@@ -3361,18 +4720,42 @@ impl BorrowState {
         }
     }
 
-    fn retain_observations_with_unchanged_route(&mut self, retires: impl Fn(WrapperId) -> bool) {
-        if self.layer.observations.is_empty() {
-            return;
+    fn invalidate_observation_routes(&mut self, retired: impl IntoIterator<Item = WrapperId>) {
+        for local in self.linked_observation_locals(retired) {
+            self.layer.set_observation(local, None);
         }
-        let mut observations = std::mem::take(&mut self.layer.observations);
-        observations.retain(|entry| {
-            !self
-                .reachable_from(vec![WrapperId::current(entry.local)])
-                .into_iter()
-                .any(&retires)
-        });
-        self.layer.observations = observations;
+    }
+
+    fn linked_observation_locals(
+        &self,
+        retired: impl IntoIterator<Item = WrapperId>,
+    ) -> Vec<usize> {
+        let mut locals = Vec::new();
+        if self.layer.observations.is_empty() {
+            return locals;
+        }
+        let mut pending: Vec<_> = retired.into_iter().collect();
+        let mut seen = FxHashSet::default();
+        while let Some(wrapper) = pending.pop() {
+            if !seen.insert(wrapper) {
+                continue;
+            }
+            if wrapper.age == WrapperAge::Current
+                && self.layer.observations.contains_key(&wrapper.local)
+            {
+                locals.push(wrapper.local);
+            }
+            pending.extend(self.layer.wrapper_users(wrapper).filter(|&user| {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementWrapperRows);
+                self.binding_row(user).is_some_and(|row| {
+                    row.alts
+                        .as_slice()
+                        .iter()
+                        .any(|alt| alt.target == BindingTarget::Link(wrapper))
+                })
+            }));
+        }
+        locals
     }
 
     /// Apply a simultaneous set of edge retirements to a pre-edge allocation capture.
@@ -3424,31 +4807,13 @@ impl BorrowState {
         if !values.is_empty() {
             self.invalidate_detachments();
         }
-        for holder in holders {
-            if strong {
-                self.layer
-                    .edges
-                    .remove_group(&self.layer.table, *holder, key, false);
-            } else if self.layer.edges.group(*holder, key).is_empty() {
-                let lazy = self.layer.table.borrow_mut().child(*holder, key);
-                self.layer.add_edge(Edge {
-                    holder: *holder,
-                    key,
-                    held: lazy,
-                    writable: true,
-                    single: false,
-                });
-            } else {
-                // A store into a known-empty group makes it non-empty.
-                self.layer
-                    .edges
-                    .remove_group(&self.layer.table, *holder, key, true);
-            }
+        for &holder in holders {
+            self.prepare_edge_group(holder, key, strong, true);
             for value in values {
                 let single = distinct_occurrence && self.alloc_singular(value.id);
                 self.layer.insert_edge(
                     Edge {
-                        holder: *holder,
+                        holder,
                         key,
                         held: value.id,
                         writable: value.writable,
@@ -3459,7 +4824,7 @@ impl BorrowState {
             }
             if strong && values.is_empty() {
                 self.layer.add_edge(Edge {
-                    holder: *holder,
+                    holder,
                     key,
                     held: AllocId::EMPTY,
                     writable: true,
@@ -3467,6 +4832,168 @@ impl BorrowState {
                 });
             }
         }
+    }
+
+    fn prepare_edge_group(
+        &mut self,
+        holder: AllocId,
+        key: FieldKey,
+        strong: bool,
+        supersede_empty: bool,
+    ) {
+        if strong {
+            self.layer
+                .edges
+                .remove_group(&self.layer.table, holder, key, false);
+        } else if self.layer.edges.group(holder, key).is_empty() {
+            let lazy = self.layer.table.borrow_mut().child(holder, key);
+            self.layer.add_edge(Edge {
+                holder,
+                key,
+                held: lazy,
+                writable: true,
+                single: false,
+            });
+        } else if supersede_empty {
+            // New members supersede the empty marker, not other possible old members.
+            self.layer
+                .edges
+                .remove_group(&self.layer.table, holder, key, true);
+        }
+    }
+
+    #[allow(dead_code)] // Prepared publisher for typed final-member postconditions.
+    pub(in super::super) fn publish_family_members(
+        &mut self,
+        receivers: &[AllocId],
+        coverage: Coverage,
+        key: FieldKey,
+        replace: Replacement,
+        members: &[FamilyMember],
+    ) -> PublicationCarriers {
+        debug_assert!(matches!(key, FieldKey::Elem | FieldKey::MapKey));
+        let mut receipt = PublicationCarriers::default();
+        let definite_receiver = coverage == Coverage::Complete
+            && matches!(receivers, [receiver] if self.alloc_singular(*receiver));
+        let exact = replace == Replacement::Must && definite_receiver;
+        if members.is_empty() && replace == Replacement::May {
+            return receipt;
+        }
+        let cells: Vec<_> = receivers
+            .iter()
+            .map(|&receiver| CellId::Projected(receiver, key))
+            .collect();
+        self.invalidate_observations(&cells, coverage);
+        if members.is_empty() && !exact {
+            // A non-definite replacement can clear any candidate. Keep possible
+            // old members and add the empty outcome alongside them.
+            for cell in cells {
+                let CellId::Projected(holder, key) = cell else {
+                    unreachable!()
+                };
+                if !self.layer.contents(cell).is_empty() {
+                    self.publish_cell_contents(
+                        cell,
+                        &[],
+                        &[ValueAlt::plain(ValueKind::Absent)],
+                        false,
+                        false,
+                    );
+                }
+                self.prepare_edge_group(holder, key, false, false);
+                self.layer.add_edge(Edge {
+                    holder,
+                    key,
+                    held: AllocId::EMPTY,
+                    writable: true,
+                    single: false,
+                });
+            }
+            return receipt;
+        }
+        let mut values = Vec::new();
+        let mut views = Vec::new();
+        let mut alternatives = Vec::new();
+        let has_views = members.iter().any(|member| !member.value.views.is_empty());
+        let explicit = members
+            .iter()
+            .any(|member| !member.value.alternatives.is_empty() || member.value.values.is_empty());
+        for member in members {
+            values.extend_from_slice(&member.value.values);
+            if has_views && member.value.views.is_empty() {
+                // An explicit view group masks the ordinary edge fallback, so it must
+                // also contain a representative for each plain member.
+                views.extend(member.value.values.iter().map(|value| value.id));
+            } else {
+                views.extend_from_slice(&member.value.views);
+            }
+            if explicit && member.value.alternatives.is_empty() {
+                if member.value.values.is_empty() {
+                    alternatives.push(ValueAlt::plain(ValueKind::Scalar));
+                } else {
+                    alternatives.extend(
+                        member
+                            .value
+                            .values
+                            .iter()
+                            .copied()
+                            .map(|value| ValueAlt::plain(ValueKind::Allocation(value))),
+                    );
+                }
+            } else {
+                alternatives.extend(member.value.alternatives.iter().cloned());
+            }
+        }
+        let possibly_absent = alternatives.iter().any(|alt| alt.kind == ValueKind::Absent);
+        let must_add_member = definite_receiver && !members.is_empty() && !possibly_absent;
+        for cell in cells {
+            receipt.record(cell, self.layer.contents(cell), cell, &alternatives, exact);
+            self.publish_cell_contents(cell, &values, &alternatives, exact, false);
+            if must_add_member
+                && self
+                    .layer
+                    .contents(cell)
+                    .iter()
+                    .any(|alt| alt.kind == ValueKind::Absent)
+                && let Some((cell, mut retained)) = self.layer.take_contents(cell)
+            {
+                retained.retain(|alt| alt.kind != ValueKind::Absent);
+                self.layer.set_contents(cell, retained);
+            }
+        }
+        self.store_view_projections(receivers, key, &values, &views, exact);
+        if !values.is_empty() {
+            self.invalidate_detachments();
+        }
+        for &holder in receivers {
+            self.prepare_edge_group(holder, key, exact, must_add_member);
+            for member in members {
+                for value in &member.value.values {
+                    self.layer.insert_edge(
+                        Edge {
+                            holder,
+                            key,
+                            held: value.id,
+                            writable: value.writable,
+                            single: definite_receiver
+                                && member.at_most_once
+                                && self.alloc_singular(value.id),
+                        },
+                        true,
+                    );
+                }
+            }
+            if (exact && values.is_empty()) || possibly_absent {
+                self.layer.add_edge(Edge {
+                    holder,
+                    key,
+                    held: AllocId::EMPTY,
+                    writable: true,
+                    single: true,
+                });
+            }
+        }
+        receipt
     }
 
     fn store_view_projections(
@@ -3481,10 +5008,13 @@ impl BorrowState {
             return;
         }
         let sources = &self.layer.sharing;
-        let mut affected: Vec<_> = sources
-            .members
+        let mut affected: Vec<_> = holders
             .iter()
-            .filter_map(|&(view, id)| holders.contains(&id).then_some(view))
+            .flat_map(|&holder| {
+                sources.views_for(holder).inspect(|_| {
+                    increment_frontend_counter(FrontendCounter::BorrowPublisherGroupRowsInspected);
+                })
+            })
             .collect();
         affected.extend_from_slice(holders);
         affected.sort_unstable();
@@ -3500,8 +5030,7 @@ impl BorrowState {
             if exact {
                 self.layer
                     .sharing
-                    .projections
-                    .retain(|&(holder, field, _)| holder != view || field != key);
+                    .clear_projection(&self.layer.table.borrow(), view, key);
             } else if !existing {
                 let mut previous = Vec::new();
                 self.layer.project_members(
@@ -3676,8 +5205,8 @@ impl BorrowState {
                     self.layer
                         .sharing
                         .projections
-                        .iter()
-                        .any(|&(holder, _, _)| self.layer.covers(table, current, holder))
+                        .keys()
+                        .any(|&(holder, _)| self.layer.covers(table, current, holder))
                 }));
         let mut table = self.layer.table.borrow_mut();
         let singular = table.singular(site);
@@ -3771,12 +5300,7 @@ impl BorrowState {
         &self,
         holder: AllocId,
     ) -> impl Iterator<Item = &[Edge]> {
-        let start = self
-            .layer
-            .edges
-            .partition_point(|edge| edge.holder < holder);
-        let end = start + self.layer.edges[start..].partition_point(|edge| edge.holder == holder);
-        self.layer.edges[start..end].chunk_by(|left, right| left.key == right.key)
+        self.layer.edges.holder_groups(holder)
     }
 
     /// The exceptional rows include dependency-carrying scalars without an
@@ -3786,18 +5310,15 @@ impl BorrowState {
         &self,
         holder: AllocId,
     ) -> impl Iterator<Item = (FieldKey, &[ValueAlt])> {
-        let is_before = |(cell, _): &(CellId, ValueAlternatives)| match cell {
-            CellId::Slot(_) => true,
-            CellId::Projected(owner, _) => *owner < holder,
-        };
-        let start = self.layer.contents.partition_point(is_before);
-        self.layer.contents[start..]
-            .iter()
-            .map_while(move |(cell, values)| match cell {
-                CellId::Projected(owner, key) if *owner == holder => {
-                    Some((*key, values.as_slice()))
-                }
-                _ => None,
+        self.layer
+            .contents
+            .range(
+                CellId::Projected(holder, FieldKey::Field(0))
+                    ..=CellId::Projected(holder, FieldKey::MapKey),
+            )
+            .filter_map(|(cell, values)| match cell {
+                CellId::Projected(_, key) => Some((*key, values.as_slice())),
+                CellId::Slot(_) => None,
             })
     }
 
@@ -3820,8 +5341,7 @@ impl BorrowState {
     pub(in super::super) fn value_routes(
         &self,
     ) -> impl Iterator<Item = (WrapperId, CellId, &DependencySet)> + '_ {
-        self.layer
-            .may_have_value_routes
+        (self.layer.route_rows != 0)
             .then_some(self.layer.wrappers.as_slice())
             .into_iter()
             .flatten()
@@ -3833,7 +5353,7 @@ impl BorrowState {
     }
 
     pub(in super::super) fn value_route_owners(&self, local: usize) -> FxHashSet<WrapperId> {
-        if self.layer.may_have_value_routes && self.has_wrapped_binding(local) {
+        if self.layer.route_rows != 0 && self.has_wrapped_binding(local) {
             self.reachable_from(vec![WrapperId::current(local)])
         } else {
             FxHashSet::default()
@@ -4037,12 +5557,13 @@ impl BorrowState {
             && self.resolve_cells(local).cells() == cells.as_ref()
         {
             if let Some(roots) = slot_roots {
-                self.locals[local].value_roots = if roots.is_empty() {
+                let roots = if roots.is_empty() {
                     // Report fresh payload origins rather than possible old value roots.
                     self.binding(local).attribution_roots()
                 } else {
                     roots.clone()
                 };
+                self.set_local_value_roots(local, roots);
             }
             if definite.is_none() {
                 let mut entry = Observation {
@@ -4053,11 +5574,7 @@ impl BorrowState {
                     readonly,
                 };
                 normalize_observation(&mut entry);
-                let index = self
-                    .layer
-                    .observations
-                    .partition_point(|other| other.local < local);
-                self.layer.observations.insert(index, entry);
+                self.record_observation(entry);
             }
         }
         StoreReceipt {
@@ -4129,29 +5646,88 @@ impl BorrowState {
         }
     }
 
+    fn record_observation(&mut self, observation: Observation) {
+        let local = observation.local;
+        let routes = observation_routes(&self.resolve_cells(local));
+        self.layer.set_observation(local, Some(observation));
+        self.layer.set_observation_routes(local, routes);
+    }
+
+    pub(super) fn refresh_linked_observations(&mut self, wrapper: WrapperId) {
+        if self.layer.observations.is_empty()
+            || !(wrapper.age == WrapperAge::Current
+                && self.layer.observations.contains_key(&wrapper.local)
+                || self.layer.wrapper_users(wrapper).next().is_some())
+        {
+            return;
+        }
+        for local in self.linked_observation_locals([wrapper]) {
+            let address = self.resolve_cells(local);
+            self.layer
+                .set_observation_routes(local, observation_routes(&address));
+        }
+    }
+
+    fn rebuild_observation_routes(&mut self) {
+        self.layer.observation_routes.clear();
+        self.layer.observations_by_route.clear();
+        let entries: Vec<_> = self
+            .layer
+            .observations
+            .keys()
+            .map(|&local| (local, observation_routes(&self.resolve_cells(local))))
+            .collect();
+        for (local, routes) in entries {
+            self.layer.set_observation_routes(local, routes);
+        }
+    }
+
     fn invalidate_observations(&mut self, cells: &[CellId], coverage: Coverage) {
         if self.layer.observations.is_empty() {
             return;
         }
         if coverage == Coverage::Partial {
-            self.layer.observations.clear();
+            self.layer.clear_observations();
             return;
         }
-        let mut observations = std::mem::take(&mut self.layer.observations);
-        observations.retain(|entry| {
-            let observed = self.resolve_cells(entry.local);
-            observed.coverage == Coverage::Complete
-                && !observed.cells().iter().any(|&left| {
-                    cells.iter().any(|&right| match (left, right) {
-                        (CellId::Slot(a), CellId::Slot(b)) => a == b,
-                        (CellId::Projected(a, x), CellId::Projected(b, y)) => {
-                            x == y && self.alloc_paths_may_share(&[a], &[], &[b], &[])
-                        }
-                        _ => false,
+        let candidates = self.observation_candidates(cells);
+        let removed: Vec<_> = candidates
+            .into_iter()
+            .filter(|&local| {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
+                let observed = self.resolve_cells(local);
+                observed.coverage != Coverage::Complete
+                    || observed.cells().iter().any(|&left| {
+                        cells.iter().any(|&right| match (left, right) {
+                            (CellId::Slot(a), CellId::Slot(b)) => a == b,
+                            (CellId::Projected(a, x), CellId::Projected(b, y)) => {
+                                x == y && self.alloc_paths_may_share(&[a], &[], &[b], &[])
+                            }
+                            _ => false,
+                        })
                     })
-                })
-        });
-        self.layer.observations = observations;
+            })
+            .collect();
+        for local in removed {
+            self.layer.set_observation(local, None);
+        }
+    }
+
+    fn observation_candidates(&self, cells: &[CellId]) -> BTreeSet<usize> {
+        cells
+            .iter()
+            .map(|cell| match *cell {
+                CellId::Slot(slot) => ObservationRoute::Slot(slot),
+                CellId::Projected(_, key) => ObservationRoute::Selector(key),
+            })
+            .chain(std::iter::once(ObservationRoute::Incomplete))
+            .flat_map(|route| {
+                self.layer
+                    .observations_by_route
+                    .range((route, 0)..=(route, usize::MAX))
+                    .map(|&(_, local)| local)
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4200,15 +5776,26 @@ impl BorrowState {
                     .wrappers
                     .binary_search_by_key(&slot, |row| row.wrapper)
                 {
-                    self.layer.wrappers[index].slot_roots = Some(merged.clone());
-                    self.locals[slot.local].value_roots.union_with(&merged);
+                    let row = &mut self.layer.wrappers[index];
+                    AllocationLayer::index_wrapper_slot_roots(
+                        &mut self.layer.slot_root_users,
+                        row,
+                        false,
+                    );
+                    row.slot_roots = Some(merged.clone());
+                    AllocationLayer::index_wrapper_slot_roots(
+                        &mut self.layer.slot_root_users,
+                        row,
+                        true,
+                    );
+                    let mut roots = merged;
+                    roots.union_with(&self.locals[slot.local].value_roots);
+                    self.set_local_value_roots(slot.local, roots);
                 } else {
-                    self.locals[slot.local].value_roots = merged;
+                    self.set_local_value_roots(slot.local, merged);
                 }
             }
-            self.layer
-                .detached
-                .retain(|&(owner, _)| owner != slot.local as u32);
+            self.layer.clear_detachments(slot.local);
         }
         if exact && values.is_empty() && views.is_empty() && !readonly && !explicit_slot_payload {
             // Plain scalar updates keep the implicit slot and allocate no sparse facts.
@@ -4219,29 +5806,29 @@ impl BorrowState {
             retained.extend(old.iter().map(|value| value.id));
         }
         if exact || !values.is_empty() {
-            let bound = &mut self.layer.bound;
-            let range = slot_group(bound, slot, |&(owner, _, _)| owner);
+            let bound = self.layer.bound_of(slot);
             let incoming = |value: &StoredValue| (slot, value.id, readonly || !value.writable);
-            match (exact, values) {
-                (true, []) => drop(bound.splice(range, [(slot, AllocId::EMPTY, readonly)])),
-                (true, [value]) => drop(bound.splice(range, [incoming(value)])),
+            let mut group = match (exact, values) {
+                (true, []) => vec![(slot, AllocId::EMPTY, readonly)],
+                (true, [value]) => vec![incoming(value)],
                 _ => {
                     // Retiring captures can reorder or collapse ids, so normalise this slot only.
                     let mut group = Vec::with_capacity(
-                        values.len() + if exact { 0 } else { range.len().max(old.len()) },
+                        values.len() + if exact { 0 } else { bound.len().max(old.len()) },
                     );
                     if !exact {
-                        if range.is_empty() {
+                        if bound.is_empty() {
                             group.extend(old.iter().map(|value| (slot, value.id, !value.writable)));
                         } else {
-                            group.extend_from_slice(&bound[range.clone()]);
+                            group.extend_from_slice(bound);
                         }
                     }
                     group.extend(values.iter().map(incoming));
-                    normalize_bindings(&mut group);
-                    drop(bound.splice(range, group));
+                    group
                 }
-            }
+            };
+            normalize_bindings(&mut group);
+            self.layer.set_bound(slot, group);
         }
         if retained.is_empty() {
             if exact || !views.is_empty() {
@@ -4408,15 +5995,17 @@ impl BorrowState {
 
     /// Join sparse facts from the pre-join inputs, then publish the merged local facts.
     pub(in super::super) fn join_in_place(&mut self, other: &Self) -> bool {
-        let mut changed = self.join_layer(other);
+        let changed = self.join_layer(other);
         let wrappers = self.merged_wrappers(other);
-        changed |= self.join_local_facts(other);
+        let locals_changed = self.join_local_facts(other);
+        let routing_changed = locals_changed || wrappers.is_some();
         if let Some(wrappers) = wrappers {
-            self.layer.wrappers = wrappers;
-            self.layer.may_have_value_routes |= other.layer.may_have_value_routes;
-            changed = true;
+            self.layer.replace_wrappers(wrappers);
         }
-        changed
+        if routing_changed && !self.layer.observations.is_empty() {
+            self.rebuild_observation_routes();
+        }
+        changed || routing_changed
     }
 
     fn join_layer(&mut self, other: &Self) -> bool {
@@ -4430,7 +6019,7 @@ impl BorrowState {
                 .contents
                 .iter()
                 .chain(&other.layer.contents)
-                .map(|row| row.0)
+                .map(|(&cell, _)| cell)
                 .collect();
             cells.sort_unstable();
             cells.dedup();
@@ -4456,30 +6045,36 @@ impl BorrowState {
                 })
                 .collect();
             changed |= self.layer.contents != contents;
-            self.layer.contents = contents;
+            self.layer.replace_contents(contents);
         }
 
         // Mix the receiver and result only after checking detachment on each incoming path.
         let mut detached = self.layer.detached.clone();
         detached.extend(other.layer.detached.iter().copied());
-        detached.sort_unstable();
-        detached.dedup();
         detached.retain(|pair| self.proves_detached(*pair) && other.proves_detached(*pair));
         changed |= detached != self.layer.detached;
-        self.layer.detached = detached;
+        if detached != self.layer.detached {
+            self.invalidate_detachments();
+            let table = self.layer.table.borrow();
+            for key in detached {
+                AllocationLayer::edit_detachment(
+                    &mut self.layer.detached,
+                    &mut self.layer.detached_by_base,
+                    &table,
+                    key,
+                    true,
+                );
+            }
+        }
 
         // An overridden slot holds its ordinary contents on the opposite incoming path.
         // Equal groups need neither a fallback nor a merge.
         if self.layer.bound != other.layer.bound {
             let mut bound = self.layer.bound.clone();
             for (source, opposite) in [(&*self, other), (other, &*self)] {
-                let mut previous = None;
-                for &(slot, _, _) in &source.layer.bound {
-                    if previous.replace(slot) != Some(slot)
-                        && opposite.owns_slot(slot)
-                        && opposite.layer.bound_of(slot).is_empty()
-                    {
-                        bound.extend(
+                for &slot in source.layer.bound.keys() {
+                    if opposite.owns_slot(slot) && opposite.layer.bound_of(slot).is_empty() {
+                        bound.entry(slot).or_default().extend(
                             opposite
                                 .slot_values(slot)
                                 .map(|value| (slot, value.id, !value.writable)),
@@ -4487,53 +6082,61 @@ impl BorrowState {
                     }
                 }
             }
-            bound.extend(other.layer.bound.iter().copied());
-            normalize_bindings(&mut bound);
-            changed |= bound != self.layer.bound;
-            self.layer.bound = bound;
+            for (&slot, group) in &other.layer.bound {
+                bound.entry(slot).or_default().extend_from_slice(group);
+            }
+            changed |= self.layer.replace_bound(bound);
         }
 
         // A group explicit on one side holds the lazy child on the other.
-        let mut merged = Vec::with_capacity(self.layer.edges.len() + other.layer.edges.len());
-        let mut table = self.layer.table.borrow_mut();
-        for (source, opposite) in [(&self.layer, &other.layer), (&other.layer, &self.layer)] {
-            for edge in source.edges.iter() {
-                merged.push(*edge);
-                if opposite.edges.group(edge.holder, edge.key).is_empty() {
-                    merged.push(Edge {
-                        holder: edge.holder,
-                        key: edge.key,
-                        held: table.child(edge.holder, edge.key),
-                        writable: true,
-                        single: false,
-                    });
+        if self.layer.edges.groups != other.layer.edges.groups {
+            let mut table = self.layer.table.borrow_mut();
+            let mine = &mut self.layer.edges;
+            let theirs = &other.layer.edges;
+            // Lazy children are interned in predecessor order, not the merged group's
+            // order: their allocation IDs can break ties in diagnostic attribution.
+            for (source, opposite) in [(&*mine, theirs), (theirs, &*mine)] {
+                for &(holder, key) in source.groups.keys() {
+                    if opposite.group(holder, key).is_empty() {
+                        table.child(holder, key);
+                    }
+                }
+            }
+            let groups: BTreeSet<_> = mine
+                .groups
+                .keys()
+                .chain(theirs.groups.keys())
+                .copied()
+                .collect();
+            for (holder, key) in groups {
+                let left = mine.group(holder, key);
+                let right = theirs.group(holder, key);
+                if left == right {
+                    continue;
+                }
+                if left.is_empty() || right.is_empty() {
+                    let lazy = table.child(holder, key);
+                    changed |= mine.insert(
+                        &table,
+                        Edge {
+                            holder,
+                            key,
+                            held: lazy,
+                            writable: true,
+                            single: false,
+                        },
+                        false,
+                    );
+                }
+                for &edge in right {
+                    changed |= mine.insert(&table, edge, false);
                 }
             }
         }
-        drop(table);
-        merged.sort_by_key(Edge::sort_key);
-        merged.dedup_by(|later, earlier| {
-            if later.sort_key() != earlier.sort_key() {
-                return false;
-            }
-            earlier.writable &= later.writable;
-            earlier.single &= later.single;
-            true
-        });
-        let edges_changed = merged != self.layer.edges.rows;
-        changed |= edges_changed;
-        if edges_changed {
-            self.layer
-                .edges
-                .edit(&mut self.layer.table.borrow_mut(), |rows, _| *rows = merged);
-        }
 
-        let previous_len = self.layer.observations.len();
-        self.layer.observations.retain_mut(|entry| {
-            let Some(incoming) = other.layer.observation(entry.local) else {
-                return false;
-            };
-            if entry != incoming {
+        changed |= self
+            .layer
+            .join_observations(&other.layer, |entry, incoming| {
                 let old = entry.clone();
                 let had_views = !entry.views.is_empty();
                 if !had_views && !incoming.views.is_empty() {
@@ -4566,11 +6169,8 @@ impl BorrowState {
                 entry.values.extend_from_slice(&incoming.values);
                 entry.readonly |= incoming.readonly;
                 normalize_observation(entry);
-                changed |= *entry != old;
-            }
-            true
-        });
-        changed |= self.layer.observations.len() != previous_len;
+                *entry != old
+            });
         changed
     }
 
@@ -4647,9 +6247,10 @@ impl BorrowState {
         }
         let mut sharing = SharingLayer::default();
         for (source, opposite, opposite_state) in [(mine, theirs, other), (theirs, mine, &*self)] {
-            sharing.members.extend_from_slice(&source.members);
+            for &(view, id) in &source.members {
+                sharing.insert_member(view, id);
+            }
             sharing.bindings.extend_from_slice(&source.bindings);
-            sharing.projections.extend_from_slice(&source.projections);
             let mut previous = None;
             for &(slot, _) in &source.bindings {
                 if previous.replace(slot) != Some(slot)
@@ -4664,10 +6265,10 @@ impl BorrowState {
                 }
             }
             let mut table = self.layer.table.borrow_mut();
-            let mut last_group = None;
-            for &(holder, key, _) in &source.projections {
-                if last_group.replace((holder, key)) == Some((holder, key))
-                    || opposite.projections(holder, key).next().is_some()
+            for (&(holder, key), children) in &source.projections {
+                let group = sharing.projections.entry((holder, key)).or_default();
+                group.extend(children);
+                if opposite.projections(holder, key).next().is_some()
                     || (matches!(table.base(holder), AllocBase::CallView(..))
                         && opposite.members(holder).next().is_none())
                 {
@@ -4677,9 +6278,7 @@ impl BorrowState {
                 opposite_state
                     .layer
                     .project_members(&mut table, holder, key, &mut ids);
-                sharing
-                    .projections
-                    .extend(ids.into_iter().map(|id| (holder, key, id)));
+                group.extend(ids);
             }
             for &(a, b, shares) in source.pairs.iter() {
                 let could_exist = |view| {
@@ -4693,13 +6292,10 @@ impl BorrowState {
                 sharing.pairs.union(a, b, possible);
             }
         }
-        sharing.members.sort_unstable();
-        sharing.members.dedup();
         sharing.bindings.sort_unstable();
         sharing.bindings.dedup();
-        sharing.projections.sort_unstable();
-        sharing.projections.dedup();
         let changed = &sharing != mine;
+        sharing.rebuild_bases(&self.layer.table.borrow());
         self.layer.sharing = sharing;
         changed
     }
@@ -4711,43 +6307,96 @@ impl BorrowState {
     ///      binding moves to a base that outlives the name.
     pub(super) fn narrow_layer(&mut self, visible: &RootSet) {
         let retires = |local| !visible.contains(local);
-        self.retain_observations_with_unchanged_route(|wrapper| {
-            wrapper.age == WrapperAge::Current && retires(wrapper.local)
-        });
+        if !self.layer.observations.is_empty() {
+            let retired: BTreeSet<_> = self
+                .layer
+                .wrapper_users
+                .iter()
+                .map(|&(target, _)| target)
+                .filter(|target| target.age == WrapperAge::Current && retires(target.local))
+                .chain(
+                    self.layer
+                        .observations
+                        .keys()
+                        .copied()
+                        .filter(|&local| retires(local))
+                        .map(WrapperId::current),
+                )
+                .collect();
+            self.invalidate_observation_routes(retired);
+        }
         // First capture all departing slot payloads in the pre-edge allocation coordinates.
         if !self.layer.wrappers.is_empty() {
             let reached = self.reachable_wrappers(|local| visible.contains(local));
-            for local in 0..self.locals.len() {
-                let wrapper = WrapperId::current(local);
-                if retires(local)
-                    && self.locals[local].init != Init::No
-                    && reached.contains(&wrapper)
-                {
-                    self.materialize_prior(wrapper);
-                }
+            let mut reached: Vec<_> = reached
+                .into_iter()
+                .filter(|wrapper| {
+                    wrapper.age == WrapperAge::Current
+                        && retires(wrapper.local)
+                        && self.locals[wrapper.local].init != Init::No
+                })
+                .collect();
+            // Keep allocation insertion independent of hash iteration.
+            reached.sort_unstable();
+            for wrapper in reached {
+                self.materialize_prior(wrapper);
             }
         }
-        self.freeze_slot_observers(visible.iter_ones(), |roots| {
+        let observers = self
+            .value_root_users
+            .iter()
+            .chain(&self.layer.slot_root_users)
+            .filter_map(|&(root, observer)| {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementLocalRows);
+                (retires(root) && visible.contains(observer)).then_some(observer)
+            })
+            .collect::<BTreeSet<_>>();
+        self.freeze_slot_observers(observers.into_iter(), |roots| {
             roots.has_members_outside(visible)
         });
         if self.layer.is_empty() {
             return;
         }
-        self.layer.rename_bases(|base| departed_base(base, visible));
-        self.age_wrappers(retires);
+        self.layer
+            .rename_bases(None, |base| departed_base(base, visible));
+        let retired: BTreeSet<_> = self
+            .layer
+            .wrapper_users
+            .iter()
+            .filter(|(target, _)| target.age == WrapperAge::Current)
+            .map(|(target, _)| target.local)
+            .filter(|&local| retires(local))
+            .collect();
+        self.age_wrappers(retired, retires);
         self.prune_wrappers(|local| visible.contains(local));
         for row in &mut self.layer.wrappers {
             row.route_roots.intersect_with(visible);
+            let tracks_slot = row.has_slot() && row.wrapper.age == WrapperAge::Current;
             if let Some(roots) = &mut row.slot_roots {
+                if tracks_slot {
+                    super::index_roots(
+                        &mut self.layer.slot_root_users,
+                        row.wrapper.local,
+                        roots,
+                        false,
+                    );
+                }
                 roots.intersect_with(visible);
+                if tracks_slot {
+                    super::index_roots(
+                        &mut self.layer.slot_root_users,
+                        row.wrapper.local,
+                        roots,
+                        true,
+                    );
+                }
             }
         }
+        self.rebuild_observation_routes();
         self.layer
-            .observations
-            .retain(|entry| visible.contains(entry.local));
+            .retain_observations(|entry| visible.contains(entry.local));
         self.layer
-            .detached
-            .retain(|&(owner, _)| visible.contains(owner as usize));
+            .retain_detachment_owners(|owner| visible.contains(owner as usize));
         self.collect_unreachable_allocations(visible);
     }
 
@@ -4790,17 +6439,15 @@ impl BorrowState {
             WrapperAge::Current => live_name(wrapper.local),
             WrapperAge::Prior => reached.contains(&wrapper),
         };
-        self.layer.wrappers.retain(|row| keep(row.wrapper));
-        if self.layer.may_have_value_routes {
-            self.layer.may_have_value_routes =
-                self.layer.wrappers.iter().any(|row| !row.routes.is_empty());
-        }
-        self.layer.bound.retain(|&(slot, _, _)| keep(slot));
-        self.layer.contents.retain(|(cell, _)| match cell {
-            CellId::Slot(slot) => keep(*slot),
+        self.layer.retain_wrappers(keep);
+        self.layer.retain_bound(keep);
+        self.layer.retain_contents(|cell, _| match cell {
+            CellId::Slot(slot) => keep(slot),
             CellId::Projected(..) => true,
         });
-        self.layer.sharing.bindings.retain(|&(slot, _)| keep(slot));
+        self.layer
+            .sharing
+            .retain_binding_owners(&self.layer.table.borrow(), keep);
     }
 
     pub(in super::super) fn has_retired_wrappers(&self) -> bool {
@@ -4850,33 +6497,45 @@ impl BorrowState {
         live.extend(
             self.layer
                 .bound
-                .iter()
+                .values()
+                .flatten()
                 .filter_map(|&(_, id, _)| (id != AllocId::EMPTY).then_some(id)),
         );
         let table = self.layer.table.borrow();
         let mut reached: FxHashSet<AllocId> = live.iter().copied().collect();
         let mut stack = live;
-        let mut keep = vec![false; self.layer.edges.len()];
+        let mut kept_holders = FxHashSet::default();
         while let Some(current) = stack.pop() {
-            for (index, edge) in self.layer.edges.iter().enumerate() {
-                if keep[index] || !ancestor_or_self(&table, current, edge.holder) {
-                    continue;
-                }
-                keep[index] = true;
+            increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
+            if !kept_holders.insert(current) {
+                continue;
+            }
+            stack.extend(self.layer.edges.children_of(current));
+            for edge in self.layer.edges.for_holder(current) {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
                 if edge.held != AllocId::EMPTY && reached.insert(edge.held) {
                     stack.push(edge.held);
                 }
             }
         }
+        let has_reached_ancestor = |table: &AllocTable, mut holder| {
+            loop {
+                increment_frontend_counter(FrontendCounter::BorrowRetirementAllocationRows);
+                if reached.contains(&holder) {
+                    return true;
+                }
+                let Some((parent, _)) = table.parent(holder) else {
+                    return false;
+                };
+                holder = parent;
+            }
+        };
         if !self.layer.sharing.is_empty() {
             let sharing = &mut self.layer.sharing;
             let mut live_views = FxHashSet::default();
             let mut visit: Vec<AllocId> = sharing.bindings.iter().map(|&(_, view)| view).collect();
-            for &(holder, _, _) in &sharing.projections {
-                if reached
-                    .iter()
-                    .any(|&id| ancestor_or_self(&table, id, holder))
-                {
+            for &(holder, _) in sharing.projections.keys() {
+                if has_reached_ancestor(&table, holder) {
                     visit.push(holder);
                 }
             }
@@ -4884,43 +6543,27 @@ impl BorrowState {
                 if !live_views.insert(view) {
                     continue;
                 }
-                let start = sharing
-                    .projections
-                    .partition_point(|&(holder, _, _)| holder < view);
-                visit.extend(
-                    sharing.projections[start..]
-                        .iter()
-                        .take_while(|&&(holder, _, _)| holder == view)
-                        .map(|&(_, _, child)| child),
-                );
+                visit.extend(sharing.projected_by(view).map(|(_, child)| child));
             }
-            sharing
-                .members
-                .retain(|&(view, _)| live_views.contains(&view));
-            sharing
-                .projections
-                .retain(|&(holder, _, _)| live_views.contains(&holder));
-            sharing.pairs.edit(|pairs| {
-                pairs.retain(|&(a, b, _)| live_views.contains(&a) && live_views.contains(&b));
-            });
+            sharing.retain_live_views(&table, &live_views);
         }
-        self.layer.contents.retain(|(cell, _)| match cell {
-            CellId::Projected(holder, _) => reached
-                .iter()
-                .any(|&id| ancestor_or_self(&table, id, *holder)),
+        drop(table);
+        self.layer.retain_contents(|cell, table| match cell {
+            CellId::Projected(holder, _) => has_reached_ancestor(table, holder),
             CellId::Slot(_) => true,
         });
-        drop(table);
-        let mut index = 0;
-        self.layer
+        let discarded: Vec<_> = self
+            .layer
             .edges
-            .edit(&mut self.layer.table.borrow_mut(), |edges, _| {
-                edges.retain(|_| {
-                    let kept = keep[index];
-                    index += 1;
-                    kept
-                });
-            });
+            .groups
+            .keys()
+            .copied()
+            .filter(|(holder, _)| !kept_holders.contains(holder))
+            .collect();
+        let table = self.layer.table.borrow();
+        for (holder, key) in discarded {
+            self.layer.edges.take_group(&table, holder, key);
+        }
     }
 }
 
@@ -4930,23 +6573,6 @@ fn departed_base(base: AllocBase, visible: &RootSet) -> Option<AllocBase> {
             Some(AllocBase::Departed(local))
         }
         _ => None,
-    }
-}
-
-/// Whether `ancestor` is `id` or on its field path, ignoring overrides.
-///
-/// WHY: collection keeps an edge whenever its holder might be reached; an override that hides
-///      the path only makes the kept edge unreachable for conflicts, never wrong.
-fn ancestor_or_self(table: &AllocTable, ancestor: AllocId, id: AllocId) -> bool {
-    let mut current = id;
-    loop {
-        if current == ancestor {
-            return true;
-        }
-        match table.parent(current) {
-            Some((parent, _)) => current = parent,
-            None => return false,
-        }
     }
 }
 
@@ -4963,7 +6589,9 @@ fn base_local(base: AllocBase) -> Option<usize> {
 }
 
 /// Blocks that can reach themselves.
-fn cyclic_blocks(successors: &FxHashMap<BlockId, Vec<BlockId>>) -> FxHashSet<BlockId> {
+pub(in super::super) fn cyclic_blocks(
+    successors: &FxHashMap<BlockId, Vec<BlockId>>,
+) -> FxHashSet<BlockId> {
     // Iterative Tarjan over the reachable successor map.
     let mut index_of: FxHashMap<BlockId, (u32, u32)> = FxHashMap::default();
     let mut on_stack: FxHashSet<BlockId> = FxHashSet::default();
@@ -5034,6 +6662,180 @@ mod tests {
     use super::*;
 
     #[test]
+    fn join_interns_missing_children_in_predecessor_order_for_readonly_attribution() {
+        for preinterned in [false, true] {
+            for left_is_higher in [false, true] {
+                let mut base = BorrowState::new_uninitialized(3);
+                for local in 0..3 {
+                    base.initialize_parameter(local);
+                }
+                let [low, high, result] = [0, 1, 2].map(|local| base.local_alloc_ids(local).0[0]);
+                let (left, right) = if left_is_higher {
+                    (high, low)
+                } else {
+                    (low, high)
+                };
+                let field = FieldKey::Field(0);
+                if preinterned {
+                    base.alloc_child(right, field);
+                    base.alloc_child(left, field);
+                }
+                let mut first = base.clone();
+                let mut second = base;
+                let member = StoredValue {
+                    id: result,
+                    writable: true,
+                };
+                first.add_alloc_edge(left, field, member);
+                second.add_alloc_edge(right, field, member);
+                first.join_in_place(&second);
+                let a = first.alloc_child(left, field);
+                let b = first.alloc_child(right, field);
+                assert_eq!(
+                    a < b,
+                    !preinterned,
+                    "fresh children must follow predecessor order"
+                );
+                first.add_alloc_edge(
+                    result,
+                    field,
+                    StoredValue {
+                        id: a,
+                        writable: false,
+                    },
+                );
+                first.add_alloc_edge(
+                    result,
+                    field,
+                    StoredValue {
+                        id: b,
+                        writable: false,
+                    },
+                );
+                let mut resolved = first.resolve_local_allocs(2);
+                first.step_resolved(&mut resolved, field, &[false, false, true]);
+                let expected_origin = usize::from(left_is_higher != preinterned);
+                assert_eq!(resolved.readonly_source, Some(expected_origin));
+            }
+        }
+    }
+
+    #[test]
+    fn projected_write_selects_only_observations_on_the_same_selector() {
+        let mut state = BorrowState::new_uninitialized(65);
+        state.initialize_parameter(0);
+        let holder = state.local_alloc_ids(0).0[0];
+        for local in 1..65 {
+            let cell = CellId::Projected(holder, FieldKey::Field(local as _));
+            state.initialize_entry_binding(
+                local,
+                BindingSpec::Projected {
+                    addresses: AddressSet::from_cells([cell], Coverage::Complete),
+                    origin: WrapperId::current(0),
+                    owner: None,
+                    writable: true,
+                    isolated: true,
+                    route_roots: RootSet::empty(65),
+                },
+            );
+            state.record_observation(Observation {
+                local,
+                values: Vec::new(),
+                views: Vec::new(),
+                alternatives: Vec::new(),
+                readonly: false,
+            });
+        }
+        let cell = CellId::Projected(holder, FieldKey::Field(33));
+        assert_eq!(state.observation_candidates(&[cell]), BTreeSet::from([33]));
+        state.invalidate_observations(&[cell], Coverage::Complete);
+        assert_eq!(state.layer.observations.len(), 63);
+        assert!(!state.layer.observations.contains_key(&33));
+        state.assert_allocation_incidence();
+    }
+
+    #[test]
+    fn retirement_moves_only_rows_incident_on_the_old_base() {
+        let mut state = BorrowState::new_uninitialized(3);
+        for local in 0..3 {
+            state.initialize_parameter(local);
+        }
+        let [old, survivor, other] = [0, 1, 2].map(|local| state.local_alloc_ids(local).0[0]);
+        let view = state.call_view_id(1, false, 0);
+        let field = FieldKey::Field(0);
+        state.add_view_member(view, old);
+        state.add_view_member(view, survivor);
+        state.relate_views(old, survivor, true);
+        state.link_view(view, field, old);
+        state.link_view(view, FieldKey::Field(1), other);
+        state.bind_detached_holders(2, [old, survivor]);
+        state.bind_alloc_ids(1, &[old, other], false);
+        state.record_observation(Observation {
+            local: 2,
+            values: Vec::new(),
+            views: Vec::new(),
+            alternatives: vec![ValueAlt {
+                kind: ValueKind::Scalar,
+                deps: vec![super::super::ReceiverDependency {
+                    entries: SmallSet::from_iter([old]),
+                    coverage: Coverage::Complete,
+                }],
+            }],
+            readonly: true,
+        });
+        state.assert_allocation_incidence();
+
+        state.retire_slot_value(0, 2);
+        let rebased = state.remap_retired_alloc_id(old, 2, |local| local == 0);
+        assert_ne!(old, rebased);
+        assert!(state.layer.sharing.members(view).any(|id| id == rebased));
+        assert!(state.layer.sharing.members(view).any(|id| id == survivor));
+        assert_eq!(
+            state.layer.sharing.possible_pair(rebased, survivor),
+            Some(true)
+        );
+        assert_eq!(
+            state.layer.sharing.projections(view, field).next(),
+            Some(rebased)
+        );
+        assert_eq!(
+            state
+                .layer
+                .sharing
+                .projections(view, FieldKey::Field(1))
+                .next(),
+            Some(other)
+        );
+        assert_eq!(state.detached_holders(2).collect::<Vec<_>>(), [survivor]);
+        assert_eq!(
+            state.layer.observation(2).unwrap().alternatives[0].deps[0]
+                .entries
+                .as_slice(),
+            &[rebased],
+        );
+        assert!(
+            state
+                .layer
+                .bound_of(WrapperId::current(1))
+                .iter()
+                .any(|&(_, id, _)| id == rebased)
+        );
+        state.assert_allocation_incidence();
+
+        state.bind_slot_views(WrapperId::current(1), &[view]);
+        let mut joined = state.clone();
+        joined.join_in_place(&state);
+        joined.assert_allocation_incidence();
+        let mut visible = RootSet::empty(3);
+        visible.insert(1);
+        joined.kill_invisible(&visible);
+        assert!(joined.layer.observation(2).is_none());
+        assert!(joined.detached_holders(2).next().is_none());
+        assert!(joined.layer.sharing.members(view).any(|id| id == rebased));
+        joined.assert_allocation_incidence();
+    }
+
+    #[test]
     fn implicit_scalar_definition_and_store_need_no_sparse_storage() {
         let mut state = BorrowState::new_uninitialized(1);
         state.rebind_local(0, LocalState::slot(1), 0);
@@ -5046,7 +6848,7 @@ mod tests {
             .with_slot_roots(RootSet::empty(1));
         state.publish_store(&write, 1, None);
         assert_eq!(state.layer.wrappers.capacity(), 0);
-        assert_eq!(state.layer.bound.capacity(), 0);
+        assert!(state.layer.bound.is_empty());
         assert!(state.layer.table.borrow().infos.is_empty());
     }
 
@@ -5099,7 +6901,9 @@ mod tests {
         assert_eq!(state.boundary_binding(slot).coverage, Coverage::Complete);
         assert!(state.retained_slot_payload(slot).is_none());
 
-        state.layer.bound.push((slot, AllocId::EMPTY, false));
+        state
+            .layer
+            .set_bound(slot, vec![(slot, AllocId::EMPTY, false)]);
         assert_eq!(
             state
                 .retained_slot_payload(slot)
@@ -5107,8 +6911,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             [ValueKind::Absent],
         );
-        let allocation = AllocId(0);
-        state.layer.bound.insert(0, (slot, allocation, true));
+        let allocation = state.layer.table.borrow_mut().root(0);
+        state.layer.extend_bound(slot, [(slot, allocation, true)]);
         assert_eq!(
             state
                 .retained_slot_payload(slot)
@@ -5122,6 +6926,7 @@ mod tests {
                 ValueKind::Absent
             ],
         );
-        assert!(state.layer.table.borrow().infos.is_empty());
+        assert_eq!(state.layer.table.borrow().infos.len(), 1);
+        state.assert_allocation_incidence();
     }
 }

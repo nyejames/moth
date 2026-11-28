@@ -16,7 +16,8 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     ValueObservations,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BlockTransferStats, BorrowTransferContext, InvokeLayerOp, InvokeTransfer, transfer_block,
+    BlockTransferStats, BorrowTransferContext, EdgeTransferView, InvokeLayerOp, InvokeTransfer,
+    transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
@@ -26,20 +27,33 @@ use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutabl
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::try_for_each_terminator_target;
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
+#[cfg(test)]
+use std::cell::RefCell;
 use std::collections::{BinaryHeap, VecDeque, hash_map::Entry};
+use std::rc::Rc;
 
 #[cfg(test)]
 #[path = "transfer/tests/invoke_edge_tests.rs"]
 mod invoke_edge_tests;
+
+struct ForwardEdgeSource<'a> {
+    function: FunctionId,
+    block: &'a HirBlock,
+    view: EdgeTransferView<'a>,
+    order: OrderKey,
+}
 
 #[derive(Default)]
 struct FunctionObservations {
@@ -178,6 +192,8 @@ pub(super) struct BorrowChecker<'a> {
     // One frontend-owned local call contract used by transfer and retained for semantic consumers.
     pub(super) public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
     pub(super) local_types: FxHashMap<LocalId, TypeId>,
+    #[cfg(test)]
+    pub(super) forward_probe: Option<RefCell<ForwardProbe>>,
 }
 
 impl<'a> BorrowChecker<'a> {
@@ -224,6 +240,8 @@ impl<'a> BorrowChecker<'a> {
             region_parent_by_id: FxHashMap::default(),
             public_call_summaries: FxHashMap::default(),
             local_types: FxHashMap::default(),
+            #[cfg(test)]
+            forward_probe: None,
         }
     }
 
@@ -246,6 +264,22 @@ impl<'a> BorrowChecker<'a> {
             .map(|region| (region.id(), region.parent()))
             .collect();
         self
+    }
+
+    fn transfer_context(&self) -> BorrowTransferContext<'_> {
+        BorrowTransferContext {
+            external_package_registry: self.external_package_registry,
+            public_call_summaries: &self.public_call_summaries,
+            imported_call_summaries: &self.module.imported_call_summaries,
+            module_private_call_summaries: &self.module.module_private_call_summaries,
+            generated_call_summaries: &self.module.generated_call_summaries,
+            local_types: &self.local_types,
+            structs: &self.module.structs,
+            choices: &self.module.choices,
+            expressions: &self.module.expressions,
+            type_environment: self.type_environment,
+            diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
+        }
     }
 
     pub(super) fn run(
@@ -284,7 +318,7 @@ impl<'a> BorrowChecker<'a> {
         Ok(report)
     }
 
-    fn analyze_function(
+    pub(super) fn analyze_function(
         &mut self,
         function_index: usize,
         report: &mut BorrowCheckReport,
@@ -296,21 +330,14 @@ impl<'a> BorrowChecker<'a> {
         let function = &self.module.functions[function_index];
         let reachable_blocks = self.collect_reachable_blocks(function)?;
         let layout = self.build_function_layout(function, &reachable_blocks)?;
+        #[cfg(feature = "benchmark_counters")]
+        add_frontend_counter(
+            FrontendCounter::BorrowValidationDenseLayoutSlots,
+            layout.local_count() * layout.block_local_max_use_order.len(),
+        );
         let visible_locals_by_block = &layout.visible_locals_by_block;
 
-        let transfer_context = BorrowTransferContext {
-            external_package_registry: self.external_package_registry,
-            public_call_summaries: &self.public_call_summaries,
-            imported_call_summaries: &self.module.imported_call_summaries,
-            module_private_call_summaries: &self.module.module_private_call_summaries,
-            generated_call_summaries: &self.module.generated_call_summaries,
-            local_types: &self.local_types,
-            structs: &self.module.structs,
-            choices: &self.module.choices,
-            expressions: &self.module.expressions,
-            type_environment: self.type_environment,
-            diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
-        };
+        let transfer_context = self.transfer_context();
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
@@ -324,6 +351,14 @@ impl<'a> BorrowChecker<'a> {
 
         // Entry state starts as UNINIT, with parameters immediately initialized.
         let mut initial_state = BorrowState::new_uninitialized(layout.local_count());
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            initial_state = probe.borrow().entry.clone();
+        }
+        #[cfg(test)]
+        let supplied_entry = self.forward_probe.is_some();
+        #[cfg(not(test))]
+        let supplied_entry = false;
         for param in &function.params {
             let Some(param_index) = layout.index_of(*param) else {
                 return Err(self.diagnostics.internal_error(format!(
@@ -332,7 +367,9 @@ impl<'a> BorrowChecker<'a> {
                 )));
             };
 
-            initial_state.initialize_parameter(param_index);
+            if !supplied_entry {
+                initial_state.initialize_parameter(param_index);
+            }
         }
 
         if let Some(mask) = visible_locals_by_block.get(&function.entry) {
@@ -340,14 +377,13 @@ impl<'a> BorrowChecker<'a> {
         }
         in_states.insert(function.entry, initial_state);
 
-        // Reverse postorder lets the forward inputs of a merge accumulate before it runs,
-        // even when they arrive along paths of different lengths.
-        let ranks = reverse_postorder_ranks(function.entry, &layout.block_successors);
-        let mut worklist = BinaryHeap::new();
-        // Pending membership prevents multiple growing inputs from queuing a block twice.
-        let mut pending = FxHashSet::default();
-        worklist.push((ranks[&function.entry], function.entry.0));
-        pending.insert(function.entry);
+        let mut worklist = ForwardWorklist::new(function.entry, &layout.block_successors);
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            let probe = probe.borrow();
+            worklist.fifo = probe.fifo.then(|| VecDeque::from([function.entry]));
+            worklist.reverse_siblings = probe.reverse_siblings;
+        }
 
         let mut summary = FunctionBorrowSummary {
             reachable_blocks: reachable_blocks.len(),
@@ -363,10 +399,11 @@ impl<'a> BorrowChecker<'a> {
         ));
 
         // Keep diagnostic priority independent of fact publication order.
-        while let Some((_, block_index)) = worklist.pop() {
-            let block_id = BlockId(block_index);
-            // Clear before transfer so a self-loop or later back edge can queue the block again.
-            pending.remove(&block_id);
+        while let Some(block_id) = worklist.pop() {
+            #[cfg(test)]
+            if let Some(probe) = &self.forward_probe {
+                probe.borrow_mut().dequeues.push(block_id);
+            }
             summary.worklist_iterations += 1;
 
             // Stored inputs are already narrowed to this block's visibility: the entry state and
@@ -375,6 +412,11 @@ impl<'a> BorrowChecker<'a> {
             let Some(input_state) = in_states.get(&block_id) else {
                 continue;
             };
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(
+                FrontendCounter::BorrowValidationRowsCloned,
+                input_state.validation_row_count(),
+            );
             let mut output_state = input_state.clone();
 
             let block = self.block_by_id_or_error(block_id, function.id)?;
@@ -419,61 +461,54 @@ impl<'a> BorrowChecker<'a> {
                 continue;
             }
 
-            // The target visitor enumerates success before error, even when both share a block.
-            let mut invoke_lanes = [&invoke.success, &invoke.error].into_iter();
-            let mut edge_index = 0;
-
-            try_for_each_terminator_target(&block.terminator, |successor| {
+            let mut deliver_edge = |edge_index, successor| {
                 let edge = (block_id, edge_index);
-                edge_index += 1;
+                #[cfg(test)]
+                if let Some(probe) = &self.forward_probe {
+                    probe.borrow_mut().deliveries.push(edge);
+                }
                 if block_stats.diverges {
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
                     observations.edges.remove(&edge);
                     return Ok::<(), BorrowCheckError>(());
                 }
                 let invoke_lane = if matches!(&block.terminator, HirTerminator::Invoke { .. }) {
-                    invoke_lanes.next()
+                    Some([&invoke.success, &invoke.error][edge_index])
                 } else {
                     None
                 };
                 if invoke_lane.is_some_and(|lane| lane.unreachable) {
                     observations.edges.remove(&edge);
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
                     return Ok::<(), BorrowCheckError>(());
                 }
-                let Some(&rank) = ranks.get(&successor) else {
+                if !worklist.ranks.contains_key(&successor) {
                     return Ok::<(), BorrowCheckError>(());
-                };
+                }
 
+                #[cfg(feature = "benchmark_counters")]
+                add_frontend_counter(
+                    FrontendCounter::BorrowValidationRowsCloned,
+                    output_state.validation_row_count(),
+                );
                 let mut successor_input = output_state.clone();
-                let order = layout.terminator_order_or_unknown(block_id);
-                let fresh_outcomes = invoke_lane.is_some_and(|lane| lane.operations.is_empty())
-                    && !successor_input.layer_is_empty()
-                    && !successor_input.block_may_repeat(block_id, &layout.block_successors);
-                let mut edge_observations = if let Some(lane) = invoke_lane {
-                    apply_invoke_edge_transfer(
-                        &layout,
-                        &block.terminator,
-                        lane,
-                        order,
-                        |index: usize| {
-                            fresh_outcomes
-                            && layout.local_first_write_order[index] == order
-                            && matches!(
-                                self.diagnostics.local_origin_kind(layout.local_ids[index]),
-                                Some(crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind::CompilerTemp)
-                            )
-                        },
-                        &mut successor_input,
-                    )
-                } else {
-                    self.apply_jump_argument_transfer(
-                        function.id,
-                        &layout,
-                        &block.terminator,
-                        successor,
-                        order,
-                        &mut successor_input,
-                    )?
-                };
+                let mut edge_observations = self.apply_forward_edge(
+                    &ForwardEdgeSource {
+                        function: function.id,
+                        block,
+                        view: EdgeTransferView::from(&layout),
+                        order: layout.terminator_order_or_unknown(block_id),
+                    },
+                    successor,
+                    invoke_lane,
+                    &mut successor_input,
+                )?;
 
                 // Apply lexical visibility kills before join to prevent
                 // branch-local aliases from leaking into outer regions.
@@ -489,6 +524,13 @@ impl<'a> BorrowChecker<'a> {
                         |id| successor_input.visible_allocation(id, mask),
                     );
                 }
+                #[cfg(test)]
+                if let Some(probe) = &self.forward_probe {
+                    probe
+                        .borrow_mut()
+                        .edges
+                        .insert(edge, successor_input.clone());
+                }
                 if !edge_observations.is_empty() {
                     observations.edges.insert(edge, edge_observations);
                 } else {
@@ -499,6 +541,12 @@ impl<'a> BorrowChecker<'a> {
                 let changed_in = match in_states.get_mut(&successor) {
                     Some(existing) => {
                         report.stats.state_joins += 1;
+                        #[cfg(feature = "benchmark_counters")]
+                        add_frontend_counter(
+                            FrontendCounter::BorrowValidationRowsJoined,
+                            existing.validation_row_count()
+                                + successor_input.validation_row_count(),
+                        );
                         existing.join_in_place(&successor_input)
                     }
                     None => {
@@ -506,13 +554,38 @@ impl<'a> BorrowChecker<'a> {
                         true
                     }
                 };
-                if changed_in && pending.insert(successor) {
-                    worklist.push((rank, successor.0));
+                if changed_in {
+                    worklist.push(successor);
                 }
 
                 Ok::<(), BorrowCheckError>(())
-            })?;
-            drop(invoke_lanes);
+            };
+            #[cfg(test)]
+            let reverse_delivery = self
+                .forward_probe
+                .as_ref()
+                .is_some_and(|probe| probe.borrow().reverse_delivery);
+            #[cfg(not(test))]
+            let reverse_delivery = false;
+            if reverse_delivery {
+                let mut edges = Vec::new();
+                try_for_each_terminator_target(&block.terminator, |successor| {
+                    edges.push((edges.len(), successor));
+                    Ok::<_, BorrowCheckError>(())
+                })?;
+                for (index, successor) in edges.into_iter().rev() {
+                    deliver_edge(index, successor)?;
+                }
+            } else {
+                let mut edge_index = 0;
+                try_for_each_terminator_target(&block.terminator, |successor| {
+                    let index = edge_index;
+                    edge_index += 1;
+                    deliver_edge(index, successor)
+                })?;
+            }
+            #[cfg(test)]
+            worklist.finish_successors();
 
             out_states.insert(block_id, output_state);
             if has_invoke_effects {
@@ -520,6 +593,16 @@ impl<'a> BorrowChecker<'a> {
             } else {
                 invoke_by_block.remove(&block_id);
             }
+        }
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            let mut probe = probe.borrow_mut();
+            probe.block_observations = observations.blocks.clone();
+            probe.observations = observations
+                .edges
+                .iter()
+                .map(|(&edge, observations)| (edge, observations.clone()))
+                .collect();
         }
 
         // The verdict uses final executable edges and cannot change forward state.
@@ -768,17 +851,162 @@ impl<'a> BorrowChecker<'a> {
         total.conflicts_checked += block.conflicts_checked;
     }
 
+    /// A component which does not write at an edge shares its incoming facts at the successor.
+    #[allow(dead_code)] // Prepared for guarded extraction over a projected support.
+    pub(super) fn drive_sparse_support(
+        &self,
+        function: &HirFunction,
+        mut entry: BorrowState,
+        support: &super::metadata::ProjectedSupport<'_>,
+    ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
+        use super::transfer::transfer_sparse_block;
+
+        let context = self.transfer_context();
+        entry.use_indexed_recurring_blocks(support.recurring_blocks());
+        if let Some(mask) = support.visibility(function.entry) {
+            entry.kill_invisible(mask);
+        }
+        let entry_block = support.continuation(function.entry);
+        let mut worklist = ForwardWorklist::with_ranks(entry_block, support.ranks());
+        let mut inputs = FxHashMap::default();
+        inputs.insert(entry_block, Rc::new(entry));
+        let mut exits = FxHashMap::default();
+        while let Some(block_id) = worklist.pop() {
+            let block = self.block_by_id_or_error(block_id, function.id)?;
+            if matches!(block.terminator, HirTerminator::Uninitialized) {
+                return Err(context
+                    .diagnostics
+                    .internal_error("Missing terminator during sparse borrow transfer"));
+            }
+            let view = support.block_view(block_id);
+            let source = ForwardEdgeSource {
+                function: function.id,
+                block,
+                view: EdgeTransferView {
+                    operations: view.operations,
+                    observations: false,
+                },
+                order: view.terminator_order,
+            };
+            let transfer_terminator = view.transfer_terminator;
+            let mut state = Rc::clone(&inputs[&block_id]);
+            let transfer = if view.statement_positions.is_empty() && !transfer_terminator {
+                BlockTransferStats::default()
+            } else {
+                transfer_sparse_block(&context, view, block, Rc::make_mut(&mut state))?
+            };
+            if transfer.diverges {
+                continue;
+            }
+            self.transfer_sparse_successors(
+                &source,
+                transfer_terminator.then_some(&transfer.invoke),
+                &state,
+                support,
+                |successor, incoming| {
+                    let changed = match inputs.entry(successor) {
+                        Entry::Occupied(mut entry) => {
+                            let existing = entry.get_mut();
+                            !Rc::ptr_eq(existing, &incoming)
+                                && existing.as_ref() != incoming.as_ref()
+                                && Rc::make_mut(existing).join_in_place(&incoming)
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(incoming);
+                            true
+                        }
+                    };
+                    if changed {
+                        worklist.push(successor);
+                    }
+                },
+            )?;
+            exits.insert(block_id, state);
+        }
+        Ok(exits)
+    }
+
+    fn transfer_sparse_successors(
+        &self,
+        source: &ForwardEdgeSource<'_>,
+        terminator_effects: Option<&InvokeTransfer>,
+        state: &Rc<BorrowState>,
+        support: &super::metadata::ProjectedSupport<'_>,
+        mut deliver: impl FnMut(BlockId, Rc<BorrowState>),
+    ) -> Result<(), BorrowCheckError> {
+        let terminator = &source.block.terminator;
+        let mut lanes = terminator_effects
+            .filter(|_| matches!(terminator, HirTerminator::Invoke { .. }))
+            .map(|invoke| [&invoke.success, &invoke.error].into_iter());
+        let jump_rebinds = terminator_effects.is_some()
+            && matches!(terminator, HirTerminator::Jump { args, .. } if !args.is_empty());
+        try_for_each_terminator_target(terminator, |successor| {
+            let lane = lanes.as_mut().and_then(Iterator::next);
+            if lane.is_some_and(|lane| lane.unreachable) {
+                return Ok(());
+            }
+            let mut incoming = Rc::clone(state);
+            if jump_rebinds || lane.is_some() {
+                self.apply_forward_edge(source, successor, lane, Rc::make_mut(&mut incoming))?;
+            }
+            if let Some(mask) = support.visibility(successor) {
+                Rc::make_mut(&mut incoming).kill_invisible(mask);
+            }
+            deliver(support.continuation(successor), incoming);
+            Ok(())
+        })
+    }
+
+    fn apply_forward_edge(
+        &self,
+        source: &ForwardEdgeSource<'_>,
+        successor: BlockId,
+        invoke: Option<&super::transfer::InvokeLaneTransfer>,
+        state: &mut BorrowState,
+    ) -> Result<ValueObservations, BorrowCheckError> {
+        let ForwardEdgeSource {
+            function,
+            block,
+            view,
+            order,
+        } = *source;
+        let terminator = &block.terminator;
+        if let Some(lane) = invoke {
+            let operations = view.operations;
+            let fresh = lane.operations.is_empty()
+                && !state.layer_is_empty()
+                && !state.block_may_repeat(block.id, operations.block_successors);
+            Ok(apply_invoke_edge_transfer(
+                view,
+                terminator,
+                lane,
+                order,
+                |index| {
+                    fresh && operations.local_first_write_order[index] == order
+                        && matches!(
+                            self.diagnostics.local_origin_kind(operations.local_ids[index]),
+                            Some(crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind::CompilerTemp)
+                        )
+                },
+                state,
+            ))
+        } else {
+            self.apply_jump_argument_transfer(function, view, terminator, successor, order, state)
+        }
+    }
+
     pub(super) fn apply_jump_argument_transfer(
         &self,
         function_id: FunctionId,
-        layout: &FunctionLayout,
+        view: EdgeTransferView<'_>,
         terminator: &HirTerminator,
         successor: BlockId,
         order: OrderKey,
         successor_input: &mut BorrowState,
     ) -> Result<ValueObservations, BorrowCheckError> {
+        let layout = view.operations;
         let mut observations = ValueObservations {
-            enabled: layout.lookup_observations,
+            enabled: view.observations,
             ..Default::default()
         };
         let HirTerminator::Jump { target, args } = terminator else {
@@ -803,9 +1031,9 @@ impl<'a> BorrowChecker<'a> {
 
                 if observations.enabled && successor_input.has_value_alternatives() {
                     let mut resolved =
-                        successor_input.resolve_place_path(source_index, &layout.local_mutable, []);
+                        successor_input.resolve_place_path(source_index, layout.local_mutable, []);
                     if layout.local_has_in_place_mutation_surface[source_index] {
-                        successor_input.load_place_content(&mut resolved, &layout.local_mutable, false);
+                        successor_input.load_place_content(&mut resolved, layout.local_mutable, false);
                     }
                     let mut access = AccessFootprint::cells(resolved.address, PlaceUse::Read);
                     access.content = resolved.content;
@@ -935,8 +1163,91 @@ impl<'a> BorrowChecker<'a> {
     }
 }
 
+struct ForwardWorklist {
+    ranks: Rc<FxHashMap<BlockId, usize>>,
+    rpo: BinaryHeap<(usize, u32)>,
+    pending: FxHashSet<BlockId>,
+    #[cfg(test)]
+    fifo: Option<VecDeque<BlockId>>,
+    #[cfg(test)]
+    reverse_siblings: bool,
+    #[cfg(test)]
+    siblings: Vec<BlockId>,
+}
+
+impl ForwardWorklist {
+    fn new(entry: BlockId, successors: &FxHashMap<BlockId, Vec<BlockId>>) -> Self {
+        Self::with_ranks(entry, Rc::new(reverse_postorder_ranks(entry, successors)))
+    }
+
+    fn with_ranks(entry: BlockId, ranks: Rc<FxHashMap<BlockId, usize>>) -> Self {
+        let rpo = BinaryHeap::from([(ranks[&entry], entry.0)]);
+        Self {
+            ranks,
+            rpo,
+            pending: [entry].into_iter().collect(),
+            #[cfg(test)]
+            fifo: None,
+            #[cfg(test)]
+            reverse_siblings: false,
+            #[cfg(test)]
+            siblings: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, block: BlockId) {
+        if !self.pending.insert(block) {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(fifo) = &mut self.fifo {
+            if self.reverse_siblings {
+                self.siblings.push(block);
+            } else {
+                fifo.push_back(block);
+            }
+            return;
+        }
+        self.rpo.push((self.ranks[&block], block.0));
+    }
+
+    fn pop(&mut self) -> Option<BlockId> {
+        #[cfg(test)]
+        if let Some(fifo) = &mut self.fifo {
+            let block = fifo.pop_front()?;
+            self.pending.remove(&block);
+            return Some(block);
+        }
+        // Clear before transfer so a self-edge can queue this block again.
+        let (_, index) = self.rpo.pop()?;
+        let block = BlockId(index);
+        self.pending.remove(&block);
+        Some(block)
+    }
+
+    #[cfg(test)]
+    fn finish_successors(&mut self) {
+        if let Some(fifo) = &mut self.fifo {
+            fifo.extend(self.siblings.drain(..).rev());
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) struct ForwardProbe {
+    pub entry: BorrowState,
+    pub fifo: bool,
+    pub reverse_siblings: bool,
+    pub reverse_delivery: bool,
+    pub deliveries: Vec<(BlockId, usize)>,
+    pub dequeues: Vec<BlockId>,
+    pub edges: FxHashMap<(BlockId, usize), BorrowState>,
+    pub observations: FxHashMap<(BlockId, usize), ValueObservations>,
+    pub block_observations: FxHashMap<BlockId, ValueObservations>,
+}
+
 /// A larger finishing rank means earlier reverse-postorder priority.
-fn reverse_postorder_ranks(
+pub(super) fn reverse_postorder_ranks(
     entry: BlockId,
     successors: &FxHashMap<BlockId, Vec<BlockId>>,
 ) -> FxHashMap<BlockId, usize> {
@@ -964,7 +1275,7 @@ fn reverse_postorder_ranks(
 
 /// Retire both previous outcomes before installing the selected lane's captures.
 fn apply_invoke_edge_transfer(
-    layout: &FunctionLayout,
+    view: EdgeTransferView<'_>,
     terminator: &HirTerminator,
     lane: &super::transfer::InvokeLaneTransfer,
     order: OrderKey,
@@ -979,8 +1290,9 @@ fn apply_invoke_edge_transfer(
     else {
         return ValueObservations::default();
     };
+    let layout = view.operations;
     let mut observations = ValueObservations {
-        enabled: layout.lookup_observations,
+        enabled: view.observations,
         ..Default::default()
     };
     for checkpoint in &lane.checkpoints {
@@ -1030,9 +1342,11 @@ fn apply_invoke_edge_transfer(
         local == *error_result || success_results.contains(&local)
     };
     for op in &lane.operations {
-        observations
-            .tail
-            .replace(op.apply(layout, edge_state, Some((order, &retires))));
+        observations.tail.replace(op.apply_with_indices(
+            &|local| layout.index_of(local),
+            edge_state,
+            Some((order, &retires)),
+        ));
     }
     observations.prune_retired_wrappers(edge_state);
     observations
@@ -1085,15 +1399,6 @@ impl InvokeLayerOp {
         let readonly = value.readonly();
         let store = TypedStore::receive_result(state.resolve_cells(index), value, index, readonly);
         state.publish_store(&store, UNKNOWN_ORDER_KEY, None)
-    }
-
-    pub(super) fn apply(
-        &self,
-        layout: &FunctionLayout,
-        state: &mut BorrowState,
-        rebase: Option<(OrderKey, &dyn Fn(usize) -> bool)>,
-    ) -> StoreReceipt {
-        self.apply_with_indices(&|local| layout.index_of(local), state, rebase)
     }
 
     fn apply_with_indices(

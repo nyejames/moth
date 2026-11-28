@@ -168,7 +168,7 @@ return source_a
 
     let jump = module.blocks[entry.0 as usize].terminator.clone();
     checker
-        .apply_jump_argument_transfer(function_id, &layout, &jump, entry, 0, &mut state)
+        .apply_jump_argument_transfer(function_id, (&layout).into(), &jump, entry, 0, &mut state)
         .expect("explicit local destinations should transfer");
 
     for (destination, expected_root, excluded_root) in [
@@ -232,7 +232,7 @@ return source_a
     state.bind_detached_holders(source_b_index, [old_a]);
 
     checker
-        .apply_jump_argument_transfer(function_id, &layout, &jump, entry, 1, &mut state)
+        .apply_jump_argument_transfer(function_id, (&layout).into(), &jump, entry, 1, &mut state)
         .expect("the parallel jump should transport pre-edge allocations");
 
     let (observed_a, observed_b) = (
@@ -287,7 +287,14 @@ return source_a
         }],
     };
     let observations = checker
-        .apply_jump_argument_transfer(function_id, &layout, &same_slot, entry, 3, &mut state)
+        .apply_jump_argument_transfer(
+            function_id,
+            (&layout).into(),
+            &same_slot,
+            entry,
+            3,
+            &mut state,
+        )
         .expect("same-slot jump should transfer");
     let mut demand = Default::default();
     observations.backward(&mut demand, |_, _| {
@@ -330,4 +337,244 @@ probe |flag Bool| -> I32, Error!:
     assert_lookup_conflict(&fixture(""), "~scores.clear()");
     check_place_access_source(&fixture("~score = 0"))
         .expect("the jump transports only the replacement");
+}
+
+#[test]
+fn rpo_and_fifo_agree_on_rebased_carriers_and_verdicts() {
+    use crate::compiler_frontend::analysis::borrow_checker::engine::ForwardProbe;
+    use crate::compiler_frontend::analysis::borrow_checker::types::BorrowCheckReport;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+    use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
+    use std::collections::BTreeMap;
+
+    for rejected in [false, true] {
+        let result = if rejected { "score" } else { "0" };
+        let source = format!(
+            r#"
+probe |flag Bool, nested Bool, saved I32, previous I32| -> I32, Error!:
+    scores ~{{String = I32}} = {{"k" = 7}}
+    score = scores.get("k") catch:
+        return saved
+    ;
+    if flag:
+        if nested:
+            nested_value = previous
+        ;
+    else
+        direct_value = previous
+    ;
+    ~scores.clear()
+    return {result}
+;
+"#
+        );
+        let (ast, mut paths, mut strings) = parse_single_file_ast(&source);
+        let registry = default_external_package_registry(&mut strings);
+        let (module, types) = lower_ast(ast, &mut strings, &mut paths, &registry)
+            .expect("schedule fixture should lower");
+        validate_hir_module(&module, &types, &registry).expect("schedule fixture HIR");
+        let function_index = module
+            .functions
+            .iter()
+            .position(|function| function.params.len() == 4)
+            .expect("probe signature");
+        let function = &module.functions[function_index];
+        let mut checker = BorrowChecker::new(&module, &types, &registry, &paths, &strings);
+        let blocks = checker
+            .collect_reachable_blocks(function)
+            .expect("probe CFG");
+        let layout = checker
+            .build_function_layout(function, &blocks)
+            .expect("probe layout");
+        let [flag, nested, saved, previous] = std::array::from_fn(|i| {
+            layout
+                .index_of(function.params[i])
+                .expect("parameter in layout")
+        });
+        let count = layout.local_count();
+        let mut entry = BorrowState::new_uninitialized(count);
+        for parameter in [flag, nested, saved, previous] {
+            entry.initialize_parameter(parameter);
+        }
+        let receiver = entry.local_alloc_ids(flag).0[0];
+        entry.set_binding(
+            saved,
+            BindingSpec::Link {
+                source: WrapperId::current(previous),
+                writable: false,
+            },
+            RootSet::empty(count),
+            RootSet::empty(count),
+        );
+        entry.publish_store(
+            &TypedStore::replace_cells(
+                entry.resolve_cells(previous),
+                CapturedValue {
+                    alternatives: vec![ValueAlt {
+                        kind: ValueKind::Scalar,
+                        deps: vec![ReceiverDependency {
+                            entries: [receiver].into_iter().collect(),
+                            coverage: Coverage::Complete,
+                        }],
+                    }],
+                    ..Default::default()
+                },
+            ),
+            0,
+            None,
+        );
+        entry.retire_binding_allocation(previous, -2);
+        entry.initialize_parameter(previous);
+
+        let mut vocabulary = BTreeMap::new();
+        let mut ordinary_fifo = None;
+        let mut canonical = None;
+        for (fifo, reverse_siblings, reverse_delivery, preinterned) in [
+            (false, false, false, false),
+            (true, false, false, false),
+            (true, true, false, false),
+            (true, false, true, true),
+        ] {
+            let entry = entry.independent_test_state();
+            if preinterned {
+                entry.alloc_child(
+                    receiver,
+                    crate::compiler_frontend::analysis::borrow_checker::state::FieldKey::Field(97),
+                );
+            }
+            checker.forward_probe = Some(
+                ForwardProbe {
+                    entry,
+                    fifo,
+                    reverse_siblings,
+                    reverse_delivery,
+                    deliveries: Vec::new(),
+                    dequeues: Vec::new(),
+                    edges: Default::default(),
+                    observations: Default::default(),
+                    block_observations: Default::default(),
+                }
+                .into(),
+            );
+            let verdict =
+                checker.analyze_function(function_index, &mut BorrowCheckReport::default());
+            let diagnostic = verdict.err().map(|error| {
+                let draft = error
+                    .into_draft_or_infrastructure()
+                    .expect("typed borrow diagnostic");
+                let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+                let diagnostic = bag.first().expect("borrow diagnostic");
+                let view = diagnostic
+                    .family_view::<InvalidMutableAccessView>()
+                    .expect("mutation verdict");
+                assert_eq!(
+                    view.reason,
+                    InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess
+                );
+                let subject = view.place.diagnostic_place();
+                let conflict = view.conflicting_place.map(|place| place.diagnostic_place());
+                let primary = format!("{:?}", diagnostic.primary_site());
+                let labels: Vec<_> = diagnostic
+                    .durable_labels()
+                    .map(|label| format!("{label:?}"))
+                    .collect();
+                (
+                    view.reason,
+                    primary,
+                    format!("{subject:?}"),
+                    format!("{conflict:?}"),
+                    labels,
+                )
+            });
+            assert_eq!(diagnostic.is_some(), rejected);
+            let mut probe = checker
+                .forward_probe
+                .take()
+                .expect("forward inspection")
+                .into_inner();
+            if fifo && reverse_siblings {
+                assert_ne!(ordinary_fifo.as_ref().unwrap(), &probe.dequeues);
+            } else if fifo && !reverse_delivery {
+                ordinary_fifo = Some(probe.dequeues.clone());
+            }
+            let invoke = checker
+                .module
+                .blocks
+                .iter()
+                .find(|block| {
+                    probe.deliveries.contains(&(block.id, 1))
+                        && matches!(block.terminator, HirTerminator::Invoke { .. })
+                })
+                .expect("both invoke edges delivered");
+            let lanes: Vec<_> = probe
+                .deliveries
+                .iter()
+                .filter_map(|&(block, lane)| (block == invoke.id).then_some(lane))
+                .take(2)
+                .collect();
+            assert_eq!(lanes, if reverse_delivery { [1, 0] } else { [0, 1] });
+            let prior = WrapperId::current(previous).retired(|_| true);
+            for lane in 0..2 {
+                let edge = &probe.edges[&(invoke.id, lane)];
+                assert!(edge.boundary_binding(WrapperId::current(saved)).alternatives.iter()
+                    .any(|alt| alt.target == crate::compiler_frontend::analysis::borrow_checker::state::BindingTarget::Link(prior)));
+                assert!(
+                    edge.capture_jump_value(saved, true, false)
+                        .unwrap()
+                        .alternatives
+                        .iter()
+                        .any(|alt| alt
+                            .deps
+                            .iter()
+                            .any(|dep| dep.entries.as_slice().contains(&receiver)))
+                );
+            }
+            assert!(
+                probe
+                    .edges
+                    .values()
+                    .any(|state| state.has_retired_wrappers())
+            );
+            assert!(
+                probe
+                    .edges
+                    .values()
+                    .any(|state| state.has_value_alternatives())
+            );
+            assert!(
+                probe
+                    .block_observations
+                    .values()
+                    .any(|observations| observations.has_obligations())
+            );
+            for edge in probe.edges.values() {
+                edge.assert_allocation_incidence();
+            }
+            let canonical_id = probe.entry.canonical_test_allocations(&mut vocabulary);
+            let edges: BTreeMap<_, _> = probe
+                .edges
+                .iter()
+                .map(|(&edge, state)| (edge, state.canonical_test_edge_rows(&canonical_id)))
+                .collect();
+            for observations in probe
+                .observations
+                .values_mut()
+                .chain(probe.block_observations.values_mut())
+            {
+                observations.canonicalise_test_carriers(&canonical_id);
+            }
+            let result = (
+                diagnostic,
+                edges,
+                probe.observations,
+                probe.block_observations,
+            );
+            if let Some(expected) = &canonical {
+                assert_eq!(&result, expected);
+            } else {
+                canonical = Some(result);
+            }
+        }
+    }
 }

@@ -51,7 +51,9 @@ use layer::{
 use move_decision::{MoveDecision, classify_move_decision};
 pub(in super::super) use statement::call_member_result;
 pub(super) use statement::transfer_statement;
+pub(super) use statement::{CallTransferContext, transfer_statement_operation};
 pub(super) use terminator::transfer_terminator;
+pub(super) use terminator::transfer_terminator_operation;
 
 fn require_initialized_update_target(
     layout: &FunctionLayout,

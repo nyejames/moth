@@ -81,7 +81,7 @@ pub(crate) fn transfer_statement(
     Ok(())
 }
 
-fn transfer_statement_operation(
+pub(in super::super) fn transfer_statement_operation(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     kind: &HirStatementKind,
 ) -> Result<(), BorrowCheckError> {
@@ -181,7 +181,7 @@ fn transfer_statement_write(
     };
     let location = input.location;
     let local_count = input.view.local_count();
-    {
+    if input.validation.is_some() {
         let mut reads = input.shared_read_env(location);
         record_shared_reads_in_place_indices(
             &mut reads,
@@ -190,6 +190,30 @@ fn transfer_statement_write(
             &mut RootSet::empty(local_count),
         )?;
         record_assignment_value_reads(&mut reads, &place, is_definition, value, location)?;
+    }
+
+    if input.validation.is_none() {
+        let Some(local) = local else {
+            return Err(input.context.diagnostics.internal_error(format!(
+                "Assignment target local '{}' is not in the active function layout",
+                input.context.diagnostics.local_name(place.root)
+            )));
+        };
+        let values = LayerValueContext {
+            context: input.context,
+            view: input.view,
+            block_id: input.block_id,
+        };
+        let plan = plan_assignment(&values, input.state, &place, value, is_definition, local)?;
+        return publish_assignment(
+            &values,
+            input.state,
+            &mut input.stats.observations,
+            input.current_order,
+            value,
+            plan,
+            pristine_definition,
+        );
     }
 
     let validation = input
@@ -217,10 +241,13 @@ fn transfer_statement_write(
     )
 }
 
-fn read_statement_operands(
+pub(super) fn read_statement_operands(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     operands: impl IntoIterator<Item = HirValueId>,
 ) -> Result<(), BorrowCheckError> {
+    if input.validation.is_none() {
+        return Ok(());
+    }
     let location = input.location;
     let local_count = input.view.local_count();
     let mut reads = input.shared_read_env(location);
@@ -515,7 +542,7 @@ impl CallStorage {
     }
 }
 
-pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
+pub(in super::super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
     context: &'a BorrowTransferContext<'module>,
     view: OperationView<'a>,
     state: &'state mut BorrowState,
@@ -530,7 +557,7 @@ impl<'a, 'module, 'state, 'tracker, 'stats, 'facts>
     CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts>
 {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub(in super::super) fn new(
         context: &'a BorrowTransferContext<'module>,
         view: OperationView<'a>,
         state: &'state mut BorrowState,
@@ -550,6 +577,14 @@ impl<'a, 'module, 'state, 'tracker, 'stats, 'facts>
             stats,
             validation,
         }
+    }
+
+    pub(super) fn read_match_pattern(&mut self, arm: &HirMatchArm) -> Result<(), BorrowCheckError> {
+        if self.validation.is_some() {
+            let location = self.location;
+            record_shared_reads_in_pattern(&mut self.shared_read_env(location), arm)?;
+        }
+        Ok(())
     }
 
     fn shared_read_env(&mut self, location: Option<SourceSpan>) -> SharedReadEnv<'_, 'module> {

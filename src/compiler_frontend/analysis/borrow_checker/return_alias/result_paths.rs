@@ -7,9 +7,15 @@ use super::super::{
     collect_statement_written_locals, collect_terminator_loaded_locals,
 };
 use super::{BorrowCheckError, BorrowChecker};
+use crate::compiler_frontend::analysis::borrow_checker::state::{
+    BindingSpec, BorrowState, OrderKey, RootSet, UNKNOWN_ORDER_KEY, cyclic_blocks,
+};
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_member_result;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::{
     BorrowedCall, CallReturns,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+    OperationView, SparseBlockView,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalReturnAlias};
@@ -41,6 +47,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound::{Included, Unbounded};
+use std::rc::Rc;
 
 #[path = "call.rs"]
 mod call;
@@ -202,12 +209,380 @@ pub(super) struct SparseFunction {
     pub(super) port_supports: Vec<SupportId>,
     pub(super) guards: Vec<Predicate>,
     pub(super) compatibility: Vec<CompatibilityConstraint>,
+    #[cfg(test)]
     pub(super) operations: BTreeMap<IndexedSite, Box<[SupportId]>>,
+    operations_by_support: BTreeMap<(SupportId, BlockId), Box<[usize]>>,
     pub(super) conditional_supports: BTreeSet<SupportId>,
     pub(super) conditional_arm_count: usize,
     pub(super) counts: IndexCounts,
+    transfer: Rc<SparseTransferIndex>,
     envelope: BTreeMap<(usize, Box<[CallField]>, DemandKind), SupportId>,
     result_sources: BTreeMap<(bool, usize), ResultSources>,
+}
+
+/// Transfer coordinates are unchanged when a callee's structural envelope widens.
+struct SparseTransferIndex {
+    local_ids: Vec<LocalId>,
+    local_indices: FxHashMap<LocalId, usize>,
+    mutable: Vec<bool>,
+    heap: Vec<bool>,
+    first_write: Vec<i32>,
+    successors: FxHashMap<BlockId, Vec<BlockId>>,
+    predecessors: FxHashMap<BlockId, Vec<BlockId>>,
+    recurring: Rc<FxHashSet<BlockId>>,
+    ranks: Rc<FxHashMap<BlockId, usize>>,
+    postdom_jumps: Vec<FxHashMap<BlockId, BlockId>>,
+    structural_barriers: BTreeSet<usize>,
+    acyclic_entry: Option<BlockId>,
+    blocks: FxHashMap<BlockId, SparseBlockOrders>,
+}
+
+struct SparseBlockOrders {
+    statements: Box<[i32]>,
+    operands: Box<[Box<[usize]>]>,
+    terminator: i32,
+}
+
+impl SparseTransferIndex {
+    fn new(checker: &BorrowChecker<'_>, snapshot: &Snapshot<'_>) -> Result<Self, BorrowCheckError> {
+        let blocks = || {
+            snapshot
+                .blocks
+                .iter()
+                .map(|id| &checker.module.blocks[checker.block_index_by_id[id]])
+        };
+        let mut locals: Vec<_> = blocks().flat_map(|block| &block.locals).collect();
+        locals.sort_unstable_by_key(|local| local.id.0);
+        let mut result = Self {
+            local_ids: locals.iter().map(|local| local.id).collect(),
+            local_indices: locals
+                .iter()
+                .enumerate()
+                .map(|(i, local)| (local.id, i))
+                .collect(),
+            mutable: locals.iter().map(|local| local.mutable).collect(),
+            heap: locals
+                .iter()
+                .map(|local| is_heap(checker, local.ty))
+                .collect::<Result<_, _>>()?,
+            first_write: vec![UNKNOWN_ORDER_KEY; locals.len()],
+            successors: FxHashMap::default(),
+            predecessors: FxHashMap::default(),
+            recurring: Rc::default(),
+            acyclic_entry: Some(snapshot.function.entry),
+            blocks: FxHashMap::default(),
+            ranks: Rc::default(),
+            postdom_jumps: Vec::new(),
+            structural_barriers: BTreeSet::new(),
+        };
+        let mut prior_statements = 0;
+        for (block_index, block) in blocks().enumerate() {
+            // The preceding blocks each contribute one terminator in addition to their statements.
+            let first_order = (prior_statements + block_index) as OrderKey;
+            prior_statements += block.statements.len();
+            let order = (prior_statements + block_index) as OrderKey;
+            let mut first_write = |local, order| {
+                let slot = &mut result.first_write[result.local_indices[&local]];
+                if *slot == UNKNOWN_ORDER_KEY {
+                    *slot = order;
+                }
+            };
+            let mut operands = Vec::with_capacity(block.statements.len() + 1);
+            let statements = block
+                .statements
+                .iter()
+                .enumerate()
+                .map(|(position, statement)| {
+                    let at = first_order + position as OrderKey;
+                    collect_statement_written_locals(statement, &mut |local| {
+                        first_write(local, at)
+                    });
+                    let mut slots = Vec::new();
+                    let mut push = |local| slots.push(result.local_indices[&local]);
+                    collect_statement_loaded_locals(
+                        &checker.module.expressions,
+                        statement,
+                        &mut push,
+                    );
+                    collect_statement_defined_locals(statement, &mut push);
+                    collect_statement_written_locals(statement, &mut push);
+                    slots.sort_unstable();
+                    slots.dedup();
+                    operands.push(slots.into_boxed_slice());
+                    at
+                })
+                .collect();
+            let mut slots = Vec::new();
+            let mut push = |local| slots.push(result.local_indices[&local]);
+            collect_terminator_loaded_locals(
+                &checker.module.expressions,
+                &block.terminator,
+                &mut push,
+            );
+            match &block.terminator {
+                HirTerminator::Jump { args, .. } => {
+                    for argument in args {
+                        first_write(argument.destination, order);
+                        push(argument.source);
+                        push(argument.destination);
+                    }
+                }
+                HirTerminator::Invoke {
+                    success_results,
+                    error_result,
+                    ..
+                } => {
+                    for &local in success_results.iter().chain(std::iter::once(error_result)) {
+                        first_write(local, order);
+                        push(local);
+                    }
+                }
+                _ => {}
+            }
+            slots.sort_unstable();
+            slots.dedup();
+            operands.push(slots.into_boxed_slice());
+            let successors = result.successors.entry(block.id).or_default();
+            for_each_terminator_target(&block.terminator, |next| successors.push(next));
+            for &next in successors.iter() {
+                result.predecessors.entry(next).or_default().push(block.id);
+            }
+            if successors.contains(&snapshot.function.entry) {
+                result.acyclic_entry = None;
+            }
+            result.blocks.insert(
+                block.id,
+                SparseBlockOrders {
+                    statements,
+                    operands: operands.into_boxed_slice(),
+                    terminator: order,
+                },
+            );
+        }
+        result.ranks = Rc::new(
+            crate::compiler_frontend::analysis::borrow_checker::engine::reverse_postorder_ranks(
+                snapshot.function.entry,
+                &result.successors,
+            ),
+        );
+        for block in blocks() {
+            if matches!(block.terminator, HirTerminator::Uninitialized) {
+                result.structural_barriers.insert(result.ranks[&block.id]);
+            }
+        }
+        let cfg = SparseCfg::new(checker, snapshot, &mut 0);
+        result.recurring = Rc::new(cyclic_blocks(&result.successors));
+        if result.recurring.is_empty() {
+            let parents = cfg.postdominators(&mut 0);
+            let immediate: FxHashMap<_, _> = snapshot
+                .blocks
+                .iter()
+                .copied()
+                .enumerate()
+                .filter_map(|(i, block)| snapshot.blocks.get(parents[i]).map(|&next| (block, next)))
+                .collect();
+            result.postdom_jumps.push(immediate);
+            // Jump along the postdominator chain without walking each identity diamond.
+            while let Some(previous) = result.postdom_jumps.last() {
+                let next: FxHashMap<_, _> = previous
+                    .iter()
+                    .filter_map(|(&from, through)| previous.get(through).map(|&to| (from, to)))
+                    .collect();
+                if next.is_empty() {
+                    break;
+                }
+                result.postdom_jumps.push(next);
+            }
+        }
+        Ok(result)
+    }
+}
+
+#[allow(dead_code)] // Prepared for support-local execution after typed publication is enabled.
+pub(in crate::compiler_frontend::analysis::borrow_checker) struct ProjectedSupport<'a> {
+    function: &'a SparseFunction,
+    support: SupportId,
+    barriers: BTreeSet<usize>,
+    visibility: FxHashMap<BlockId, RootSet>,
+    #[cfg(test)]
+    compress: bool,
+    local_ids: Vec<LocalId>,
+    local_indices: FxHashMap<LocalId, usize>,
+    mutable: Vec<bool>,
+    heap: Vec<bool>,
+    first_write: Vec<i32>,
+}
+
+#[allow(dead_code)] // Prepared for guarded extraction.
+impl SparseFunction {
+    fn project_support(
+        &self,
+        support: SupportId,
+        anchors: impl IntoIterator<Item = LocalId>,
+        visibility: impl IntoIterator<Item = (BlockId, RootSet)>,
+    ) -> ProjectedSupport<'_> {
+        let coordinates = &self.transfer;
+        let mut barriers = coordinates.structural_barriers.clone();
+        let mut locals: BTreeSet<_> = anchors
+            .into_iter()
+            .map(|local| coordinates.local_indices[&local])
+            .collect();
+        for (&(_, block), positions) in self
+            .operations_by_support
+            .range((support, BlockId(u32::MIN))..=(support, BlockId(u32::MAX)))
+        {
+            barriers.insert(coordinates.ranks[&block]);
+            for &position in positions.iter() {
+                locals.extend(
+                    coordinates.blocks[&block].operands[position]
+                        .iter()
+                        .copied(),
+                );
+            }
+        }
+        let mut projected = ProjectedSupport {
+            function: self,
+            support,
+            barriers,
+            visibility: FxHashMap::default(),
+            #[cfg(test)]
+            compress: true,
+            local_ids: Vec::with_capacity(locals.len()),
+            local_indices: FxHashMap::default(),
+            mutable: Vec::with_capacity(locals.len()),
+            heap: Vec::with_capacity(locals.len()),
+            first_write: Vec::with_capacity(locals.len()),
+        };
+        projected.local_indices.reserve(locals.len());
+        for i in locals {
+            let local = coordinates.local_ids[i];
+            projected
+                .local_indices
+                .insert(local, projected.local_ids.len());
+            projected.local_ids.push(local);
+            projected.mutable.push(coordinates.mutable[i]);
+            projected.heap.push(coordinates.heap[i]);
+            projected.first_write.push(coordinates.first_write[i]);
+        }
+        for (target, mask) in visibility {
+            assert_eq!(mask.bit_len(), coordinates.local_ids.len());
+            let mut visible = RootSet::empty(projected.local_ids.len());
+            for (index, local) in projected.local_ids.iter().enumerate() {
+                if mask.contains(coordinates.local_indices[local]) {
+                    visible.insert(index);
+                }
+            }
+            if visible.covers_all(projected.local_ids.len()) {
+                continue;
+            }
+            projected.visibility.insert(target, visible);
+            projected.barriers.insert(coordinates.ranks[&target]);
+            // Narrowing does not distribute over a join. Keep the authored edge
+            // source so all its incoming facts are joined before the mask applies.
+            if let Some(predecessors) = coordinates.predecessors.get(&target) {
+                projected
+                    .barriers
+                    .extend(predecessors.iter().map(|block| coordinates.ranks[block]));
+            }
+        }
+        projected
+    }
+}
+
+#[allow(dead_code)] // Prepared for guarded extraction.
+impl ProjectedSupport<'_> {
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn continuation(
+        &self,
+        mut block: BlockId,
+    ) -> BlockId {
+        #[cfg(test)]
+        if !self.compress {
+            return block;
+        }
+        let transfer = &self.function.transfer;
+        let rank = transfer.ranks[&block];
+        let barrier = self
+            .barriers
+            .range(..=rank)
+            .next_back()
+            .copied()
+            .unwrap_or(0);
+        // In a DAG an interior block lies strictly between an origin and its
+        // postdominator in RPO. Jump only when that whole interval is identity.
+        for jumps in transfer.postdom_jumps.iter().rev() {
+            if let Some(&next) = jumps.get(&block)
+                && transfer.ranks[&next] >= barrier
+            {
+                block = next;
+            }
+        }
+        block
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn ranks(
+        &self,
+    ) -> Rc<FxHashMap<BlockId, usize>> {
+        Rc::clone(&self.function.transfer.ranks)
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn recurring_blocks(
+        &self,
+    ) -> Rc<FxHashSet<BlockId>> {
+        Rc::clone(&self.function.transfer.recurring)
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn visibility(
+        &self,
+        block: BlockId,
+    ) -> Option<&RootSet> {
+        self.visibility.get(&block)
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn block_view(
+        &self,
+        block: BlockId,
+    ) -> SparseBlockView<'_> {
+        let coordinates = &self.function.transfer;
+        let orders = &coordinates.blocks[&block];
+        let positions = self
+            .function
+            .operations_by_support
+            .get(&(self.support, block))
+            .map(Box::as_ref)
+            .unwrap_or_default();
+        let count = orders.statements.len();
+        let transfer_terminator = positions.last() == Some(&count);
+        SparseBlockView {
+            operations: OperationView {
+                local_ids: &self.local_ids,
+                local_indices: &self.local_indices,
+                local_mutable: &self.mutable,
+                local_has_in_place_mutation_surface: &self.heap,
+                block_successors: &coordinates.successors,
+                local_first_write_order: &self.first_write,
+                acyclic_entry_block: coordinates.acyclic_entry,
+            },
+            statement_orders: &orders.statements,
+            statement_positions: if transfer_terminator {
+                &positions[..positions.len() - 1]
+            } else {
+                positions
+            },
+            terminator_order: orders.terminator,
+            transfer_terminator,
+        }
+    }
+
+    fn seed_entry(
+        &self,
+        bindings: impl IntoIterator<Item = (LocalId, BindingSpec)>,
+    ) -> BorrowState {
+        let mut entry = BorrowState::new_uninitialized(self.local_ids.len());
+        for (local, binding) in bindings {
+            entry.initialize_entry_binding(self.local_indices[&local], binding);
+        }
+        entry
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -1718,7 +2093,7 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
         path.len()
     }
 
-    fn seal(mut self) -> SparseFunction {
+    fn seal(mut self, transfer: Rc<SparseTransferIndex>) -> SparseFunction {
         let result_sources = self.collect_result_sources();
         self.drain_demands();
         let (conditional, conditional_arm_count) = self.connect_control();
@@ -1743,16 +2118,22 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             .copied()
             .map(&mut support_of)
             .collect();
-        let operations = self
-            .sites
-            .into_iter()
-            .map(|(site, nodes)| {
-                let mut supports: Vec<_> = nodes.into_iter().map(&mut support_of).collect();
-                supports.sort_unstable();
-                supports.dedup();
-                (site, supports.into_boxed_slice())
-            })
-            .collect();
+        let mut support_positions = BTreeMap::<_, Vec<_>>::new();
+        #[cfg(test)]
+        let mut operations = BTreeMap::new();
+        for (site, nodes) in self.sites {
+            let mut supports: Vec<_> = nodes.into_iter().map(&mut support_of).collect();
+            supports.sort_unstable();
+            supports.dedup();
+            for &support in &supports {
+                support_positions
+                    .entry((support, BlockId(site.0)))
+                    .or_default()
+                    .push(site.1);
+            }
+            #[cfg(test)]
+            operations.insert(site, supports.into_boxed_slice());
+        }
         let conditional_supports = conditional.into_iter().map(&mut support_of).collect();
 
         SparseFunction {
@@ -1760,10 +2141,16 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             port_supports,
             guards,
             compatibility,
+            #[cfg(test)]
             operations,
+            operations_by_support: support_positions
+                .into_iter()
+                .map(|(key, positions)| (key, positions.into_boxed_slice()))
+                .collect(),
             conditional_supports,
             conditional_arm_count,
             counts: self.counts,
+            transfer,
             envelope,
             result_sources,
         }
@@ -2031,6 +2418,10 @@ impl IndexedFunction {
             .iter()
             .map(|function| Snapshot::collect(checker, function))
             .collect::<Result<Vec<_>, _>>()?;
+        let transfer_indices = snapshots
+            .iter()
+            .map(|snapshot| SparseTransferIndex::new(checker, snapshot).map(Rc::new))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
         for (caller, snapshot) in snapshots.iter().enumerate() {
             for call in &snapshot.calls {
@@ -2084,7 +2475,7 @@ impl IndexedFunction {
             let mut builder = DemandBuilder::new(checker, snapshot, &fields, &indices);
             builder.collect_roots();
             builder.collect_call_roots()?;
-            let mut index = builder.seal();
+            let mut index = builder.seal(Rc::clone(&transfer_indices[position]));
             index.counts.record(index.ports.len());
             let previous = indices.get(&snapshot.function.id);
             if let Some(old) = previous {

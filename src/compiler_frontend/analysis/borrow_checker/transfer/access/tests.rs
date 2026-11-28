@@ -214,6 +214,211 @@ fn allocation_incidence_tracks_store_rekey_join_and_narrow() {
 }
 
 #[test]
+fn final_family_members_preserve_occurrence_and_empty_group_evidence() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::FamilyMember;
+
+    let (mut state, [holder, old, fresh]) = parameter_allocations::<3>();
+    let member = FamilyMember {
+        value: writable_value(fresh),
+        at_most_once: true,
+    };
+    let field = FieldKey::Elem;
+    state.add_alloc_edge(
+        holder,
+        field,
+        StoredValue {
+            id: old,
+            writable: true,
+        },
+    );
+    let mut weak = state.clone();
+    weak.publish_family_members(
+        &[holder],
+        Coverage::Partial,
+        field,
+        Replacement::Must,
+        std::slice::from_ref(&member),
+    );
+    assert!(weak.alloc_reaches_typed(&[holder], old, true, false));
+    assert!(weak.alloc_reaches_typed(&[holder], fresh, true, false));
+    weak.assert_allocation_incidence();
+
+    for _ in 0..2 {
+        state.publish_family_members(
+            &[holder],
+            Coverage::Complete,
+            field,
+            Replacement::Must,
+            std::slice::from_ref(&member),
+        );
+        assert!(state.retained_edge_groups(holder).next().unwrap()[0].single);
+    }
+    assert!(!state.alloc_reaches_typed(&[holder], old, true, false));
+    let mut duplicate = state.clone();
+    duplicate.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        field,
+        Replacement::Must,
+        &[member.clone(), member.clone()],
+    );
+    assert!(!duplicate.retained_edge_groups(holder).next().unwrap()[0].single);
+    duplicate.remove_alloc_element(&[holder], false, None);
+    assert!(duplicate.alloc_reaches_typed(&[holder], fresh, true, false));
+
+    state.remove_alloc_element(&[holder], false, None);
+    assert!(!state.alloc_reaches_typed(&[holder], fresh, true, false));
+    let lazy = state.alloc_child(holder, field);
+    state.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        field,
+        Replacement::May,
+        std::slice::from_ref(&member),
+    );
+    assert!(!state.alloc_reaches_typed(&[holder], lazy, true, false));
+    assert!(state.alloc_reaches_typed(&[holder], fresh, true, false));
+    assert!(state.retained_edge_groups(holder).next().unwrap()[0].single);
+    let mut overlapping = state.clone();
+    overlapping.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        field,
+        Replacement::May,
+        &[member],
+    );
+    assert!(!overlapping.retained_edge_groups(holder).next().unwrap()[0].single);
+    overlapping.remove_alloc_element(&[holder], false, None);
+    assert!(overlapping.alloc_reaches_typed(&[holder], fresh, true, false));
+    state.remove_alloc_element(&[holder], false, None);
+    assert!(!state.alloc_reaches_typed(&[holder], fresh, true, false));
+    overlapping.assert_allocation_incidence();
+    state.assert_allocation_incidence();
+    duplicate.assert_allocation_incidence();
+}
+
+#[test]
+fn family_batch_keeps_viewed_and_plain_members_in_the_same_projection() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::FamilyMember;
+
+    let (mut state, [holder, viewed, plain]) = parameter_allocations::<3>();
+    let view = state.call_view_id(1, false, 0);
+    state.add_view_member(view, viewed);
+    let mut occurrence = writable_value(viewed);
+    occurrence.views.push(view);
+    let members = [
+        FamilyMember {
+            value: occurrence,
+            at_most_once: true,
+        },
+        FamilyMember {
+            value: writable_value(plain),
+            at_most_once: true,
+        },
+    ];
+    state.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        FieldKey::Elem,
+        Replacement::Must,
+        &members,
+    );
+    let mut projected = state.resolve_local_allocs(0);
+    state.step_resolved(&mut projected, FieldKey::Elem, &[true; 3]);
+    assert!(projected.views.contains(&view));
+    assert!(projected.views.contains(&plain));
+    assert!(state.alloc_paths_may_share(&projected.ids, &projected.views, &[plain], &[]));
+    state.assert_allocation_incidence();
+}
+
+#[test]
+fn family_batch_retains_absence_on_a_candidate_that_may_be_skipped() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::FamilyMember;
+
+    let (mut empty, [holder, member]) = parameter_allocations::<2>();
+    for family in [FieldKey::Elem, FieldKey::MapKey] {
+        empty.publish_family_members(
+            &[holder],
+            Coverage::Complete,
+            family,
+            Replacement::Must,
+            &[],
+        );
+        for coverage in [Coverage::Complete, Coverage::Partial] {
+            let mut state = empty.clone();
+            state.publish_family_members(
+                &[holder],
+                coverage,
+                family,
+                Replacement::May,
+                &[FamilyMember {
+                    value: writable_value(member),
+                    at_most_once: true,
+                }],
+            );
+            let mut projected = state.resolve_local_allocs(0);
+            state.step_resolved(&mut projected, family, &[true; 2]);
+            assert!(projected.ids.contains(&member));
+            assert_eq!(projected.may_be_absent, coverage == Coverage::Partial);
+            state.publish_family_members(
+                &[holder],
+                Coverage::Partial,
+                family,
+                Replacement::Must,
+                &[],
+            );
+            let mut projected = state.resolve_local_allocs(0);
+            state.step_resolved(&mut projected, family, &[true; 2]);
+            assert!(projected.ids.contains(&member));
+            assert!(projected.may_be_absent);
+            state.assert_allocation_incidence();
+        }
+    }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn projected_replacement_inspects_only_the_addressed_group() {
+    use crate::compiler_frontend::instrumentation::{
+        FrontendCounter, capture_counters_for_test, frontend_counter_test_values, lock_counter_test,
+    };
+
+    let _guard = lock_counter_test();
+    let _capture = capture_counters_for_test();
+
+    let (mut state, [holder, old, fresh, unrelated]) = parameter_allocations::<4>();
+    let replace = |state: &mut BorrowState, holder, selector, value| {
+        let address = AddressSet::from_cells(
+            [CellId::Projected(holder, FieldKey::Field(selector))],
+            Coverage::Complete,
+        )
+        .with_singleton_proof();
+        state.publish_store(
+            &TypedStore::replace_cells(address, writable_value(value)),
+            0,
+            None,
+        );
+    };
+    for selector in 1..=64 {
+        replace(&mut state, holder, selector, old);
+        replace(&mut state, unrelated, selector, old);
+    }
+    let counters = [
+        FrontendCounter::BorrowPublisherGroupRowsInspected,
+        FrontendCounter::BorrowPublisherGroupRowsMoved,
+    ];
+    let before = frontend_counter_test_values(&counters);
+    for selector in (1..=64).rev().chain(std::iter::once(0)) {
+        replace(&mut state, holder, selector, fresh);
+    }
+    let after = frontend_counter_test_values(&counters);
+    assert_eq!(after[0] - before[0], 64);
+    assert_eq!(after[1] - before[1], 65);
+    assert!(state.alloc_reaches_typed(&[unrelated], old, true, false));
+    state.assert_allocation_incidence();
+}
+
+#[test]
 fn allocation_incidence_join_tracks_groups_missing_from_either_predecessor() {
     let (entry, [root, target, view]) = parameter_allocations::<3>();
     let field = FieldKey::Field(0);
@@ -1351,6 +1556,80 @@ fn publisher_kills_only_exact_dependent_scalar_replacements() {
             assert!(state.value_cell(cell).contains(&old));
         }
     }
+}
+
+#[test]
+fn publication_distinguishes_identical_old_and_new_carriers() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::PublicationCarriers;
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
+        Carrier, CarrierValue, Demand, ObservationBoundary, ObservationCheckpoint,
+        ObservationSegment, ValueObservations,
+    };
+
+    let (mut state, [receiver, holder, copy_holder]) = parameter_allocations::<3>();
+    let cell = CellId::Projected(holder, FieldKey::Elem);
+    let detached = CellId::Projected(copy_holder, FieldKey::Elem);
+    let value = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: [receiver].into_iter().collect(),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let captured = CapturedValue {
+        alternatives: vec![value.clone()],
+        ..Default::default()
+    };
+    for holder in [holder, copy_holder] {
+        state.record_constructed_value(holder, FieldKey::Elem, &captured, true);
+    }
+    let carrier = |cell| Carrier::Cell(cell, CarrierValue::Scalar, value.deps.clone());
+    let mut observations = ValueObservations::default();
+    let checkpoint = |order| {
+        ObservationBoundary::Checkpoint(ObservationCheckpoint {
+            order,
+            actor: None,
+            span: None,
+            candidates: Demand::default(),
+            pending: Demand::default(),
+        })
+    };
+
+    let receipt = state.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        FieldKey::Elem,
+        Replacement::Must,
+        &[
+            crate::compiler_frontend::analysis::borrow_checker::state::FamilyMember {
+                value: captured,
+                at_most_once: true,
+            },
+        ],
+    );
+    observations.split(checkpoint(0));
+    observations.publish(receipt);
+    observations.split(checkpoint(1));
+    let mut later = ObservationSegment::default();
+    later.read([carrier(cell), carrier(detached)]);
+    observations.tail.then(later);
+
+    let mut demand = Demand::default();
+    observations.backward(&mut demand, |checkpoint, demand| {
+        assert!(demand.contains(&carrier(detached)));
+        assert_eq!(demand.contains(&carrier(cell)), checkpoint.order == 1);
+    });
+    assert_eq!(demand, [carrier(detached)].into_iter().collect());
+
+    let mut weak = PublicationCarriers::default();
+    weak.record(
+        cell,
+        std::slice::from_ref(&value),
+        cell,
+        state.value_cell(cell),
+        false,
+    );
+    assert!(weak.definite_old.is_empty() && weak.introduced.is_empty());
 }
 
 #[test]

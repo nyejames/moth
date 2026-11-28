@@ -36,6 +36,7 @@ use std::collections::VecDeque;
 
 #[path = "return_alias.rs"]
 mod return_alias;
+pub(super) use return_alias::ProjectedSupport;
 
 type ReturnAliasIndices = Vec<Option<return_alias::IndexedFunction>>;
 type ReturnAliasCallers = FxHashMap<FunctionId, Vec<usize>>;

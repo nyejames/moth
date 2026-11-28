@@ -64,7 +64,7 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
     };
     let mut success = output.clone();
     apply_invoke_edge_transfer(
-        &layout,
+        (&layout).into(),
         &terminator,
         &success_lane,
         0,
@@ -78,7 +78,7 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
     // A following failure cannot observe the preceding successful iteration's payload.
     let mut failure = success;
     apply_invoke_edge_transfer(
-        &layout,
+        (&layout).into(),
         &terminator,
         &error_lane,
         0,
@@ -92,7 +92,7 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
 
     // Returning to success similarly discards the preceding error.
     apply_invoke_edge_transfer(
-        &layout,
+        (&layout).into(),
         &terminator,
         &success_lane,
         0,
@@ -211,7 +211,7 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
     };
     let mut failure = state.clone();
     apply_invoke_edge_transfer(
-        &layout,
+        (&layout).into(),
         &terminator,
         &error_lane,
         1,
@@ -242,7 +242,7 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
     );
 
     apply_invoke_edge_transfer(
-        &layout,
+        (&layout).into(),
         &terminator,
         &success_lane,
         1,
@@ -310,7 +310,14 @@ fn invoke_weak_cell_store_does_not_replace_a_new_outcome_slot() {
         ))],
         ..Default::default()
     };
-    apply_invoke_edge_transfer(&layout, &terminator, &success, 1, |_| false, &mut state);
+    apply_invoke_edge_transfer(
+        (&layout).into(),
+        &terminator,
+        &success,
+        1,
+        |_| false,
+        &mut state,
+    );
     assert!(!state.local_alloc_ids(1).0.contains(&marker));
     let (live_contents, _) = state.local_alloc_ids(3);
     assert!(live_contents.contains(&marker));
@@ -349,7 +356,14 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
         (failure_lane, false),
     ] {
         let mut state = entry.clone();
-        apply_invoke_edge_transfer(&layout, &terminator, &selected, 1, |_| false, &mut state);
+        apply_invoke_edge_transfer(
+            (&layout).into(),
+            &terminator,
+            &selected,
+            1,
+            |_| false,
+            &mut state,
+        );
         for (key, old) in keys.into_iter().zip(old_members) {
             let mut place = state.resolve_place_path(0, &layout.local_mutable, [key]);
             state.load_place_content(&mut place, &layout.local_mutable, false);
@@ -414,8 +428,14 @@ fn invoke_success_observes_entry_member_and_rebases_lookup_payload() {
     };
     for (lane, succeeds) in [(&success, true), (&failure, false)] {
         let mut state = entry.clone();
-        let summary =
-            apply_invoke_edge_transfer(&layout, &terminator, lane, 7, |_| false, &mut state);
+        let summary = apply_invoke_edge_transfer(
+            (&layout).into(),
+            &terminator,
+            lane,
+            7,
+            |_| false,
+            &mut state,
+        );
         let mut reads = Default::default();
         summary.backward(&mut reads, |_, _| {
             panic!("a lookup does not mutate its receiver")

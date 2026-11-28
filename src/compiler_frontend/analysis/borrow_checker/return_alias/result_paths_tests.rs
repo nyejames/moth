@@ -1,4 +1,4 @@
-use super::{BorrowChecker, IndexCounts, build_sparse_index_for_test};
+use super::{BorrowChecker, IndexCounts, SparseFunction, build_sparse_index_for_test};
 use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -15,6 +15,7 @@ use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{LoweredHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -48,6 +49,12 @@ impl ResultFixture {
             &self.strings,
         )
     }
+
+    fn indexed(&self) -> (BorrowChecker<'_>, FxHashMap<FunctionId, SparseFunction>) {
+        let mut checker = self.checker();
+        let indexes = build_sparse_index_for_test(&mut checker).expect("sparse index");
+        (checker, indexes)
+    }
 }
 
 fn named_function<'a>(checker: &BorrowChecker<'a>, name: &str) -> &'a HirFunction {
@@ -63,6 +70,249 @@ fn named_function<'a>(checker: &BorrowChecker<'a>, name: &str) -> &'a HirFunctio
             ) == Some(name)
         })
         .unwrap_or_else(|| panic!("fixture should lower function {name}"))
+}
+
+#[test]
+fn sparse_forward_transfer_executes_admitted_entry_roles_without_validation() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{
+        AddressSet, BindingSpec, BindingTarget, CellId, Coverage, FieldKey, RootSet, WrapperId,
+    };
+    use crate::compiler_frontend::public_call_summary::typed::Role;
+
+    let fixture = ResultFixture::new(
+        r#"
+probe |dest ~I32, source I32, unrelated I32|:
+    ~dest = source
+    ignored = unrelated
+;
+"#,
+    );
+    let (checker, indexes) = fixture.indexed();
+    let function = named_function(&checker, "probe");
+    let index = &indexes[&function.id];
+    let support = index.operations[&(function.entry.0, 0)][0];
+    let projected_support = index.project_support(support, [], []);
+    let block_view = projected_support.block_view(function.entry);
+    assert_eq!(block_view.statement_positions, [0]);
+    let view = block_view.operations;
+    assert!(view.index_of(function.params[2]).is_none());
+    let dest = view
+        .index_of(function.params[0])
+        .expect("destination index");
+    let source = view.index_of(function.params[1]).expect("source index");
+    let source_wrapper = WrapperId::current(source);
+    for role in [Role::Slot, Role::WholeAlias, Role::ProjectedAlias] {
+        let mut entry = projected_support.seed_entry([(function.params[1], BindingSpec::Slot)]);
+        let projected = entry.local_alloc_ids(source).0[0];
+        let key = FieldKey::Field(0);
+        let binding = match role {
+            Role::Slot => BindingSpec::Slot,
+            Role::WholeAlias => BindingSpec::Link {
+                source: source_wrapper,
+                writable: true,
+            },
+            Role::ProjectedAlias => BindingSpec::Projected {
+                addresses: AddressSet::from_cells(
+                    [CellId::Projected(projected, key)],
+                    Coverage::Complete,
+                )
+                .with_singleton_proof(),
+                origin: source_wrapper,
+                owner: None,
+                writable: true,
+                isolated: true,
+                route_roots: RootSet::empty(view.local_count()),
+            },
+        };
+        entry.initialize_entry_binding(dest, binding);
+        let exits = checker
+            .drive_sparse_support(function, entry, &projected_support)
+            .expect("the transfer must not use the borrow verdict");
+        let after = exits[&function.entry].boundary_binding(WrapperId::current(dest));
+        let expected = match role {
+            Role::Slot | Role::WholeAlias => BindingTarget::Link(source_wrapper),
+            Role::ProjectedAlias => BindingTarget::Projected(projected, key),
+        };
+        assert_eq!(
+            after
+                .alternatives
+                .iter()
+                .map(|alt| alt.target)
+                .collect::<Vec<_>>(),
+            [expected]
+        );
+    }
+}
+
+#[test]
+fn sparse_forward_skips_unrelated_diamonds() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::BindingSpec;
+    use std::collections::BTreeSet;
+
+    const DIAMONDS: usize = 16;
+    let mut source = String::new();
+    for i in 0..DIAMONDS {
+        source.push_str(&format!("Holder{i} = |items {{I32}}|\n"));
+    }
+    let params = (0..DIAMONDS)
+        .flat_map(|i| [format!("target_{i} ~Holder{i}"), format!("take_{i} Bool")])
+        .collect::<Vec<_>>()
+        .join(", ");
+    source.push_str(&format!("\nchoose |{params}|:\n"));
+    for i in 0..DIAMONDS {
+        source.push_str(&format!(
+            "    if take_{i}:\n        ~target_{i}.items = {{2, 3}}\n    ;\n"
+        ));
+    }
+    source.push_str(";\n");
+    let fixture = ResultFixture::new(&source);
+    let (checker, indexes) = fixture.indexed();
+    let function = named_function(&checker, "choose");
+    let index = &indexes[&function.id];
+    let supports: BTreeSet<_> = index.operations.values().flatten().copied().collect();
+    assert_eq!(supports.len(), DIAMONDS);
+    for support in supports {
+        let projected = index.project_support(support, [], []);
+        let entry = projected.seed_entry(function.params.iter().copied().filter_map(|param| {
+            projected
+                .local_indices
+                .contains_key(&param)
+                .then_some((param, BindingSpec::Slot))
+        }));
+        let exits = checker
+            .drive_sparse_support(function, entry, &projected)
+            .expect("transfer of one independent support");
+        assert!(
+            exits
+                .values()
+                .all(|state| state.shares_test_recurring_index(&index.transfer.recurring))
+        );
+        assert!(
+            exits.len() <= 4,
+            "visited {} blocks for one diamond",
+            exits.len()
+        );
+    }
+}
+
+#[test]
+fn sparse_compaction_preserves_the_join_before_visibility_narrowing() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{
+        BindingSpec, RootSet, ValueKind,
+    };
+
+    let fixture = ResultFixture::new(
+        r#"
+Holder = |items {I32}|
+choose |target ~Holder, take Bool, step Bool, hidden I32, entry_only I32, incoming {I32}|:
+    if take:
+        ~target.items = incoming
+    ;
+    if step:
+        ignored = 0
+    ;
+;
+"#,
+    );
+    let (checker, indexes) = fixture.indexed();
+    let function = named_function(&checker, "choose");
+    let index = &indexes[&function.id];
+    let coordinates = &index.transfer;
+    let (&(write_block, write_position), supports) = index.operations.iter()
+        .find(|&(&(block, statement), supports)| {
+            !supports.is_empty() && checker.module.blocks[checker.block_index_by_id[&super::BlockId(block)]]
+                .statements.get(statement).is_some_and(|statement| matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: crate::compiler_frontend::hir::statements::HirWriteTarget::AssignPlace(place), ..
+                    } if !place.projections.is_empty()
+                ))
+        }).expect("selected inner-arm write");
+    let write_block = super::BlockId(write_block);
+    let support = supports[0];
+    let (&merge, _) = coordinates
+        .predecessors
+        .iter()
+        .filter(|&(block, predecessors)| {
+            predecessors.len() > 1 && !coordinates.successors[block].is_empty()
+        })
+        .max_by_key(|&(block, _)| coordinates.ranks[block])
+        .expect("merge before a continuation");
+    let target = coordinates.successors[&merge][0];
+    let without = |local| {
+        let mut roots = RootSet::full(coordinates.local_ids.len());
+        roots.remove(coordinates.local_indices[&local]);
+        roots
+    };
+    let mut projected = index.project_support(
+        support,
+        function.params.iter().copied(),
+        [
+            (function.entry, without(function.params[4])),
+            (target, without(function.params[3])),
+        ],
+    );
+    assert!(
+        projected
+            .block_view(write_block)
+            .statement_positions
+            .contains(&write_position),
+        "the support must execute the projected write"
+    );
+    assert_eq!(
+        projected.continuation(merge),
+        merge,
+        "the merge must precede narrowing"
+    );
+    let entry = projected.seed_entry(
+        function
+            .params
+            .iter()
+            .copied()
+            .map(|local| (local, BindingSpec::Slot)),
+    );
+    let holder = entry
+        .local_alloc_ids(projected.local_indices[&function.params[0]])
+        .0[0];
+    // Loading an existing collection records an edge even when the layer starts empty.
+    let incoming = entry
+        .local_alloc_ids(projected.local_indices[&function.params[5]])
+        .0[0];
+    let compressed = checker
+        .drive_sparse_support(function, entry.clone(), &projected)
+        .expect("compressed transfer");
+    projected.compress = false;
+    let authored = checker
+        .drive_sparse_support(function, entry, &projected)
+        .expect("authored transfer");
+    for (&block, state) in &compressed {
+        assert_eq!(state, &authored[&block], "different facts at {block:?}");
+    }
+    let hidden = projected.local_indices[&function.params[3]];
+    let entry_only = projected.local_indices[&function.params[4]];
+    assert!(
+        compressed[&function.entry]
+            .binding_mode(entry_only)
+            .is_definitely_uninit()
+    );
+    assert!(
+        compressed[&target]
+            .binding_mode(hidden)
+            .is_definitely_uninit()
+    );
+    // `Holder` has one field, so any retained edge from the holder is `items`. Field keys are
+    // interned field identities, not positions.
+    let holds_incoming = |block| {
+        compressed[&block]
+            .retained_edge_groups(holder)
+            .flatten()
+            .any(|edge| {
+                matches!(edge.value_alternative().kind,
+                    ValueKind::Allocation(value) if value.id == incoming)
+            })
+    };
+    assert!(holds_incoming(write_block));
+    assert!(holds_incoming(target));
 }
 
 #[test]
@@ -263,8 +513,7 @@ independent_choices |left ~LeftHolder, right ~RightHolder, take_left Bool, take_
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indices) = fixture.indexed();
     for (name, expected_supports) in [("shared_choice", 1), ("independent_choices", 2)] {
         let index = &indices[&named_function(&checker, name).id];
         let cell_supports: std::collections::BTreeSet<_> = index
@@ -300,8 +549,7 @@ read_count |items {Item}| -> I32:
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indices) = fixture.indexed();
     for (name, field) in [("read_item", 0), ("read_count", 1)] {
         let index = &indices[&named_function(&checker, name).id];
         let path = |field| [CallField::Elem, CallField::Field(field)];
@@ -342,8 +590,7 @@ read_count |wrapped Envelope| -> I32:
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indexes) = fixture.indexed();
     let field = CallField::Field;
     for (name, selected, sibling) in [
         ("read_item", &[field(0)][..], &[field(1)][..]),
@@ -390,8 +637,7 @@ read_count |saved Saved, spare Saved| -> I32:
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indexes) = fixture.indexed();
     for (name, parameter, selector) in [("read_item", 0, 0), ("read_count", 1, 1)] {
         let function = named_function(&checker, name);
         let projected: Vec<_> = indexes[&function.id]
@@ -433,8 +679,7 @@ choose |left ~LeftHolder, right ~RightHolder, take_left Bool, take_right Bool|:
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indexes) = fixture.indexed();
     let function = named_function(&checker, "choose");
     let snapshot = super::Snapshot::collect(&checker, function).unwrap();
     assert!(
@@ -467,8 +712,7 @@ recur |take Bool, value I32| -> I32:
 ;
 "#;
     let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    let (checker, indices) = fixture.indexed();
     let function = named_function(&checker, "recur");
     let snapshot = super::Snapshot::collect(&checker, function).unwrap();
     let work = indices[&function.id].counts;

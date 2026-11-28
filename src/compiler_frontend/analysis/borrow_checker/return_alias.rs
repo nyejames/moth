@@ -11,6 +11,7 @@ use crate::compiler_frontend::public_call_summary::{
 #[path = "return_alias/result_paths.rs"]
 mod result_paths;
 pub(super) use result_paths::IndexedFunction;
+pub(in crate::compiler_frontend::analysis::borrow_checker) use result_paths::ProjectedSupport;
 
 impl BorrowChecker<'_> {
     pub(super) fn classify_function_return_alias(

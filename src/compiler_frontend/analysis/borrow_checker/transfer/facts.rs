@@ -5,8 +5,8 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, AllocationRetirement, BorrowState, CellId, Coverage, DependencySet,
-    FieldKey, FunctionLayout, OrderKey, ResolvedPlace, RootSet, SmallSet, StoreReceipt, ValueAlt,
-    ValueKind, WrapperAge, WrapperId, remap_dependencies,
+    FieldKey, FunctionLayout, OrderKey, PublicationCarriers, ResolvedPlace, RootSet, SmallSet,
+    StoreReceipt, ValueAlt, ValueKind, WrapperAge, WrapperId, remap_dependencies,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     AccessKind, OptionalTransferStatus, ValueAccessClassification, ValueBorrowFact,
@@ -149,7 +149,7 @@ impl CarrierValue {
 
 pub(in super::super) type Demand = FxHashSet<Carrier>;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in super::super) struct ObservationSegment {
     pub upward_reads: Demand,
     pub definite_kills: Demand,
@@ -181,13 +181,22 @@ impl ObservationSegment {
     }
 
     pub(in super::super) fn replace(&mut self, receipt: StoreReceipt) {
-        for (cell, old) in receipt.replaced.into_iter().flatten() {
+        self.kill(receipt.replaced.into_iter().flatten());
+    }
+
+    fn kill(&mut self, rows: impl IntoIterator<Item = (CellId, Vec<ValueAlt>)>) {
+        for (cell, old) in rows {
             self.definite_kills
                 .extend(old.into_iter().filter_map(|value| {
                     (!value.deps.is_empty())
                         .then(|| Carrier::Cell(cell, CarrierValue::of(&value), value.deps))
                 }));
         }
+    }
+
+    pub(in super::super) fn then(&mut self, next: Self) {
+        self.read(next.upward_reads);
+        self.definite_kills.extend(next.definite_kills);
     }
 
     pub(in super::super) fn apply(&self, demand: &mut Demand) {
@@ -205,13 +214,14 @@ pub(in super::super) struct ObservationCheckpoint {
     pub pending: Demand,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in super::super) enum ObservationBoundary {
     Checkpoint(ObservationCheckpoint),
     Rekey(Vec<(Carrier, Carrier)>),
+    Publication(Demand),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in super::super) struct ValueObservations {
     pub enabled: bool,
     pub tail: ObservationSegment,
@@ -221,6 +231,56 @@ pub(in super::super) struct ValueObservations {
 impl ValueObservations {
     pub(in super::super) fn split(&mut self, boundary: ObservationBoundary) {
         self.splits.push((std::mem::take(&mut self.tail), boundary));
+    }
+
+    #[allow(dead_code)] // Prepared for keyed publication without treating acquisition as a read.
+    pub(in super::super) fn publish(&mut self, receipt: PublicationCarriers) {
+        let mut operation = ObservationSegment::default();
+        operation.kill(receipt.definite_old);
+        self.tail.then(operation);
+        let mut introduced = ObservationSegment::default();
+        introduced.kill(receipt.introduced);
+        if !introduced.definite_kills.is_empty() {
+            self.split(ObservationBoundary::Publication(introduced.definite_kills));
+        }
+    }
+    #[cfg(test)]
+    pub(in super::super) fn canonicalise_test_carriers(
+        &mut self,
+        map: impl Fn(AllocId) -> AllocId,
+    ) {
+        let remap_carrier = |carrier: &mut Carrier| carrier.rekey(|slot| slot, &map);
+        let remap_demand = |demand: &mut Demand| {
+            *demand = std::mem::take(demand)
+                .into_iter()
+                .map(|mut carrier| {
+                    remap_carrier(&mut carrier);
+                    carrier
+                })
+                .collect();
+        };
+        let remap_segment = |segment: &mut ObservationSegment| {
+            remap_demand(&mut segment.upward_reads);
+            remap_demand(&mut segment.definite_kills);
+        };
+        for (segment, boundary) in &mut self.splits {
+            remap_segment(segment);
+            match boundary {
+                ObservationBoundary::Checkpoint(checkpoint) => {
+                    remap_demand(&mut checkpoint.candidates);
+                    remap_demand(&mut checkpoint.pending);
+                }
+                ObservationBoundary::Rekey(rows) => {
+                    for (before, after) in rows.iter_mut() {
+                        remap_carrier(before);
+                        remap_carrier(after);
+                    }
+                    rows.sort_unstable();
+                }
+                ObservationBoundary::Publication(acquired) => remap_demand(acquired),
+            }
+        }
+        remap_segment(&mut self.tail);
     }
 
     pub(in super::super) fn is_empty(&self) -> bool {
@@ -323,6 +383,9 @@ impl ValueObservations {
                             .map(|(entry, _)| entry.clone()),
                     );
                     exit_demand.clear();
+                }
+                ObservationBoundary::Publication(introduced) => {
+                    demand.retain(|carrier| !introduced.contains(carrier));
                 }
             }
             segment.apply(demand);

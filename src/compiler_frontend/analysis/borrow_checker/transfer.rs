@@ -38,8 +38,9 @@ use rustc_hash::FxHashMap;
 
 pub(super) use access::call_member_result;
 use access::{
-    AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
-    transfer_terminator,
+    AggregateTransferContext, CallTransferContext, transfer_aggregate_expression_ownership,
+    transfer_statement, transfer_statement_operation, transfer_terminator,
+    transfer_terminator_operation,
 };
 use facts::{
     Demand, ObservationCheckpoint, StatementAccessTracker, ValueFactBuffer, ValueObservations,
@@ -98,6 +99,81 @@ impl<'a> OperationView<'a> {
     pub(super) fn local_count(self) -> usize {
         self.local_ids.len()
     }
+}
+
+/// Captures and retirement use the same coordinate queries even when no diagnostic sink exists.
+#[derive(Clone, Copy)]
+pub(super) struct EdgeTransferView<'a> {
+    pub operations: OperationView<'a>,
+    pub observations: bool,
+}
+
+impl<'a> From<&'a FunctionLayout> for EdgeTransferView<'a> {
+    fn from(layout: &'a FunctionLayout) -> Self {
+        Self {
+            operations: OperationView::from_layout(layout),
+            observations: layout.lookup_observations,
+        }
+    }
+}
+
+/// Per-block orders are packed alongside the HIR operations, not across every local.
+pub(super) struct SparseBlockView<'a> {
+    pub operations: OperationView<'a>,
+    pub statement_orders: &'a [i32],
+    pub statement_positions: &'a [usize],
+    pub terminator_order: i32,
+    pub transfer_terminator: bool,
+}
+
+pub(super) fn transfer_sparse_block(
+    context: &BorrowTransferContext<'_>,
+    view: SparseBlockView<'_>,
+    block: &HirBlock,
+    state: &mut BorrowState,
+) -> Result<BlockTransferStats, BorrowCheckError> {
+    assert_eq!(block.statements.len(), view.statement_orders.len());
+    let mut stats = BlockTransferStats::default();
+    for &position in view.statement_positions {
+        let statement = &block.statements[position];
+        let order = view.statement_orders[position];
+        transfer_statement_operation(
+            &mut CallTransferContext::new(
+                context,
+                view.operations,
+                state,
+                block.id,
+                order,
+                context.diagnostics.statement_error_span(statement),
+                &mut stats,
+                None,
+            ),
+            &statement.kind,
+        )?;
+        stats.statements_analyzed += 1;
+        if stats.diverges {
+            return Ok(stats);
+        }
+    }
+    if !view.transfer_terminator {
+        return Ok(stats);
+    }
+    transfer_terminator_operation(
+        &mut CallTransferContext::new(
+            context,
+            view.operations,
+            state,
+            block.id,
+            view.terminator_order,
+            context.diagnostics.terminator_error_span(block.id),
+            &mut stats,
+            None,
+        ),
+        context,
+        &block.terminator,
+    )?;
+    stats.terminators_analyzed += 1;
+    Ok(stats)
 }
 
 /// Only mandatory validation needs a borrow verdict, liveness or value facts.
