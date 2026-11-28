@@ -196,6 +196,8 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
         None,
         "retired token tag code 39 must not decode"
     );
+    assert_eq!(TokenTag::from_raw(94), None, "retired token tag code 94");
+    assert_eq!(TokenShape::from_raw_parts(94, 0, 0), None);
     assert_eq!(TokenTag::from_raw(107), None, "retired token tag code 107");
     assert_eq!(
         TokenShape::from_raw_parts(107, 0, 0),

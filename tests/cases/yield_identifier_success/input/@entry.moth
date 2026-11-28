@@ -1,0 +1,6 @@
+show ||:
+    yield = 42
+    io.line([:yield identifier [yield]])
+;
+
+show()

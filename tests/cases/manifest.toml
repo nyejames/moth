@@ -23266,3 +23266,10 @@ path = "runtime_call_shared_sibling_place_operand_rejected"
 tags = ["integration", "functions", "borrows", "diagnostics"]
 contract = "language.borrows.root_granular_projection_conflicts"
 role = "boundary"
+
+[[case]]
+id = "yield_identifier_success"
+path = "yield_identifier_success"
+tags = ["integration", "bindings", "runtime"]
+contract = "language.names.yield_is_an_ordinary_identifier"
+role = "primary"
