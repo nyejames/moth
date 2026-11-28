@@ -1,23 +1,26 @@
 # Moth Tree-sitter grammars
 
-Status: design only. The parser and queries have not been implemented.
+Status: initial candidate grammar sources and hand-authored corpus. Generation and real parser tests are not yet verified.
 
-This is the shared syntax owner for the official editor integrations. Read the [design](../design.md) and [roadmap](../roadmap.md) before adding grammar rules.
+The [design](../design.md), [highlighting vocabulary](../highlighting.md) and [roadmap](../roadmap.md) own scope. The three root languages share ordinary JavaScript rule definitions. Tree-sitter generates the parser sources and node metadata per grammar.
 
-## Planned layout
+- `common/`: lexical leaves, named records and maps, constructions and shared Moth expressions.
+- `grammars/moth/`: code root, simple bindings, basic type names and documentation operands.
+- `grammars/mtf/`: implicit template root.
+- `grammars/mon/`: explicit/implicit literal record root, sequences and maps.
+- `scripts/grammar.cjs`: native CLI generation and corpus execution per root.
+- Each grammar's `queries/` and `test/corpus/`: initial query and exact-tree expectations.
 
-- Shared JavaScript grammar rules for lexical forms, records, collections, maps and template structure.
-- Root grammar definitions for `moth`, `moth_template` and `mon`. A separate Moth Markdown grammar may be needed after the injection prototype.
-- Generated C parser sources and node metadata, with a small external scanner only if required by the tested grammar.
-- Shared query sources for highlighting, language injections and structural features.
-- Tree-sitter corpus and highlight tests, plus a reproducible parser-generation and validation entry point.
+From this directory, with Node.js LTS, npm, a native C compiler and network access:
 
-Settle the exact multi-grammar directory layout and build tooling in M1. Do not create three copied grammars or commit generated files from an unpinned toolchain. Compile the same sources for the native and Wasm consumers.
+```sh
+npm install
+npm run generate
+npm test
+```
 
-## Contracts
+The CLI is pinned to 0.25.10 and generation targets ABI 14. The initial npm lockfile and generated C/metadata must be produced by a real successful install/generate run and committed after review. Use `npm ci` thereafter. Do not handwrite generated artifacts. Validate grammar metadata discovery from each nested root. Native/Wasm equivalence, host versions and package layout remain prototype gates.
 
-The editor parses authored syntax, not inferred types or resolved symbols. It remains useful on incomplete or invalid input. The compiler and MON codec decide validity. Template body text, literal code listings and nested Moth contributions must retain distinct ranges.
+This slice includes shared literal/record syntax, bracket heads, raw bodies, basic formatter heads, balanced notes and code listings. It deliberately omits full statements, precedence, qualified constructors, typed containers, slot/control grammar, comment/spacing edge cases, contextual names and recovery rules. Corpus trees are candidate assertions, not recorded execution output. Add malformed source cases after verifying the parser's recovery shapes. Query experiments cover HTML/CSS chunks and a literal Moth code listing. They do not group fragments per parent body, supply full guest inventories or implement Markdown. Full Moth Markdown and documentation Markdown highlighting require the next prototype.
 
-Use the delivered canonical language syntax and compiler lexical inventory at activation. No pre-migration compatibility grammar. Prove recovery, Unicode handling, incremental edit equivalence and capture boundaries through [shared tests](../tests/README.md).
-
-Where editor query dialects differ, keep the shared structural pattern in this project and adapt it at the consuming boundary. Pin the generated node schema, parser ABI and dependent queries together.
+Use the delivered syntax authorities before expanding the grammar. No legacy dialect, fake semantic validation or editor-specific grammar copy.

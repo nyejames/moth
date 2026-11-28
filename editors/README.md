@@ -1,11 +1,13 @@
 # Moth editor support
 
-Status: design and foundation preparation. No editor package is installable yet.
+Status: initial grammar and fallback preparation. No editor package is release-ready.
 
 This directory owns the official editor integrations for Moth, Moth template files and MON. The first release supports VS Code, Zed, Neovim and Emacs through a shared Tree-sitter grammar project. Highlighting works without an installed compiler or language server.
 
 - [Design](design.md): goals, syntax ownership, embedded languages, editor integration and compiler tooling boundaries.
 - [Roadmap](roadmap.md): ordered work, prerequisites and release gates.
+- [Highlighting vocabulary](highlighting.md): V1 capture roles and embedded language requirements.
+- [Versioning](versioning.md): public ObVer and internal SemVer boundaries.
 - [Tree-sitter grammars](tree-sitter-moth/README.md): shared grammar, queries and parser tests.
 - [VS Code](vscode/README.md): TypeScript extension and compatibility fallback.
 - [Zed](zed/README.md): declarative language extension.

@@ -1,0 +1,92 @@
+==================
+Shared record and numeric literals
+==================
+settings #= (count = -42, title = "Moth")
+---
+
+(source_file
+  (binding
+    (identifier)
+    (record
+      (record_fields
+        (record_field (identifier) (field_separator) (number))
+        (record_field (identifier) (field_separator) (string))))))
+
+==================
+Code comments and raw template text
+==================
+-- code
+message = [: -- body [name]]
+---
+
+(source_file
+  (comment)
+  (binding
+    (identifier)
+    (construction
+      (template_body (template_text)
+        (construction (construction_head (identifier)))))))
+
+==================
+Head-only nested and empty map constructions
+==================
+rows = [[1, 2], [=]]
+---
+
+(source_file
+  (binding (identifier)
+    (construction
+      (construction_head
+        (construction (construction_head (number) (number)))
+        (construction)))))
+
+==================
+Map entries
+==================
+scores = ["Priya" = 10]
+---
+
+(source_file
+  (binding (identifier)
+    (construction (map_entries (map_entry (string) (map_separator) (number))))))
+
+==================
+HTML head and interpolation
+==================
+label = [$html:<b>[name]</b>]
+---
+
+(source_file
+  (binding (identifier)
+    (construction
+      (construction_head (formatter_directive))
+      (template_body
+        (template_text)
+        (construction (construction_head (identifier)))
+        (template_text)))))
+
+==================
+Literal balanced code listing
+==================
+listing = [$code "moth": [1, 2]]
+---
+
+(source_file
+  (binding (identifier)
+    (construction
+      (code_directive (string))
+      (listing_body
+        (listing_text)
+        (listing_brackets (listing_body (listing_text)))))))
+
+==================
+Documentation operand
+==================
+$doc [: **Greeting**]
+message #= "hi"
+---
+
+(source_file
+  (documentation (construction (template_body (template_text))))
+  (binding (identifier) (string)))
+

@@ -8,9 +8,13 @@ Read [design.md](design.md) first. Its accepted goals and ownership constrain ev
 
 - [x] Define the shared syntax and editor integration direction.
 - [x] Establish the editor directory boundaries and document intended ownership.
-- [ ] Review this design with the project lead.
-- [ ] Inventory the existing VS Code extension and distribution identity. Determine whether its source lives in this repository or separately.
-- [ ] Prepare only syntax-independent scaffolding with an executable consumer, such as package layout, toolchain pinning and a small shared test runner. Add those in separate reviewed slices.
+- [x] Review this design with the project lead.
+- [x] Inventory the existing VS Code extension: `nyejames/moth-vscode-highlighting`, publisher `Nye`, extension name `moth-highligher` (retain the existing spelling for upgrade continuity).
+- [x] Record the required highlighting vocabulary, ObVer policy and approved multi-root grammar organisation.
+- [x] Add the initial settled grammar subset, corpus and injection experiments in `tree-sitter-moth/`. This is candidate source until the generator and corpus pass.
+- [ ] Run parser generation and tests on the pinned toolchain. Commit reproducibly generated files only after verification.
+- [ ] Validate the ported TextMate candidates with the real tokenizer, then decide their long-term role at M1.
+- [ ] Expand the settled subset only when its tests run. Preserve the remaining syntax and host-specific work for M1/M2.
 - [ ] Verify that every preparation commit changes only `editors/`. Keep root manifests, docs, roadmap, CI and compiler code unchanged.
 
 Exit: approved design, ready-to-use local foundation and a narrowly scoped PR. No claim of highlighting support.
@@ -21,7 +25,7 @@ Prerequisite: completed syntax migration with settled canonical language documen
 
 Read the final source authorities, progress matrix, lexical inventory and relevant compiler ownership. Use the repository style, testing and validation routes. Reconcile draft decisions with the delivered grammar before freezing node names or fixtures.
 
-Create the smallest useful multi-root Tree-sitter prototype. Include nested Moth brackets, an implicit template body, a MON root record, code versus body comments and a malformed source witness. Try native and Wasm parser generation using pinned compatible tools. Establish stable node shapes only after tests prove they express the required boundaries.
+Verify and extend the initial M0 multi-root Tree-sitter prototype. Include nested Moth brackets, an implicit template body, a MON root record, code versus body comments and a malformed source witness. Try native and Wasm parser generation using pinned compatible tools. Establish stable node shapes only after tests prove they express the required boundaries.
 
 Use [shared integration fixtures](tests/README.md) to prototype embedded HTML, CSS including inline mode, Moth Markdown and nested Moth code listings. Exercise all four editors at this checkpoint, especially VS Code with semantic highlighting on and off. Verify how each host loads guest parsers and how ranges, query predicates and nested captures behave. Establish supported versions and installation paths. Resolve the release packaging question for multi-root grammars and guest dependencies.
 

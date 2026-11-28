@@ -1,6 +1,6 @@
 # Shared editor integration tests
 
-Status: test design. No runner or fixtures have been added yet.
+Status: shared test design. Initial grammar-local corpus expectations now live with each grammar. Cross-host fixture runner and real-host tests are still pending.
 
 Grammar-local corpus and query tests belong in [tree-sitter-moth](../tree-sitter-moth/README.md). This directory owns the shared editor-facing fixtures and cross-host conformance checks. Adapter-specific API and lifecycle tests live with the adapter that owns them.
 
