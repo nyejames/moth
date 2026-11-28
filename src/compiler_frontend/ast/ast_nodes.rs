@@ -547,7 +547,7 @@ fn visit_node_expressions<'a>(
             visit_declaration_expressions(declaration, stack, visitor);
         }
         NodeKind::NeverCall(call) => {
-            if let Some(receiver) = call.receiver {
+            if let Some((receiver, _)) = call.receiver {
                 visitor(receiver);
             }
             for argument in &call.arguments {
@@ -689,7 +689,7 @@ fn visit_node_expressions_mut<'a>(
             visit_declaration_expressions_mut(declaration, stack, visitor);
         }
         NodeKind::NeverCall(call) => {
-            if let Some(receiver) = &mut call.receiver {
+            if let Some((receiver, _)) = &mut call.receiver {
                 visitor(receiver);
             }
             for argument in &mut call.arguments {

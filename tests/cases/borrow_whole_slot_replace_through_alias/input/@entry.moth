@@ -1,0 +1,4 @@
+slot ~= 2
+writer ~= slot
+~writer = 9
+~[:[writer]]

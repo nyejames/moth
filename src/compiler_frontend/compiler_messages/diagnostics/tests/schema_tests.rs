@@ -27,7 +27,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
     UNCLOSED_SOURCE_SCOPE, UnclosedSourceScopeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    self, TYPE_MISMATCH, USE_OF_UNINITIALIZED_LOCAL, UnsupportedBackendFeatureView,
+    self, INVALID_CONST_ACCESS, InvalidConstAccessView, TYPE_MISMATCH, USE_OF_UNINITIALIZED_LOCAL,
+    UnsupportedBackendFeatureView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::reason_keys::StableReasonKey;
@@ -43,11 +44,11 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticSeverity, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
-    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidExternalModuleReason, InvalidMapTypeReason, InvalidMultiBindReason,
-    InvalidOutputFolderReason, InvalidScopeLayoutReason, InvalidTypeAnnotationReason,
-    NonExhaustiveMatchReason, SourceScopeConstruct, TypeAnnotationContext,
-    UnsupportedBackendFeatureReason,
+    InvalidCollectionTypeReason, InvalidConfigReason, InvalidConstAccessReason,
+    InvalidDeclarationReason, InvalidExternalModuleReason, InvalidMapTypeReason,
+    InvalidMultiBindReason, InvalidOutputFolderReason, InvalidScopeLayoutReason,
+    InvalidTypeAnnotationReason, NonExhaustiveMatchReason, SourceScopeConstruct,
+    TypeAnnotationContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -62,6 +63,7 @@ fn family_layouts_declare_their_word_counts() {
     assert_eq!(TYPE_MISMATCH.pending_mask(), 0b11);
     assert_eq!(INVALID_MULTI_BIND.word_count(), 4);
     assert_eq!(USE_OF_UNINITIALIZED_LOCAL.word_count(), 1);
+    assert_eq!(INVALID_CONST_ACCESS.word_count(), 1);
     assert_eq!(COMPILER_CAPACITY_EXCEEDED.word_count(), 1);
     assert_eq!(UNREACHABLE_MATCH_ARM.word_count(), 0);
     assert_eq!(COMPILE_TIME_EVALUATION_ERROR.word_count(), 4);
@@ -94,7 +96,7 @@ fn reserved_and_active_rows_are_flagged() {
 #[test]
 fn registry_finds_sampled_family_codes_and_no_other() {
     for code in [
-        1001, 1037, 2001, 3002, 3022, 3034, 3035, 3045, 3050, 4002, 4005, 5009,
+        1001, 1037, 2001, 3002, 3022, 3034, 3035, 3045, 3050, 4002, 4005, 5009, 5010,
     ] {
         assert!(
             family_for_code(DiagnosticCode::new(code)).is_some(),
@@ -396,6 +398,34 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
         Some("unsupported_backend_feature.hashmap_operation")
     );
     assert_eq!(string_table.resolve(facts.backend_name), "Wasm");
+}
+
+#[test]
+fn invalid_const_access_preserves_typed_reason_and_stable_key() {
+    for (reason, key) in [
+        (
+            InvalidConstAccessReason::InvalidatedReference,
+            "invalid_const_access.invalidated_reference",
+        ),
+        (
+            InvalidConstAccessReason::ExpiredProjection,
+            "invalid_const_access.expired_projection",
+        ),
+    ] {
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(types_borrows_targets::invalid_const_access(reason, None)),
+            None,
+        );
+        let view = compact
+            .first()
+            .expect("invalid const access draft compacts");
+        let facts = view
+            .family_view::<InvalidConstAccessView>()
+            .expect("const access reason remains typed");
+        assert_eq!(view.descriptor().code, "MOTH-BORROW-0010");
+        assert_eq!(view.reason_key(), Some(key));
+        assert_eq!(facts.reason, reason);
+    }
 }
 
 #[test]

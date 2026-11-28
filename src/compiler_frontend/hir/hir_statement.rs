@@ -565,13 +565,12 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
-    /// Reads a statement condition's folded `Bool` value from the pre-fold selection fact.
+    /// Reads a statement condition's folded `Bool` value from the shared constant store.
     ///
-    /// WHY: HIR lowering must classify assertion, `if` and loop conditions exactly as AST selection
-    /// did, before optional release folding. Reading the post-fold constant store would let a
-    /// release-only fold skip a body, a divergence proof or a trap that a debug build keeps.
-    pub(super) fn pre_fold_bool_condition(&self, condition: ExprId) -> Option<bool> {
-        self.pre_fold_bool_conditions.get(&condition).copied()
+    /// WHY: HIR lowering must classify assertion, `if` and loop conditions exactly as AST
+    /// selection and exit analysis did, through the same folded-Bool authority.
+    pub(super) fn folded_bool_condition(&self, condition: ExpressionView<'_>) -> Option<bool> {
+        self.module_const_values.folded_bool_value(condition)
     }
 
     // -------------------------
@@ -591,7 +590,7 @@ impl<'a> HirBuilder<'a> {
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         // Statically known false → immediate assertion failure, no pass block needed.
-        if self.pre_fold_bool_condition(condition.id()) == Some(false) {
+        if self.folded_bool_condition(condition) == Some(false) {
             let message_value = self.lower_expression_value_to_current_block(message)?;
             let failure_block = self.current_block_id_or_error()?;
             return self.emit_terminator_with_span(
@@ -609,7 +608,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         // Statically known true → no runtime effect.
-        if self.pre_fold_bool_condition(condition.id()) == Some(true) {
+        if self.folded_bool_condition(condition) == Some(true) {
             return Ok(());
         }
 

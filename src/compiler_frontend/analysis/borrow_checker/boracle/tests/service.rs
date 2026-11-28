@@ -70,6 +70,7 @@ fn module_report_header_renders_entry_path_as_portable_text() {
     module.functions.push(function);
     let input = BoracleModuleInput {
         hir: module,
+        type_environment: crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         external_package_registry: Arc::new(ExternalPackageRegistry::new()),
         source_path: PathBuf::from("/project/back\\slash.moth"),
     };

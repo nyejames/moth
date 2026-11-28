@@ -63,7 +63,7 @@ empty_log ~= [:]
 empty_visits ~= 0
 empty_code ~U32 = 0
 empty = walk_empty(~empty_log, ~empty_visits) catch |err|:
-    ~empty_code = err.code
+    ~empty_code = copy err.code
     then -1
 ;
 

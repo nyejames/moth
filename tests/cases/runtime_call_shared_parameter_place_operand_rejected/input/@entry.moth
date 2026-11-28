@@ -1,0 +1,18 @@
+-- Parameters are authored places too.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace |holder ~Holder| -> I32:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+probe |holder ~Holder| -> I32:
+    return inspect(holder.items, replace(~holder))
+;
+
+holder ~= Holder({1})
+~[:[probe(~holder)]]

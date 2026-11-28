@@ -511,7 +511,12 @@ mod tests {
     use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
     use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
     use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
-    use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+    use crate::compiler_frontend::public_call_summary::typed::{
+        Lane, Product, TypedCallAllocationFacts,
+    };
+    use crate::compiler_frontend::public_call_summary::{
+        FunctionReturnAliasSummary, PublicCallSummary,
+    };
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
     };
@@ -551,8 +556,10 @@ mod tests {
     ) -> PublicCallSummary {
         PublicCallSummary {
             parameters: Vec::new(),
-            return_alias:
-                crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary::Fresh,
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+                success: Lane::Returning(Product::default()),
+                ..Default::default()
+            })),
             escapes_builtin_failure: false,
             uses_fast_semantics,
             may_trap,

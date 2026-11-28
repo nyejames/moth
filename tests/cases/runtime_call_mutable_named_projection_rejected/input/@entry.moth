@@ -1,0 +1,15 @@
+Leaf = |item I32|
+Holder = |inner Leaf|
+
+replace |holder ~Holder| -> I32:
+    ~holder = Holder(Leaf(9))
+    return 0
+;
+
+observe |number I32, item ~I32| -> I32:
+    return item + number
+;
+
+holder ~= Holder(Leaf(2))
+result = observe(item = ~holder.inner.item, number = replace(~holder))
+~[:[result]]

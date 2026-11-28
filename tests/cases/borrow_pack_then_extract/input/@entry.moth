@@ -1,0 +1,13 @@
+Saved = |item I32, count I32|
+pack |item I32| -> Saved:
+    return Saved(item, 3)
+;
+item_of |saved Saved| -> I32:
+    return saved.item
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k") catch then 0
+saved = pack(score)
+forwarded = item_of(saved)
+~scores.clear()
+~[:[forwarded]]

@@ -89,7 +89,7 @@ core_probe || -> I32, Error!:
 
 core_parse_code ~U32 = 0
 core_probe_value = core_probe() catch |core_err|:
-    ~core_parse_code = core_err.code
+    ~core_parse_code = copy core_err.code
     then 0
 ;
 core_code_plus_one = core_parse_code + 1
@@ -101,7 +101,7 @@ cast_probe |value F64| -> I32, Error!:
 
 backend_cast_code ~U32 = 0
 cast_probe_value = cast_probe(3.4028234663852886e38) catch |backend_err|:
-    ~backend_cast_code = backend_err.code
+    ~backend_cast_code = copy backend_err.code
     then 0
 ;
 backend_code_plus_one = backend_cast_code + 1

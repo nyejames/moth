@@ -1,7 +1,7 @@
 //! Live interpreter state and the borrowed service context for const execution.
 //!
-//! WHAT: owns the per-attempt interpreter state (frame aliases, prepared catch bodies, active and
-//!       inherited handler recovery, nesting depths and the pending handler return) and bundles
+//! WHAT: owns attempt-local storage, prepared catch bodies, active handlers,
+//!       pending frame outcomes and nesting depths, and bundles
 //!       the compiler services every operation reads.
 //! WHY: one context replaces long positional parameter lists, while resource limits stay in
 //!       `ExecutionBudget` and frame bindings stay explicit per function frame. Separating state
@@ -11,20 +11,20 @@
 
 use super::budget::ExecutionBudget;
 use super::instructions::ConstInstruction;
-use super::{AliasTarget, ConstFunctionExecutable, ConstValueId, ExprId, FxHashMap, PathId, Rc};
+use super::storage::{LiveBinding, LiveStorage, LiveValue};
+use super::{ConstFunctionExecutable, ExprId, FxHashMap, PathId, Rc};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Interpreted names bound in one function frame or handler body.
 ///
-/// Bindings belong to a frame rather than to the whole interpreter: a call, a handler body and a
-/// nested template site each supply their own name-to-value map.
-pub(super) type FrameBindings = FxHashMap<PathId, ConstValueId>;
+/// Static paths select names within one frame. The selected binding designates
+/// actual storage shared by every frame of the attempt.
+pub(super) type FrameBindings = FxHashMap<PathId, LiveBinding>;
 
 /// Borrowed compiler services required by one const-execution attempt.
 ///
@@ -43,9 +43,6 @@ pub(crate) struct ConstExecutionServices<'a> {
 
 impl<'services> ConstExecutionServices<'services> {
     /// Borrow these services for one attempt with the caller's budget and state.
-    ///
-    /// The services are reborrowed, so one bundle can start several attempts (release rewriting
-    /// starts one per expression) without rebuilding the field list.
     pub(super) fn interpreter<'attempt>(
         &'attempt mut self,
         budget: &'attempt mut ExecutionBudget,
@@ -89,29 +86,9 @@ pub(super) struct ConstInterpreter<'a> {
 /// Interpreter control, recovery and frame state for one const-execution attempt.
 #[derive(Default)]
 pub(super) struct ExecutionState {
-    /// Mutable aliases in the active function frame; values are canonical roots plus projections.
-    pub(super) aliases: FxHashMap<PathId, AliasTarget>,
+    pub(super) storage: LiveStorage,
     /// Prepared catch bodies for the active function frame.
     pub(super) handler_bodies: Option<Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>>,
-    /// Prepared catch bodies carried to catch expressions a rewrite rebuilt under a fresh `ExprId`.
-    ///
-    /// WHY: a rewrite replaces folded children, so a catch whose handled value or arguments folded
-    /// is rebuilt under a new id. Completion can evaluate that rebuilt catch (a successful
-    /// collection read under an arithmetic catch is enough), and the handler compiled for the
-    /// authored expression must follow it. The entry is registered with the rebuild, so the
-    /// identity travels with the expression instead of being guessed from an authored span.
-    pub(super) rewritten_handlers: FxHashMap<ExprId, Rc<[ConstInstruction]>>,
-    /// Ordinary calls one release rewrite replaced with folded constants.
-    ///
-    /// WHAT: `(callee path, authored call span)` rows recorded only by a `Release` rewrite walk.
-    /// WHY: the walk knows the erased call but not which callable owns the expression, so the
-    ///      caller drains these rows and attributes them to the node it is rewriting. Executing a
-    ///      prepared candidate runs nested walks in `InterpretedBody` mode, which do not record;
-    ///      a callee's internal folds therefore cannot be misattributed to its caller. The span is
-    ///      required because every evidence row carries its authored call site; release
-    ///      speculation declines a spanless call instead. Catch handler bodies and handled subjects
-    ///      are never folded, so every row belongs to source HIR lowers.
-    pub(super) release_erased_calls: Vec<(PathId, SourceSpan)>,
     /// Catch handler currently available to collection failures.
     ///
     /// This is not owned by one collection operation: a larger handled expression installs its
@@ -119,25 +96,13 @@ pub(super) struct ExecutionState {
     pub(super) active_handler: ActiveHandler,
     /// Nested selected-handler execution depth.
     pub(super) handler_depth: usize,
-    /// Current expression evaluation nesting depth, used to consume inherited recovery once.
+    /// Current expression evaluation nesting depth across every running body, bounding native
+    /// recursion.
     pub(super) expression_depth: usize,
-    /// True when an inherited catch handler completed, including a handler with no value.
-    pub(super) inherited_handler_recovered: bool,
-    /// Recovery value produced by an inherited catch handler; the whole handled expression
-    /// yields this value instead of the partially evaluated child expression.
-    pub(super) inherited_handler_value: Option<ConstValueId>,
-    /// A `return` executed by a selected catch handler, awaiting its owning function boundary.
-    ///
-    /// WHY this is a slot rather than a returned value: a handler body runs from inside expression
-    /// evaluation and the expression rewriter, which yield a value or a rewritten expression to
-    /// their caller. Its `return` must abandon the whole enclosing statement, not merely produce
-    /// the handler's recovery value, and the template callback trait
-    /// (`RequiredCallSiteRewriter`) has no channel for an early-exit variant. The pending values
-    /// therefore stay visible until `execute_frames` in `FrameMode::FunctionBody` consumes them
-    /// (or `execute_body` does after handler instructions run); nested handler frames only peek
-    /// so the return can cross them, and expression evaluation keeps returning its first value so
-    /// no enclosing expression continues past the handled statement.
-    pub(super) pending_handler_return: Option<Vec<ConstValueId>>,
+    /// An outcome from a handler reached through expression evaluation rather than a frame step.
+    /// `Recovered` belongs to the protected expression; other outcomes belong to the frame
+    /// machine. An empty recovery is still an outcome.
+    pub(super) outcome: Option<FrameOutcome>,
     /// Set once an escaping diagnostic has received its call-site labels.
     pub(super) call_chain_attached: bool,
     /// Compact identity of the executable body currently running, if any.
@@ -148,35 +113,36 @@ pub(super) struct ExecutionState {
     pub(super) current_body: Option<PathId>,
 }
 
+pub(super) enum FrameOutcome {
+    Recovered(Vec<LiveValue>),
+    Return(Vec<LiveValue>),
+    Break,
+    Continue,
+}
 /// The catch handler currently available to fallible collection operations.
 ///
 /// This value is swapped wholesale while an inner operation runs, so a saved copy restores the
-/// body, error binding and boundary together.
+/// body and its error binding together.
 #[derive(Clone, Default)]
 pub(super) struct ActiveHandler {
     /// Body of the handler selected by the nearest enclosing catch.
     pub(super) body: Option<Rc<[ConstInstruction]>>,
     /// Error binding inherited with `body`.
     pub(super) error_binding: Option<PathId>,
-    /// True when this handler owns a nested catch boundary rather than the whole expression being
-    /// evaluated.
-    pub(super) boundary: bool,
 }
 
 impl ActiveHandler {
-    /// Replace the handler body and error binding, leaving the boundary flag untouched.
+    /// Install a handler for the duration of a protected expression.
     pub(super) fn replace(
         state: &mut ExecutionState,
         body: Option<Rc<[ConstInstruction]>>,
         error_binding: Option<PathId>,
     ) -> Self {
-        let boundary = state.active_handler.boundary;
         std::mem::replace(
             &mut state.active_handler,
             ActiveHandler {
                 body,
                 error_binding,
-                boundary,
             },
         )
     }

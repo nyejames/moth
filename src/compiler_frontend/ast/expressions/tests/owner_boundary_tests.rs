@@ -38,7 +38,7 @@ fn foreign_call_receiver_and_arguments_are_rejected_before_mutation() {
 
     assert!(matches!(
         second.method_call_with_typed_arguments(
-            first_root,
+            (first_root, CallAccessMode::Shared),
             method,
             vec![CallArgument::positional(
                 second_root,
@@ -54,7 +54,7 @@ fn foreign_call_receiver_and_arguments_are_rejected_before_mutation() {
 
     assert!(matches!(
         second.method_call_with_typed_arguments(
-            second_root,
+            (second_root, CallAccessMode::Shared),
             method,
             vec![CallArgument::positional(
                 first_root,
@@ -75,7 +75,7 @@ fn foreign_call_receiver_and_arguments_are_rejected_before_mutation() {
     )];
     assert!(matches!(
         second.method_call_with_typed_arguments(
-            second_root,
+            (second_root, CallAccessMode::Shared),
             method,
             first.own_slice(&raw_arguments),
             vec![builtin_type_ids::BOOL; 2],

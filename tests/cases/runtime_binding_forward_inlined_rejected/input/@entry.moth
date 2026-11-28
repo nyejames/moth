@@ -1,0 +1,10 @@
+Cell = |value I32|
+
+slot ~= 1
+incoming ~= Cell(2)
+later ~= 3
+~slot = incoming.value
+~slot = later
+observed = slot
+~incoming.value = 9
+~[:[observed]]

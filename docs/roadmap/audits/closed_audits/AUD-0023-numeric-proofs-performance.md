@@ -13,7 +13,7 @@ Does the proof analysis or its JS and Wasm consumption add measurable compiler t
 
 ## What was inspected
 
-Code paths: the same surfaces as [AUD-0022](../open_audits/AUD-0022-numeric-proofs-redundancy.md#what-was-inspected). They are `analysis/numeric_proofs/mod.rs` in full; its invocations in `module_compilation/service.rs` and the `generated/convergence.rs` publication loop; the materialisation placeholder; and the proof queries in `backends/js/{reachability.rs, js_statement.rs, emitter.rs, js_function.rs}` and `backends/wasm/hir_to_lir/stmt.rs`. `JsNumericOperationLowering::classify` and `numeric_failure_codes` were read to establish per-query cost.
+Code paths: the same surfaces as [AUD-0022](./AUD-0022-numeric-proofs-redundancy.md#what-was-inspected). They are `analysis/numeric_proofs/mod.rs` in full; its invocations in `module_compilation/service.rs` and the `generated/convergence.rs` publication loop; the materialisation placeholder; and the proof queries in `backends/js/{reachability.rs, js_statement.rs, emitter.rs, js_function.rs}` and `backends/wasm/hir_to_lir/stmt.rs`. `JsNumericOperationLowering::classify` and `numeric_failure_codes` were read to establish per-query cost.
 
 Workloads, generated into `./tmp/aud0023/` with the repository generator `benchmarks/numeric-scaling/generate.py` (`fixture("narrow-chains", n)`):
 

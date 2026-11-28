@@ -1,0 +1,23 @@
+Pair = |left {I32}, right {I32}|
+
+select |flag Bool, a {I32}, b {I32}| -> Pair:
+    if flag:
+        return Pair(a, b)
+    ;
+    return Pair({3}, b)
+;
+
+forward |flag Bool, a {I32}, b {I32}| -> Pair:
+    return select(flag, a, b)
+;
+
+probe |flag Bool| -> String:
+    items = {1}
+    selected = forward(flag, items, items)
+    owned ~= copy selected
+    observed = owned.right
+    ~owned.left.push(4)
+    return [:left=[owned.left.length()] right=[observed.length()] original=[items.length()]]
+;
+
+~[:[probe(true)] / [probe(false)]]

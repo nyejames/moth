@@ -6,36 +6,52 @@
 //! WHY: transfer owns borrow-rule effects and side-table fact emission; it must
 //! not mutate HIR or perform backend ownership lowering.
 
-mod access;
-mod call_semantics;
-mod facts;
+pub(super) mod access;
+pub(super) mod call_semantics;
+pub(super) mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState,
+    AllocId, BorrowState, CapturedValue, FieldKey, FunctionLayout, LocalState, RootSet,
+    StoredValue, TypedStore,
 };
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     StatementBorrowFact, TerminatorBorrowFact, ValueBorrowFact,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::module::HirChoice;
+use crate::compiler_frontend::hir::structs::HirStruct;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::public_call_summary::typed::SupportId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::rc::Rc;
 
+pub(super) use access::{call_member_result, call_member_writes};
+
+pub(super) use access::typed_call;
 use access::{
-    AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
-    transfer_terminator,
+    AggregateTransferContext, CallTransferContext, transfer_aggregate_expression_ownership,
+    transfer_statement, transfer_statement_operation, transfer_terminator,
+    transfer_terminator_operation,
 };
-use facts::ValueFactBuffer;
+use facts::{
+    Demand, ObservationCheckpoint, StatementAccessTracker, ValueFactBuffer, ValueObservations,
+};
 
 #[cfg(test)]
 #[path = "transfer/tests/value_fact_buffer_tests.rs"]
@@ -50,8 +66,327 @@ pub(super) struct BorrowTransferContext<'a> {
     pub module_private_call_summaries:
         &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
     pub generated_call_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    pub local_types: &'a FxHashMap<LocalId, TypeId>,
+    pub structs: &'a [HirStruct],
+    pub choices: &'a [HirChoice],
     pub expressions: &'a HirExpressionStore,
+    pub type_environment: &'a TypeEnvironment,
+    pub type_projection:
+        crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'a>,
     pub diagnostics: BorrowDiagnostics<'a>,
+}
+
+/// The storage queries use local indices, not validation's dense liveness tables.
+#[derive(Clone, Copy)]
+pub(super) struct OperationView<'a> {
+    pub local_ids: &'a [LocalId],
+    pub local_indices: &'a FxHashMap<LocalId, usize>,
+    pub local_mutable: &'a [bool],
+    pub local_has_in_place_mutation_surface: &'a [bool],
+    pub block_successors: &'a FxHashMap<BlockId, Vec<BlockId>>,
+    pub local_first_write_order: &'a [i32],
+    pub acyclic_entry_block: Option<BlockId>,
+    pub entry_roots: Option<&'a RootSet>,
+}
+
+impl<'a> OperationView<'a> {
+    pub(super) fn from_layout(layout: &'a FunctionLayout) -> Self {
+        Self {
+            local_ids: &layout.local_ids,
+            local_indices: &layout.local_index_by_id,
+            local_mutable: &layout.local_mutable,
+            local_has_in_place_mutation_surface: &layout.local_has_in_place_mutation_surface,
+            block_successors: &layout.block_successors,
+            local_first_write_order: &layout.local_first_write_order,
+            acyclic_entry_block: layout.acyclic_entry_block,
+            entry_roots: None,
+        }
+    }
+
+    pub(super) fn index_of(self, local: LocalId) -> Option<usize> {
+        self.local_indices.get(&local).copied()
+    }
+
+    pub(super) fn local_count(self) -> usize {
+        self.local_ids.len()
+    }
+}
+
+/// Captures and retirement use the same coordinate queries even when no diagnostic sink exists.
+#[derive(Clone, Copy)]
+pub(super) struct EdgeTransferView<'a> {
+    pub operations: OperationView<'a>,
+}
+
+impl<'a> From<&'a FunctionLayout> for EdgeTransferView<'a> {
+    fn from(layout: &'a FunctionLayout) -> Self {
+        Self {
+            operations: OperationView::from_layout(layout),
+        }
+    }
+}
+
+/// Per-block orders are packed alongside the HIR operations, not across every local.
+pub(super) struct SparseBlockView<'a> {
+    pub operations: OperationView<'a>,
+    pub statement_orders: &'a [i32],
+    pub statement_positions: &'a [usize],
+    pub terminator_order: i32,
+    pub transfer_terminator: bool,
+    pub structural_calls: &'a [(usize, usize)],
+    pub structural_terminator: Option<usize>,
+    pub call_components: Option<&'a BTreeMap<usize, Vec<SupportId>>>,
+}
+
+pub(super) fn transfer_sparse_block(
+    context: &BorrowTransferContext<'_>,
+    view: SparseBlockView<'_>,
+    block: &HirBlock,
+    state: Rc<BorrowState>,
+    retained: &mut BTreeSet<usize>,
+) -> Result<Vec<(Rc<BorrowState>, InvokeTransfer)>, BorrowCheckError> {
+    assert_eq!(block.statements.len(), view.statement_orders.len());
+    let mut states = vec![state];
+    let mut next = Vec::new();
+    // The shared allocation interner is excluded from equality and hashing.
+    // Semantic rows are only mutated through Rc::make_mut while keys are shared.
+    #[allow(clippy::mutable_key_type)]
+    let mut seen = FxHashSet::default();
+    let mut structural = view.structural_calls.iter().peekable();
+    for &position in view.statement_positions {
+        while let Some(&&(at, argc)) = structural.peek() {
+            if at >= position {
+                if at == position {
+                    structural.next();
+                }
+                break;
+            }
+            structural.next();
+            let target = crate::compiler_frontend::hir::reachability::statement_call_target(
+                &block.statements[at].kind,
+            )
+            .expect("indexed statement call");
+            if !sparse_structural_call(context, target, argc, false)? {
+                return Ok(Vec::new());
+            }
+        }
+        let statement = &block.statements[position];
+        let order = view.statement_orders[position];
+        let call_components = view
+            .call_components
+            .and_then(|calls| calls.get(&position))
+            .map(Vec::as_slice);
+        for mut state in states.drain(..) {
+            let mut stats = BlockTransferStats {
+                sparse: true,
+                ..Default::default()
+            };
+            let mut transfer = CallTransferContext::new(
+                context,
+                view.operations,
+                Rc::make_mut(&mut state),
+                block.id,
+                order,
+                context.diagnostics.statement_error_span(statement),
+                &mut stats,
+                None,
+            );
+            transfer.call_components = call_components;
+            transfer_statement_operation(&mut transfer, &statement.kind)?;
+            retained.append(&mut stats.executed_retention);
+            if !stats.diverges && !stats.deferred {
+                if let Some(batch) = stats.sparse_call {
+                    super::engine::replay_captured_sparse_support(
+                        EdgeTransferView {
+                            operations: view.operations,
+                        },
+                        Cow::Owned(batch),
+                        &[],
+                        order,
+                        state,
+                        |branch| {
+                            if seen.insert(Rc::clone(&branch)) {
+                                next.push(branch);
+                            }
+                        },
+                    )?;
+                } else if seen.insert(Rc::clone(&state)) {
+                    next.push(state);
+                }
+            }
+        }
+        std::mem::swap(&mut states, &mut next);
+        seen.clear();
+        if states.is_empty() {
+            break;
+        }
+    }
+    if !states.is_empty() {
+        for &(at, argc) in structural {
+            let target = crate::compiler_frontend::hir::reachability::statement_call_target(
+                &block.statements[at].kind,
+            )
+            .expect("indexed statement call");
+            if !sparse_structural_call(context, target, argc, false)? {
+                return Ok(Vec::new());
+            }
+        }
+    }
+    let mut exits = Vec::with_capacity(states.len());
+    let call_components = view
+        .call_components
+        .and_then(|calls| calls.get(&view.statement_orders.len()))
+        .map(Vec::as_slice);
+    for mut state in states {
+        let mut stats = BlockTransferStats {
+            sparse: true,
+            ..Default::default()
+        };
+        if view.transfer_terminator {
+            let mut transfer = CallTransferContext::new(
+                context,
+                view.operations,
+                Rc::make_mut(&mut state),
+                block.id,
+                view.terminator_order,
+                context.diagnostics.terminator_error_span(block.id),
+                &mut stats,
+                None,
+            );
+            transfer.call_components = call_components;
+            transfer_terminator_operation(&mut transfer, context, &block.terminator)?;
+            retained.append(&mut stats.executed_retention);
+        } else if let Some(argc) = view.structural_terminator {
+            let target = crate::compiler_frontend::hir::reachability::terminator_call_target(
+                &block.terminator,
+            )
+            .expect("indexed terminal call");
+            if matches!(block.terminator, HirTerminator::NeverCall { .. }) {
+                continue;
+            }
+            stats.invoke.success.unreachable =
+                !sparse_structural_call(context, target, argc, false)?;
+            stats.invoke.error.unreachable = !sparse_structural_call(context, target, argc, true)?;
+        }
+        if !stats.diverges && !stats.deferred {
+            exits.push((state, stats.invoke));
+        }
+    }
+    Ok(exits)
+}
+
+/// Non-observing supports still inherit the callable's structural control edge.
+fn sparse_structural_call(
+    context: &BorrowTransferContext<'_>,
+    target: &crate::compiler_frontend::external_packages::CallTarget,
+    argc: usize,
+    error: bool,
+) -> Result<bool, BorrowCheckError> {
+    use call_semantics::{
+        CallReturns, TypedContinuation, classify_typed_continuation, resolve_call_semantics,
+    };
+    match resolve_call_semantics(context, target, argc)?.returns() {
+        CallReturns::Summary(summary) => Ok(matches!(
+            classify_typed_continuation(
+                summary.facts(),
+                false,
+                error,
+                false,
+                &context.diagnostics,
+            )?,
+            TypedContinuation::Match(_)
+        )),
+        _ => Ok(true),
+    }
+}
+
+/// Only mandatory validation needs a borrow verdict, liveness or value facts.
+pub(in crate::compiler_frontend::analysis::borrow_checker::transfer) struct ValidationSink<
+    'a,
+    'tracker,
+    'facts,
+> {
+    pub layout: &'a FunctionLayout,
+    pub tracker: &'tracker mut StatementAccessTracker,
+    pub value_facts: &'facts mut ValueFactBuffer,
+}
+
+/// An allocation-layer effect captured before retiring a call's result bindings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum InvokeLayerOp {
+    Store(TypedStore),
+    Contribute {
+        holder: AllocId,
+        key: FieldKey,
+        value: StoredValue,
+    },
+    Bind {
+        local: LocalId,
+        value: CapturedValue,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum InvokeLane {
+    Success,
+    Error,
+}
+
+/// Evaluation fixes the address of an update; a definition instead creates
+/// a new slot whose incoming value can still name predecessor storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum CapturedDestination {
+    Define(usize),
+    Update {
+        actor: usize,
+        address: super::state::AddressSet,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CapturedDetachment {
+    pub holders: Vec<AllocId>,
+    pub map: bool,
+    /// The result ordinal, not the actor spelling of the receiving place.
+    pub result: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CapturedCallBatch<Post = typed_call::CapturedPost> {
+    pub post: Post,
+    pub destinations: Vec<CapturedDestination>,
+    pub member_reads: Demand,
+    pub checkpoints: Vec<ObservationCheckpoint>,
+    pub detachment: Option<CapturedDetachment>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct InvokeLaneTransfer {
+    pub typed: Option<CapturedCallBatch<typed_call::MatchedLane>>,
+    pub results: Vec<(LocalId, LocalState)>,
+    pub operations: Vec<InvokeLayerOp>,
+    pub member_reads: Demand,
+    pub checkpoints: Vec<ObservationCheckpoint>,
+    pub unreachable: bool,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct InvokeTransfer {
+    pub success: InvokeLaneTransfer,
+    pub error: InvokeLaneTransfer,
+}
+
+impl InvokeTransfer {
+    pub(super) fn is_empty(&self) -> bool {
+        [&self.success, &self.error].into_iter().all(|lane| {
+            lane.results.is_empty()
+                && lane.typed.is_none()
+                && lane.operations.is_empty()
+                && lane.member_reads.is_empty()
+                && lane.checkpoints.is_empty()
+                && !lane.unreachable
+        })
+    }
 }
 
 /// Accumulated statistics and emitted facts for one block transfer.
@@ -72,7 +407,13 @@ pub(super) struct BlockTransferStats {
     pub terminator_fact: Option<(BlockId, TerminatorBorrowFact)>,
     pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
     // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
-    pub invoke_results: Vec<(LocalId, LocalState)>,
+    pub invoke: InvokeTransfer,
+    pub observations: ValueObservations,
+    pub diverges: bool,
+    pub deferred: bool,
+    pub sparse: bool,
+    pub sparse_call: Option<CapturedCallBatch<typed_call::MatchedLane>>,
+    pub executed_retention: BTreeSet<usize>,
 }
 
 /// Executes one forward transfer step for a single basic block.
@@ -104,6 +445,12 @@ pub(super) fn transfer_block(
         )?;
         value_fact_buffer.finish_use();
         stats.statements_analyzed += 1;
+        if stats.diverges {
+            stats.value_facts = value_fact_buffer.into_serialized(layout);
+            #[cfg(test)]
+            state.assert_allocation_incidence();
+            return Ok(stats);
+        }
     }
 
     transfer_terminator(
@@ -190,5 +537,7 @@ pub(super) fn transfer_block(
 
     value_fact_buffer.finish_use();
     stats.value_facts = value_fact_buffer.into_serialized(layout);
+    #[cfg(test)]
+    state.assert_allocation_incidence();
     Ok(stats)
 }

@@ -6,6 +6,7 @@
 //!      interval semantics directly.
 
 use super::OracleLimitReason;
+use super::conflicts;
 use super::execute::{
     AccessExecutionResult, EventExecutionResult, OracleExecutionContext, execute_access,
     finish_definition_transition, oracle_error, require_call, require_origin, require_place,
@@ -112,11 +113,21 @@ pub(super) fn execute_call_effect<'a>(
     let problem = context.problem;
     let trace_index = context.trace_index;
     let bounds = context.bounds;
-    require_call(problem, effect.call, "call effect")?;
+    let call = require_call(problem, effect.call, "call effect")?;
     verify_granular_arguments(problem, effect)?;
     context
         .state
         .extend_call_capabilities(effect.call, trace_index);
+    if call.opaque_stores {
+        if let Ok(Some(witness)) =
+            conflicts::find_interval_conflict(context.trace.entries(), &context.state.capabilities)
+        {
+            return Ok(EventExecutionResult::RuntimeConflict(witness));
+        }
+        return Ok(EventExecutionResult::Inconclusive(
+            OracleLimitReason::OpaqueCallStores { call: effect.call },
+        ));
+    }
 
     // Capture every incoming provenance relationship before any destination is replaced.
     let mut argument_targets = BTreeMap::new();

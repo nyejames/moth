@@ -118,6 +118,14 @@ impl SourceReceiverMethodTarget<'_> {
     }
 }
 
+fn method_receiver_access(receiver_mutable: bool) -> CallAccessMode {
+    if receiver_mutable {
+        CallAccessMode::Mutable
+    } else {
+        CallAccessMode::Shared
+    }
+}
+
 /// Builds the hidden call's receiver argument for one receiver method call.
 ///
 /// WHAT: materialises the receiver expression once in declaration-order slot zero, carrying the
@@ -130,15 +138,9 @@ fn receiver_hidden_call_argument(
     member_span: Option<SourceSpan>,
     expression_builder: &AstExpressionBuilder,
 ) -> Result<CallArgument<OwnedExpr>, ExpressionParseError> {
-    let receiver_access = if receiver_mutable {
-        CallAccessMode::Mutable
-    } else {
-        CallAccessMode::Shared
-    };
-
     Ok(CallArgument::positional(
         expression_builder.own(expression_from_postfix_node(receiver_node)?),
-        receiver_access,
+        method_receiver_access(receiver_mutable),
         member_span,
     )
     .with_parameter_slot(ParameterSlot::new(0)))
@@ -303,7 +305,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
     };
 
-    let (method_path, call_signature, generic_request, receiver_expression) = match &source_method {
+    let (method_path, call_signature, generic_request, receiver_argument) = match &source_method {
         SourceReceiverMethodTarget::Declared(method_entry) => {
             let receiver_argument = receiver_hidden_call_argument(
                 receiver_node,
@@ -336,14 +338,14 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         instantiation.instance_path,
                         instantiation.signature,
                         Some(instantiation.request),
-                        receiver_argument.value,
+                        receiver_argument,
                     )
                 }
                 None => (
                     method_entry.function_path.to_owned(),
                     method_entry.signature.to_owned(),
                     None,
-                    receiver_argument.value,
+                    receiver_argument,
                 ),
             }
         }
@@ -380,14 +382,14 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         instantiation.instance_path,
                         instantiation.signature,
                         Some(instantiation.request),
-                        receiver_argument.value,
+                        receiver_argument,
                     )
                 }
                 None => (
                     method.method_path,
                     method.signature.clone(),
                     None,
-                    receiver_argument.value,
+                    receiver_argument,
                 ),
             }
         }
@@ -413,6 +415,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             path_fork,
         },
     )?;
+    let receiver_expression = receiver_argument.value;
+    let receiver_access = receiver_argument.access_mode;
 
     // A Never method has no value. The statement owner lifts this outcome into `NeverCall`;
     // every value owner rejects it at the shared evaluation choke point.
@@ -425,7 +429,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
         return Ok(ParsedReceiverMethodCall::Terminating(Box::new(NeverCall {
             target: NeverCallTarget::Source(method_path),
-            receiver: Some(receiver_expression.id()),
+            receiver: Some((receiver_expression.id(), receiver_access)),
             arguments: args
                 .into_iter()
                 .map(|argument| argument.map_value(OwnedExpr::id))
@@ -439,11 +443,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         // Typed methods use the established handled-call shape, with their receiver in slot zero.
         // A raw MethodCall inside a carrier would bypass HIR's explicit error-channel call lowering.
         let receiver_span = expression_builder.view_owned(receiver_expression)?.span();
-        let receiver_access = if source_method.receiver_mutable() {
-            CallAccessMode::Mutable
-        } else {
-            CallAccessMode::Shared
-        };
         let receiver_argument =
             CallArgument::positional(receiver_expression, receiver_access, receiver_span)
                 .with_marker_span(authored_marker_span)
@@ -492,7 +491,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             type_interner,
         )?;
         let method_call_expression = expression_builder.method_call_with_typed_arguments(
-            receiver_expression,
+            (receiver_expression, receiver_access),
             method_path,
             args,
             result_type_ids,
@@ -1165,6 +1164,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
             path_fork,
         },
     )?;
+    let receiver_access = method_receiver_access(receiver_mutable);
 
     let completed = if completion == CallCompletion::Never {
         // A terminating method has no success or error slot, so the receiver stays separate and
@@ -1172,7 +1172,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
         // non-fallible method call shape, without building an expression that has no value.
         CompletedExpression::NeverCall(Box::new(NeverCall {
             target: NeverCallTarget::Source(method_path),
-            receiver: Some(receiver_expression.id()),
+            receiver: Some((receiver_expression.id(), receiver_access)),
             arguments: args
                 .into_iter()
                 .map(|argument| argument.map_value(OwnedExpr::id))
@@ -1190,11 +1190,10 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
             )
         });
         CompletedExpression::Value(receiver_call_expression(
-            receiver_expression,
+            (receiver_expression, receiver_access),
             method_path,
             returns,
             args,
-            receiver_mutable,
             authored_marker_span,
             call_span,
             private_failure_candidate,
@@ -1220,11 +1219,10 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
     reason = "each resolved call fact is a separate argument so the constructor stays flat"
 )]
 fn receiver_call_expression(
-    receiver_expression: OwnedExpr,
+    (receiver_expression, receiver_access): (OwnedExpr, CallAccessMode),
     method_path: PathId,
     returns: &CallableReturnShape,
     args: Vec<CallArgument<OwnedExpr>>,
-    receiver_mutable: bool,
     authored_marker_span: Option<SourceSpan>,
     call_span: Option<SourceSpan>,
     private_failure_candidate: Option<PathId>,
@@ -1236,7 +1234,7 @@ fn receiver_call_expression(
         // Every receiver call here was resolved at its site without a `!`, so the success types are
         // the declared ones and the plain method call is the completed shape.
         let expression = expression_builder.method_call_with_typed_arguments(
-            receiver_expression,
+            (receiver_expression, receiver_access),
             method_path,
             args,
             result_type_ids,
@@ -1253,11 +1251,6 @@ fn receiver_call_expression(
     // The handled carrier keeps the receiver in implicit slot zero and shifts every authored
     // argument by one declaration-order slot, exactly as the completed typed-method path does.
     let receiver_span = expression_builder.view_owned(receiver_expression)?.span();
-    let receiver_access = if receiver_mutable {
-        CallAccessMode::Mutable
-    } else {
-        CallAccessMode::Shared
-    };
     let receiver_argument =
         CallArgument::positional(receiver_expression, receiver_access, receiver_span)
             .with_marker_span(authored_marker_span)

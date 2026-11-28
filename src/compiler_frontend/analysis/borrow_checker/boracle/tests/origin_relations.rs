@@ -771,14 +771,17 @@ fn boundary_reason_problem() -> BorrowProblem {
             Call {
                 id: CallId::new(0),
                 label: "summary-unknown".to_owned(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(1),
                 label: "missing-summary".to_owned(),
+                opaque_stores: false,
             },
             Call {
                 id: CallId::new(2),
                 label: "opaque-external".to_owned(),
+                opaque_stores: false,
             },
         ],
         events: vec![
@@ -861,6 +864,7 @@ fn unknown_provenance_problem() -> BorrowProblem {
         calls: vec![Call {
             id: CallId::new(0),
             label: "unknown-provenance".to_owned(),
+            opaque_stores: false,
         }],
         uses: vec![
             Use {

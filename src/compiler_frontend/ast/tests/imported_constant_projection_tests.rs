@@ -27,7 +27,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedField, PublicFoldedValue,
+    FoldedAllocationDefinition, OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedField,
+    PublicFoldedValue,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     DeclarationId, OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
@@ -47,6 +48,9 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -171,10 +175,14 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
             CanonicalTypeIdentity::AnonymousConstRecord => {
                 Ok(self.type_environment.anonymous_const_record_type())
             }
+            CanonicalTypeIdentity::Collection { element, fixed_capacity } => {
+                let element = self.intern_canonical_type(element, _string_table)?;
+                Ok(self.type_environment.intern_collection(element, *fixed_capacity))
+            }
 
             _ => Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
-                "record projection test materialiser interns builtin and marker types only",
+                "record projection test materialiser interns builtin, collection and marker types only",
             )
             .into()),
         }
@@ -899,5 +907,160 @@ fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
         value: DeclarationValue::Absent,
         binding_span: None,
         config_contract: None,
+    }
+}
+
+fn folded_graph_child_type() -> CanonicalTypeIdentity {
+    CanonicalTypeIdentity::Collection {
+        element: Box::new(CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )),
+        fixed_capacity: None,
+    }
+}
+
+fn folded_graph_member(member: &str) -> SyntheticInterfaceProvenance {
+    SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        member,
+    ))
+}
+
+fn folded_graph_definition(
+    value: PublicFoldedValue,
+    provenance: SyntheticInterfaceProvenance,
+) -> PublicFoldedValue {
+    PublicFoldedValue::AllocationDefinition {
+        index: 0,
+        definition: Box::new(FoldedAllocationDefinition {
+            type_identity: folded_graph_child_type(),
+            value,
+            provenance,
+        }),
+    }
+}
+
+#[test]
+fn folded_graph_import_remaps_definitions_per_root_and_keeps_occurrence_provenance() {
+    let mut importer = ConsumerFoldedValueMaterialiser::new();
+    let mut strings = StringTable::new();
+    let mut constants = ConstValueStore::default();
+    let first = folded_graph_member("first");
+    let second = folded_graph_member("second");
+    let child_type = importer
+        .intern_canonical_type(&folded_graph_child_type(), &mut strings)
+        .unwrap();
+    let root_type = importer
+        .type_environment
+        .intern_collection(child_type, None);
+    let graph = PublicFoldedValue::Collection(vec![
+        folded_graph_definition(PublicFoldedValue::Collection(Vec::new()), first.clone()),
+        PublicFoldedValue::AllocationReference {
+            index: 0,
+            provenance: second.clone(),
+        },
+    ]);
+    let mut import = || {
+        let root = materialize_public_folded_value(
+            &mut importer,
+            &graph,
+            root_type,
+            &mut constants,
+            &mut strings,
+            None,
+        )
+        .unwrap();
+        let Some(ConstValuePayload::Collection(children)) = constants.payload(root) else {
+            panic!("expected the imported outer collection");
+        };
+        let [definition, occurrence] = children.as_slice() else {
+            panic!("expected a definition and one occurrence");
+        };
+        assert_eq!(constants.shared_allocation(*definition), Some(*definition));
+        assert_eq!(constants.shared_allocation(*occurrence), Some(*definition));
+        assert!(constants.owned_payload(*occurrence).is_none());
+        assert_eq!(
+            constants
+                .metadata(*definition)
+                .unwrap()
+                .synthetic_interface_provenance,
+            first
+        );
+        assert_eq!(
+            constants
+                .metadata(*occurrence)
+                .unwrap()
+                .synthetic_interface_provenance,
+            second
+        );
+        *definition
+    };
+    assert_ne!(
+        import(),
+        import(),
+        "separate imports must own separate definitions"
+    );
+}
+
+#[test]
+fn folded_graph_import_rejects_unfinished_and_wrong_type_references() {
+    let mut importer = ConsumerFoldedValueMaterialiser::new();
+    let mut strings = StringTable::new();
+    let mut constants = ConstValueStore::default();
+    let child_type = importer
+        .intern_canonical_type(&folded_graph_child_type(), &mut strings)
+        .unwrap();
+    let outer_type = importer
+        .type_environment
+        .intern_collection(child_type, None);
+    let reference = PublicFoldedValue::AllocationReference {
+        index: 0,
+        provenance: SyntheticInterfaceProvenance::empty(),
+    };
+    let cycle = folded_graph_definition(
+        PublicFoldedValue::Collection(vec![reference.clone()]),
+        SyntheticInterfaceProvenance::empty(),
+    );
+    let unresolved = "does not name a completed definition in this root";
+    let wrong_type = PublicFoldedValue::Collection(vec![
+        folded_graph_definition(
+            PublicFoldedValue::Collection(Vec::new()),
+            SyntheticInterfaceProvenance::empty(),
+        ),
+        PublicFoldedValue::Collection(vec![reference.clone()]),
+    ]);
+    let wrong_index = PublicFoldedValue::AllocationDefinition {
+        index: 1,
+        definition: Box::new(FoldedAllocationDefinition {
+            type_identity: folded_graph_child_type(),
+            value: PublicFoldedValue::Collection(Vec::new()),
+            provenance: SyntheticInterfaceProvenance::empty(),
+        }),
+    };
+    for (folded, expected_type, reason) in [
+        (&reference, child_type, unresolved),
+        (&cycle, child_type, unresolved),
+        (
+            &wrong_type,
+            outer_type,
+            "no same-type allocation definition",
+        ),
+        (
+            &wrong_index,
+            child_type,
+            "must have consecutive authored indices",
+        ),
+    ] {
+        let failure = materialize_public_folded_value(
+            &mut importer,
+            folded,
+            expected_type,
+            &mut constants,
+            &mut strings,
+            None,
+        )
+        .unwrap_err();
+        assert!(failure.primary.message.contains(reason), "{failure:?}");
     }
 }

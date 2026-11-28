@@ -1,0 +1,6 @@
+invalid #|input I32| -> I32:
+    slot ~= input
+    return slot
+;
+
+~[: uncalled]

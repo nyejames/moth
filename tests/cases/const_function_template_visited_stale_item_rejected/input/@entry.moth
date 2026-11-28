@@ -1,0 +1,10 @@
+render #|| -> String:
+    x ~= 1
+    held = x
+    values ~{I32} = {1, held, 3}
+    ~x = 2
+    return [:visited=[loop values |item|:[item];]]
+;
+
+result #String = render()
+~[:[result]]

@@ -1,0 +1,10 @@
+Saved = |item I32|
+store |dst ~Saved, item I32|:
+    ~dst.item = item
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k")!
+saved ~= Saved(3)
+store(~saved, score)
+~scores.clear()
+~[:[saved.item]]

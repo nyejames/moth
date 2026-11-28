@@ -336,7 +336,6 @@ impl EntryFixture {
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &frontend_test_style_directives(),
             builder_surface,
@@ -354,7 +353,6 @@ impl EntryFixture {
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let result = compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut builder_surface,

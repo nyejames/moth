@@ -21,7 +21,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
-use crate::compiler_frontend::ast::statements::control_flow_exits::collect_pre_fold_bool_conditions;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -433,9 +432,9 @@ pub(crate) fn build_ast_with_choices(
     let expressions = builder
         .freeze(&mut nodes)
         .expect("completed fixture expression store");
-    // HIR projects the same pre-fold facts production finalization retains.
+    // HIR projects the same function failure facts production finalization retains.
     let template_ir_store = crate::compiler_frontend::ast::templates::tir::TemplateIrStore::new();
-    let pre_fold_failure_facts = AstBuiltinFailureSummaries::compute(
+    let function_failure_facts = AstBuiltinFailureSummaries::compute(
         &[&nodes],
         &template_ir_store,
         &const_values,
@@ -443,15 +442,6 @@ pub(crate) fn build_ast_with_choices(
     )
     .expect("fixture failure facts")
     .into_function_facts();
-    // HIR classifies assertion and loop conditions from the same pre-fold Bool view production
-    // finalization retains.
-    let mut pre_fold_bool_conditions = Default::default();
-    collect_pre_fold_bool_conditions(
-        &nodes,
-        &expressions,
-        &const_values,
-        &mut pre_fold_bool_conditions,
-    );
 
     Ast {
         synthesizes_entry_start: true,
@@ -461,9 +451,7 @@ pub(crate) fn build_ast_with_choices(
         doc_fragments: vec![],
         constraint_boundaries: vec![],
         fast_operation_witnesses: vec![],
-        release_erased_call_sites: vec![],
-        pre_fold_failure_facts,
-        pre_fold_bool_conditions,
+        function_failure_facts,
         constraint_pruned_regions: vec![],
         const_top_level_fragments: vec![],
         warnings: vec![],

@@ -254,8 +254,7 @@ pub(crate) struct FormatterResult {
 ///      payloads.
 #[derive(Clone, Debug)]
 pub struct Style {
-    /// Semantic style label for this parsed template. Set by directive effects
-    /// (`StyleDirectiveEffects.style_id`) or built-in directive handlers.
+    /// Semantic style label set by `StyleDirectiveHandlerSpec.style_id` or core directives.
     pub id: &'static str,
 
     /// A callback function for how the string content of the template should be parsed

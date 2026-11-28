@@ -18,15 +18,15 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     render_empty_collection_type_ambiguity, render_incompatible_choice_comparison,
-    render_invalid_mutable_access, render_invalid_route_output, render_multiple_mutable_borrows,
-    render_shared_mutable_conflict, render_type_mismatch, render_unsupported_backend_feature,
-    render_unsupported_external_function, render_unsupported_operator_types,
-    render_use_of_uninitialized_local,
+    render_invalid_const_access, render_invalid_mutable_access, render_invalid_route_output,
+    render_multiple_mutable_borrows, render_shared_mutable_conflict, render_type_mismatch,
+    render_unsupported_backend_feature, render_unsupported_external_function,
+    render_unsupported_operator_types, render_use_of_uninitialized_local,
 };
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, DiagnosticOperator, DiagnosticPlace, DiagnosticSeverity,
-    IncompatibleChoiceComparisonReason, InvalidMutableAccessReason, InvalidRouteOutputReason,
-    TypeMismatchContext, UnsupportedBackendFeatureReason,
+    IncompatibleChoiceComparisonReason, InvalidConstAccessReason, InvalidMutableAccessReason,
+    InvalidRouteOutputReason, TypeMismatchContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -95,6 +95,13 @@ unit_code! {
         ImmutablePlace = 1,
         OverlappingAccess = 2,
         AliasedValueRequiresExclusiveAccess = 3,
+    }
+}
+
+unit_code! {
+    impl InvalidConstAccessReason {
+        InvalidatedReference = 1,
+        ExpiredProjection = 2,
     }
 }
 
@@ -209,6 +216,26 @@ pub(crate) fn use_of_uninitialized_local(
     DiagnosticDraft::with_facts(&USE_OF_UNINITIALIZED_LOCAL, span, |cursor| {
         cursor.push::<PlaceFact>(&place)
     })
+}
+
+diagnostic_family! {
+    INVALID_CONST_ACCESS {
+        internal: 5010,
+        stable: "MOTH-BORROW-0010",
+        category: DiagnosticCategory::Borrow,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid const access",
+        facts: [reason: UnitFact<InvalidConstAccessReason>],
+        labels: [
+            LabelMessageCode::CONST_REFERENCE_ACQUIRED,
+            LabelMessageCode::CONST_INVALIDATING_WRITE,
+        ],
+        extra: None,
+        ctor: generated invalid_const_access,
+        reason_key: reason,
+        view: InvalidConstAccessView,
+        render: render_invalid_const_access,
+    }
 }
 
 pub(crate) fn incompatible_choice_comparison(
@@ -561,6 +588,7 @@ diagnostic_family! {
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     TYPE_MISMATCH,
     USE_OF_UNINITIALIZED_LOCAL,
+    INVALID_CONST_ACCESS,
     EMPTY_COLLECTION_TYPE_AMBIGUITY,
     UNSUPPORTED_OPERATOR_TYPES,
     INCOMPATIBLE_CHOICE_COMPARISON,

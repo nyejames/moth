@@ -26,8 +26,53 @@ runtime_remove || -> Removed:
         removed = removed,
     )
 ;
+-- Removing an aggregate detaches its collection edge, not the shared child allocation.
+Owner = |items {I32}|
+
+const_detached #|| -> I32:
+    child ~= {1}
+    owner ~= Owner(child)
+    entries ~= {Owner(child)}
+    detached ~= ~entries.remove(0) catch then Owner({0})
+    ~detached.items.push(2)
+    return owner.items.length() * 100 + detached.items.length() * 10 + entries.length()
+;
+
+-- The collection has no other path to the child after removal.
+runtime_detached || -> I32:
+    child ~= {1}
+    entries ~= {Owner(child)}
+    detached ~= ~entries.remove(0) catch then Owner({0})
+    ~detached.items.push(2)
+    return detached.items.length() * 10 + entries.length()
+;
+
+const_shrinking #|| -> I32:
+    values ~= {1, 2, 3}
+    visits ~= 0
+    loop values:
+        ~visits += 1
+        removed = ~values.remove(0) catch then 0
+    ;
+    return visits * 10 + values.length()
+;
+
+runtime_shrinking || -> I32:
+    values ~= {1, 2, 3}
+    visits ~= 0
+    loop values:
+        ~visits += 1
+        removed = ~values.remove(0) catch then 0
+    ;
+    return visits * 10 + values.length()
+;
+
 
 a = remove_case()
 b = runtime_remove()
-~[: const_length=[a.length] const_removed=[a.removed] runtime_length=[b.length] runtime_removed=[b.removed]]
+c = const_detached()
+d = runtime_detached()
+e = const_shrinking()
+f = runtime_shrinking()
+~[: const_length=[a.length] const_removed=[a.removed] runtime_length=[b.length] runtime_removed=[b.removed] const_detached=[c] runtime_detached=[d] const_visits=[e] runtime_visits=[f]]
 entry = "."

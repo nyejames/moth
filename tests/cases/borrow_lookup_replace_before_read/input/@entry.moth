@@ -1,0 +1,8 @@
+Bucket = |scores {String = {I32}}|
+
+bucket ~= Bucket({"k" = {1, 2}})
+score ~= bucket.scores.get("k")!
+~bucket.scores.clear()
+~score = {0}
+observed = score.length()
+~[:[observed],[score.length()]]

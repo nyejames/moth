@@ -6,9 +6,7 @@
 
 use super::context::DiagnosticRenderContext;
 use super::named_value_or_default;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
-    CompileTimeEvaluationErrorView, ReleaseBudgetScope, ReleaseFoldingBudgetView,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateSlotView, InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
@@ -19,7 +17,6 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason, StoredTemplateHeadConflict, TemplateHeadConflictOwner,
     TemplateHeadConflictReason, TemplateHeadItemKind,
 };
-use crate::compiler_frontend::datatypes::const_budget::ConstBudgetUnit;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -206,23 +203,21 @@ pub(crate) fn compile_time_evaluation_error_message(
             )
         }
         CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded => match limit {
-            Some(limit) => format!(
-                "Const function execution exhausted `const_work_limit` at {}.",
-                budget_quantity_text(ConstBudgetUnit::Steps, limit)
-            ),
+            Some(limit) => {
+                format!("Const function execution exhausted `const_work_limit` at {limit} steps.")
+            }
             None => "Const function execution exhausted `const_work_limit`.".to_owned(),
         },
         CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded => match limit {
             Some(limit) => format!(
-                "Const function execution exhausted `const_memory_limit_mb` at {}.",
-                budget_quantity_text(ConstBudgetUnit::Mib, limit)
+                "Const function execution exhausted `const_memory_limit_mb` at {} MiB.",
+                limit / (1024 * 1024)
             ),
             None => "Const function execution exhausted `const_memory_limit_mb`.".to_owned(),
         },
         CompileTimeEvaluationErrorReason::ConstHardSafetyLimitExceeded => {
             // The typed `limit` fact carries the fixed bound, but the family has no fact word for
-            // its unit, so a bare count here would not tell the reader what was exhausted. The
-            // release advice family carries the unit as its own fact.
+            // its unit, so a bare count here would not tell the reader what was exhausted.
             "Const function execution reached a fixed compiler safety limit.".to_owned()
         }
         CompileTimeEvaluationErrorReason::ConstAssertionFailed => {
@@ -267,72 +262,6 @@ pub(crate) fn compile_time_evaluation_error_message(
                 "Compile-time evaluation of {operation_text} exceeds its supported output bound."
             )
         }
-    }
-}
-
-/// Spells one budget allowance quantity in its own unit.
-///
-/// WHAT: the one formatter for every allowance number that reaches a user.
-/// WHY: an allowance limit is a raw count in facts, and `MiB` divides while every other unit
-///      counts. Two independent formatters would eventually disagree on rounding or wording.
-fn budget_quantity_text(unit: ConstBudgetUnit, limit: usize) -> String {
-    match unit {
-        ConstBudgetUnit::Steps => format!("{limit} steps"),
-        ConstBudgetUnit::Mib => format!("{} MiB", limit / (1024 * 1024)),
-        ConstBudgetUnit::RetainedValues => format!("{limit} retained values"),
-        ConstBudgetUnit::Pieces => format!("{limit} structural pieces"),
-        ConstBudgetUnit::CallFrames => format!("{limit} call frames"),
-        ConstBudgetUnit::ExpressionLevels => format!("{limit} expression levels"),
-        ConstBudgetUnit::HandlerLevels => format!("{limit} handler levels"),
-        ConstBudgetUnit::ProjectionLevels => format!("{limit} projection levels"),
-    }
-}
-
-/// Renders one release folding budget Note from its typed facts.
-///
-/// WHAT: names the exhausted allowance, its scope and the setting that raises it.
-/// WHY: the runtime call is still emitted, so the reader needs to know that folding stopped, how
-///      much allowance the attempt spent, and which setting or fixed bound owns the refusal.
-pub(crate) fn release_folding_budget_message(
-    unit: ConstBudgetUnit,
-    limit: Option<usize>,
-    setting: Option<&str>,
-    scope: ReleaseBudgetScope,
-) -> String {
-    let scope_text = match scope {
-        ReleaseBudgetScope::Call => "this call",
-        ReleaseBudgetScope::ModuleAggregate => "this module's aggregate allowance",
-    };
-    let quantity_text = limit
-        .map(|limit| format!(" ({})", budget_quantity_text(unit, limit)))
-        .unwrap_or_default();
-    let category = unit.category().label();
-    match setting {
-        Some(setting) => format!(
-            "Release folding stopped: {category} limit for {scope_text}{quantity_text} was exhausted. Raise `{setting}` to allow more compile-time work."
-        ),
-        None => format!(
-            "Release folding stopped: the compiler safety {category} limit for {scope_text}{quantity_text} was reached. Simplify the call to fit the fixed safety allowance."
-        ),
-    }
-}
-
-/// Renders a release folding budget Note from its compact facts.
-pub(crate) fn render_release_folding_budget(
-    _diagnostic: &DiagnosticView<'_>,
-    facts: &ReleaseFoldingBudgetView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    let setting = facts
-        .setting
-        .map(|setting| context.string_table.resolve(setting));
-    RenderedPayload {
-        message: release_folding_budget_message(facts.unit, facts.limit, setting, facts.scope),
-        // The message already names the setting or the fixed bound, so the guidance states the
-        // one action that applies to either refusal.
-        guidance: vec![
-            "Raise the const execution setting named in the note when there is one, or simplify the call so it fits the current allowance.".to_owned(),
-        ],
     }
 }
 

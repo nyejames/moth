@@ -57,17 +57,99 @@ pub(crate) use problem::{
 pub(crate) use problem::{BindingDestination, RebindValue, TerminatorEventKind, UseKind};
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
+#[cfg(test)]
+use crate::compiler_frontend::ast::generic_functions::with_registered_type_projection;
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+/// Validates against the converged contracts, computing local contracts for standalone callers.
 pub(in crate::compiler_frontend) fn check_borrows(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
+    converged: Option<(
+        FxHashMap<FunctionId, PublicCallSummary>,
+        &CanonicalTypeProjectionContext<'_>,
+    )>,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    let checker = BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    );
+    if let Some((summaries, projection)) = converged {
+        checker
+            .with_type_projection(projection)
+            .run(Some(summaries))
+    } else {
+        checker.run(None)
+    }
+}
+
+/// Cold allocation extraction used to check the production refresh against final HIR.
+#[cfg(test)]
+pub(in crate::compiler_frontend) fn summarize_call_allocations(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    with_registered_type_projection(type_environment, external_package_registry, |projection| {
+        summarize_call_allocations_with_projection(
+            module,
+            type_environment,
+            external_package_registry,
+            path_fork,
+            string_table,
+            projection,
+        )
+    })
+}
+
+#[cfg(test)]
+pub(in crate::compiler_frontend) fn summarize_call_allocations_with_projection(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    projection: &CanonicalTypeProjectionContext<'_>,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    let mut checker = BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .with_type_projection(projection);
+    checker.build_public_call_summaries()?;
+    let mut report = BorrowCheckReport::default();
+    report.analysis.public_call_summaries = checker.public_call_summaries;
+    Ok(report)
+}
+
+#[cfg(test)]
+pub(in crate::compiler_frontend) fn check_borrows_with_projection_for_test(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    projection: &CanonicalTypeProjectionContext<'_>,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
     BorrowChecker::new(
         module,
@@ -76,7 +158,103 @@ pub(in crate::compiler_frontend) fn check_borrows(
         path_fork,
         string_table,
     )
-    .run()
+    .with_type_projection(projection)
+    .run(None)
+}
+
+/// Create declaration contracts for failure inference. Extracting from provisional bodies
+/// would produce allocation facts that nobody reads before private failure lane installation.
+pub(in crate::compiler_frontend) fn seed_call_summaries(
+    module: &HirModule,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    let mut report = BorrowCheckReport::default();
+    report.analysis.public_call_summaries = BorrowChecker::seed_public_call_summaries(
+        module,
+        &diagnostics::BorrowDiagnostics::new(module, path_fork, string_table),
+    )?;
+    report.metadata = metadata::BorrowMetadataCache::bootstrap(module);
+    Ok(report)
+}
+
+#[allow(
+    dead_code,
+    reason = "B2b.3b runs the exact queue after applying the installer receipt"
+)]
+pub(in crate::compiler_frontend) fn stabilize_call_metadata(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    projection: &CanonicalTypeProjectionContext<'_>,
+    report: &mut BorrowCheckReport,
+) -> Result<(), BorrowCheckError> {
+    if !report.metadata.has_work() {
+        return Ok(());
+    }
+    let mut checker = BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .with_type_projection(projection);
+    checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
+    let result = report.metadata.solve(&mut checker);
+    report.analysis.public_call_summaries = checker.public_call_summaries;
+    result
+}
+
+pub(in crate::compiler_frontend) fn refresh_call_allocations(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    inputs: (
+        &HirModuleLinkFacts,
+        &FxHashSet<FunctionId>,
+        &CanonicalTypeProjectionContext<'_>,
+    ),
+    report: &mut BorrowCheckReport,
+) -> Result<(), BorrowCheckError> {
+    let mut checker = BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .with_type_projection(inputs.2);
+    checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
+    checker.refresh_return_alias_summaries(inputs.0, inputs.1)?;
+    report.analysis.public_call_summaries = checker.public_call_summaries;
+    Ok(())
+}
+
+/// Widen call mutation effects from already-validated reaches, without replaying transfer.
+pub(in crate::compiler_frontend) fn refresh_call_mutation_effects(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    report: &mut BorrowCheckReport,
+) -> Result<(), BorrowCheckError> {
+    let mut checker = BorrowChecker::without_transfer_indices(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    );
+    checker.public_call_summaries = std::mem::take(&mut report.analysis.public_call_summaries);
+    checker.finalize_public_call_summary_effects_to_fixed_point(report)?;
+    report.analysis.public_call_summaries = checker.public_call_summaries;
+    Ok(())
 }
 
 #[cfg(test)]

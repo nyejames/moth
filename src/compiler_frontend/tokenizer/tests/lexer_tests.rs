@@ -2029,6 +2029,24 @@ fn css_template_body_keeps_selector_brackets_as_literal_text() {
 }
 
 #[test]
+fn balanced_child_mode_does_not_escape_its_template_frame() {
+    let (file_tokens, strings) = tokenize_source("[:[$code \"text\", $fresh:[literal]][:after]]");
+    let tokens = file_tokens.tokens.as_ref();
+    assert_eq!(
+        token_refs(tokens)
+            .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
+            .count(),
+        3
+    );
+    assert!(token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::STRING_SLICE_LITERAL
+            && token
+                .string_id()
+                .is_some_and(|id| strings.resolve(id).contains("after"))
+    }));
+}
+
+#[test]
 fn html_template_body_tokenizes_attribute_brackets_using_normal_rules() {
     let (file_tokens, string_table) =
         tokenize_html_source("[$html:\n<div data-tags=\"[one,two]\">Hello</div>\n]");

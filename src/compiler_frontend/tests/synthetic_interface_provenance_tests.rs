@@ -306,6 +306,7 @@ fn aggregate_value_constructors_union_child_provenance() {
                         .try_intern_portable_path("first", &mut string_table)
                         .expect("test path fits"),
                     slot: 0,
+                    authored_ordinal: None,
                     value: field_a,
                 },
                 ConstructorField {
@@ -313,6 +314,7 @@ fn aggregate_value_constructors_union_child_provenance() {
                         .try_intern_portable_path("second", &mut string_table)
                         .expect("test path fits"),
                     slot: 1,
+                    authored_ordinal: None,
                     value: field_b,
                 },
             ],
@@ -351,6 +353,7 @@ fn aggregate_value_constructors_union_child_provenance() {
                     .try_intern_portable_path("payload", &mut string_table)
                     .expect("test path fits"),
                 slot: 0,
+                authored_ordinal: None,
                 value: payload,
             }],
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),

@@ -2,7 +2,7 @@
 
 use crate::{
     HostBindingIdentity, HostImplementation, HostImportRequirement, HostRequirements,
-    HostSignature, HostType, PreflightError, preflight,
+    HostSignature, HostSlotCategory, HostType, PreflightError, preflight,
 };
 
 fn identity(package_path: &str, symbol: &str) -> HostBindingIdentity {
@@ -105,8 +105,9 @@ fn a_wrong_parameter_count_is_reported() {
 
     assert_eq!(
         error,
-        PreflightError::ParameterCountMismatch {
+        PreflightError::SlotCountMismatch {
             import: identity("@platform", "has_prefix"),
+            category: HostSlotCategory::Parameter,
             required: 2,
             declared: 1,
         }
@@ -128,12 +129,17 @@ fn a_wrong_parameter_type_is_reported() {
 
     assert_eq!(
         error,
-        PreflightError::ParameterTypeMismatch {
+        PreflightError::SlotTypeMismatch {
             import: identity("@platform", "has_prefix"),
+            category: HostSlotCategory::Parameter,
             index: 0,
             required: HostType::I64,
             declared: HostType::I32,
         }
+    );
+    assert_eq!(
+        error.to_string(),
+        "The host import '@platform#has_prefix' parameter at index 0 requires 'I64', but its Rust implementation declares 'I32'."
     );
 }
 
@@ -152,8 +158,9 @@ fn an_optional_payload_difference_is_a_mismatch() {
 
     assert_eq!(
         error,
-        PreflightError::ParameterTypeMismatch {
+        PreflightError::SlotTypeMismatch {
             import: identity("@platform", "lookup"),
+            category: HostSlotCategory::Parameter,
             index: 0,
             required: HostType::optional(HostType::U32),
             declared: HostType::optional(HostType::I32),
@@ -175,8 +182,9 @@ fn an_optional_payload_difference_is_a_mismatch() {
 
     assert_eq!(
         error,
-        PreflightError::ParameterTypeMismatch {
+        PreflightError::SlotTypeMismatch {
             import: identity("@platform", "lookup"),
+            category: HostSlotCategory::Parameter,
             index: 0,
             required: HostType::optional(HostType::optional(HostType::U32)),
             declared: HostType::optional(HostType::optional(HostType::U64)),
@@ -199,8 +207,9 @@ fn byte_and_u8_are_distinct_identities() {
 
     assert_eq!(
         error,
-        PreflightError::ParameterTypeMismatch {
+        PreflightError::SlotTypeMismatch {
             import: identity("@platform", "first_byte"),
+            category: HostSlotCategory::Parameter,
             index: 0,
             required: HostType::Byte,
             declared: HostType::U8,
@@ -217,11 +226,16 @@ fn a_wrong_success_value_count_is_reported() {
 
     assert_eq!(
         error,
-        PreflightError::SuccessValueCountMismatch {
+        PreflightError::SlotCountMismatch {
             import: identity("@platform", "count"),
+            category: HostSlotCategory::SuccessValue,
             required: 1,
             declared: 0,
         }
+    );
+    assert_eq!(
+        error.to_string(),
+        "The host import '@platform#count' requires 1 success value(s), but its Rust implementation declares 0."
     );
 }
 
@@ -237,8 +251,9 @@ fn a_wrong_success_value_type_is_reported() {
 
     assert_eq!(
         error,
-        PreflightError::SuccessValueTypeMismatch {
+        PreflightError::SlotTypeMismatch {
             import: identity("@platform", "count"),
+            category: HostSlotCategory::SuccessValue,
             index: 0,
             required: HostType::U32,
             declared: HostType::I64,
@@ -352,14 +367,16 @@ fn several_differences_in_one_signature_are_all_reported() {
     assert_eq!(
         errors.errors(),
         [
-            PreflightError::ParameterTypeMismatch {
+            PreflightError::SlotTypeMismatch {
                 import: identity("@platform", "read"),
+                category: HostSlotCategory::Parameter,
                 index: 0,
                 required: HostType::String,
                 declared: HostType::I64,
             },
-            PreflightError::SuccessValueTypeMismatch {
+            PreflightError::SlotTypeMismatch {
                 import: identity("@platform", "read"),
+                category: HostSlotCategory::SuccessValue,
                 index: 0,
                 required: HostType::U32,
                 declared: HostType::I64,
@@ -370,6 +387,47 @@ fn several_differences_in_one_signature_are_all_reported() {
                 declared: false,
             },
         ]
+    );
+}
+
+#[test]
+fn count_mismatch_suppresses_only_its_own_list() {
+    let required = requirements([import("read", accepted_signature())]);
+    let declared = HostSignature::new()
+        .parameter(HostType::I64)
+        .returns(HostType::I64);
+    let errors = preflight(&required, &[implementation("read", declared)])
+        .expect_err("the count, success type and error channel differ");
+    assert_eq!(
+        errors.errors(),
+        [
+            PreflightError::SlotCountMismatch {
+                import: identity("@platform", "read"),
+                category: HostSlotCategory::Parameter,
+                required: 2,
+                declared: 1,
+            },
+            PreflightError::SlotTypeMismatch {
+                import: identity("@platform", "read"),
+                category: HostSlotCategory::SuccessValue,
+                index: 0,
+                required: HostType::U32,
+                declared: HostType::I64,
+            },
+            PreflightError::ErrorChannelMismatch {
+                import: identity("@platform", "read"),
+                required: true,
+                declared: false,
+            },
+        ]
+    );
+    assert_eq!(
+        errors.errors()[0].to_string(),
+        "The host import '@platform#read' requires 2 parameter(s), but its Rust implementation declares 1."
+    );
+    assert_eq!(
+        errors.errors()[1].to_string(),
+        "The host import '@platform#read' success value at index 0 requires 'U32', but its Rust implementation declares 'I64'."
     );
 }
 
@@ -397,8 +455,9 @@ fn every_mismatch_is_reported_in_canonical_order() {
     assert_eq!(
         errors.errors(),
         [
-            PreflightError::ParameterTypeMismatch {
+            PreflightError::SlotTypeMismatch {
                 import: identity("@audio", "play"),
+                category: HostSlotCategory::Parameter,
                 index: 0,
                 required: HostType::String,
                 declared: HostType::U64,
@@ -406,8 +465,9 @@ fn every_mismatch_is_reported_in_canonical_order() {
             PreflightError::MissingImplementation {
                 import: identity("@platform", "has_prefix"),
             },
-            PreflightError::SuccessValueTypeMismatch {
+            PreflightError::SlotTypeMismatch {
                 import: identity("@platform", "open"),
+                category: HostSlotCategory::SuccessValue,
                 index: 0,
                 required: HostType::U32,
                 declared: HostType::I64,

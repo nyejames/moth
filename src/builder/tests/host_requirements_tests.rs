@@ -14,7 +14,8 @@ use crate::builder::{
 };
 use moth_host::{
     HostBindingIdentity, HostExportRequirement, HostExportSelection, HostExports, HostFunction,
-    HostImplementation, HostRequirements, HostSignature, HostType, PreflightError, preflight,
+    HostImplementation, HostRequirements, HostSignature, HostSlotCategory, HostType,
+    PreflightError, preflight,
 };
 use std::cell::RefCell;
 use std::fs;
@@ -397,8 +398,9 @@ fn preflight_rejects_a_wrong_parameter_type() {
 
     assert_eq!(
         errors.errors(),
-        [PreflightError::ParameterTypeMismatch {
+        [PreflightError::SlotTypeMismatch {
             import: HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
+            category: HostSlotCategory::Parameter,
             index: 0,
             required: HostType::String,
             declared: HostType::U8,
@@ -427,8 +429,9 @@ fn preflight_rejects_a_wrong_parameter_count() {
 
     assert_eq!(
         errors.errors(),
-        [PreflightError::ParameterCountMismatch {
+        [PreflightError::SlotCountMismatch {
             import: HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
+            category: HostSlotCategory::Parameter,
             required: 2,
             declared: 1,
         }]

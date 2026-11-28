@@ -2834,6 +2834,30 @@ fn folded_wrapper_application(wrapper_source: &str, application_source: &str) ->
 }
 
 #[test]
+fn balanced_formatter_with_supplied_guard_renders_in_either_order() {
+    for wrapper in [
+        "[:[$code \"text\", $supplied title:[$not_a_directive]]]",
+        "[:[$supplied title, $code \"text\":[$not_a_directive]]]",
+    ] {
+        assert_eq!(
+            folded_wrapper_application(wrapper, "[wrapper:[$in title:]]"),
+            "<code class='codeblock'>[$not_a_directive]</code>",
+            "{wrapper}"
+        );
+    }
+    for wrapper in [
+        "[:[$css, $supplied title:.button[data-kind=\"cta\"] { color: red; }]]",
+        "[:[$supplied title, $css:.button[data-kind=\"cta\"] { color: red; }]]",
+    ] {
+        assert_eq!(
+            folded_wrapper_application(wrapper, "[wrapper:[$in title:]]"),
+            ".button[data-kind=\"cta\"] { color: red; }",
+            "{wrapper}"
+        );
+    }
+}
+
+#[test]
 fn supplied_guard_resolves_when_head_referenced_wrapper_is_applied() {
     let rendered = folded_wrapper_application(
         "[:<button[$supplied disabled:[\" disabled\"]]>[$slot]</button>]",

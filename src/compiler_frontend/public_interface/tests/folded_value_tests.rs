@@ -10,9 +10,10 @@
 //! This module reuses shared fixtures from `test_support`.
 
 use super::super::{
-    DirectExportSeed, PublicDeclarationRecord, PublicDeclarationSemantics,
+    DirectExportSeed, ProviderDependencyKind, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicInterfaceDraftBuildFailure, PublicInterfaceDraftBuilder,
-    PublicInterfaceDraftBuilderInput,
+    PublicInterfaceDraftBuilderInput, PublicSemanticInterface, SourceProviderDependency,
+    SourceProviderDependencySet,
 };
 use super::test_support::{
     choice_origin, constant_origin, module_origin, nominal_origins_map, register_struct,
@@ -20,8 +21,8 @@ use super::test_support::{
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValueMetadata, ConstValuePayload, ConstValueStore,
-    ConstValueStoreError,
+    ConstStringPiece, ConstStringValue, ConstValueId, ConstValueMetadata, ConstValuePayload,
+    ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression::{
     ChoiceConstructInput, CollectionExpressionType, ConstRecordState,
@@ -29,6 +30,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ConstructorField, OwnedExpr,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
 };
@@ -54,6 +56,8 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTypeId, PublicExportRoute,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -721,11 +725,13 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
                 ConstructorField {
                     name: title_path,
                     slot: 0,
+                    authored_ordinal: None,
                     value: title_expr,
                 },
                 ConstructorField {
                     name: year_path,
                     slot: 1,
+                    authored_ordinal: None,
                     value: year_expr,
                 },
             ],
@@ -839,6 +845,7 @@ fn constant_record_owns_recursive_const_record_fields() {
             vec![ConstructorField {
                 name: depth_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: depth_expr,
             }],
             inner_type_id,
@@ -853,6 +860,7 @@ fn constant_record_owns_recursive_const_record_fields() {
             vec![ConstructorField {
                 name: inner_field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: inner_instance,
             }],
             outer_type_id,
@@ -1062,6 +1070,201 @@ fn constant_record_owns_collection_of_folded_values() {
     assert_eq!(values[0], PublicFoldedValue::FixedScalar(i32_value(10)));
     assert_eq!(values[1], PublicFoldedValue::FixedScalar(i32_value(20)));
     assert_eq!(values[2], PublicFoldedValue::FixedScalar(i32_value(30)));
+}
+
+fn graph_occurrence_provenance(member: &str) -> SyntheticInterfaceProvenance {
+    SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        member,
+    ))
+}
+
+enum GraphShape {
+    Shared { definition_first: bool },
+    Distinct { mark_children: bool },
+}
+
+fn provider_with_nested_graph(
+    shape: GraphShape,
+    unrelated_rows: usize,
+    span_start: u32,
+) -> PublicSemanticInterface {
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let mut types = TypeEnvironment::new();
+    let mut constants = ConstValueStore::default();
+    let mut spans = ExtendedSpanBuilder::new();
+    let span = Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(span_start, 1, &mut spans).unwrap(),
+    ));
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let inner_type = types.intern_collection(i32_type, None);
+    let outer_type = types.intern_collection(inner_type, None);
+    for _ in 0..unrelated_rows {
+        constants
+            .insert_resolved(i32_type, ConstValuePayload::FixedScalar(i32_value(9)), None)
+            .unwrap();
+    }
+    let element = constants
+        .insert_resolved(i32_type, ConstValuePayload::FixedScalar(i32_value(1)), span)
+        .unwrap();
+    let insert_child = |store: &mut ConstValueStore, member| -> ConstValueId {
+        store
+            .insert_value(
+                ConstValueMetadata {
+                    value_kind: ConstValueKind::Composite,
+                    synthetic_interface_provenance: graph_occurrence_provenance(member),
+                    ..ConstValueMetadata::resolved(inner_type, span, ValueMode::ImmutableOwned)
+                },
+                ConstValuePayload::Collection(vec![element]),
+            )
+            .unwrap()
+    };
+    let items = match shape {
+        GraphShape::Shared { definition_first } => {
+            let (owner, alias) = if definition_first {
+                ("first", "second")
+            } else {
+                ("second", "first")
+            };
+            let definition = insert_child(&mut constants, owner);
+            constants.mark_imported_allocation(definition).unwrap();
+            let alias = constants
+                .insert_imported_allocation_reference(
+                    definition,
+                    inner_type,
+                    span,
+                    graph_occurrence_provenance(alias),
+                )
+                .unwrap();
+            if definition_first {
+                vec![definition, alias]
+            } else {
+                vec![alias, definition]
+            }
+        }
+        GraphShape::Distinct { mark_children } => {
+            let first = insert_child(&mut constants, "first");
+            let second = insert_child(&mut constants, "second");
+            if mark_children {
+                constants.mark_imported_allocation(first).unwrap();
+                constants.mark_imported_allocation(second).unwrap();
+            }
+            vec![first, second]
+        }
+    };
+    let root = constant_root("graph", outer_type, &mut strings, &mut paths);
+    let value = constants
+        .insert_resolved(outer_type, ConstValuePayload::Collection(items), span)
+        .unwrap();
+    constants.bind_module_constant(root.path, value).unwrap();
+    let binding = constant_binding("graph");
+    let declarations = build_constant_records(
+        vec![root],
+        vec![binding.clone()],
+        &constants,
+        &FxHashMap::default(),
+        &types,
+        &strings,
+        &paths,
+    )
+    .unwrap();
+    PublicSemanticInterface {
+        module_origin: module_origin(),
+        export_bindings: vec![binding],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations,
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+#[test]
+fn folded_graph_sharing_participates_in_provider_interface_comparison() {
+    let shared = provider_with_nested_graph(
+        GraphShape::Shared {
+            definition_first: true,
+        },
+        0,
+        1,
+    );
+    let isomorphic = provider_with_nested_graph(
+        GraphShape::Shared {
+            definition_first: false,
+        },
+        8,
+        1,
+    );
+    let span_only = provider_with_nested_graph(
+        GraphShape::Shared {
+            definition_first: true,
+        },
+        0,
+        15,
+    );
+    let distinct = provider_with_nested_graph(
+        GraphShape::Distinct {
+            mark_children: false,
+        },
+        0,
+        1,
+    );
+    let singly_reached = provider_with_nested_graph(
+        GraphShape::Distinct {
+            mark_children: true,
+        },
+        0,
+        1,
+    );
+    let register = |left, right| {
+        let authored = |slot, interface| SourceProviderDependency {
+            kind: ProviderDependencyKind::Authored {
+                shell: DependencyShellId::new(SourceId::COMPILATION_ROOT, slot),
+                route: PublicExportRoute::ROOT,
+            },
+            interface,
+        };
+        SourceProviderDependencySet::new(vec![authored(0, left), authored(1, right)])
+            .map(|set| set.interfaces().count())
+    };
+    assert_eq!(register(&shared, &isomorphic).unwrap(), 1);
+    assert_eq!(register(&shared, &span_only).unwrap(), 1);
+    assert_eq!(register(&distinct, &singly_reached).unwrap(), 1);
+    assert!(
+        register(&shared, &distinct)
+            .unwrap_err()
+            .message
+            .contains("disagrees")
+    );
+    assert_eq!(
+        shared.declarations[0].synthetic_interface_provenance,
+        distinct.declarations[0].synthetic_interface_provenance,
+    );
+
+    let PublicDeclarationSemantics::Constant(constant) = &shared.declarations[0].semantics else {
+        panic!("expected a constant export");
+    };
+    let PublicFoldedValue::Collection(children) = &constant.folded_value else {
+        panic!("expected the outer collection");
+    };
+    let [
+        PublicFoldedValue::AllocationDefinition {
+            index: 0,
+            definition,
+        },
+        PublicFoldedValue::AllocationReference {
+            index: 0,
+            provenance,
+        },
+    ] = children.as_slice()
+    else {
+        panic!("expected one definition and its backreference: {children:?}");
+    };
+    assert_eq!(definition.provenance, graph_occurrence_provenance("first"));
+    assert_eq!(*provenance, graph_occurrence_provenance("second"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,6 +1754,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
             vec![ConstructorField {
                 name: enabled_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: enabled_expr,
             }],
             marker,
@@ -1582,11 +1786,13 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
                 ConstructorField {
                     name: year_path,
                     slot: 0,
+                    authored_ordinal: None,
                     value: year_expr,
                 },
                 ConstructorField {
                     name: flags_path,
                     slot: 1,
+                    authored_ordinal: None,
                     value: nested_record,
                 },
             ],

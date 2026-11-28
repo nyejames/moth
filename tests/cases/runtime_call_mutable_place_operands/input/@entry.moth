@@ -1,0 +1,69 @@
+Leaf = |item I32|
+Holder = |inner Leaf|
+WithCollections = |list {I32}, map {String = I32}|
+
+replace |holder ~Holder| -> I32:
+    ~holder = Holder(Leaf(9))
+    return 0
+;
+
+observe |number I32, item ~I32| -> I32:
+    ~item = 7
+    return item + number
+;
+
+bump |this ~Leaf, amount I32| -> I32:
+    ~this.item = this.item + amount
+    return this.item
+;
+
+fail |holder ~Holder| -> I32, Error!:
+    ~holder = Holder(Leaf(9))
+    return! Error("later argument")
+;
+
+observe_or_fail |item ~I32, number I32, fail_after_write Bool| -> I32, Error!:
+    ~item = 8
+    if fail_after_write:
+        return! Error("outer call")
+    ;
+    return item + number
+;
+
+probe |left ~Holder, right ~Holder, fail_later Bool| -> I32, Error!:
+    if fail_later:
+        return observe_or_fail(~left.inner.item, fail(~right)!, false)!
+    ;
+    return observe_or_fail(~left.inner.item, replace(~right), true)!
+;
+
+slot_write |dest ~I32, source ~I32, unused I32|:
+    ~dest = source
+    ~dest = 6
+;
+
+left ~= Holder(Leaf(2))
+right ~= Holder(Leaf(3))
+alias ~= left
+named = observe(item = ~alias.inner.item, number = replace(~right))
+method = ~alias.inner.bump(replace(~right) + 1)
+
+skip_left ~= Holder(Leaf(2))
+skip_right ~= Holder(Leaf(3))
+skip = probe(~skip_left, ~skip_right, true) catch then 41
+error_left ~= Holder(Leaf(2))
+error_right ~= Holder(Leaf(3))
+committed = probe(~error_left, ~error_right, false) catch then 42
+
+bucket ~= WithCollections({2}, {"k" = 3})
+~bucket.list.set(replace(~right), 5)!
+~bucket.map.set([:k[replace(~right)]], 6)!
+list_value = bucket.list.get(0)!
+map_value = bucket.map.get("k0")!
+
+-- A whole mutable slot must still enter the callee as a slot, not a write-through alias.
+slot ~= 1
+source ~= 2
+slot_write(~slot, ~source, replace(~right))
+
+~[:named=[named] method=[method] left=[left.inner.item] right=[right.inner.item] skip=[skip],[skip_left.inner.item],[skip_right.inner.item] committed=[committed],[error_left.inner.item],[error_right.inner.item] builtins=[list_value],[map_value] slot=[slot],[source]]

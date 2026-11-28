@@ -1,0 +1,11 @@
+$export
+Shell type T = |items T, sibling {I32}|
+
+retain type T |child T| -> Shell of T:
+    return Shell(child, {0})
+;
+
+$export
+forward type T |child T| -> Shell of T:
+    return retain(child)
+;

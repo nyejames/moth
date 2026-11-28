@@ -1,0 +1,113 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091", "MOTH-RULE-0091"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 1
+reason = "invalid_source_constraint.trap_assertion"
+path = "input/@entry.moth"
+line = 12
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 16
+column = 9
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 2
+reason = "invalid_source_constraint.escaping_error"
+path = "input/@entry.moth"
+line = 22
+column = 1
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 3
+reason = "invalid_source_constraint.trap_assertion"
+path = "input/@entry.moth"
+line = 28
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 33
+column = 9
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 4
+reason = "invalid_source_constraint.escaping_error"
+path = "input/@entry.moth"
+line = 39
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 42
+column = 24
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 5
+reason = "invalid_source_constraint.trap_division"
+path = "input/@entry.moth"
+line = 46
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 49
+column = 31
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 6
+reason = "invalid_source_constraint.trap_division"
+path = "input/@entry.moth"
+line = 53
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 55
+column = 23
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 7
+reason = "invalid_source_constraint.trap_assertion"
+path = "input/@entry.moth"
+line = 59
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 64
+column = 9
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 8
+reason = "invalid_source_constraint.trap_assertion"
+path = "input/@entry.moth"
+line = 72
+column = 5
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 74
+column = 9

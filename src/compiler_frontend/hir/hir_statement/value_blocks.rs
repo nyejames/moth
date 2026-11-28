@@ -171,10 +171,11 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         result_type_ids: &[TypeId],
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        // A condition the folded-Bool authority decided before release folding means AST static
-        // selection failed its own contract. A condition that only release folding made constant is
-        // absent from the pre-fold fact and lowers as the runtime branch a debug build keeps.
-        if self.pre_fold_bool_condition(value_if.condition).is_some() {
+        // A folded condition means AST static selection failed its own contract.
+        if self
+            .folded_bool_condition(expressions.view(value_if.condition)?)
+            .is_some()
+        {
             return Err(InfrastructureFailure::hir_transformation(
                 "Stage 4 passed a statically decided value-producing Bool `if` to HIR",
             )

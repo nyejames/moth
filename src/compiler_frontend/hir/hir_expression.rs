@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ValueBlock, ValueCatchBlock,
+    ValueBlock, ValueCatchBlock, optional_cast_catch_target,
 };
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{
@@ -74,6 +74,7 @@ mod runtime;
 mod templates;
 mod types;
 
+use self::calls::{CallReceiver, method_receiver, receiver_access};
 use self::fallible::EmittedFallibleResults;
 pub(crate) use self::fallible::FallibleBranchingContext;
 
@@ -151,7 +152,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_bound_call_results(expr, call, None)?
             }
             ExpressionOperationView::MethodCall { receiver, call } => {
-                self.lower_bound_call_results(expr, call, Some(receiver))?
+                self.lower_bound_call_results(expr, call, Some(method_receiver(receiver, call)?))?
             }
             ExpressionOperationView::CollectionBuiltin {
                 receiver,
@@ -198,7 +199,10 @@ impl<'a> HirBuilder<'a> {
         self.lower_call_results(
             CallTarget::External(facts.operation.external_function_id()),
             arguments,
-            Some(receiver),
+            Some((
+                receiver,
+                receiver_access(facts.operation.requires_mutable_receiver()),
+            )),
             types,
             span,
         )
@@ -279,7 +283,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expression: ExpressionView<'_>,
         call: CallView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let metadata = call.metadata();
         let span = &expression.span();
@@ -967,19 +971,10 @@ impl<'a> HirBuilder<'a> {
         };
         let err_type = self.lower_type_id(error_type_id)?;
 
-        // The direct catch root joins cast target values before applying an optional receiving
-        // wrap. Nested casts keep their receiving type because a parent expression may need it.
-        let cast_with_optional_receiving_wrap = match protected.operation() {
-            ExpressionOperationView::Cast { facts, .. }
-                if facts.requires_optional_wrap_after_cast =>
-            {
-                Some(facts)
-            }
-            _ => None,
-        };
+        let optional_cast_target = optional_cast_catch_target(protected);
         let inner_result_type_ids;
-        let result_type_ids = if let Some(cast) = cast_with_optional_receiving_wrap {
-            inner_result_type_ids = [cast.target_type_id];
+        let result_type_ids = if let Some(target) = optional_cast_target {
+            inner_result_type_ids = [target];
             inner_result_type_ids.as_slice()
         } else {
             result_type_ids
@@ -1000,12 +995,10 @@ impl<'a> HirBuilder<'a> {
             },
             // Every protected shape lowers through the ordinary expression path while the
             // handler is active; producers route their error edges to that handler themselves.
-            |builder| match cast_with_optional_receiving_wrap {
-                Some(cast) => {
-                    let lowered = builder.lower_expression_with_root_cast_result_type(
-                        protected,
-                        Some(cast.target_type_id),
-                    )?;
+            |builder| match optional_cast_target {
+                Some(target) => {
+                    let lowered = builder
+                        .lower_expression_with_root_cast_result_type(protected, Some(target))?;
                     Ok(LoweredResults {
                         prelude: lowered.prelude,
                         values: vec![lowered.value],
@@ -1014,7 +1007,7 @@ impl<'a> HirBuilder<'a> {
                 None => builder.lower_expression_results(protected),
             },
         )?;
-        if cast_with_optional_receiving_wrap.is_some() {
+        if optional_cast_target.is_some() {
             let value = self.wrap_value_to_optional_type(
                 lowered.values[0],
                 protected.value_type_id()?,
@@ -1528,9 +1521,32 @@ impl<'a> HirBuilder<'a> {
             ty,
             source_info,
             HirLocalOriginKind::CompilerTemp,
+            true,
             None,
             None,
         )
+    }
+
+    // Pin a place at its authored operand, with the same access as the call. Retain a user
+    // origin so ordinary alias checks apply; diagnostics name the authored place.
+    pub(crate) fn allocate_operand_capture_local(
+        &mut self,
+        ty: TypeId,
+        source_info: Option<SourceSpan>,
+        display: PathId,
+        mutable: bool,
+    ) -> Result<LocalId, HirConstructionFailure> {
+        let local_id = self.allocate_compiler_local(
+            ty,
+            source_info,
+            HirLocalOriginKind::User,
+            mutable,
+            None,
+            None,
+        )?;
+        self.side_table
+            .bind_operand_capture_display(local_id, display);
+        Ok(local_id)
     }
 
     pub(crate) fn allocate_fresh_mutable_call_arg_local(
@@ -1544,6 +1560,7 @@ impl<'a> HirBuilder<'a> {
             ty,
             source_info,
             HirLocalOriginKind::CompilerFreshMutableArg,
+            true,
             call_span,
             Some(argument_index),
         )
@@ -1554,6 +1571,7 @@ impl<'a> HirBuilder<'a> {
         ty: TypeId,
         source_info: Option<SourceSpan>,
         origin: HirLocalOriginKind,
+        mutable: bool,
         call_span: Option<SourceSpan>,
         argument_index: Option<usize>,
     ) -> Result<LocalId, HirConstructionFailure> {
@@ -1564,7 +1582,7 @@ impl<'a> HirBuilder<'a> {
         let local = HirLocal {
             id: local_id,
             ty,
-            mutable: true,
+            mutable,
             region,
             span: source_info,
         };

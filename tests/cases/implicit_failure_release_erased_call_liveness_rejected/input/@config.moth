@@ -1,3 +1,0 @@
-project #= (
-    name = "implicit_failure_release_erased_call_liveness_rejected")
-html #= ()

@@ -6,8 +6,7 @@
 //!      liveness. Lowering omits statically infallible handlers and dead statements after a
 //!      terminator, so the ordinary HIR scan cannot see the calls and range guards they still
 //!      select. Recording at the skip point keeps the lowering optimisations without losing the
-//!      evidence. Release speculation never folds a catch handler body or a handled subject, so
-//!      this walk sees the same selected source in both profiles.
+//!      evidence.
 //!
 //! The expression walk owns calls, nested value blocks and owned runtime template handoffs; the
 //! statement walk owns `-> !` calls and statement range guards. Each nested value block is visited
@@ -18,9 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionStore, ResolvedCallableTarget,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
-use crate::compiler_frontend::ast::statements::control_flow_exits::{
-    ConditionLookup, range_ordinal_update_is_emitted,
-};
+use crate::compiler_frontend::ast::statements::control_flow_exits::range_ordinal_update_is_emitted;
 use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
@@ -54,10 +51,8 @@ impl<'a> HirBuilder<'a> {
     /// Records evidence from selected statements that the CFG never receives.
     ///
     /// WHAT: walks a skipped handler body or the statements remaining after a terminator.
-    /// WHY: both skip paths omit selected source for the same optimisation reason, so one walker
-    ///      owns their call sites and fast range-guard witnesses. The release producer never folds
-    ///      an authored-dead statement, a catch handler or a handled subject, so both walked bodies
-    ///      still contain the calls and operations the selected-source evidence describes.
+    /// WHY: both skip paths omit selected source for the same reason, so one walker owns their
+    ///      call sites and fast range-guard witnesses.
     pub(in crate::compiler_frontend::hir) fn record_skipped_statement_evidence(
         &mut self,
         store: &ExpressionStore,
@@ -130,14 +125,12 @@ impl<'a> HirBuilder<'a> {
                     // the checks lowering emits. Lowering drops the step block, and with it the
                     // generated ordinal update, when the body can neither fall through nor
                     // `continue`; a skipped copy must not record a trap a live copy never runs.
-                    // Conditions use the pre-fold selection table so a release-only fold cannot
-                    // turn an authored fallthrough into a terminator here while debug keeps it.
                     if range.fast_math {
                         let ordinal_update_is_emitted = range_ordinal_update_is_emitted(
                             bindings,
                             body,
                             store,
-                            ConditionLookup::PreFold(&self.pre_fold_bool_conditions),
+                            Some(&self.module_const_values),
                         );
                         if range.has_generated_range_check(ordinal_update_is_emitted) {
                             let function = self.current_function_id_or_error()?;

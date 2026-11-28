@@ -40,6 +40,13 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHY: a second recursive value converter would make defaults and constants diverge between
 /// provider dependencies and generated sidecars.
 pub(crate) trait FoldedValueMaterialiser {
+    const IMPORT_STAGE: CompilerStage = CompilerStage::AstConstruction;
+
+    fn field_path_exhausted(_span: Option<SourceSpan>) -> ConstValueStoreError {
+        InfrastructureFailure::internal(Self::IMPORT_STAGE, "Imported field path table exhausted")
+            .into()
+    }
+
     fn intern_resource_origin(
         &mut self,
         origin: &StableResourceOriginId,
@@ -332,6 +339,26 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
 ) -> Result<ConstValueId, Box<InfrastructureErrors>> {
+    materialize_folded_value(
+        materialiser,
+        folded,
+        expected_type_id,
+        const_values,
+        string_table,
+        span,
+    )
+    .map_err(const_store_error_into_infrastructure_failure)
+}
+
+/// Shared decoder for direct dependency imports and generated defaults/private constants.
+pub(in crate::compiler_frontend::ast) fn materialize_folded_value<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
+    folded: &PublicFoldedValue,
+    expected_type_id: TypeId,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    span: Option<SourceSpan>,
+) -> Result<ConstValueId, ConstValueStoreError> {
     import_folded_value(
         materialiser,
         folded,
@@ -341,7 +368,6 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
         span,
         ImportedRootMetadata::default(),
     )
-    .map_err(const_store_error_into_infrastructure_failure)
 }
 
 /// Declaration-level facts applied only to the outermost node of one imported projection.
@@ -381,6 +407,34 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
     span: Option<SourceSpan>,
     root: ImportedRootMetadata,
 ) -> Result<ConstValueId, ConstValueStoreError> {
+    import_folded_occurrence(
+        materialiser,
+        folded,
+        expected_type_id,
+        const_values,
+        string_table,
+        span,
+        root,
+        &mut Vec::new(),
+    )
+}
+
+/// `None` reserves the first authored index before decoding its payload. Only completed slots may
+/// be referenced, ruling out forward, self and ancestor references as well as cross-root reuse.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "folded import context and root-only metadata"
+)]
+fn import_folded_occurrence<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
+    folded: &PublicFoldedValue,
+    expected_type_id: TypeId,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    span: Option<SourceSpan>,
+    mut root: ImportedRootMetadata,
+    allocations: &mut Vec<Option<ConstValueId>>,
+) -> Result<ConstValueId, ConstValueStoreError> {
     let node = |value_kind: ConstValueKind| ConstValueMetadata {
         type_id: expected_type_id,
         value_mode: ValueMode::ImmutableReference,
@@ -392,13 +446,82 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
     };
 
     match folded {
+        PublicFoldedValue::AllocationDefinition { index, definition } => {
+            if *index != allocations.len() {
+                return Err(InfrastructureFailure::internal(
+                    M::IMPORT_STAGE,
+                    "Imported allocation definitions must have consecutive authored indices",
+                )
+                .into());
+            }
+            let definition_type =
+                materialiser.intern_canonical_type(&definition.type_identity, string_table)?;
+            if definition_type != expected_type_id {
+                return Err(InfrastructureFailure::internal(
+                    M::IMPORT_STAGE,
+                    "Imported allocation definition disagrees with its expected canonical type",
+                )
+                .into());
+            }
+            allocations.push(None);
+            root.synthetic_interface_provenance
+                .merge(&definition.provenance);
+            let id = import_folded_occurrence(
+                materialiser,
+                &definition.value,
+                expected_type_id,
+                const_values,
+                string_table,
+                span,
+                root,
+                allocations,
+            )?;
+            const_values.mark_imported_allocation(id)?;
+            allocations[*index] = Some(id);
+            Ok(id)
+        }
+        PublicFoldedValue::AllocationReference { index, provenance } => {
+            let id = allocations.get(*index).copied().flatten().ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    M::IMPORT_STAGE,
+                    "Imported allocation reference does not name a completed definition in this root",
+                )
+            })?;
+            root.synthetic_interface_provenance.merge(provenance);
+            const_values.insert_imported_allocation_reference(
+                id,
+                expected_type_id,
+                span,
+                root.synthetic_interface_provenance,
+            )
+        }
+        PublicFoldedValue::AllocationCoercion {
+            inner_type,
+            value,
+            provenance,
+        } => {
+            let inner_type = materialiser.intern_canonical_type(inner_type, string_table)?;
+            let mut metadata = node(ConstValueKind::Composite);
+            metadata.synthetic_interface_provenance.merge(provenance);
+            let inner = import_folded_occurrence(
+                materialiser,
+                value,
+                inner_type,
+                const_values,
+                string_table,
+                span,
+                ImportedRootMetadata::default(),
+                allocations,
+            )?;
+            const_values.insert_value(metadata, ConstValuePayload::Coerced(inner))
+        }
         PublicFoldedValue::Number(value) => {
             if materialiser
                 .type_environment()
                 .number_scale(expected_type_id)
                 != Some(value.scale())
             {
-                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
+                return Err(InfrastructureFailure::internal(M::IMPORT_STAGE, format!(
                     "Imported folded Dec value at scale {} disagrees with its consumer-local canonical type",
                     value.scale()
                 ))
@@ -459,13 +582,13 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 .map(|shape| shape.element_type)
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
+                        M::IMPORT_STAGE,
                         "Imported folded collection value has a non-collection canonical type",
                     )
                 })?;
             let mut items = Vec::with_capacity(values.len());
             for value in values {
-                items.push(import_folded_value(
+                items.push(import_folded_occurrence(
                     materialiser,
                     value,
                     element_type_id,
@@ -473,6 +596,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                     string_table,
                     span,
                     ImportedRootMetadata::default(),
+                    allocations,
                 )?);
             }
             const_values.insert_value(
@@ -496,13 +620,8 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                     let field_path = materialiser
                         .path_fork()
                         .try_intern_child(PathId::ROOT, string_table.intern(&field.name))
-                        .ok_or_else(|| {
-                            InfrastructureFailure::internal(
-                                CompilerStage::AstConstruction,
-                                "Imported field path table exhausted",
-                            )
-                        })?;
-                    let value = import_folded_value(
+                        .ok_or_else(|| M::field_path_exhausted(span))?;
+                    let value = import_folded_occurrence(
                         materialiser,
                         &field.value,
                         field_type_id,
@@ -510,6 +629,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                         string_table,
                         span,
                         ImportedRootMetadata::default(),
+                        allocations,
                     )?;
                     projected.push(ConstValueField {
                         name: field_path,
@@ -525,7 +645,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                     .fields_for(expected_type_id)
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
+                            M::IMPORT_STAGE,
                             "Imported folded record value has a canonical type without fields",
                         )
                     })?
@@ -537,6 +657,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                     const_values,
                     string_table,
                     span,
+                    allocations,
                 )?;
                 let mut metadata = node(ConstValueKind::Composite);
                 if root.const_record {
@@ -553,7 +674,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
             let choice_type_id = materialiser.intern_canonical_type(type_identity, string_table)?;
             if choice_type_id != expected_type_id {
                 return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
+                    M::IMPORT_STAGE,
                     "Imported folded choice value disagrees with its declared canonical type",
                 )
                 .into());
@@ -563,7 +684,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 .variants_for(choice_type_id)
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
+                        M::IMPORT_STAGE,
                         "Imported folded choice value has a non-choice canonical type",
                     )
                 })?
@@ -572,7 +693,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 .cloned()
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
+                        M::IMPORT_STAGE,
                         format!(
                             "Imported folded choice value names unknown variant '{variant_name}'"
                         ),
@@ -587,7 +708,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 .nominal_path(choice_type_id)
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
+                        M::IMPORT_STAGE,
                         "Imported folded choice type has no consumer-local nominal path",
                     )
                 })?
@@ -599,6 +720,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 const_values,
                 string_table,
                 span,
+                allocations,
             )?;
             const_values.insert_value(
                 node(ConstValueKind::Composite),
@@ -612,9 +734,9 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
         PublicFoldedValue::Range { start, end } => {
             // A range has no shared endpoint identity: preserve each folded scalar's exact type
             // instead of applying the unconstrained literal default.
-            let start_type_id = folded_range_endpoint_type(start)?;
-            let end_type_id = folded_range_endpoint_type(end)?;
-            let start_id = import_folded_value(
+            let start_type_id = folded_range_endpoint_type::<M>(start)?;
+            let end_type_id = folded_range_endpoint_type::<M>(end)?;
+            let start_id = import_folded_occurrence(
                 materialiser,
                 start,
                 start_type_id,
@@ -622,8 +744,9 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 string_table,
                 span,
                 ImportedRootMetadata::default(),
+                allocations,
             )?;
-            let end_id = import_folded_value(
+            let end_id = import_folded_occurrence(
                 materialiser,
                 end,
                 end_type_id,
@@ -631,6 +754,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 string_table,
                 span,
                 ImportedRootMetadata::default(),
+                allocations,
             )?;
             const_values.insert_value(
                 node(ConstValueKind::Composite),
@@ -646,11 +770,11 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 .option_inner_type(expected_type_id)
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
+                        M::IMPORT_STAGE,
                         "Imported folded option value has a non-option canonical type",
                     )
                 })?;
-            let inner = import_folded_value(
+            let inner = import_folded_occurrence(
                 materialiser,
                 value,
                 inner_type_id,
@@ -658,6 +782,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 string_table,
                 span,
                 ImportedRootMetadata::default(),
+                allocations,
             )?;
             const_values.insert_value(
                 node(ConstValueKind::Composite),
@@ -665,18 +790,29 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
             )
         }
         PublicFoldedValue::OptionNone => {
+            if !materialiser
+                .type_environment()
+                .option_inner_type(expected_type_id)
+                .is_some_and(|inner| materialiser.type_environment().get(inner).is_some())
+            {
+                return Err(InfrastructureFailure::internal(
+                    M::IMPORT_STAGE,
+                    "Imported folded option value has an invalid canonical type",
+                )
+                .into());
+            }
             const_values.insert_value(node(ConstValueKind::Literal), ConstValuePayload::OptionNone)
         }
     }
 }
 
-fn folded_range_endpoint_type(
+fn folded_range_endpoint_type<M: FoldedValueMaterialiser>(
     endpoint: &PublicFoldedValue,
 ) -> Result<TypeId, ConstValueStoreError> {
     match endpoint {
         PublicFoldedValue::FixedScalar(value) => Ok(builtin_type_ids::fixed_scalar(value.scalar())),
         _ => Err(InfrastructureFailure::internal(
-            CompilerStage::AstConstruction,
+            M::IMPORT_STAGE,
             "Imported folded range endpoints must be fixed scalar values",
         )
         .into()),
@@ -690,9 +826,10 @@ fn import_named_fields<M: FoldedValueMaterialiser>(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
+    allocations: &mut Vec<Option<ConstValueId>>,
 ) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
     if fields.len() != definitions.len() {
-        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
+        return Err(InfrastructureFailure::internal(M::IMPORT_STAGE,
             "Imported folded aggregate value has a field count inconsistent with its canonical type",
         )
         .into());
@@ -705,19 +842,16 @@ fn import_named_fields<M: FoldedValueMaterialiser>(
             .component(definition.name)
             .map(|name| string_table.resolve(name))
             .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "Imported field path has no name",
-                )
+                InfrastructureFailure::internal(M::IMPORT_STAGE, "Imported field path has no name")
             })?;
         if definition_name != field.name {
-            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
+            return Err(InfrastructureFailure::internal(M::IMPORT_STAGE, format!(
                 "Imported folded aggregate field '{}' does not match canonical field '{definition_name}'",
                 field.name
             ))
             .into());
         }
-        let value = import_folded_value(
+        let value = import_folded_occurrence(
             materialiser,
             &field.value,
             definition.type_id,
@@ -725,6 +859,7 @@ fn import_named_fields<M: FoldedValueMaterialiser>(
             string_table,
             span,
             ImportedRootMetadata::default(),
+            allocations,
         )?;
         projected.push(ConstValueField {
             name: definition.name,

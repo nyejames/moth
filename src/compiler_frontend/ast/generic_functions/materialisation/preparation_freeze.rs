@@ -8,17 +8,16 @@ use super::semantic_closure::{
 };
 use super::sidecar_build::bootstrap_call_summary_from_signature;
 use super::stable_types::{
-    ConstFunctionArtefact, GenericTemplateArtefact, MaterialisationNominalOriginResolver,
-    MaterialisationNominalSource, StableCallableBinding, StableFunctionParameter,
-    StableFunctionReturnContract, StableFunctionSignature, StableFunctionTarget,
-    StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
-    StableParameterContract, StableReceiverKey, StableReturns,
+    ConstFunctionArtefact, GenericTemplateArtefact, MaterialisationNominalSource,
+    StableCallableBinding, StableFunctionParameter, StableFunctionReturnContract,
+    StableFunctionSignature, StableFunctionTarget, StableGenericCallableContract,
+    StableGenericParameter, StableNominalBinding, StableParameterContract, StableReceiverKey,
+    StableReturns,
 };
 use super::visibility::{
     StableExternalSymbol, StableFileVisibility, StableNamespaceBinding, StableReceiverMethod,
     StableVisibleDeclaration,
 };
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -128,7 +127,6 @@ pub(crate) struct ModuleMaterialisationCapture {
     pub(crate) trait_evidence_environment: TraitEvidenceEnvironment,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
 }
 
@@ -152,7 +150,6 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) trait_evidence_environment: TraitEvidenceEnvironment,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// Requester module's aggregate const-work meter.
     ///
@@ -737,7 +734,6 @@ impl ModuleMaterialisationCapture {
                 trait_evidence_environment: self.trait_evidence_environment,
                 external_package_registry: self.external_package_registry,
                 style_directives: self.style_directives,
-                build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
                 const_execution_meter: const_values.execution_meter(),
                 nominal_blueprints: self.nominal_blueprints,
@@ -1259,12 +1255,9 @@ impl ModuleMaterialisationCapture {
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<PublicFoldedValue, InfrastructureFailure> {
-        let nominal_origins = MaterialisationNominalOriginResolver {
-            type_environment: &self.type_environment,
-        };
         let generic_parameter_origins = FoldedValueGenericParameterResolver;
         let projection_context = CanonicalTypeProjectionContext::new(
-            &nominal_origins,
+            &self.type_environment,
             &generic_parameter_origins,
             &self.external_package_registry,
         );
@@ -1361,12 +1354,9 @@ impl ModuleMaterialisationCapture {
                 "Retained module constant has no store metadata",
             )
         })?;
-        let nominal_origins = MaterialisationNominalOriginResolver {
-            type_environment: &self.type_environment,
-        };
         let generic_parameter_origins = FoldedValueGenericParameterResolver;
         let projection_context = CanonicalTypeProjectionContext::new(
-            &nominal_origins,
+            &self.type_environment,
             &generic_parameter_origins,
             &self.external_package_registry,
         );
@@ -2320,7 +2310,6 @@ impl ModuleMaterialisationCapture {
             trait_evidence_environment: (*lookups.trait_evidence_environment).clone(),
             external_package_registry: Arc::clone(&lookups.external_package_registry),
             style_directives: lookups.style_directives.clone(),
-            build_profile: lookups.build_profile,
             template_const_loop_iteration_limit,
         }
     }

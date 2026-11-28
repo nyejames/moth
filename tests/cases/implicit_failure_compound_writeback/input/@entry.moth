@@ -21,13 +21,13 @@ safe_adjust |extra U8| -> U8, Error!:
 kept U8 = 100
 code ~U32 = 0
 recovered = safe_bump(kept) catch |overflow_error|:
-    ~code = overflow_error.code
+    ~code = copy overflow_error.code
     then kept
 ;
 exact = safe_bump(20) catch then 0
 rhs_code ~U32 = 0
 adjusted = safe_adjust(10) catch |writeback_error|:
-    ~rhs_code = writeback_error.code
+    ~rhs_code = copy writeback_error.code
     then 250
 ;
 

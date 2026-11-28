@@ -2,7 +2,7 @@
 
 ## Design contract
 
-Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional affine-transfer safety, and publishes solver-independent facts beside HIR.
+Borrow validation runs after HIR generation for runtime executable bodies. It reads coherent, validated HIR, enforces source-language access safety and optional affine-transfer safety, and publishes solver-independent facts beside HIR. Required const functions have no HIR and use the dynamic generational access contract in @../access-and-aliasing (Access and aliasing). They do not produce borrow-solver facts.
 
 It doesn't rewrite HIR, choose the final memory strategy, perform backend lowering or decide lifetime topology. Borrow validation supplies facts. Lifetime analysis and memory planning own the later decisions. Lifetime owners, retained edges, escapes and cycles belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
 

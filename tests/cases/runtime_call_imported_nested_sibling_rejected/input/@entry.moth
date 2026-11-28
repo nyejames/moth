@@ -1,0 +1,9 @@
+@helper Box, pair
+
+probe || -> I32:
+    first ~Box, second Box = pair()
+    ~first.inner.items.push(2)
+    return second.inner.items.length()
+;
+
+~[:[probe()]]

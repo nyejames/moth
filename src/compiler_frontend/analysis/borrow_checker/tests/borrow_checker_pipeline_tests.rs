@@ -136,9 +136,17 @@ fn frontend_check_borrows_propagates_failures() {
     let generated_owner =
         FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("generated"));
     let mut warnings = crate::compiler_frontend::compiler_messages::DiagnosticBag::new();
+    let result = crate::compiler_frontend::analysis::borrow_checker::check_borrows(
+        &hir,
+        &type_environment,
+        frontend.external_package_registry,
+        &frontend.path_fork,
+        &frontend.string_table,
+        None,
+    );
     let failure = frontend
-        .check_borrows_premerge(
-            &hir,
+        .prepare_borrow_check_result(
+            result,
             &type_environment,
             &mut warnings,
             Some(&generated_owner),

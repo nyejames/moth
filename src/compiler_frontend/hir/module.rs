@@ -165,6 +165,33 @@ pub struct HirModule {
     pub(crate) catch_handlers: Vec<CatchHandlerRecord>,
 }
 
+/// Maps pre-compaction block IDs to the retained dense layout.
+#[derive(Debug, Default)]
+pub(crate) struct BlockIdRemap {
+    // A dense layout needs no map, but its count still excludes any pruned suffix.
+    retained_count: usize,
+    before_to_after: FxHashMap<BlockId, BlockId>,
+}
+
+impl BlockIdRemap {
+    #[allow(
+        dead_code,
+        reason = "B2b.3b uses the remap to invalidate moved sparse coordinates"
+    )]
+    pub(crate) fn get(&self, before: BlockId) -> Option<BlockId> {
+        if self.before_to_after.is_empty() {
+            ((before.0 as usize) < self.retained_count).then_some(before)
+        } else {
+            self.before_to_after.get(&before).copied()
+        }
+    }
+
+    /// Whether any retained block changed ID. Pruning a suffix need not renumber blocks.
+    pub(crate) fn renumbered(&self) -> bool {
+        !self.before_to_after.is_empty()
+    }
+}
+
 impl HirModule {
     pub fn new() -> Self {
         Self {
@@ -247,18 +274,22 @@ impl HirModule {
         Ok(changed)
     }
 
-    /// Renumber blocks so `blocks[index].id == BlockId(index)`.
+    /// Renumber blocks so `blocks[index].id == BlockId(index)` and return the retained mapping.
     ///
     /// HIR construction removes unused scaffolding blocks after other blocks already exist,
     /// which leaves gaps. The builder calls this once construction is done, before validation.
-    pub(crate) fn compact_block_ids(&mut self) {
+    pub(crate) fn compact_block_ids(&mut self) -> BlockIdRemap {
+        let retained_count = self.blocks.len();
         if self
             .blocks
             .iter()
             .enumerate()
             .all(|(index, block)| block.id == BlockId(index as u32))
         {
-            return;
+            return BlockIdRemap {
+                retained_count,
+                before_to_after: FxHashMap::default(),
+            };
         }
 
         let remap = self
@@ -303,6 +334,10 @@ impl HirModule {
             })
             .collect();
         self.side_table.remap_block_ids(&remap);
+        BlockIdRemap {
+            retained_count,
+            before_to_after: remap,
+        }
     }
 
     /// Resolve one block through the dense post-construction block-id layout.

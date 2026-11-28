@@ -102,6 +102,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
             vec![ConstructorField {
                 name: field_path,
                 slot: 0,
+                authored_ordinal: None,
                 value: field_value,
             }],
             card_type_id,

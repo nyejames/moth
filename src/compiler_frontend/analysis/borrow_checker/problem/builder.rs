@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirProjection;
@@ -50,9 +51,15 @@ pub(crate) fn from_hir(
     function: &HirFunction,
     local_summaries: Option<&FxHashMap<FunctionId, PublicCallSummary>>,
     external_registry: Option<&ExternalPackageRegistry>,
+    type_environment: Option<&TypeEnvironment>,
 ) -> Result<BorrowProblem, InfrastructureFailure> {
-    let builder =
-        FunctionProblemBuilder::new(module, function, local_summaries, external_registry)?;
+    let builder = FunctionProblemBuilder::new(
+        module,
+        function,
+        local_summaries,
+        external_registry,
+        type_environment,
+    )?;
     builder.build()
 }
 
@@ -73,6 +80,7 @@ struct CallEffectSpec<'a> {
     argument_sources: Vec<EventSource>,
     accesses: Vec<AccessKind>,
     provenance: CallResultProvenance,
+    opaque_stores: bool,
     results: &'a [HirLocalDestination],
     killed_bindings: Box<[BindingId]>,
     source: &'a EventSource,
@@ -83,6 +91,7 @@ struct FunctionProblemBuilder<'a> {
     function: &'a HirFunction,
     local_summaries: Option<&'a FxHashMap<FunctionId, PublicCallSummary>>,
     external_registry: Option<&'a ExternalPackageRegistry>,
+    type_environment: Option<&'a TypeEnvironment>,
     block_by_id: BTreeMap<u32, &'a HirBlock>,
     reachable_blocks: Vec<HirBlockId>,
     problem_block_by_hir: BTreeMap<u32, BlockId>,
@@ -171,6 +180,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         function: &'a HirFunction,
         local_summaries: Option<&'a FxHashMap<FunctionId, PublicCallSummary>>,
         external_registry: Option<&'a ExternalPackageRegistry>,
+        type_environment: Option<&'a TypeEnvironment>,
     ) -> Result<Self, InfrastructureFailure> {
         let mut block_by_id = BTreeMap::new();
         for block in &module.blocks {
@@ -204,6 +214,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             function,
             local_summaries,
             external_registry,
+            type_environment,
             block_by_id,
             reachable_blocks,
             problem_block_by_hir: BTreeMap::new(),
@@ -1310,7 +1321,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             .iter()
             .map(|argument| self.value_source(*argument, source))
             .collect();
-        let (accesses, provenance) = self.call_effect(target, args.len())?;
+        let (accesses, provenance, opaque_stores) =
+            self.call_effect(target, args, results, true)?;
         self.emit_call_effect_with_label(
             CallEffectSpec {
                 label: format!("{target:?}"),
@@ -1318,6 +1330,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 argument_sources,
                 accesses,
                 provenance,
+                opaque_stores,
                 results,
                 killed_bindings: Box::new([]),
                 source,
@@ -1352,6 +1365,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 argument_sources,
                 accesses,
                 provenance,
+                opaque_stores: op.requires_mutable_receiver(),
                 results: result.as_slice(),
                 killed_bindings: Box::new([]),
                 source,
@@ -1403,6 +1417,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             argument_sources,
             accesses,
             provenance,
+            opaque_stores,
             results: result_locals,
             killed_bindings,
             source,
@@ -1427,7 +1442,11 @@ impl<'a> FunctionProblemBuilder<'a> {
             *argument = captured;
         }
         let call_id = self.next_call_id()?;
-        self.calls.push(Call { id: call_id, label });
+        self.calls.push(Call {
+            id: call_id,
+            label,
+            opaque_stores,
+        });
         let mut call_arguments = Vec::with_capacity(arguments.len());
         for (index, ((place, access), argument_source)) in arguments
             .into_iter()
@@ -1774,13 +1793,8 @@ impl<'a> FunctionProblemBuilder<'a> {
                     .iter()
                     .map(|value| self.value_source(*value, &source))
                     .collect();
-                let (accesses, provenance) = self.call_effect(target, args.len())?;
-                // Error provenance is not described by the success summary.
-                let provenance = if succeeded {
-                    provenance
-                } else {
-                    CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
-                };
+                let (accesses, provenance, opaque_stores) =
+                    self.call_effect(target, &args, &destinations, succeeded)?;
                 self.emit_call_effect_with_label(
                     CallEffectSpec {
                         label: format!("{target:?}"),
@@ -1788,6 +1802,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                         argument_sources,
                         accesses,
                         provenance,
+                        opaque_stores,
                         results: &destinations,
                         killed_bindings,
                         source: &source,
@@ -1818,6 +1833,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                         argument_sources,
                         accesses,
                         provenance,
+                        opaque_stores: succeeded && op.requires_mutable_receiver(),
                         results: &destinations,
                         killed_bindings,
                         source: &source,
@@ -2281,21 +2297,13 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn local_parameter_accesses(
         &self,
-        function_id: FunctionId,
+        function: &HirFunction,
         argument_count: usize,
-    ) -> Result<Option<Vec<AccessKind>>, InfrastructureFailure> {
-        let Some(function) = self
-            .module
-            .functions
-            .iter()
-            .find(|function| function.id == function_id)
-        else {
-            return Ok(None);
-        };
+    ) -> Result<Vec<AccessKind>, InfrastructureFailure> {
         if function.params.len() != argument_count {
             return Err(internal_failure(format!(
                 "Boracle local call {:?} has {} arguments but its HIR function has {} parameters",
-                function_id,
+                function.id,
                 argument_count,
                 function.params.len()
             )));
@@ -2312,7 +2320,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .ok_or_else(|| {
                     internal_failure(format!(
                         "Boracle local call {:?} cannot resolve parameter local {:?}",
-                        function_id, parameter
+                        function.id, parameter
                     ))
                 })?;
             accesses.push(if local.mutable {
@@ -2321,7 +2329,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 AccessKind::Shared
             });
         }
-        Ok(Some(accesses))
+        Ok(accesses)
     }
 
     fn new_fresh_origin(&mut self) -> ValueOriginId {

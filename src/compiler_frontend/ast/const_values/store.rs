@@ -267,7 +267,8 @@ pub(crate) enum ConstValuePayload {
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValue {
     pub(crate) metadata: ConstValueMetadata,
-    pub(crate) payload: ConstValuePayload,
+    payload: Option<ConstValuePayload>,
+    shared_allocation: Option<ConstValueId>,
 }
 
 /// Borrowed postorder shape passed to public and HIR consumers.
@@ -301,6 +302,22 @@ pub(crate) enum ConstValueVisit<'a, T> {
     },
 }
 
+/// One authored occurrence in a graph fold. Indices are local to this fold.
+pub(crate) enum ConstValueGraphVisit<'a, T> {
+    Value {
+        visit: ConstValueVisit<'a, T>,
+        definition: Option<usize>,
+        coerced_inner_type: Option<TypeId>,
+    },
+    Reference(usize),
+}
+
+enum AllocationFoldState {
+    Once,
+    Repeated,
+    Assigned(usize),
+}
+
 /// One module-constant row, borrowed together with the metadata it is guaranteed to have.
 pub(crate) struct ConstValueRowView<'a> {
     pub(crate) path: &'a PathId,
@@ -320,8 +337,7 @@ pub(crate) struct ConstValueFieldVisit<'a, T> {
 
 /// Compiler-owned aggregate work and allocation meter for const execution.
 ///
-/// WHAT: one module-scoped accounting object shared by every required and speculative const
-///       evaluation attempt.
+/// WHAT: one module-scoped accounting object shared by required const execution attempts.
 /// WHY: per-attempt limits alone let a module with many call sites multiply the allowed work.
 ///      The store owns this meter so all evaluation entry points share one aggregate safeguard.
 #[derive(Clone, Debug, Default)]
@@ -350,35 +366,26 @@ impl ConstExecutionMeter {
         if steps > self.limits.max_attempt_steps {
             return Err(Self::work_limit_exhaustion(
                 self.limits.max_attempt_steps,
-                false,
                 span,
             ));
         }
         if self.steps > self.limits.max_total_steps {
             return Err(Self::work_limit_exhaustion(
                 self.limits.max_total_steps,
-                true,
                 span,
             ));
         }
         Ok(())
     }
 
-    fn work_limit_exhaustion(
-        limit: usize,
-        aggregate: bool,
-        span: Option<SourceSpan>,
-    ) -> ConstBudgetExhaustion {
+    fn work_limit_exhaustion(limit: usize, span: Option<SourceSpan>) -> ConstBudgetExhaustion {
         ConstBudgetExhaustion {
             category: ConstBudgetCategory::Work,
             unit: ConstBudgetUnit::Steps,
             limit: limit as u64,
             setting: Some("const_work_limit"),
-            aggregate,
             span,
             span_owner: None,
-            call_span: None,
-            call_span_owner: None,
             call_chain: Vec::new(),
         }
     }
@@ -415,8 +422,34 @@ impl ConstValueCandidate<'_> {
         self.value(id).map(|value| &value.metadata)
     }
 
+    pub(crate) fn allocation_definition(&self, id: ConstValueId) -> Option<ConstValueId> {
+        self.value(id)
+            .map(|value| value.shared_allocation.unwrap_or(id))
+    }
+
+    /// Precharge suffix backing before appending a budgeted row. The producer accounts for
+    /// the logical destination row and owned payload separately.
+    pub(crate) fn reserve_staged_row<E>(
+        &mut self,
+        budget: &mut impl StagedValueBudget<E>,
+    ) -> Result<(), E> {
+        let capacity = self.values.capacity();
+        if self.values.len() == capacity {
+            let target = staged_row_capacity(capacity, capacity + 1);
+            let row_bytes = std::mem::size_of::<ConstValue>();
+            budget.charge_scratch(target.saturating_mul(row_bytes))?;
+            self.values.reserve_exact(target - self.values.len());
+            budget.release_scratch(capacity * row_bytes);
+        }
+        Ok(())
+    }
+
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
-        self.value(id).map(|value| &value.payload)
+        let value = self.value(id)?;
+        value
+            .payload
+            .as_ref()
+            .or_else(|| self.value(value.shared_allocation?)?.payload.as_ref())
     }
 
     pub(crate) fn insert_value(
@@ -428,7 +461,54 @@ impl ConstValueCandidate<'_> {
         let index =
             checked_const_value_index(self.prefix.values.len(), self.values.len(), metadata.span)?;
         let id = ConstValueId(index);
-        self.values.push(ConstValue { metadata, payload });
+        self.values.push(ConstValue {
+            metadata,
+            payload: Some(payload),
+            shared_allocation: None,
+        });
+        Ok(id)
+    }
+
+    /// Mark a staged row as the unique definition of a live allocation.
+    pub(crate) fn mark_shared_allocation(
+        &mut self,
+        id: ConstValueId,
+    ) -> Result<(), ConstValueStoreError> {
+        let index = id
+            .index()
+            .checked_sub(self.prefix.values.len())
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is not staged."))?;
+        let value = self
+            .values
+            .get_mut(index)
+            .filter(|value| value.payload.is_some())
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is missing."))?;
+        value.shared_allocation = Some(id);
+        Ok(())
+    }
+
+    /// Preserve occurrence metadata without copying the shared definition's payload.
+    pub(crate) fn insert_shared_occurrence(
+        &mut self,
+        metadata: ConstValueMetadata,
+        definition: ConstValueId,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let value = self
+            .value(definition)
+            .ok_or_else(|| ingest_invariant("Shared allocation definition is missing."))?;
+        if value.shared_allocation != Some(definition) || value.payload.is_none() {
+            return Err(ingest_invariant(
+                "Shared allocation has no owned definition.",
+            ));
+        }
+        let index =
+            checked_const_value_index(self.prefix.values.len(), self.values.len(), metadata.span)?;
+        let id = ConstValueId(index);
+        self.values.push(ConstValue {
+            metadata,
+            payload: None,
+            shared_allocation: Some(definition),
+        });
         Ok(id)
     }
 
@@ -439,6 +519,17 @@ impl ConstValueCandidate<'_> {
         expression: ExpressionView<'_>,
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(
+            id,
+            expression.occurrence_facts().map(|facts| &facts.provenance),
+        )
+    }
+
+    fn with_value_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: Option<&SyntheticInterfaceProvenance>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
@@ -446,10 +537,47 @@ impl ConstValueCandidate<'_> {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+        let Some(metadata) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
-        self.insert_value(metadata, payload)
+        if let Some(definition) = stored.shared_allocation {
+            self.insert_shared_occurrence(metadata, definition)
+        } else {
+            let payload = stored
+                .payload
+                .as_ref()
+                .expect("ordinary value owns its payload")
+                .clone();
+            self.insert_value(metadata, payload)
+        }
+    }
+
+    /// Attach provenance to a completed root, which is the only consumer of its staged row.
+    pub(crate) fn with_completed_root_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        if self
+            .value(id)
+            .is_some_and(|value| value.shared_allocation.is_some())
+        {
+            return self.with_value_provenance(id, Some(provenance));
+        }
+        if let Some(index) = id.index().checked_sub(self.prefix.values.len()) {
+            let value = self.values.get_mut(index).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Completed constant root lacks a staged value.",
+                )
+            })?;
+            value
+                .metadata
+                .synthetic_interface_provenance
+                .merge(provenance);
+            return Ok(id);
+        }
+        self.with_value_provenance(id, Some(provenance))
     }
 }
 
@@ -461,48 +589,51 @@ impl ConstValueCandidate<'_> {
 /// the value it resolves to, as a folded result did in the baseline.
 fn occurrence_copy(
     stored: &ConstValue,
-    expression: ExpressionView<'_>,
-) -> Option<(ConstValueMetadata, ConstValuePayload)> {
-    let facts = expression.occurrence_facts()?;
-    let metadata = stored
-        .metadata
-        .with_occurrence_provenance(&facts.provenance)?;
-    Some((metadata, stored.payload.clone()))
+    provenance: Option<&SyntheticInterfaceProvenance>,
+) -> Option<ConstValueMetadata> {
+    stored.metadata.with_occurrence_provenance(provenance?)
 }
 
-fn visit_payload_children(payload: &ConstValuePayload, mut visitor: impl FnMut(ConstValueId)) {
+fn try_visit_payload_children<E>(
+    payload: &ConstValuePayload,
+    mut visitor: impl FnMut(ConstValueId) -> Result<(), E>,
+) -> Result<(), E> {
     match payload {
         ConstValuePayload::Collection(values) => {
             for &value in values {
-                visitor(value);
+                visitor(value)?;
             }
         }
         ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
             for field in fields {
-                visitor(field.value);
+                visitor(field.value)?;
             }
         }
         ConstValuePayload::Range { start, end } => {
-            visitor(*start);
-            visitor(*end);
+            visitor(*start)?;
+            visitor(*end)?;
         }
-        ConstValuePayload::Coerced(value) | ConstValuePayload::OptionSome(value) => visitor(*value),
+        ConstValuePayload::Coerced(value) | ConstValuePayload::OptionSome(value) => {
+            visitor(*value)?
+        }
         _ => {}
     }
+    Ok(())
 }
 
 fn validate_payload_children(
     payload: &ConstValuePayload,
     exists: impl Fn(ConstValueId) -> bool,
 ) -> Result<(), InfrastructureFailure> {
-    let mut missing = false;
-    visit_payload_children(payload, |id| missing |= !exists(id));
-    if missing {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::ConstantEvaluation,
-            "Constant child is outside its content owner.",
-        ));
-    }
+    try_visit_payload_children(payload, |id| {
+        if !exists(id) {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Constant child is outside its content owner.",
+            ));
+        }
+        Ok(())
+    })?;
     if let ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } = payload {
         let mut names = rustc_hash::FxHashSet::default();
         for field in fields {
@@ -550,6 +681,7 @@ enum FoldFrame<'a> {
     Field(ConstValueId),
     Finish {
         value: &'a ConstValue,
+        payload: &'a ConstValuePayload,
         result_start: usize,
     },
 }
@@ -669,6 +801,30 @@ impl StagedRoots for Vec<ConstValueId> {
     }
 }
 
+/// Required const evaluation supplies its attempt budget; eager folds do not own one.
+/// The caller releases the remaining scratch when the transaction returns.
+pub(crate) trait StagedValueBudget<E> {
+    fn step(&mut self) -> Result<(), E>;
+    fn charge_scratch(&mut self, bytes: usize) -> Result<(), E>;
+    fn release_scratch(&mut self, bytes: usize);
+}
+
+impl<E> StagedValueBudget<E> for () {
+    fn step(&mut self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn charge_scratch(&mut self, _bytes: usize) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn release_scratch(&mut self, _bytes: usize) {}
+}
+
+fn staged_row_capacity(capacity: usize, required: usize) -> usize {
+    required.max(capacity.saturating_mul(2)).max(4)
+}
+
 impl ConstValueStore {
     /// Install the configured work and memory allowances for this module.
     pub(crate) fn set_const_execution_limits(&mut self, limits: ConstExecutionLimits) {
@@ -708,85 +864,132 @@ impl ConstValueStore {
         R: StagedRoots,
         E: From<ConstValueStoreError>,
     {
+        self.stage_values_with_budget(&mut (), |candidate, _| produce(candidate))
+    }
+
+    pub(crate) fn stage_values_with_budget<R, E, B: StagedValueBudget<E>>(
+        &mut self,
+        budget: &mut B,
+        produce: impl FnOnce(&mut ConstValueCandidate<'_>, &mut B) -> Result<Option<R>, E>,
+    ) -> Result<Option<R>, E>
+    where
+        R: StagedRoots,
+        E: From<ConstValueStoreError>,
+    {
         let prefix_len = self.values.len();
-        let (mut roots, values) = {
+        let (mut roots, values, anchor) = {
             let mut candidate = ConstValueCandidate {
                 prefix: self,
                 values: Vec::new(),
             };
-            let Some(roots) = produce(&mut candidate)? else {
+            let Some(roots) = produce(&mut candidate, budget)? else {
                 return Ok(None);
             };
-            if roots
-                .roots()
-                .iter()
-                .any(|&root| candidate.value(root).is_none())
-            {
-                return Err(E::from(
-                    InfrastructureFailure::internal(
-                        CompilerStage::ConstantEvaluation,
+            let mut anchor = None;
+            for &root in roots.roots() {
+                budget.step()?;
+                let value = candidate.value(root).ok_or_else(|| {
+                    E::from(ingest_invariant(
                         "Selected constant root is outside its candidate.",
-                    )
-                    .into(),
-                ));
-            }
-            (roots, candidate.values)
-        };
-
-        // Only candidate roots need staging; prefix roots are already committed. Every candidate
-        // root is live, and the first one anchors the index-limit diagnostic.
-        let mut pending: Vec<ConstValueId> = roots
-            .roots()
-            .iter()
-            .copied()
-            .filter(|root| root.index() >= prefix_len)
-            .collect();
-        let Some(&anchor) = pending.first() else {
-            return Ok(Some(roots));
-        };
-
-        // Every staged edge is backwards: append validates against the already issued prefix.
-        // Reachability does not depend on visit order, so an explicit stack marks the same rows.
-        let mut live = vec![false; values.len()];
-        while let Some(id) = pending.pop() {
-            let index = id.index() - prefix_len;
-            if live[index] {
-                continue;
-            }
-            live[index] = true;
-            visit_payload_children(&values[index].payload, |child| {
-                if child.index() >= prefix_len {
-                    pending.push(child);
+                    ))
+                })?;
+                if root.index() >= prefix_len {
+                    anchor.get_or_insert(value.metadata.span);
                 }
-            });
+            }
+            let Some(anchor) = anchor else {
+                return Ok(Some(roots));
+            };
+            (roots, candidate.values, anchor)
+        };
+
+        // All staged edges go backwards, so a reverse pass marks every reachable row. Reuse
+        // the marks for remapping: the commit length check excludes the dead sentinel from
+        // promoted IDs. Each traversal step covers both marking and its subsequent remap.
+        const DEAD: ConstValueId = ConstValueId(u32::MAX);
+        const LIVE: ConstValueId = ConstValueId(0);
+        budget.charge_scratch(
+            values
+                .len()
+                .saturating_mul(std::mem::size_of::<ConstValueId>()),
+        )?;
+        let mut remapped = vec![DEAD; values.len()];
+        let mark = |remapped: &mut [ConstValueId], id: ConstValueId| {
+            if let Some(index) = id.index().checked_sub(prefix_len) {
+                remapped[index] = LIVE;
+            }
+        };
+        for &root in roots.roots() {
+            budget.step()?;
+            mark(&mut remapped, root);
         }
-        let live_count = live.iter().filter(|&&live| live).count();
-        checked_const_value_index(
-            prefix_len,
-            live_count,
-            values[anchor.index() - prefix_len].metadata.span,
-        )
-        .map_err(|error| E::from(ConstValueStoreError::from(error)))?;
-        self.values.reserve(live_count);
-        let mut remapped = vec![None; values.len()];
-        for (index, mut value) in values.into_iter().enumerate() {
-            if !live[index] {
+        let mut live_count = 0;
+        for (index, value) in values.iter().enumerate().rev() {
+            budget.step()?;
+            if remapped[index] == DEAD {
                 continue;
             }
-            remap_payload_children(&mut value.payload, |child| {
-                if child.index() >= prefix_len {
-                    *child = remapped[child.index() - prefix_len]
-                        .expect("validated backwards edge has a live promoted child");
-                }
-            });
+            live_count += 1;
+            if let Some(definition) = value.shared_allocation {
+                budget.step()?;
+                mark(&mut remapped, definition);
+            }
+            if let Some(payload) = &value.payload {
+                try_visit_payload_children(payload, |child| {
+                    budget.step()?;
+                    mark(&mut remapped, child);
+                    Ok::<_, E>(())
+                })?;
+            }
+        }
+        let required = checked_const_value_index(prefix_len, live_count, anchor)
+            .map_err(|error| E::from(ConstValueStoreError::from(error)))?
+            as usize;
+        let capacity = self.values.capacity();
+        let target = if required > capacity {
+            staged_row_capacity(capacity, required)
+        } else {
+            capacity
+        };
+        // The occupied prefix and precharged new rows are the logical destination. Charge
+        // spare capacity plus old backing that may overlap the new allocation during growth.
+        let spare = target - required;
+        let overlap = if required > capacity { capacity } else { 0 };
+        let extra_rows = spare.saturating_add(overlap);
+        if extra_rows != 0 {
+            budget.charge_scratch(extra_rows.saturating_mul(std::mem::size_of::<ConstValue>()))?;
+        }
+        if required > capacity {
+            self.values.reserve_exact(target - prefix_len);
+            budget.release_scratch(overlap * std::mem::size_of::<ConstValue>());
+        }
+        for (index, mut value) in values.into_iter().enumerate() {
+            if remapped[index] == DEAD {
+                continue;
+            }
+            if let Some(payload) = &mut value.payload {
+                remap_payload_children(payload, |child| {
+                    if child.index() >= prefix_len {
+                        *child = remapped[child.index() - prefix_len];
+                    }
+                });
+            }
             let id = ConstValueId(self.values.len() as u32);
+            if let Some(definition) = &mut value.shared_allocation
+                && definition.index() >= prefix_len
+            {
+                *definition = if definition.index() - prefix_len == index {
+                    id
+                } else {
+                    remapped[definition.index() - prefix_len]
+                };
+            }
             self.values.push(value);
-            remapped[index] = Some(id);
+            remapped[index] = id;
         }
         for root in roots.roots_mut() {
             if root.index() >= prefix_len {
-                *root = remapped[root.index() - prefix_len]
-                    .expect("selected staged root is marked reachable");
+                *root = remapped[root.index() - prefix_len];
             }
         }
         Ok(Some(roots))
@@ -879,7 +1082,78 @@ impl ConstValueStore {
         validate_payload_children(&payload, |id| self.value(id).is_some())?;
         let index = checked_const_value_index(self.values.len(), 0, metadata.span)?;
         let id = ConstValueId(index);
-        self.values.push(ConstValue { metadata, payload });
+        self.values.push(ConstValue {
+            metadata,
+            payload: Some(payload),
+            shared_allocation: None,
+        });
+        Ok(id)
+    }
+
+    /// Mark a newly imported payload row as an allocation definition in this store.
+    pub(crate) fn mark_imported_allocation(
+        &mut self,
+        id: ConstValueId,
+    ) -> Result<(), ConstValueStoreError> {
+        let value = self
+            .values
+            .get_mut(id.index())
+            .ok_or_else(|| ingest_invariant("Imported allocation definition is missing."))?;
+        if value.shared_allocation.is_some()
+            || !matches!(
+                value.payload.as_ref(),
+                Some(
+                    ConstValuePayload::Collection(_)
+                        | ConstValuePayload::Record(_)
+                        | ConstValuePayload::Choice { .. }
+                        | ConstValuePayload::Coerced(_)
+                        | ConstValuePayload::OptionSome(_)
+                )
+            )
+        {
+            return Err(ingest_invariant(
+                "Imported allocation must own a fresh payload.",
+            ));
+        }
+        value.shared_allocation = Some(id);
+        Ok(())
+    }
+
+    /// Reuse a definition's row only when it already carries exactly this occurrence's metadata.
+    pub(crate) fn insert_imported_allocation_reference(
+        &mut self,
+        definition: ConstValueId,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        provenance: SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let value = self
+            .value(definition)
+            .filter(|value| {
+                value.shared_allocation == Some(definition)
+                    && value.payload.is_some()
+                    && value.metadata.type_id == type_id
+            })
+            .ok_or_else(|| {
+                ingest_invariant("Imported reference has no same-type allocation definition.")
+            })?;
+        if value.metadata.span == span
+            && value.metadata.synthetic_interface_provenance == provenance
+        {
+            return Ok(definition);
+        }
+        let metadata = ConstValueMetadata {
+            type_id,
+            span,
+            synthetic_interface_provenance: provenance,
+            ..value.metadata
+        };
+        let id = ConstValueId(checked_const_value_index(self.values.len(), 0, span)?);
+        self.values.push(ConstValue {
+            metadata,
+            payload: None,
+            shared_allocation: Some(definition),
+        });
         Ok(id)
     }
 
@@ -931,6 +1205,26 @@ impl ConstValueStore {
         expression: ExpressionView<'_>,
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(
+            id,
+            expression.occurrence_facts().map(|facts| &facts.provenance),
+        )
+    }
+
+    /// Carry combined occurrence dependencies on a result with no replacement expression.
+    pub(crate) fn with_synthetic_interface_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        self.with_value_provenance(id, Some(provenance))
+    }
+
+    fn with_value_provenance(
+        &mut self,
+        id: ConstValueId,
+        provenance: Option<&SyntheticInterfaceProvenance>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
@@ -938,10 +1232,26 @@ impl ConstValueStore {
             )
             .into());
         };
-        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+        let Some(metadata) = occurrence_copy(stored, provenance) else {
             return Ok(id);
         };
-        self.insert_value(metadata, payload)
+        if let Some(definition) = stored.shared_allocation {
+            let index = checked_const_value_index(self.values.len(), 0, metadata.span)?;
+            let id = ConstValueId(index);
+            self.values.push(ConstValue {
+                metadata,
+                payload: None,
+                shared_allocation: Some(definition),
+            });
+            Ok(id)
+        } else {
+            let payload = stored
+                .payload
+                .as_ref()
+                .expect("ordinary value owns its payload")
+                .clone();
+            self.insert_value(metadata, payload)
+        }
     }
 
     /// Finalisation reads bound edges directly. Ordinary constant occurrences reuse content.
@@ -1215,7 +1525,21 @@ impl ConstValueStore {
     }
 
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
-        self.value(id).map(|value| &value.payload)
+        let value = self.value(id)?;
+        value
+            .payload
+            .as_ref()
+            .or_else(|| self.value(value.shared_allocation?)?.payload.as_ref())
+    }
+
+    /// Payload owned by this row, excluding any shared definition it references.
+    pub(crate) fn owned_payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
+        self.value(id)?.payload.as_ref()
+    }
+
+    /// Identity of the allocation definition shared by this row, if any.
+    pub(crate) fn shared_allocation(&self, id: ConstValueId) -> Option<ConstValueId> {
+        self.value(id)?.shared_allocation
     }
 
     /// Whether a stored value is a `$in` helper, after walking transparent `Coerced` wrappers.
@@ -1316,6 +1640,40 @@ impl ConstValueStore {
         }
     }
 
+    /// Count only reachable allocation occurrences, descending into each marked payload once.
+    /// Ordinary row identity is not allocation identity, so unmarked edges still expand.
+    fn repeated_allocations(
+        &self,
+        root: ConstValueId,
+    ) -> Result<FxHashMap<ConstValueId, AllocationFoldState>, InfrastructureFailure> {
+        use std::collections::hash_map::Entry;
+
+        let mut allocations = FxHashMap::default();
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if let Some(definition) = self.shared_allocation(id) {
+                match allocations.entry(definition) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(AllocationFoldState::Once);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        *entry.get_mut() = AllocationFoldState::Repeated;
+                        continue;
+                    }
+                }
+            }
+            let payload = self
+                .payload(id)
+                .ok_or_else(|| fold_value_missing_error::<InfrastructureFailure>(id))?;
+            try_visit_payload_children(payload, |child| {
+                pending.push(child);
+                Ok::<_, InfrastructureFailure>(())
+            })?;
+        }
+        allocations.retain(|_, state| matches!(state, AllocationFoldState::Repeated));
+        Ok(allocations)
+    }
+
     /// Map one value graph through the common postorder visitor.
     ///
     /// Depth-dependent work stays on the heap. Each edge produces its own `T`, including
@@ -1329,17 +1687,50 @@ impl ConstValueStore {
     where
         E: From<InfrastructureFailure>,
     {
+        self.fold_value_impl(id, false, &mut |metadata, event| match event {
+            ConstValueGraphVisit::Value { visit, .. } => visitor(metadata, visit),
+            ConstValueGraphVisit::Reference(_) => {
+                unreachable!("tree fold expands every occurrence")
+            }
+        })
+    }
+
+    /// Map one authored graph, emitting only genuinely shared allocations as definitions/refs.
+    pub(crate) fn fold_value_graph<T, E>(
+        &self,
+        id: ConstValueId,
+        visitor: &mut impl FnMut(&ConstValueMetadata, ConstValueGraphVisit<'_, T>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<InfrastructureFailure>,
+    {
+        self.fold_value_impl(id, true, visitor)
+    }
+
+    fn fold_value_impl<T, E>(
+        &self,
+        root: ConstValueId,
+        preserve_sharing: bool,
+        visitor: &mut impl FnMut(&ConstValueMetadata, ConstValueGraphVisit<'_, T>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<InfrastructureFailure>,
+    {
+        let mut allocations: Option<FxHashMap<ConstValueId, AllocationFoldState>> = None;
+        let mut next_definition = 0;
         let mut work = Vec::new();
         let mut results: Vec<T> = Vec::new();
-        let mut next = Some(FoldFrame::Visit(id));
+        let mut next = Some(FoldFrame::Visit(root));
 
         while let Some(frame) = next {
+            let mut coerced_inner_type = None;
             let (value, visit) = match frame {
                 FoldFrame::Finish {
                     value,
+                    payload,
                     result_start,
                 } => {
-                    let visit = match &value.payload {
+                    let visit = match payload {
                         ConstValuePayload::Collection(items) => {
                             if results.len().checked_sub(result_start) != Some(items.len()) {
                                 return Err(fold_stack_error::<E>());
@@ -1370,9 +1761,18 @@ impl ConstValueStore {
                             let start = results.pop().ok_or_else(fold_stack_error::<E>)?;
                             ConstValueVisit::Range { start, end }
                         }
-                        ConstValuePayload::Coerced(_) => {
+                        ConstValuePayload::Coerced(inner) => {
                             if results.len().checked_sub(result_start) != Some(1) {
                                 return Err(fold_stack_error::<E>());
+                            }
+                            if allocations
+                                .as_ref()
+                                .is_some_and(|allocations| !allocations.is_empty())
+                            {
+                                let metadata = self
+                                    .metadata(*inner)
+                                    .ok_or_else(|| fold_value_missing_error::<E>(*inner))?;
+                                coerced_inner_type = Some(metadata.type_id);
                             }
                             ConstValueVisit::Coerced(
                                 results.pop().ok_or_else(fold_stack_error::<E>)?,
@@ -1406,8 +1806,52 @@ impl ConstValueStore {
                         ))),
                         _ => fold_value_missing_error::<E>(id),
                     })?;
+                    let reference = if let Some(definition) =
+                        value.shared_allocation.filter(|_| preserve_sharing)
+                    {
+                        if allocations.is_none() {
+                            allocations = Some(self.repeated_allocations(root)?);
+                        }
+                        self.value(definition)
+                            .filter(|target| {
+                                target.shared_allocation == Some(definition)
+                                    && target.payload.is_some()
+                                    && target.metadata.type_id == value.metadata.type_id
+                            })
+                            .ok_or_else(|| {
+                                InfrastructureFailure::internal(
+                                    CompilerStage::ConstantEvaluation,
+                                    "Folded reference has no same-type allocation definition.",
+                                )
+                            })?;
+                        match allocations
+                            .as_mut()
+                            .and_then(|allocations| allocations.get_mut(&definition))
+                        {
+                            Some(AllocationFoldState::Assigned(index)) => Some(*index),
+                            Some(state) => {
+                                *state = AllocationFoldState::Assigned(next_definition);
+                                next_definition += 1;
+                                None
+                            }
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(index) = reference {
+                        results.push(visitor(
+                            &value.metadata,
+                            ConstValueGraphVisit::Reference(index),
+                        )?);
+                        next = work.pop();
+                        continue;
+                    }
                     let result_start = results.len();
-                    let visit = match &value.payload {
+                    let payload = self
+                        .payload(id)
+                        .ok_or_else(|| fold_value_missing_error::<E>(id))?;
+                    let visit = match payload {
                         ConstValuePayload::Number(number) => ConstValueVisit::Number(number),
                         ConstValuePayload::FixedScalar(scalar) => {
                             ConstValueVisit::FixedScalar(*scalar)
@@ -1425,6 +1869,7 @@ impl ConstValueStore {
                         ConstValuePayload::Collection(items) => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.extend(items.iter().rev().copied().map(FoldFrame::Visit));
@@ -1435,6 +1880,7 @@ impl ConstValueStore {
                         | ConstValuePayload::Choice { fields, .. } => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.extend(
@@ -1449,6 +1895,7 @@ impl ConstValueStore {
                         ConstValuePayload::Range { start, end } => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.push(FoldFrame::Visit(*end));
@@ -1460,6 +1907,7 @@ impl ConstValueStore {
                         | ConstValuePayload::OptionSome(child) => {
                             work.push(FoldFrame::Finish {
                                 value,
+                                payload,
                                 result_start,
                             });
                             work.push(FoldFrame::Visit(*child));
@@ -1471,7 +1919,21 @@ impl ConstValueStore {
                 }
             };
 
-            let mapped = visitor(&value.metadata, visit)?;
+            let definition = value
+                .shared_allocation
+                .and_then(|id| allocations.as_ref()?.get(&id))
+                .and_then(|state| match state {
+                    AllocationFoldState::Assigned(index) => Some(*index),
+                    _ => None,
+                });
+            let mapped = visitor(
+                &value.metadata,
+                ConstValueGraphVisit::Value {
+                    visit,
+                    definition,
+                    coerced_inner_type,
+                },
+            )?;
             if work.is_empty() {
                 return Ok(mapped);
             }

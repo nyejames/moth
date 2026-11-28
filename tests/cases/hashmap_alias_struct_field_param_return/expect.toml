@@ -1,15 +1,25 @@
 entry = "."
 
 [backends.html]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = ["alias_struct_param priya=10 linus=7 bo=7"]
+diagnostic_codes = ["MOTH-BORROW-0007"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-BORROW-0007"
+reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
+path = "input/@entry.moth"
+line = 21
+count = 1
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0064"]
+diagnostic_codes = ["MOTH-BORROW-0007"]
 
 [[backends.html_wasm.diagnostic_assertions]]
-code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.fixed_width_scalar_values"
+code = "MOTH-BORROW-0007"
+reason = "invalid_mutable_access.aliased_value_requires_exclusive_access"
+path = "input/@entry.moth"
+line = 21
+count = 1

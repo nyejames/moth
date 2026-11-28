@@ -1,0 +1,11 @@
+combine #|removed I32, view {I32}| -> I32:
+    return removed + view.length()
+;
+
+stale #|| -> I32:
+    values ~= {1, 2}
+    return combine(view = values, removed = (~values.remove(0))) catch then 0
+;
+
+result #I32 = stale()
+~[:result=[result]]

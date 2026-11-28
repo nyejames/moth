@@ -9,7 +9,6 @@ use crate::timing_scope_attributed;
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionIndex,
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
@@ -108,7 +107,6 @@ enum CheckOnlyProviderClassification {
 ///      coordinator instead of relying on a long positional argument list whose order can drift.
 pub(super) struct BoundaryCompilationContext<'a> {
     config: &'a Config,
-    build_profile: FrontendBuildProfile,
     project_path_resolver: &'a ProjectPathResolver,
     source_files: Arc<SourceDatabase>,
     style_directives: &'a StyleDirectiveRegistry,
@@ -135,11 +133,10 @@ pub(super) struct BoundaryCompilationContext<'a> {
 impl<'a> BoundaryCompilationContext<'a> {
     #[allow(
         clippy::too_many_arguments,
-        reason = "boundary construction keeps configuration, profile, resolver, source owner, directives, external packages, builder and completed-package services, resolved build-config values, canonical/fixed/direct facts, build-config inputs, builder globals and optional project globals separate"
+        reason = "boundary construction keeps configuration, resolver, source owner, directives, external packages, builder and completed-package services, resolved build-config values, canonical/fixed/direct facts, build-config inputs, builder globals and optional project globals separate"
     )]
     pub(super) fn new(
         config: &'a Config,
-        build_profile: FrontendBuildProfile,
         project_path_resolver: &'a ProjectPathResolver,
         source_files: Arc<SourceDatabase>,
         style_directives: &'a StyleDirectiveRegistry,
@@ -155,7 +152,6 @@ impl<'a> BoundaryCompilationContext<'a> {
     ) -> Self {
         Self {
             config,
-            build_profile,
             project_path_resolver,
             source_files,
             style_directives,
@@ -813,7 +809,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             );
         let compile_context = ModuleCompilationContext {
             options: frontend_options,
-            build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
             project_path_resolver: Some(self.boundary.project_path_resolver),
             style_directives: self.boundary.style_directives,

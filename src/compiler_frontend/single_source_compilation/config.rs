@@ -17,7 +17,6 @@
 
 use crate::builder_surface::config_schema::{ProjectFieldConfigPolicies, ProjectFieldConfigPolicy};
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
@@ -46,7 +45,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
-    convert_const_value_to_folded_value,
+    convert_const_value_to_folded_tree,
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -313,7 +312,6 @@ fn compile_prepared_config_source(
             string_table,
             path_fork,
             entry_dir: authored_scope,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
             build_config_values: std::sync::Arc::new(Default::default()),
@@ -569,11 +567,8 @@ fn project_authored_config_declarations(
             continue;
         };
 
-        let value = convert_const_value_to_folded_value(
-            &ast.const_values,
-            value_id,
-            &folded_value_context,
-        )?;
+        let value =
+            convert_const_value_to_folded_tree(&ast.const_values, value_id, &folded_value_context)?;
         let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)?;
         if let PublicFoldedValue::Record(fields) = &value {
             if fields.len() != direct_field_spans.len() {

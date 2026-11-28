@@ -101,12 +101,12 @@ pub(crate) struct ModuleExecutable {
     pub(crate) borrow_analysis: BorrowCheckReport,
     /// Conservative bounded-integer proof facts computed from this exact validated HIR.
     ///
-    /// WHAT: statement-keyed proven-safe operation/narrowing facts paired with this executable;
-    ///       the empty default table retains every runtime check.
-    /// WHY: the table is computed inside the compiler service after HIR validation and before
-    ///      publication, so backends consume facts that pair with the immutable statement ids
-    ///      they lower. Facts carry no interned strings, paths or dense layouts, so they need
-    ///      no remap when the executable is published.
+    /// WHAT: proven-safe operation and narrowing facts keyed by their statement or Invoke
+    ///       operation's HIR node identity. An empty table retains every otherwise-required check.
+    /// WHY: the compiler service computes the table from final validated HIR after private-lane
+    ///      installation and convergence, before publication, so backends consume facts paired
+    ///      with the exact operations they lower. Facts carry no interned strings, paths or dense
+    ///      layouts, so they need no remap when the executable is published.
     pub(crate) numeric_proofs: NumericProofs,
     /// Immutable path identity table shared by the enclosing project/package compilation boundary.
     /// It covers every `PathId` retained by this executable after publication.

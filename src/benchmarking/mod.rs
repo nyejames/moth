@@ -64,10 +64,10 @@ pub fn timing_metric_label(name: &str) -> &str {
 }
 
 pub use frontend::{
-    FrontendBenchmarkBuildProfile, FrontendBenchmarkCounter, FrontendBenchmarkError,
-    FrontendBenchmarkFailureKind, FrontendBenchmarkInput, FrontendBenchmarkInputValue,
-    FrontendBenchmarkOptions, FrontendBenchmarkOutcome, FrontendBenchmarkReport,
-    FrontendBenchmarkRetention, FrontendBenchmarkStage, run_frontend_benchmark,
+    FrontendBenchmarkCounter, FrontendBenchmarkError, FrontendBenchmarkFailureKind,
+    FrontendBenchmarkInput, FrontendBenchmarkInputValue, FrontendBenchmarkOptions,
+    FrontendBenchmarkOutcome, FrontendBenchmarkReport, FrontendBenchmarkRetention,
+    FrontendBenchmarkStage, run_frontend_benchmark,
 };
 #[cfg(feature = "data_layout_memory_probe")]
 pub use frontend::{

@@ -8,7 +8,6 @@
 
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::ResolvedBuildConfigMap;
 use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -26,7 +25,6 @@ use std::sync::Arc;
 pub(crate) struct ModuleCompilationContext<'a> {
     /// Compiler-owned settings, already projected from whatever configuration the caller uses.
     pub(crate) options: FrontendOptions,
-    pub(crate) build_profile: FrontendBuildProfile,
     /// The canonical boundary owns the resolver; module compilation only borrows it.
     pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     /// Immutable source identities registered once by the enclosing compilation boundary.

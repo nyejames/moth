@@ -1,5 +1,4 @@
 use super::*;
-use crate::compiler_frontend::style_directives::specs::SourceModifierTarget;
 
 #[test]
 fn supported_directives_for_diagnostic_uses_stable_registry_order() {
@@ -41,12 +40,10 @@ fn export_and_config_are_source_modifiers() {
     let export = built_ins
         .find("export")
         .expect("missing '$export' directive");
-    assert!(export.contexts.allows_source_modifier());
-    assert!(!export.contexts.allows_template_head());
     assert!(matches!(
         export.kind,
         StyleDirectiveKind::SourceModifier {
-            target: SourceModifierTarget::ExportablePublicApiItem,
+            kind: SourceDirectiveKind::Export,
             operand: SourceModifierOperand::OptionalPublicRoute,
         }
     ));
@@ -54,12 +51,10 @@ fn export_and_config_are_source_modifiers() {
     let config = built_ins
         .find("config")
         .expect("missing '$config' directive");
-    assert!(config.contexts.allows_source_modifier());
-    assert!(!config.contexts.allows_template_head());
     assert!(matches!(
         config.kind,
         StyleDirectiveKind::SourceModifier {
-            target: SourceModifierTarget::ExplicitTypedCompileTimeBinding,
+            kind: SourceDirectiveKind::Config,
             operand: SourceModifierOperand::None,
         }
     ));
@@ -81,14 +76,7 @@ fn export_and_config_are_source_modifiers() {
         let directive = built_ins
             .find(template_directive)
             .unwrap_or_else(|| panic!("missing '${template_directive}' directive"));
-        assert!(
-            directive.contexts.allows_template_head(),
-            "'${template_directive}' keeps its template-head context"
-        );
-        assert!(
-            !directive.contexts.allows_source_modifier(),
-            "'${template_directive}' is not a source modifier"
-        );
+        assert!(source_modifier_contract(directive).is_none());
     }
 }
 
@@ -104,16 +92,11 @@ fn lexical_constraint_directives_share_one_target_contract() {
         let directive = built_ins
             .find(name)
             .unwrap_or_else(|| panic!("missing '${name}' directive"));
-        assert!(directive.contexts.allows_source_modifier());
-        assert!(
-            !directive.contexts.allows_template_head(),
-            "'${name}' is a source-only modifier"
-        );
         assert!(
             matches!(
                 directive.kind,
                 StyleDirectiveKind::SourceModifier {
-                    target: SourceModifierTarget::SourceConstraint(attached),
+                    kind: attached,
                     operand: SourceModifierOperand::None,
                 } if attached == kind
             ),

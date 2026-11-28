@@ -1,0 +1,25 @@
+seed |first ~I32, second ~I32|:
+    left ~= 2
+    right ~= 2
+    ~first = left
+    ~second = right
+;
+
+first ~= 0
+second ~= 1
+seed(~first, ~second)
+observed = second
+~first = 9
+
+seed_one |dest ~I32|:
+    local ~= 2
+    ~dest = local
+;
+
+one ~= 0
+two ~= 1
+seed_one(~one)
+seed_one(~two)
+other_call = two
+~one = 9
+~[:seen=[observed] first=[first] separate_calls=[other_call],[one]]

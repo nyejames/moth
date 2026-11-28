@@ -8,7 +8,7 @@ failed ~U8 = 200
 old ~U8 = 0
 code ~U32 = 0
 recovered = update(~failed, 20) catch |err|:
-    ~code = err.code
+    ~code = copy err.code
     ~old = copy failed
     ~failed = 7
     then copy failed

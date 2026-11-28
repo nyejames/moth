@@ -1,0 +1,10 @@
+Holder = |values {I32}|
+
+invalid #|input {I32}| -> I32:
+    holder ~= Holder(input)
+    ~holder.values.push(2)
+    return holder.values.length()
+;
+
+result #I32 = invalid({1})
+~[: [result]]

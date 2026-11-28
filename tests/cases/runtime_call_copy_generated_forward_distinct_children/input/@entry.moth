@@ -1,0 +1,16 @@
+@helper Shell, forward
+
+probe |flag Bool| -> String:
+    left_child = {1}
+    right_child = {2}
+    first Shell of {I32} = Shell(left_child)
+    second Shell of {I32} = Shell(right_child)
+    spare = {3}
+    selected = forward(flag, first, second, spare)
+    owned ~= copy selected
+    observed = owned.right
+    ~owned.left.push(4)
+    return [:left=[owned.left.length()] right=[observed.length()] original_left=[left_child.length()] original_right=[right_child.length()]]
+;
+
+~[:[probe(true)] / [probe(false)]]

@@ -6,7 +6,6 @@ use super::prepare_moth_template_file;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices,
@@ -420,7 +419,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
             string_table: &mut string_table,
             path_fork: &mut path_fork,
             entry_dir,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
@@ -832,7 +830,6 @@ css_private #= "private"
                 string_table: &mut string_table,
                 path_fork: &mut path_fork,
                 entry_dir,
-                build_profile: FrontendBuildProfile::Dev,
                 file_value_resolution,
                 config_resolution: None,
                 build_config_values: Arc::new(Default::default()),
@@ -2552,7 +2549,6 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             string_table: &mut string_table,
             path_fork: &mut path_fork,
             entry_dir,
-            build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

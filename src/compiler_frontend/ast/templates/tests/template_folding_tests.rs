@@ -132,7 +132,7 @@ fn bool_condition_binding_substitution_reuses_binding() {
         &mut constants,
         vec![TemplateFoldBinding {
             path: binding_path,
-            value,
+            value: value.into(),
         }],
     );
     assert_eq!(
@@ -173,7 +173,7 @@ fn option_present_capture_substitution_preserves_wrapper() {
         &mut constants,
         vec![TemplateFoldBinding {
             path: binding_path,
-            value,
+            value: value.into(),
         }],
     );
     assert_eq!(
@@ -223,7 +223,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         &mut constants,
         vec![TemplateFoldBinding {
             path: binding_path,
-            value,
+            value: value.into(),
         }],
     );
     let capture = selected_option_capture_payload_with_provenance(
@@ -236,7 +236,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
     .0
     .expect("present");
     assert_eq!(capture.path, capture_path);
-    assert_eq!(capture.value, inner);
+    assert_eq!(capture.value.folded(), Some(inner));
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
         &mut constants,
         vec![TemplateFoldBinding {
             path: binding_path,
-            value,
+            value: value.into(),
         }],
     );
     let active_fold_borrow = store.borrow();
@@ -304,7 +304,7 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
     .0
     .expect("present");
     assert_eq!(capture.path, capture_path);
-    assert_eq!(capture.value, inner);
+    assert_eq!(capture.value.folded(), Some(inner));
 }
 
 #[test]
@@ -469,7 +469,7 @@ fn numeric_operation_with_bound_reference_folds_replacement() {
         &mut constants,
         vec![TemplateFoldBinding {
             path: binding_path,
-            value,
+            value: value.into(),
         }],
     );
     let folded = resolve_fold_bindings_in_expression(root, &mut context).expect("resolution");
@@ -526,7 +526,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
         .id();
     let collection = build_collection_iteration_bindings(
         &bindings,
-        item,
+        Some(item.into()),
         0,
         &provenance,
         &mut expressions,
@@ -545,7 +545,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     for binding in collection.iter().chain(&range) {
         assert_eq!(
             expressions
-                .view(binding.value)
+                .view(binding.value.folded().expect("folded binding"))
                 .expect("binding")
                 .occurrence_facts()
                 .expect("provenance")

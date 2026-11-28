@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "left=2 right=1 original_left=1 original_right=1 / left=2 right=1 original_left=1 original_right=1"

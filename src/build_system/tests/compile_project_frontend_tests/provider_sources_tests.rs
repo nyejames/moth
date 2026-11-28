@@ -438,7 +438,6 @@ fn provider_created_package_registry_survives_into_module() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -506,7 +505,6 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
     let mut frontend_surface = builder_surface_with_html_js_provider();
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -635,7 +633,6 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -695,7 +692,6 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -780,7 +776,6 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -851,7 +846,6 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -919,7 +913,6 @@ fn linked_module_js_lowering_is_observed_separately() {
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -986,7 +979,6 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1032,7 +1024,6 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1090,7 +1081,6 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1136,7 +1126,6 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1179,7 +1168,6 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1316,7 +1304,6 @@ fn package_local_provider_asset_carries_boundary_membership() {
 
         let modules = successful_compilation_value(compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -1368,7 +1355,6 @@ fn html_js_provider_namespace_binding_resolves() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1425,7 +1411,6 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1551,7 +1536,6 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1663,7 +1647,6 @@ fn html_js_provider_direct_selection_resolves() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1707,7 +1690,6 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1751,7 +1733,6 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1801,7 +1782,6 @@ fn html_js_provider_missing_export_keyword_points_into_the_js_source() {
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1909,7 +1889,6 @@ fn html_js_provider_repeated_imports_reuse_cache() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1957,7 +1936,6 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,

@@ -126,6 +126,40 @@ Possible consumers include more precise no-alias evidence for proven disjoint pl
 
 Each requires its own proof and benchmark. Stable address is not `noalias`. Access precision cannot select physical cleanup, and neither the borrower nor the backend may deduce REC obligations from a new footprint classifier.
 
+### 8. Universal runtime access and stability
+
+The owner approved this exploratory direction, not a change to the
+current shared/exclusive model. Keep it inactive until BC-06, const
+publication and the necessary Boracle representation improvements
+stabilise. The [deferred exclusive-access plan](./boracle-call-summary-and-deferred-exclusive-access-plan.md#related-exploration-universal-runtime-access)
+asks when exclusive access would activate. This direction asks what
+storage and references would stay valid until that access.
+
+The [const interpreter](../const-functions-evaluation-foundation-and-semantics-plan.md#c3-implement-projection-aware-mutation-generations)
+tracks concrete cell and allocation identity, projection generations and
+retained permissions. It follows binding transitions and checks at use
+whether a reference still reaches valid storage. Use that model to test
+static equivalents of generational invalidation: which structural changes
+invalidate a projection and can a later use prove that none occurred?
+Explore narrow mutation contracts that preserve only the stability a use
+needs, without granting extra mutation permission or excusing active
+access conflicts.
+
+Start with non-escaping local storage. Generalise to statically isolated
+storage or task-private graphs only when the evidence supports it. Prove
+isolation for the reached graph, not only its root. Unknown effects and
+unproven isolation stay conservative. No candidate can depend on mandatory
+runtime borrow checking or a tracing collector.
+
+Compare representative uses such as reusing dormant aliases, keeping a
+projection across a shape-preserving edit and rejecting use after
+invalidation. Record newly accepted programs and distinguish gains under
+ordinary rules from changes that need a new source contract. Compare
+diagnostic quality, compile-time cost and summary growth. Record the
+implications for optional ownership transfer, lifetime topology and
+physical memory planning without moving those decisions into borrow
+validation.
+
 ## Lessons from related designs
 
 | Source | Useful research lesson | Warning or rejected direction |

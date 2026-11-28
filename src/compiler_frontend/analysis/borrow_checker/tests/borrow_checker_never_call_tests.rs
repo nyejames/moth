@@ -256,6 +256,7 @@ run || -> !:
         function(&source, run),
         Some(&source.report.analysis.public_call_summaries),
         None,
+        None,
     )
     .expect("run should extract a normalized borrow problem");
     assert!(

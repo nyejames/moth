@@ -1,0 +1,27 @@
+Failure = | message String |
+
+load_builtin || -> String, Error!:
+    return! Error("unavailable", 41)
+;
+
+load_custom || -> String, Failure!:
+    return! Failure("closed")
+;
+
+builtin = load_builtin() catch |err|:
+    code ~U32 = 0
+    ~code = copy err.code
+    before_code = copy code
+    ~code = 9
+    then [:[before_code]/[code]/[err.code]]
+;
+
+custom = load_custom() catch |err|:
+    msg ~= ""
+    ~msg = copy err.message
+    before_msg = copy msg
+    ~msg = "replaced"
+    then [:[before_msg]/[msg]/[err.message]]
+;
+
+~[: builtin=[builtin] custom=[custom]]

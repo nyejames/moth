@@ -33,9 +33,7 @@ use crate::compiler_frontend::hir::functions::{
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
-use crate::compiler_frontend::instrumentation::{
-    FrontendCounter, add_frontend_counter, increment_frontend_counter,
-};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
     EntryRootMetadata, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
     ModuleRootActivity, ResolvedConstFragment,
@@ -57,7 +55,7 @@ use crate::compiler_frontend::module_compilation::outcome::{
     ModuleCompilationOutcome, ModuleSemanticResult,
 };
 use crate::compiler_frontend::module_compilation::prepared::PreparedModuleInput;
-use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
+use crate::compiler_frontend::module_compilation::stages::{lower_hir, seed_call_summaries};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
@@ -78,6 +76,8 @@ use crate::compiler_frontend::validated_generic_template_metadata::validate_mate
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use crate::{borrow_log, timed_stage_attributed};
 
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use rustc_hash::FxHashMap;
 use std::path::Path;
 #[cfg(feature = "boracle")]
@@ -89,6 +89,7 @@ use std::sync::Arc;
 #[cfg(feature = "boracle")]
 pub(crate) struct BoracleModuleInput {
     pub(crate) hir: HirModule,
+    pub(crate) type_environment: TypeEnvironment,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     /// The preparation anchor that located this module's source. Boracle analyses any module,
     /// including entryless API-only roots, so this is a source identity rather than an entry.
@@ -907,17 +908,18 @@ fn run_semantic_stages(
         hir_module.expressions.freeze();
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,
+            type_environment,
             external_package_registry: Arc::clone(compiler.external_package_registry),
             source_path: module_anchor_path.to_path_buf(),
         })));
     }
 
-    // 8. Run static analysis (Borrow Checker).
-    increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
+    // Only declaration and failure contracts are needed until the private lanes are installed.
+    // Allocation extraction waits for the final bodies.
     let bootstrap_borrow_analysis = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendBorrowInitial,
         timing_context,
-        check_borrows(
+        seed_call_summaries(
             compiler,
             &hir_module,
             &type_environment,
@@ -966,23 +968,42 @@ fn run_semantic_stages(
         .map_err(PreparedFailure::from)?;
         return Err(PreparedFailure::Diagnosed(batch));
     }
-    let borrow_analysis = run_generated_summary_convergence(
-        context,
-        compiler,
-        &mut hir_module,
-        &mut function_link_facts,
-        &mut generated_transaction,
-        bootstrap_borrow_analysis,
-        &mut type_environment,
-        &mut warning_bag,
-        #[cfg(feature = "timers")]
-        timing_context,
-    )?;
+    let projection_registry = Arc::clone(compiler.external_package_registry);
+    let borrow_analysis =
+        crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
+            &materialisation_context_builder.context().type_environment,
+            &projection_registry,
+            |projection| {
+                run_generated_summary_convergence(
+                    context,
+                    compiler,
+                    &mut hir_module,
+                    &mut function_link_facts,
+                    &mut generated_transaction,
+                    bootstrap_borrow_analysis,
+                    &mut type_environment,
+                    &mut warning_bag,
+                    projection,
+                    #[cfg(feature = "timers")]
+                    timing_context,
+                )
+            },
+        )?;
+    #[cfg(test)]
+    let borrow_analysis = {
+        let mut report = borrow_analysis;
+        report.declaring_types_for_cold_check = Some(
+            materialisation_context_builder
+                .context()
+                .type_environment
+                .clone(),
+        );
+        report
+    };
     // Private failure lanes and final link facts are complete. Publication may still
     // rebase interned scalar identities, but expression topology is fixed.
     hir_module.expressions.freeze();
-    // Reinstall after convergence: the fixed point may have widened a callee summary the
-    // pre-materialisation pass recorded, and the frozen context must carry the final one.
+    // Publish exact concrete contracts into the frozen materialisation context.
     install_exact_concrete_call_summaries(
         &mut materialisation_context_builder,
         &hir_module,
@@ -1091,6 +1112,7 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     )?;
 
+    // Proofs must describe the final HIR after convergence and private-lane installation.
     let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 
     Ok(SemanticStageOutput::Complete(
@@ -1210,7 +1232,6 @@ fn build_ast_with_registered_types(
             sorted,
             module_anchor_path,
             synthesizes_entry_start,
-            build_profile: context.build_profile,
             capacity_estimate,
             resolved_file_references,
             module_origin,

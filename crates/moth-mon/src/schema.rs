@@ -859,9 +859,7 @@ fn complete_value(
                 ));
             };
 
-            let qualifier = qualifier.clone();
-            let variant_name = variant.clone();
-            path.push(PathSegment::Variant(variant_name.clone()));
+            path.push(PathSegment::Variant(variant.clone()));
             let expected_variant = &variants[expected_index];
             let fields = complete_record(
                 values,
@@ -872,10 +870,13 @@ fn complete_value(
                 context,
                 RecordContext::Choice,
             )?;
-            path.pop();
+            // Successful completion leaves the segment pushed above on top of the path.
+            let Some(PathSegment::Variant(variant_name)) = path.pop() else {
+                unreachable!("choice completion preserves its path segment");
+            };
 
             Ok(Value::Choice {
-                qualifier,
+                qualifier: qualifier.clone(),
                 variant: variant_name,
                 fields,
             })
@@ -986,8 +987,11 @@ fn complete_record(
                 }
             },
         };
-        path.pop();
-        completed.push((field.name.clone(), value));
+        // Successful completion leaves the segment pushed above on top of the path.
+        let Some(PathSegment::Field(name)) = path.pop() else {
+            unreachable!("record completion preserves its path segment");
+        };
+        completed.push((name, value));
     }
 
     Ok(completed)

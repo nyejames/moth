@@ -1,0 +1,8 @@
+Bucket = |scores {String = {I32}}|
+Saved = |item {I32}, count I32|
+
+bucket ~= Bucket({"k" = {1, 2}})
+score = bucket.scores.get("k")!
+saved ~= Saved(score, 3)
+~bucket.scores.clear()
+~[:[saved.item.length()]]

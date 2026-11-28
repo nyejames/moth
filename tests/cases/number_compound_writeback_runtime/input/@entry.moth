@@ -20,7 +20,7 @@ range_target ~I8 = 100
 range_rhs_calls ~I32 = 0
 range_error_code ~U32 = 0
 range_result = add_number_to_i8(~range_target, ~range_rhs_calls, 40.0) catch |range_error|:
-    ~range_error_code = range_error.code
+    ~range_error_code = copy range_error.code
     then 0
 ;
 
@@ -28,7 +28,7 @@ fraction_target ~I8 = 10
 fraction_rhs_calls ~I32 = 0
 fraction_error_code ~U32 = 0
 fraction_result = add_number_to_i8(~fraction_target, ~fraction_rhs_calls, 0.5) catch |fraction_error|:
-    ~fraction_error_code = fraction_error.code
+    ~fraction_error_code = copy fraction_error.code
     then 0
 ;
 

@@ -1031,7 +1031,7 @@ pub fn parse_template_head(
                 };
                 // Recognition happens by name first; only then does the directive's declared
                 // context decide whether this head may use it.
-                if !spec.contexts.allows_template_head() {
+                if matches!(spec.kind, StyleDirectiveKind::SourceModifier { .. }) {
                     return Err(with_current_token_span(
                         token_stream,
                         templates::invalid_template_directive(

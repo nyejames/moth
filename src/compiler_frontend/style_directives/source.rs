@@ -34,7 +34,7 @@ use crate::compiler_frontend::style_directives::{
     ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, SourceModifierOperand,
     StatementSourceConstraintAttachment, StyleDirectiveKind, StyleDirectiveSpec,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenRange, TokenRef, TokenTag,
@@ -57,13 +57,8 @@ use std::sync::Arc;
 pub(crate) fn source_modifier_contract(
     spec: &StyleDirectiveSpec,
 ) -> Option<(SourceDirectiveKind, SourceModifierOperand)> {
-    if !spec.contexts.allows_source_modifier() {
-        return None;
-    }
     match spec.kind {
-        StyleDirectiveKind::SourceModifier { target, operand } => {
-            Some((target.directive_kind(), operand))
-        }
+        StyleDirectiveKind::SourceModifier { kind, operand } => Some((kind, operand)),
         _ => None,
     }
 }
@@ -118,26 +113,10 @@ impl SourceDirectiveOperand {
         }
     }
 
-    /// Remap the path identity retained by a public route operand.
-    ///
-    /// WHAT: updates the route path when the owning file's local fork merges into the module's
-    ///       shared path table.
-    /// WHY: the attached annotation and `HeaderExportMode` retain the same route, so both copies
-    ///      must follow the one path remap.
-    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        if let Self::PublicRoute(route) = self {
-            route.path = remap.get(route.path);
-        }
-    }
-
     /// Move this operand's authored spans into a finalised source identity.
     pub(crate) fn rebind_source_identity(&mut self, file_id: SourceId) {
-        match self {
-            Self::None => {}
-            Self::Expression(range) => *range = range.rebind_source(file_id),
-            Self::PublicRoute(route) => {
-                route.span = SourceSpan::new(file_id, route.span.local());
-            }
+        if let Self::Expression(range) = self {
+            *range = range.rebind_source(file_id);
         }
     }
 }
@@ -588,13 +567,9 @@ pub(crate) fn parse_statement_source_directive_run(
             )
             .into());
         };
-        let (kind, operand_contract) = match spec.kind {
-            StyleDirectiveKind::SourceModifier { target, operand }
-                if spec.contexts.allows_source_modifier() =>
-            {
-                (target.directive_kind(), operand)
-            }
-            _ => {
+        let (kind, operand_contract) = match source_modifier_contract(spec) {
+            Some(contract) => contract,
+            None => {
                 return Err(templates::invalid_template_directive(
                     Some(name_id),
                     InvalidTemplateDirectiveReason::WrongContext,

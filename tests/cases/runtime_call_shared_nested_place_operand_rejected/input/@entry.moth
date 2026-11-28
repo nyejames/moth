@@ -1,0 +1,17 @@
+-- A nested projection is captured whole and named by its authored path.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace |holder ~Holder| -> I32:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+Outer = |inner Holder|
+
+outer ~= Outer(Holder({1}))
+result = inspect(outer.inner.items, replace(~outer.inner))
+~[:[result]]

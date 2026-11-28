@@ -35,6 +35,9 @@ impl<'a> ConstructorFieldView<'a> {
     pub(crate) fn name(self) -> PathId {
         self.record.name
     }
+    pub(crate) fn authored_ordinal(self) -> Option<std::num::NonZeroU32> {
+        self.record.authored_ordinal
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -77,7 +80,7 @@ impl<'a> ArgumentListView<'a> {
     pub(crate) fn len(self) -> usize {
         self.values.len()
     }
-    pub(crate) fn iter(self) -> impl ExactSizeIterator<Item = ArgumentView<'a>> + 'a {
+    pub(crate) fn iter(self) -> impl ExactSizeIterator<Item = ArgumentView<'a>> + Clone + 'a {
         let owner = self.owner;
         self.values
             .iter()

@@ -5,15 +5,15 @@
 //! string vocabulary and [`convert_const_value_to_folded_value_with_provenance`], which maps
 //! the constant store through its iterative postorder visitor into an owned stable value with
 //! no donor-local identity. Public constants and parameter/field defaults share this conversion.
-//! The owned output vocabulary remains recursively structured.
+//! The recursive vocabulary carries inline definitions and backreferences only for shared graphs.
 //!
 //! WHY: public interfaces and runtime template handoffs both outlive donor-local AST and TIR
 //! storage. Keeping their portable string representation here prevents a second parallel piece
 //! enum or duplicate conversion implementation at either boundary.
 
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
-    ConstValueVisit,
+    ConstStringPiece, ConstStringValue, ConstValueGraphVisit, ConstValueId, ConstValueMetadata,
+    ConstValuePayload, ConstValueStore, ConstValueVisit,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
@@ -161,12 +161,12 @@ fn owned_folded_string_from_pieces(
 /// directly exported constants and retained function-parameter, receiver-parameter or
 /// struct-field defaults. Every leaf is an owned stable value: no `TypeId`,
 /// `NominalTypeId`, `StringId`,
-/// `PathId`, source location, AST/TIR identity, HIR ID, local choice tag/index or
+/// `PathId`, AST/TIR identity, HIR ID, local choice tag/index or
 /// absolute path crosses this boundary. Choice variants carry a stable variant name
 /// derived from the donor-local type environment while it is available, not a local tag
-/// index. Option presence is modeled by the recursive `OptionSome`/`OptionNone` variants, not
-/// by a residual coercion operation: the interface contains values, not conversion
-/// instructions.
+/// index. `OptionSome` and `OptionNone` describe option presence without a coercion. A retyping
+/// wrapper in a shared graph keeps the inner type and value so import can rebuild that
+/// allocation relationship.
 ///
 /// WHY: the public interface must own its folded values so downstream provider binding and
 /// cross-module consumers read one backend-neutral value shape instead of donor-local AST
@@ -219,6 +219,32 @@ pub(crate) enum PublicFoldedValue {
     OptionSome(Box<PublicFoldedValue>),
     /// An absent option value.
     OptionNone,
+    /// The first authored occurrence of an allocation reached more than once in this root.
+    AllocationDefinition {
+        index: usize,
+        definition: Box<FoldedAllocationDefinition>,
+    },
+    /// An occurrence of a completed definition in the same root, not a provider row ID.
+    AllocationReference {
+        index: usize,
+        provenance: SyntheticInterfaceProvenance,
+    },
+    /// A normally transparent retyping wrapper around a graph-bearing occurrence, or itself
+    /// shared. Retain the inner type so the receiver can reconstruct separate allocation nodes.
+    AllocationCoercion {
+        inner_type: Box<CanonicalTypeIdentity>,
+        value: Box<PublicFoldedValue>,
+        provenance: SyntheticInterfaceProvenance,
+    },
+}
+
+/// An inline, graph-local definition. Its provenance belongs to this first occurrence only.
+/// Physical source spans stay with their module, outside this semantic equality/hash domain.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct FoldedAllocationDefinition {
+    pub(crate) type_identity: CanonicalTypeIdentity,
+    pub(crate) value: PublicFoldedValue,
+    pub(crate) provenance: SyntheticInterfaceProvenance,
 }
 
 impl PublicFoldedValue {
@@ -258,13 +284,24 @@ impl PublicFoldedValue {
                 end.visit_type_identities(visitor);
             }
             Self::OptionSome(value) => value.visit_type_identities(visitor),
+            Self::AllocationDefinition { definition, .. } => {
+                definition.type_identity.visit(visitor);
+                definition.value.visit_type_identities(visitor);
+            }
+            Self::AllocationCoercion {
+                inner_type, value, ..
+            } => {
+                inner_type.visit(visitor);
+                value.visit_type_identities(visitor);
+            }
             Self::Number(_)
             | Self::FixedScalar(_)
             | Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)
             | Self::ConstTemplate { .. }
-            | Self::OptionNone => {}
+            | Self::OptionNone
+            | Self::AllocationReference { .. } => {}
         }
     }
 }
@@ -525,13 +562,30 @@ pub(crate) fn convert_const_value_to_folded_value(
 /// Convert one module-store value to the owned public folded-value vocabulary and collect the
 /// synthetic-interface provenance of every visited value node.
 ///
-/// WHAT: consumes the store's postorder visitor exactly once. The returned provenance is the
-/// canonical union of the root metadata and every nested folded node's metadata; the folded-value
-/// payload itself remains the existing [`PublicFoldedValue`] vocabulary.
+/// Walk authored edges in order, publishing one definition for each shared allocation and
+/// backreferences thereafter. The aggregate provenance includes both definitions and occurrences.
 pub(crate) fn convert_const_value_to_folded_value_with_provenance(
     const_values: &ConstValueStore,
     value_id: ConstValueId,
     context: &FoldedValueProjectionContext<'_>,
+) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
+    project_folded_value(const_values, value_id, context, true)
+}
+
+/// Read-only configuration metadata consumes a value tree; it has no allocation semantics.
+pub(crate) fn convert_const_value_to_folded_tree(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    context: &FoldedValueProjectionContext<'_>,
+) -> Result<PublicFoldedValue, InfrastructureFailure> {
+    project_folded_value(const_values, value_id, context, false).map(|(value, _)| value)
+}
+
+fn project_folded_value(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    context: &FoldedValueProjectionContext<'_>,
+    preserve_sharing: bool,
 ) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
     let type_environment = context.type_environment;
     let string_table = context.string_table;
@@ -542,11 +596,28 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
         owned_folded_string_from_store_string(value, context.resources, string_table)
     };
 
-    let value = const_values.fold_value(value_id, &mut |metadata, visit| {
+    let project_type = |type_id| {
+        project_type_id_to_canonical_identity(type_id, type_environment, projection_context)
+    };
+    let mut visitor = |metadata: &ConstValueMetadata,
+                       event: ConstValueGraphVisit<'_, PublicFoldedValue>| {
         provenance.merge(&metadata.synthetic_interface_provenance);
         increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
 
-        match visit {
+        let (visit, definition, coerced_inner_type) = match event {
+            ConstValueGraphVisit::Value {
+                visit,
+                definition,
+                coerced_inner_type,
+            } => (visit, definition, coerced_inner_type),
+            ConstValueGraphVisit::Reference(index) => {
+                return Ok(PublicFoldedValue::AllocationReference {
+                    index,
+                    provenance: metadata.synthetic_interface_provenance.clone(),
+                });
+            }
+        };
+        let value = match visit {
             ConstValueVisit::Number(value) => {
                 project_number_value(value, metadata.type_id, type_environment)
             }
@@ -627,7 +698,29 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                 start: Box::new(start),
                 end: Box::new(end),
             }),
-            ConstValueVisit::Coerced(value) => Ok(value),
+            ConstValueVisit::Coerced(value) => {
+                if let Some(inner_type) = coerced_inner_type
+                    && (definition.is_some()
+                        || matches!(
+                            value,
+                            PublicFoldedValue::AllocationDefinition { .. }
+                                | PublicFoldedValue::AllocationReference { .. }
+                                | PublicFoldedValue::AllocationCoercion { .. }
+                        ))
+                {
+                    Ok(PublicFoldedValue::AllocationCoercion {
+                        inner_type: Box::new(project_type(inner_type)?),
+                        value: Box::new(value),
+                        provenance: if definition.is_some() {
+                            SyntheticInterfaceProvenance::empty()
+                        } else {
+                            metadata.synthetic_interface_provenance.clone()
+                        },
+                    })
+                } else {
+                    Ok(value)
+                }
+            }
             ConstValueVisit::OptionSome(value) => {
                 Ok(PublicFoldedValue::OptionSome(Box::new(value)))
             }
@@ -636,8 +729,33 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                 template: template.clone(),
                 folded: folded.map(owned_string).transpose()?,
             }),
-        }
-    })?;
+        }?;
+        Ok(match definition {
+            Some(index) => PublicFoldedValue::AllocationDefinition {
+                index,
+                definition: Box::new(FoldedAllocationDefinition {
+                    type_identity: project_type(metadata.type_id)?,
+                    value,
+                    provenance: metadata.synthetic_interface_provenance.clone(),
+                }),
+            },
+            None => value,
+        })
+    };
+    let value = if preserve_sharing {
+        const_values.fold_value_graph(value_id, &mut visitor)?
+    } else {
+        const_values.fold_value(value_id, &mut |metadata, visit| {
+            visitor(
+                metadata,
+                ConstValueGraphVisit::Value {
+                    visit,
+                    definition: None,
+                    coerced_inner_type: None,
+                },
+            )
+        })?
+    };
 
     Ok((value, provenance))
 }

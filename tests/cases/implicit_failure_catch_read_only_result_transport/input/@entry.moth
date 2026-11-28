@@ -1,0 +1,11 @@
+load || -> String, U32, Error!:
+    return! Error("unavailable", 41)
+;
+
+message, code = load() catch |err|:
+    then err.message, err.code
+;
+
+fallback, fallback_code = load() catch then "fallback", 9
+
+~[: bound=[message]/[code] inline=[fallback]/[fallback_code]]

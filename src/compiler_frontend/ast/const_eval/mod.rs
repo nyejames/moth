@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::field_access::project_explicit_const_record_f
 use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::builtins::casts::policies::BuiltinCastError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
@@ -65,8 +66,8 @@ use std::borrow::Cow;
 pub(crate) enum ConstantFoldError {
     Diagnostic(DiagnosticDraft),
     NumericFailure(DiagnosticDraft),
-    /// A bound refused evaluation. Release speculation converts this to an advisory Note and
-    /// retains the runtime call; required evaluation converts it to an Error.
+    /// A bound refused evaluation. Every evaluation path surfaces this as an error: speculative
+    /// binding folds never swallow a budget refusal, so it always reaches the module build.
     Budget(ConstBudgetExhaustion),
     Infrastructure(Box<InfrastructureErrors>),
 }
@@ -86,15 +87,10 @@ pub(crate) struct ConstBudgetExhaustion {
     pub unit: ConstBudgetUnit,
     pub limit: u64,
     pub setting: Option<&'static str>,
-    pub aggregate: bool,
     /// Innermost source location that spent the allowance.
     pub span: Option<SourceSpan>,
     /// Declaring-domain owner of `span`, when the allowance was spent in a provider body.
     pub span_owner: Option<FrozenIdentityHandle>,
-    /// Innermost refused call site, which owns Note deduplication and display.
-    pub call_span: Option<SourceSpan>,
-    /// Declaring-domain owner of `call_span`.
-    pub call_span_owner: Option<FrozenIdentityHandle>,
     /// Active const-call sites, outermost first, retained for required diagnostics.
     pub call_chain: Vec<OwnedConstCallSite>,
 }
@@ -151,10 +147,25 @@ pub(crate) enum ConstantFoldOutcome {
     },
 }
 
+/// The result of folding an expression for its value alone; no expression row is written.
+#[derive(Debug)]
+pub(crate) enum ConstantValueFold {
+    Value(ConstValueId),
+    NotConstant,
+    Refused(ConstantFoldRefusalReason),
+}
+
 #[derive(Debug)]
 pub(crate) enum ConstantFoldRefusalReason {
     StructuralTextUnavailable(DiagnosticDraft),
     EvaluationOutputBoundExceeded(DiagnosticDraft),
+    /// A supported cast failed on a value discovered in an active const catch.
+    CastConversion {
+        error: BuiltinCastError,
+        source: TypeId,
+        target: TypeId,
+        span: Option<SourceSpan>,
+    },
 }
 
 impl ConstantFoldRefusalReason {
@@ -162,6 +173,17 @@ impl ConstantFoldRefusalReason {
         match self {
             Self::StructuralTextUnavailable(diagnostic)
             | Self::EvaluationOutputBoundExceeded(diagnostic) => diagnostic,
+            Self::CastConversion {
+                source,
+                target,
+                span,
+                ..
+            } => calls_data::invalid_cast(
+                InvalidCastReason::BuiltinCastFailedInConst,
+                Some(source),
+                Some(target),
+                span,
+            ),
         }
     }
 }
@@ -177,6 +199,7 @@ pub(crate) struct FoldServices<'a> {
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) scope: Option<&'a ScopeContext>,
     pub(crate) registry: Option<&'a ExternalPackageRegistry>,
+    recover_cast_failure: bool,
 }
 
 impl<'a> FoldServices<'a> {
@@ -189,7 +212,13 @@ impl<'a> FoldServices<'a> {
             string_table,
             scope,
             registry,
+            recover_cast_failure: false,
         }
+    }
+
+    pub(crate) fn recover_cast_failure(mut self, active_handler: bool) -> Self {
+        self.recover_cast_failure = active_handler;
+        self
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -345,10 +374,10 @@ impl<'a> FoldBoundary<'a> {
     }
 
     fn folds_composites(self) -> bool {
-        matches!(self, Self::Content { .. })
+        !matches!(self, Self::Runtime { .. })
     }
 
-    /// The type environment that composite folds consult; only constant content boundaries carry one.
+    /// Only content boundaries materialize composite values.
     fn types(self) -> Result<&'a TypeEnvironment, InfrastructureFailure> {
         match self {
             Self::Content { types, .. } => Ok(types),
@@ -375,6 +404,7 @@ struct FoldContext<'a, 'prefix, F> {
     strings: &'a mut StringTable,
     lookup: F,
     boundary: FoldBoundary<'a>,
+    recover_cast_failure: bool,
     scope: Option<&'a ScopeContext>,
     registry: Option<&'a ExternalPackageRegistry>,
     /// Expression rows the walk reads. The fold never mutates them.
@@ -500,9 +530,15 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     policy,
                 } => {
                     let view = expressions.view(expression)?;
-                    let value = self.complete_cast(view, policy, &walk.results[base..])?;
+                    let result = self.complete_cast(view, policy, &walk.results[base..])?;
+                    if matches!(
+                        self.refusal,
+                        Some(ConstantFoldRefusalReason::CastConversion { .. })
+                    ) {
+                        return Ok(None);
+                    }
                     walk.results.truncate(base);
-                    walk.results.push(value);
+                    walk.results.push(result);
                 }
                 FoldStep::EnterDecPowerExponent => {
                     let Some(depth) = self.dec_power_exponent_depth.checked_add(1) else {
@@ -809,34 +845,11 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
     ) -> Result<Option<BuiltinCastPolicyId>, ConstantFoldError> {
         #[cfg(feature = "benchmark_counters")]
         increment_frontend_counter(FrontendCounter::CensusCastFoldAttempts);
-        match facts.evidence {
-            ResolvedCastEvidence::Builtin { policy } if policy.is_const_foldable() => {
-                Ok(Some(policy))
-            }
-            ref evidence => {
-                if self.boundary.requirement() == FoldRequirement::Opportunistic {
-                    return Ok(None);
-                }
-                let reason = match evidence {
-                    ResolvedCastEvidence::Builtin { .. } => {
-                        InvalidCastReason::BuiltinEvidenceNotConstFoldable
-                    }
-                    ResolvedCastEvidence::UserDefined { .. } => {
-                        InvalidCastReason::UserDefinedEvidenceNotConstFoldable
-                    }
-                    ResolvedCastEvidence::GenericBound => {
-                        InvalidCastReason::GenericBoundEvidenceNotConstFoldable
-                    }
-                };
-                Err(calls_data::invalid_cast(
-                    reason,
-                    Some(facts.source_type_id),
-                    Some(facts.target_type_id),
-                    original.span(),
-                )
-                .into())
-            }
-        }
+        Ok(const_cast_policy(
+            facts,
+            original.span(),
+            self.boundary.requirement(),
+        )?)
     }
 
     /// Combines the settled children of an expression that [`Self::enter`] parked. `children`
@@ -1094,14 +1107,24 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             },
             _ => return Ok(None),
         };
-        let literal = apply_builtin_cast_policy(policy, &literal).map_err(|_| {
-            calls_data::invalid_cast(
-                InvalidCastReason::BuiltinCastFailedInConst,
-                Some(facts.source_type_id),
-                Some(facts.target_type_id),
-                original.span(),
-            )
-        })?;
+        let literal = match apply_builtin_cast_policy(policy, &literal) {
+            Ok(literal) => literal,
+            Err(error) => {
+                let failure = ConstantFoldRefusalReason::CastConversion {
+                    error,
+                    source: facts.source_type_id,
+                    target: facts.target_type_id,
+                    span: original.span(),
+                };
+                // Source folding must diagnose a known-invalid conversion even under a catch.
+                // An already validated body can discover a recoverable failure on frame values.
+                if self.recover_cast_failure {
+                    self.refusal.get_or_insert(failure);
+                    return Ok(None);
+                }
+                return Err(failure.into_draft().into());
+            }
+        };
         let payload = match literal {
             BuiltinCastLiteral::Bool(value) => ConstValuePayload::Bool(value),
             BuiltinCastLiteral::Fixed(value) => ConstValuePayload::FixedScalar(value),
@@ -1183,6 +1206,33 @@ fn cast_operands(
         }
         _ => Ok(None),
     }
+}
+
+/// Check resolved cast eligibility without evaluating an operand.
+pub(crate) fn const_cast_policy(
+    facts: &CastFacts,
+    span: Option<SourceSpan>,
+    requirement: FoldRequirement,
+) -> Result<Option<BuiltinCastPolicyId>, DiagnosticDraft> {
+    let reason = match facts.evidence {
+        ResolvedCastEvidence::Builtin { policy } if policy.is_const_foldable() => {
+            return Ok(Some(policy));
+        }
+        _ if requirement == FoldRequirement::Opportunistic => return Ok(None),
+        ResolvedCastEvidence::Builtin { .. } => InvalidCastReason::BuiltinEvidenceNotConstFoldable,
+        ResolvedCastEvidence::UserDefined { .. } => {
+            InvalidCastReason::UserDefinedEvidenceNotConstFoldable
+        }
+        ResolvedCastEvidence::GenericBound => {
+            InvalidCastReason::GenericBoundEvidenceNotConstFoldable
+        }
+    };
+    Err(calls_data::invalid_cast(
+        reason,
+        Some(facts.source_type_id),
+        Some(facts.target_type_id),
+        span,
+    ))
 }
 
 enum PayloadFoldOutcome {
@@ -1705,32 +1755,17 @@ fn binary_payload(
             Operator::NotEqual => Some(left != right),
             _ => invalid_operator_for_compile_time_type(&facts.operator, strings, facts.span)?,
         },
-        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
-            if left.scalar() == FixedScalar::Byte && right.scalar() == FixedScalar::Byte =>
-        {
-            left.as_u64()
-                .zip(right.as_u64())
-                .and_then(|(left, right)| comparison_result(&facts.operator, left.cmp(&right)))
+        (ConstValuePayload::FixedScalar(_), ConstValuePayload::FixedScalar(_))
+        | (ConstValuePayload::Char(_), ConstValuePayload::Char(_)) => {
+            fold_nonnumeric_order(left, right, &facts.operator)
         }
         (ConstValuePayload::String(_), ConstValuePayload::String(_)) => {
             if !matches!(facts.operator, Operator::Equality | Operator::NotEqual) {
                 invalid_operator_for_compile_time_type::<()>(&facts.operator, strings, facts.span)?;
             }
-            let requirement = ConstStringRequirement::EqualityComparison;
-            let left = concrete_payload_text(left, span, requirement, strings);
-            let right = concrete_payload_text(right, span, requirement, strings);
-            match (left, right) {
-                (Ok(Some(left)), Ok(Some(right))) => {
-                    Some(if matches!(facts.operator, Operator::Equality) {
-                        left == right
-                    } else {
-                        left != right
-                    })
-                }
-                (Err(diagnostic), _) | (_, Err(diagnostic)) => {
-                    return Ok(PayloadFoldOutcome::TextUnavailable(diagnostic));
-                }
-                _ => None,
+            match fold_text_equality(left, right, &facts.operator, span, strings) {
+                Ok(value) => value,
+                Err(diagnostic) => return Ok(PayloadFoldOutcome::TextUnavailable(diagnostic)),
             }
         }
         _ => None,
@@ -2087,16 +2122,20 @@ pub(crate) fn fold_expression_with_bindings(
     }
 }
 
-pub(crate) fn fold_expression_with_constants(
+/// Fold `root` as constant content, returning its value without writing expression rows.
+///
+/// WHY: const execution and constant resolution consume only the value; a replacement row
+///      committed here would never be referenced.
+pub(crate) fn fold_value_with_constants(
     root: ExprId,
-    builder: &mut AstExpressionBuilder,
+    builder: &AstExpressionBuilder,
     constants: &mut ConstValueStore,
     services: FoldServices<'_>,
     types: &TypeEnvironment,
     requirement: FoldRequirement,
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
-) -> Result<ConstantFoldOutcome, ConstantFoldError> {
-    fold_root(
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    fold_value(
         root,
         builder,
         constants,
@@ -2106,6 +2145,71 @@ pub(crate) fn fold_expression_with_constants(
         0,
     )
 }
+
+/// Complete one original expression from already settled child values, without rewriting its row.
+///
+/// A cast takes the source as its single slot and inherits only source provenance.
+/// Other operands have already executed in authored order and arrive here in resolved slot order.
+pub(crate) fn fold_completed_content(
+    root: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    types: &TypeEnvironment,
+    children: &[Option<ConstValueId>],
+    dec_power_exponent_depth: u32,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    stage_fold_value(
+        builder,
+        constants,
+        services,
+        FoldBoundary::Content {
+            types,
+            requirement: FoldRequirement::Required,
+        },
+        |_| None,
+        dec_power_exponent_depth,
+        |context| {
+            let expression = builder.view(root)?;
+            if !matches!(expression.success_shape(), SuccessShape::One(_)) {
+                return Ok(None);
+            }
+            match expression.operation() {
+                ExpressionOperationView::Constant(_) => {
+                    child_slots::<0>(children)?;
+                    let mut walk = FoldWalk::default();
+                    match context.enter(&mut walk, expression)? {
+                        FoldEntry::Settled(value) => Ok(value),
+                        FoldEntry::Deferred => unreachable!("constant entry must settle"),
+                    }
+                }
+                ExpressionOperationView::Cast { facts, .. } => {
+                    let Some(policy) = context.cast_policy(expression, facts)? else {
+                        return Ok(None);
+                    };
+                    context.complete_cast(expression, policy, children)
+                }
+                _ => {
+                    let mut provenance = SyntheticInterfaceProvenance::default();
+                    for &child in children.iter().flatten() {
+                        if let Some(metadata) = context.values.metadata(child) {
+                            provenance.merge(&metadata.synthetic_interface_provenance);
+                        }
+                    }
+                    let Some(result) = context.complete(expression, children)? else {
+                        return Ok(None);
+                    };
+                    Ok(Some(
+                        context
+                            .values
+                            .with_completed_root_provenance(result, &provenance)?,
+                    ))
+                }
+            }
+        },
+    )
+}
+
 /// Fold one constant-boundary expression (a declaration or signature default).
 ///
 /// Unlike [`constant_fold`], this materialises every foldable constructor (collections, records, choices,
@@ -2155,6 +2259,7 @@ fn multi_result_host_op(
     }
 }
 
+/// Fold `root` and commit the rows that carry its constant result.
 fn fold_root(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
@@ -2164,55 +2269,25 @@ fn fold_root(
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
     initial_dec_power_exponent_depth: u32,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
-    let FoldServices {
-        string_table: strings,
-        scope,
-        registry,
-    } = services;
-    let (existing_constant, success, span, value_mode, classification, occurrence) = {
-        let view = builder.view(root)?;
-        let existing = match view.operation() {
-            ExpressionOperationView::Constant(id) => Some(id),
-            _ => None,
-        };
-        (
-            existing,
-            view.success_shape(),
-            view.span(),
-            view.value_mode(),
-            view.classification(),
-            view.occurrence_facts().cloned(),
-        )
-    };
     let view = builder.view(root)?;
-    // Baseline fold_resolved_cast kept authored eligibility for every fold except a Catch with a Handler.
-    let eligibility = match view.operation() {
-        ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
-            if matches!(block.handler, FallibleHandling::Handler { .. }) =>
-        {
-            None
-        }
-        _ => view
-            .failure_facts()
-            .map(ExpressionFailureFacts::folded_constant_eligibility)
-            .filter(|facts| *facts != ExpressionFailureFacts::default()),
-    };
-    let cast_root = matches!(
-        view.operation(),
-        ExpressionOperationView::Cast { .. }
-            | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
-    );
-    let mut refusal = None;
-    if let Some(operation) = multi_result_host_op(boundary, view, registry) {
+    if let Some(operation) = multi_result_host_op(boundary, view, services.registry) {
         // A Host call with zero or several results folds into one constant result block. Its slot
         // rows commit as one unit; a refused or unsettled call leaves the authored call intact.
+        let FoldServices {
+            string_table: strings,
+            scope,
+            registry,
+            recover_cast_failure,
+        } = services;
         let block_scope = scope.map(|context| context.scope);
+        let mut refusal = None;
         let slots = constants.stage_values(|values| {
             let mut context = FoldContext {
                 values,
                 strings,
                 lookup,
                 boundary,
+                recover_cast_failure,
                 scope,
                 registry,
                 expressions: &*builder,
@@ -2234,64 +2309,151 @@ fn fold_root(
         let (Some(slots), Some(block_scope)) = (slots, block_scope) else {
             return Ok(ConstantFoldOutcome::NotConstant(root));
         };
+        let eligibility = folded_constant_eligibility(view);
         return Ok(ConstantFoldOutcome::Folded(
             commit_constant_result_block(builder, root, &slots, block_scope, eligibility)?.id(),
         ));
     }
-    let value = constants.stage_values(|values| {
-        let mut context = FoldContext {
-            values,
-            strings,
-            lookup,
-            boundary,
-            scope,
-            registry,
-            expressions: &*builder,
-            refusal: None,
-            external_calls: ExternalCallScratch::default(),
-            dec_power_exponent_depth: initial_dec_power_exponent_depth,
-        };
-        let value = context.fold_walk(view.id())?;
-        refusal = context.refusal;
-        Ok::<_, ConstantFoldError>(if refusal.is_some() { None } else { value })
-    })?;
-    if let Some(reason) = refusal {
-        return Ok(ConstantFoldOutcome::Refused { root, reason });
-    }
-    let Some(value) = value else {
-        return Ok(ConstantFoldOutcome::NotConstant(root));
+    let value = match fold_value(
+        root,
+        builder,
+        constants,
+        services,
+        boundary,
+        lookup,
+        initial_dec_power_exponent_depth,
+    )? {
+        ConstantValueFold::Value(value) => value,
+        ConstantValueFold::NotConstant => return Ok(ConstantFoldOutcome::NotConstant(root)),
+        ConstantValueFold::Refused(reason) => {
+            return Ok(ConstantFoldOutcome::Refused { root, reason });
+        }
     };
-    if existing_constant == Some(value) {
+    if matches!(
+        view.operation(),
+        ExpressionOperationView::Constant(existing) if existing == value
+    ) {
         return Ok(ConstantFoldOutcome::Folded(root));
     }
     // A builtin cast result, including a Catch that resolves to one, carries only its source's
     // provenance. The handler named by a Catch occurrence is never part of the success value.
-    let occurrence = match occurrence {
-        Some(mut facts) if cast_root => {
+    let cast_root = matches!(
+        view.operation(),
+        ExpressionOperationView::Cast { .. }
+            | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
+    );
+    let occurrence = view.occurrence_facts().map(|facts| {
+        let mut facts = facts.clone();
+        if cast_root {
             facts.provenance = constants
                 .metadata(value)
                 .map(|source| source.synthetic_interface_provenance.clone())
                 .unwrap_or_default();
-            Some(facts)
         }
-        other => other,
-    };
-    // A folded constant cannot fail at runtime; it keeps only the authored eligibility of the
-    // operation it replaces, never origins or witnesses.
+        facts
+    });
     let input = CompletedExpressionInput {
         operation: ExpressionOp::Constant(value),
-        success,
+        success: view.success_shape(),
         error_type: None,
-        span,
-        value_mode,
-        classification,
-        failure: eligibility,
+        span: view.span(),
+        value_mode: view.value_mode(),
+        classification: view.classification(),
+        failure: folded_constant_eligibility(view),
         occurrence,
     };
     Ok(ConstantFoldOutcome::Folded(
         builder.commit_replacement(input)?.id(),
     ))
 }
+
+/// The failure facts a folded replacement of `view` keeps.
+///
+/// WHY: a folded constant cannot fail at runtime, so it keeps only the authored eligibility of the
+///      operation it replaces, never origins or witnesses. A Catch with a Handler keeps none,
+///      matching baseline `fold_resolved_cast`.
+fn folded_constant_eligibility(view: ExpressionView<'_>) -> Option<ExpressionFailureFacts> {
+    match view.operation() {
+        ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
+            if matches!(block.handler, FallibleHandling::Handler { .. }) =>
+        {
+            None
+        }
+        _ => view
+            .failure_facts()
+            .map(ExpressionFailureFacts::folded_constant_eligibility)
+            .filter(|facts| *facts != ExpressionFailureFacts::default()),
+    }
+}
+
+/// Run one staged fold walk over `root` without writing expression rows.
+///
+/// The walk's reachable values commit to `constants` only when it settles to a value; a refusal
+/// or non-constant result publishes nothing.
+fn fold_value(
+    root: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    boundary: FoldBoundary<'_>,
+    lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+    initial_dec_power_exponent_depth: u32,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    stage_fold_value(
+        builder,
+        constants,
+        services,
+        boundary,
+        lookup,
+        initial_dec_power_exponent_depth,
+        |context| context.fold_walk(root),
+    )
+}
+
+/// Stage either a walk or a completed node under the same publication and refusal rules.
+fn stage_fold_value<F: FnMut(PathId) -> Option<ConstValueId>>(
+    builder: &AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    boundary: FoldBoundary<'_>,
+    lookup: F,
+    initial_dec_power_exponent_depth: u32,
+    evaluate: impl FnOnce(
+        &mut FoldContext<'_, '_, F>,
+    ) -> Result<Option<ConstValueId>, ConstantFoldError>,
+) -> Result<ConstantValueFold, ConstantFoldError> {
+    let FoldServices {
+        string_table: strings,
+        scope,
+        registry,
+        recover_cast_failure,
+    } = services;
+    let mut refusal = None;
+    let value = constants.stage_values(|values| {
+        let mut context = FoldContext {
+            values,
+            strings,
+            lookup,
+            boundary,
+            recover_cast_failure,
+            scope,
+            registry,
+            expressions: builder,
+            refusal: None,
+            external_calls: ExternalCallScratch::default(),
+            dec_power_exponent_depth: initial_dec_power_exponent_depth,
+        };
+        let value = evaluate(&mut context)?;
+        refusal = context.refusal;
+        Ok::<_, ConstantFoldError>(if refusal.is_some() { None } else { value })
+    })?;
+    Ok(match (refusal, value) {
+        (Some(reason), _) => ConstantValueFold::Refused(reason),
+        (None, Some(value)) => ConstantValueFold::Value(value),
+        (None, None) => ConstantValueFold::NotConstant,
+    })
+}
+
 fn attach_source_config_origin_labels(
     mut diagnostic: DiagnosticDraft,
     provenances: &[&SyntheticInterfaceProvenance],
@@ -2838,21 +3000,127 @@ fn fold_numeric_comparison(
     op: &Operator,
     comparison: &ResolvedComparisonOperation,
 ) -> Option<bool> {
-    let ordering = match comparison.domain {
+    fold_numeric_comparison_in_domain(
+        lhs,
+        rhs,
+        op,
+        comparison.domain,
+        (comparison.left_conversion, comparison.right_conversion),
+    )
+}
+
+fn fold_numeric_comparison_in_domain(
+    lhs: &ConstValuePayload,
+    rhs: &ConstValuePayload,
+    op: &Operator,
+    domain: NumericComparisonDomain,
+    (left_conversion, right_conversion): (Option<NumericScalar>, Option<NumericScalar>),
+) -> Option<bool> {
+    let ordering = match domain {
         NumericComparisonDomain::ExactInteger => {
             // Both values widen exactly into i128, including the complete U64 range.
             integer_value_from_payload(lhs)?.cmp(&integer_value_from_payload(rhs)?)
         }
         NumericComparisonDomain::BinaryFloat => {
-            float_value_from_payload(lhs)?.partial_cmp(&float_value_from_payload(rhs)?)?
+            let left = float_value_from_payload(lhs)?;
+            let right = float_value_from_payload(rhs)?;
+            let Some(ordering) = left.partial_cmp(&right) else {
+                // IEEE unordered values never match an equality or relational pattern, but
+                // compare unequal under the ordinary `!=` operator.
+                return Some(matches!(op, Operator::NotEqual));
+            };
+            ordering
         }
         NumericComparisonDomain::Number(scale) => {
-            let left = number_operand_in_domain(lhs, scale, comparison.left_conversion)?;
-            let right = number_operand_in_domain(rhs, scale, comparison.right_conversion)?;
+            let left = number_operand_in_domain(lhs, scale, left_conversion)?;
+            let right = number_operand_in_domain(rhs, scale, right_conversion)?;
             left.coefficient().cmp(right.coefficient())
         }
     };
     comparison_result(op, ordering)
+}
+
+fn fold_nonnumeric_order(
+    left: &ConstValuePayload,
+    right: &ConstValuePayload,
+    op: &Operator,
+) -> Option<bool> {
+    let ordering = match (left, right) {
+        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
+            if left.scalar() == FixedScalar::Byte && right.scalar() == FixedScalar::Byte =>
+        {
+            left.as_u64()?.cmp(&right.as_u64()?)
+        }
+        (ConstValuePayload::Char(left), ConstValuePayload::Char(right)) => left.cmp(right),
+        (ConstValuePayload::Bool(left), ConstValuePayload::Bool(right))
+            if matches!(op, Operator::Equality | Operator::NotEqual) =>
+        {
+            left.cmp(right)
+        }
+        _ => return None,
+    };
+    comparison_result(op, ordering)
+}
+
+fn fold_text_equality(
+    left: &ConstValuePayload,
+    right: &ConstValuePayload,
+    op: &Operator,
+    span: Option<SourceSpan>,
+    strings: &mut StringTable,
+) -> Result<Option<bool>, DiagnosticDraft> {
+    let requirement = ConstStringRequirement::EqualityComparison;
+    let left = concrete_payload_text(left, span, requirement, strings)?;
+    let right = concrete_payload_text(right, span, requirement, strings)?;
+    Ok(left
+        .zip(right)
+        .map(|(left, right)| (left == right) == matches!(op, Operator::Equality)))
+}
+
+/// Compare a match scrutinee with one pattern value of the same value type.
+///
+/// WHAT: `op` is `Equality` for a literal pattern or the relational pattern's operator. Returns
+///       `Ok(None)` when the payloads are not one comparable family.
+/// WHY: a pattern value materialises at its subject's value type, so the payload selects the
+///      comparison domain without resolved comparison facts. Text compares only as final text,
+///      exactly like an equality operator.
+pub(crate) fn fold_pattern_comparison(
+    scrutinee: &ConstValuePayload,
+    pattern: &ConstValuePayload,
+    op: &Operator,
+    span: Option<SourceSpan>,
+    strings: &mut StringTable,
+) -> Result<Option<bool>, DiagnosticDraft> {
+    let domain = match (scrutinee, pattern) {
+        (ConstValuePayload::FixedScalar(left), ConstValuePayload::FixedScalar(right))
+            if left.scalar() == right.scalar() =>
+        {
+            match left.scalar().class() {
+                FixedScalarClass::BinaryFloat => Some(NumericComparisonDomain::BinaryFloat),
+                FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
+                    Some(NumericComparisonDomain::ExactInteger)
+                }
+                FixedScalarClass::Octet => None,
+            }
+        }
+        (ConstValuePayload::Number(left), ConstValuePayload::Number(right))
+            if left.scale() == right.scale() =>
+        {
+            Some(NumericComparisonDomain::Number(left.scale()))
+        }
+        (ConstValuePayload::String(_), ConstValuePayload::String(_))
+            if matches!(op, Operator::Equality) =>
+        {
+            return fold_text_equality(scrutinee, pattern, op, span, strings);
+        }
+        _ => None,
+    };
+    Ok(match domain {
+        Some(domain) => {
+            fold_numeric_comparison_in_domain(scrutinee, pattern, op, domain, (None, None))
+        }
+        None => fold_nonnumeric_order(scrutinee, pattern, op),
+    })
 }
 
 #[cfg(test)]

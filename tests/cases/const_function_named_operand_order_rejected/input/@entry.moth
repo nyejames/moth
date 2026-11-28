@@ -1,0 +1,19 @@
+first_failure #|| -> I32:
+    assert(false, "first parameter")
+    return 0
+;
+
+second_failure #|| -> I32:
+    assert(false, "second parameter, first in source")
+    return 0
+;
+
+combine #|first I32, second I32| -> I32:
+    return first + second
+;
+
+wrapper #|| -> I32:
+    return combine(second = second_failure(), first = first_failure())
+;
+
+~[:[wrapper()]]

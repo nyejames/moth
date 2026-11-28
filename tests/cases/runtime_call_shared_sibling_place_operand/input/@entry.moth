@@ -1,0 +1,16 @@
+-- A call that mutates `pair.right` does not conflict with the still-needed `pair.left`
+-- operand: field-precise call effects keep sibling fields disjoint (BC-06 Slice 2).
+Pair = |left {I32}, right {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace_right |items ~{I32}| -> I32:
+    ~items.push(5)
+    return items.length()
+;
+
+pair ~= Pair({1}, {2})
+result = inspect(pair.left, replace_right(~pair.right))
+~[:[result]]

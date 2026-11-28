@@ -281,7 +281,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
         prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![TemplateFoldBinding {
             path,
-            value: active_value,
+            value: active_value.into(),
         }],
         required_call_rewriter: None,
     };
@@ -705,7 +705,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     context.template_const_loop_iteration_limit = 1;
     context.bindings.push(TemplateFoldBinding {
         path: unrelated_outer_path,
-        value: unrelated_value,
+        value: unrelated_value.into(),
     });
 
     let error = fold_prepared_template(&prepared, view, &mut context)
@@ -738,7 +738,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     assert!(is_i32_literal(
         context.expression_builder,
         context.const_values,
-        context.bindings[0].value,
+        context.bindings[0].value.folded().expect("folded binding"),
         9,
     ));
 }

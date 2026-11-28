@@ -30,7 +30,7 @@ use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocat
 use crate::compiler_frontend::hir::ids::{
     BlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
 };
-use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::module::{BlockIdRemap, HirModule};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
@@ -43,15 +43,31 @@ use crate::compiler_frontend::hir::utils::{collect_structural_blocks, terminator
 use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 
-/// Whether lane installation rewrote the HIR it was given.
-///
-/// WHY: borrow analysis and validation of unchanged HIR would only reproduce the convergence
-///      results, so the caller re-runs them only after a rewrite. Most generated sidecars and
-///      fully proven bodies have no escaping private failure and stay unchanged.
+/// Whether lane installation changed executable allocation inputs or only HIR metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrivateFailureLaneInstallation {
     Unchanged,
+    /// Allocation inputs are unchanged, but link metadata may need refreshing.
+    MetadataOnly,
     Rewritten,
+}
+
+/// Transfer-input changes and the block-layout/link handoff for final convergence.
+///
+/// Block sites use the pre-compaction IDs (including any blocks created during installation).
+/// Function IDs and producer node IDs survive compaction.
+#[derive(Debug, Default)]
+#[allow(dead_code)] // 3b consumes the receipt when reseeding metadata convergence.
+pub(crate) struct PrivateFailureLaneReceipt {
+    pub(crate) outcome_changes: FxHashSet<FunctionId>,
+    pub(crate) producer_splits: FxHashSet<(FunctionId, HirNodeId)>,
+    /// Handlers newly reachable in the structural HIR CFG, not proved executable by transfer.
+    pub(crate) newly_executable_handlers: FxHashSet<(FunctionId, BlockId)>,
+    pub(crate) implicit_failure_retargets: FxHashSet<(FunctionId, BlockId)>,
+    pub(crate) block_remap: BlockIdRemap,
+    /// Existing block-indexed link facts may be stale even with no changed transfer inputs.
+    /// Retain the caller's old topology before refreshing: invalidation uses both edge sets.
+    pub(crate) link_facts_need_refresh: bool,
 }
 
 /// Give escaping private functions one internal builtin-`Error` lane and make
@@ -61,6 +77,36 @@ pub(crate) fn install_private_failure_lanes(
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
     external_packages: &ExternalPackageRegistry,
+) -> Result<PrivateFailureLaneInstallation, HirConstructionFailure> {
+    install_lanes(hir, report, type_environment, external_packages, None)
+}
+
+#[allow(dead_code)] // 3b switches production to the exact receipt.
+pub(crate) fn install_private_failure_lanes_with_receipt(
+    hir: &mut HirModule,
+    report: &BorrowCheckReport,
+    type_environment: &mut TypeEnvironment,
+    external_packages: &ExternalPackageRegistry,
+) -> Result<PrivateFailureLaneReceipt, HirConstructionFailure> {
+    let mut receipt = PrivateFailureLaneReceipt::default();
+    let installation = install_lanes(
+        hir,
+        report,
+        type_environment,
+        external_packages,
+        Some(&mut receipt),
+    )?;
+    receipt.link_facts_need_refresh = installation != PrivateFailureLaneInstallation::Unchanged
+        || receipt.block_remap.renumbered();
+    Ok(receipt)
+}
+
+fn install_lanes(
+    hir: &mut HirModule,
+    report: &BorrowCheckReport,
+    type_environment: &mut TypeEnvironment,
+    external_packages: &ExternalPackageRegistry,
+    receipt: Option<&mut PrivateFailureLaneReceipt>,
 ) -> Result<PrivateFailureLaneInstallation, HirConstructionFailure> {
     let lane_functions = private_lane_functions(hir, report)?;
     let builtin_error = type_environment.type_id_for_canonical_identity(
@@ -74,10 +120,9 @@ pub(crate) fn install_private_failure_lanes(
         .iter()
         .map(|record| (record.statement, record.handler))
         .collect::<FxHashMap<_, _>>();
-    // Draining records, installing return lanes and pruning handlers all change the HIR.
-    let mut rewritten =
-        !records.is_empty() || !handler_records.is_empty() || !lane_functions.is_empty();
-    {
+    let records_drained = !records.is_empty() || !handler_records.is_empty();
+    let mut bodies_rewritten = !lane_functions.is_empty();
+    let metadata_changed = {
         let mut installer = LaneInstaller {
             hir,
             report,
@@ -87,26 +132,40 @@ pub(crate) fn install_private_failure_lanes(
             local_types: FxHashMap::default(),
             next_local: 0,
             next_node: 0,
+            receipt,
         };
         installer.assert_records_reference_live_calls(&records)?;
         installer.prepare_ids()?;
+        installer.record_unrouted_handler_candidates(&records, &handler_records);
         installer.install_return_lanes()?;
-        rewritten |= installer.rewrite_bodies()?;
+        bodies_rewritten |= installer.rewrite_bodies()?;
         installer.retarget_implicit_conversion_failures()?;
-        rewritten |= installer.narrow_entry_return()?;
+        // Keep the legacy classification until 3b, when queue invalidation consumes the
+        // outcome-shape change even if the success slots and executable body are unchanged.
+        let entry_narrowed = installer.narrow_entry_return()?;
+        // Only blocks outside every entry-reachable CFG are removed. The drained
+        // records already account for this metadata change.
         installer.prune_unrouted_catch_handlers(&handler_records);
-        installer.hir.compact_block_ids();
-        rewritten |= installer
+        let block_remap = installer.hir.compact_block_ids();
+        if let Some(receipt) = installer.receipt {
+            receipt.block_remap = block_remap;
+        }
+        let provenance_changed = installer
             .hir
             .finalize_function_provenance_after_rewrites()?;
-    }
-    if !rewritten {
+        records_drained || entry_narrowed || provenance_changed
+    };
+    let result = if bodies_rewritten {
+        PrivateFailureLaneInstallation::Rewritten
+    } else if metadata_changed {
+        PrivateFailureLaneInstallation::MetadataOnly
+    } else {
         return Ok(PrivateFailureLaneInstallation::Unchanged);
-    }
+    };
 
     // Rewrites finish before analysis can consume the final base or generated body.
     validate_hir_module(hir, type_environment, external_packages)?;
-    Ok(PrivateFailureLaneInstallation::Rewritten)
+    Ok(result)
 }
 
 struct LaneInstaller<'a> {
@@ -119,6 +178,7 @@ struct LaneInstaller<'a> {
     local_types: FxHashMap<LocalId, TypeId>,
     next_local: u32,
     next_node: u32,
+    receipt: Option<&'a mut PrivateFailureLaneReceipt>,
 }
 
 impl LaneInstaller<'_> {
@@ -175,6 +235,9 @@ impl LaneInstaller<'_> {
                 ));
             }
             returns.set_error(Some(error_type));
+            if let Some(receipt) = &mut self.receipt {
+                receipt.outcome_changes.insert(function.id);
+            }
         }
         Ok(())
     }
@@ -438,6 +501,9 @@ impl LaneInstaller<'_> {
             failure,
             error_result,
         };
+        if let Some(receipt) = &mut self.receipt {
+            receipt.producer_splits.insert((function_id, statement.id));
+        }
         Ok(())
     }
 
@@ -472,6 +538,42 @@ impl LaneInstaller<'_> {
         Ok(())
     }
 
+    fn record_unrouted_handler_candidates(
+        &mut self,
+        records: &[CatchProtectedCall],
+        handlers: &[CatchHandlerRecord],
+    ) {
+        let Some(receipt) = &mut self.receipt else {
+            return;
+        };
+        if records.is_empty() || handlers.is_empty() {
+            return;
+        }
+
+        // A split can open a catch only in an owner with a pending protected call. A new
+        // edge alone is not proof: an explicit Invoke may already reach the same handler.
+        let owners = records
+            .iter()
+            .map(|record| record.owner)
+            .collect::<FxHashSet<_>>();
+        let entry_reachable = self
+            .hir
+            .functions
+            .iter()
+            .filter(|function| owners.contains(&function.id))
+            .flat_map(|function| collect_structural_blocks(self.hir, function.entry))
+            .collect::<FxHashSet<_>>();
+        receipt.newly_executable_handlers.extend(
+            handlers
+                .iter()
+                .filter(|record| {
+                    owners.contains(&record.owner)
+                        && !entry_reachable.contains(&record.handler.block)
+                })
+                .map(|record| (record.owner, record.handler.block)),
+        );
+    }
+
     /// Deletes catch handler subgraphs that no routed error edge reaches.
     ///
     /// WHAT: convergence may prove every protected call infallible, leaving the lowering-time
@@ -489,6 +591,11 @@ impl LaneInstaller<'_> {
             .iter()
             .flat_map(|function| collect_structural_blocks(self.hir, function.entry))
             .collect::<FxHashSet<_>>();
+        if let Some(receipt) = &mut self.receipt {
+            receipt
+                .newly_executable_handlers
+                .retain(|(_, block)| entry_reachable.contains(block));
+        }
         // Several records may share one handler, and handler subgraphs may overlap, so
         // deduplicated roots share a single visited set. The walk stops at
         // entry-reachable blocks: successors of a shared merge belong to a live CFG.
@@ -578,6 +685,11 @@ impl LaneInstaller<'_> {
                 let payload = self.load(error, error_type, region)?;
                 self.hir.blocks[block_id.0 as usize].terminator =
                     HirTerminator::ReturnError(payload);
+                if let Some(receipt) = &mut self.receipt {
+                    receipt
+                        .implicit_failure_retargets
+                        .insert((function_id, block_id));
+                }
             }
         }
         Ok(())
@@ -616,6 +728,9 @@ impl LaneInstaller<'_> {
             .ordinary_mut()
         {
             returns.set_error(None);
+            if let Some(receipt) = &mut self.receipt {
+                receipt.outcome_changes.insert(function_id);
+            }
         }
         Ok(true)
     }

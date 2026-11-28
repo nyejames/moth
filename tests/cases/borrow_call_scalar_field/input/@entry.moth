@@ -1,0 +1,9 @@
+Saved = |item I32, count I32|
+pack |item I32| -> Saved:
+    return Saved(item, 3)
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k")!
+saved = pack(score)
+~scores.clear()
+~[:[saved.item]]

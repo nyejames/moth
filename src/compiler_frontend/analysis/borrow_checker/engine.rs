@@ -8,35 +8,193 @@ use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState, RootSet,
+    AllocationRetirement, BorrowState, CapturedValue, CellId, FunctionLayout, LocalState, OrderKey,
+    RootSet, StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, WrapperId,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
+    AccessFootprint, Carrier, Demand, ObservationBoundary, ObservationCheckpoint, PlaceUse,
+    ValueObservations,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+    CapturedPosts, MatchedComponent, MatchedLane, MatchedStratum,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BlockTransferStats, BorrowTransferContext, transfer_block,
+    BlockTransferStats, BorrowTransferContext, CapturedCallBatch, CapturedDestination,
+    EdgeTransferView, InvokeLayerOp, InvokeTransfer, OperationView, transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
     LocalMode, ValueBorrowFact,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalTypeIdentity, CanonicalTypeProjectionContext, project_type_id_to_canonical_identity,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::try_for_each_terminator_target;
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::{VecDeque, hash_map::Entry};
+use std::borrow::Cow;
+#[cfg(test)]
+use std::cell::RefCell;
+use std::collections::{BTreeSet, BinaryHeap, VecDeque, hash_map::Entry};
+use std::rc::Rc;
 
 #[cfg(test)]
 #[path = "transfer/tests/invoke_edge_tests.rs"]
 mod invoke_edge_tests;
 
+struct ForwardEdgeSource<'a> {
+    function: FunctionId,
+    block: &'a HirBlock,
+    view: EdgeTransferView<'a>,
+    order: OrderKey,
+}
+
+pub(super) struct SparseEvaluation {
+    pub exits: FxHashMap<BlockId, FxHashSet<Rc<BorrowState>>>,
+    pub retained: BTreeSet<usize>,
+}
+
+#[derive(Default)]
+struct FunctionObservations {
+    blocks: FxHashMap<BlockId, ValueObservations>,
+    edges: FxHashMap<(BlockId, usize), ValueObservations>,
+    diverges: FxHashSet<BlockId>,
+}
+
+impl FunctionObservations {
+    fn record_block(
+        &mut self,
+        block: BlockId,
+        observations: ValueObservations,
+        diverges: bool,
+    ) -> bool {
+        let divergence_changed = if diverges {
+            self.diverges.insert(block)
+        } else {
+            self.diverges.remove(&block)
+        };
+        if observations.is_empty() {
+            self.blocks.remove(&block);
+        } else {
+            self.blocks.insert(block, observations);
+        }
+        divergence_changed
+    }
+
+    fn solve<'s>(
+        &'s self,
+        layout: &FunctionLayout,
+        outputs: &FxHashMap<BlockId, BorrowState>,
+        invokes: &FxHashMap<BlockId, InvokeTransfer>,
+    ) -> Option<(BlockId, &'s ObservationCheckpoint, &'s Carrier)> {
+        if !self
+            .blocks
+            .values()
+            .chain(self.edges.values())
+            .any(ValueObservations::has_obligations)
+        {
+            return None;
+        }
+        let executable = |block, edge| {
+            !self.diverges.contains(&block)
+                && invokes.get(&block).is_none_or(|invoke| {
+                    if edge == 0 {
+                        !invoke.success.unreachable
+                    } else {
+                        !invoke.error.unreachable
+                    }
+                })
+        };
+        let successors = |block| {
+            layout.block_successors[&block]
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(move |&(edge, successor)| {
+                    executable(block, edge) && outputs.contains_key(&successor)
+                })
+        };
+
+        let mut predecessors = FxHashMap::<BlockId, Vec<BlockId>>::default();
+        for &block in outputs.keys() {
+            for (_, successor) in successors(block) {
+                predecessors.entry(successor).or_default().push(block);
+            }
+        }
+        let mut pending: FxHashSet<_> = self
+            .blocks
+            .keys()
+            .copied()
+            .chain(self.edges.keys().map(|&(block, _)| block))
+            .collect();
+        let mut worklist: VecDeque<_> = pending.iter().copied().collect();
+        let mut entry_demand = FxHashMap::<BlockId, Demand>::default();
+        let mut conflict: Option<(BlockId, &ObservationCheckpoint, &Carrier)> = None;
+        while let Some(block) = worklist.pop_front() {
+            pending.remove(&block);
+            let mut check = |checkpoint: &'s ObservationCheckpoint, demand: &Demand| {
+                let offender = checkpoint
+                    .candidates
+                    .iter()
+                    .filter(|carrier| {
+                        demand.contains(*carrier) || checkpoint.pending.contains(*carrier)
+                    })
+                    .min();
+                if let Some(offender) = offender
+                    && conflict.is_none_or(|(prior_block, prior, prior_offender)| {
+                        (checkpoint.order, checkpoint.span, block.0, offender)
+                            < (prior.order, prior.span, prior_block.0, prior_offender)
+                    })
+                {
+                    conflict = Some((block, checkpoint, offender));
+                }
+            };
+            let mut demand = Demand::default();
+            for (edge, successor) in successors(block) {
+                let next = entry_demand.get(&successor);
+                if let Some(summary) = self.edges.get(&(block, edge)) {
+                    let mut edge_demand = next.cloned().unwrap_or_default();
+                    summary.backward(&mut edge_demand, &mut check);
+                    demand.extend(edge_demand);
+                } else if let Some(next) = next {
+                    demand.extend(next.iter().cloned());
+                }
+            }
+            if let Some(summary) = self.blocks.get(&block) {
+                summary.backward(&mut demand, check);
+            }
+            if !demand.is_empty() && entry_demand.get(&block) != Some(&demand) {
+                entry_demand.insert(block, demand);
+                if let Some(predecessors) = predecessors.get(&block) {
+                    for &pred in predecessors {
+                        if pending.insert(pred) {
+                            worklist.push_back(pred);
+                        }
+                    }
+                }
+            }
+        }
+        conflict
+    }
+}
+
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
     pub(super) type_environment: &'a TypeEnvironment,
+    type_projection: CanonicalTypeProjectionContext<'a>,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) string_table: &'a StringTable,
     pub(super) path_fork: &'a PathInternerFork,
@@ -46,10 +204,31 @@ pub(super) struct BorrowChecker<'a> {
     pub(super) region_parent_by_id: FxHashMap<RegionId, Option<RegionId>>,
     // One frontend-owned local call contract used by transfer and retained for semantic consumers.
     pub(super) public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
+    pub(super) local_types: FxHashMap<LocalId, TypeId>,
+    #[cfg(test)]
+    pub(super) forward_probe: Option<RefCell<ForwardProbe>>,
 }
 
 impl<'a> BorrowChecker<'a> {
     pub(super) fn new(
+        module: &'a HirModule,
+        type_environment: &'a TypeEnvironment,
+        external_package_registry: &'a ExternalPackageRegistry,
+        path_fork: &'a PathInternerFork,
+        string_table: &'a StringTable,
+    ) -> Self {
+        Self::without_transfer_indices(
+            module,
+            type_environment,
+            external_package_registry,
+            path_fork,
+            string_table,
+        )
+        .with_local_types()
+        .with_region_parents()
+    }
+
+    pub(super) fn without_transfer_indices(
         module: &'a HirModule,
         type_environment: &'a TypeEnvironment,
         external_package_registry: &'a ExternalPackageRegistry,
@@ -63,31 +242,86 @@ impl<'a> BorrowChecker<'a> {
             .map(|(index, block)| (block.id, index))
             .collect::<FxHashMap<_, _>>();
 
-        let region_parent_by_id = module
-            .regions
-            .iter()
-            .map(|region| (region.id(), region.parent()))
-            .collect::<FxHashMap<_, _>>();
         Self {
             module,
             type_environment,
+            type_projection:
+                crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                    type_environment,
+                    external_package_registry,
+                ),
             external_package_registry,
             string_table,
             path_fork,
             diagnostics: BorrowDiagnostics::new(module, path_fork, string_table),
             block_index_by_id,
-            region_parent_by_id,
+            region_parent_by_id: FxHashMap::default(),
             public_call_summaries: FxHashMap::default(),
+            local_types: FxHashMap::default(),
+            #[cfg(test)]
+            forward_probe: None,
         }
     }
 
-    pub(super) fn run(mut self) -> Result<BorrowCheckReport, BorrowCheckError> {
-        // WHAT: run the module-level borrow-analysis driver in four phases:
-        // metadata precomputation, per-function fixed-point transfer, summary finalization, then
-        // fact/report assembly.
-        // WHY: transfer needs allocation-light O(1) metadata lookups, while downstream tooling
-        //      expects one consolidated report containing both facts and summary snapshots.
-        self.build_public_call_summaries()?;
+    pub(super) fn with_type_projection(
+        mut self,
+        projection: &CanonicalTypeProjectionContext<'a>,
+    ) -> Self {
+        self.type_projection = *projection;
+        self
+    }
+
+    pub(super) fn project_type(&self, ty: TypeId) -> Option<CanonicalTypeIdentity> {
+        project_type_id_to_canonical_identity(ty, self.type_environment, &self.type_projection).ok()
+    }
+
+    pub(super) fn with_local_types(mut self) -> Self {
+        self.local_types = self
+            .module
+            .blocks
+            .iter()
+            .flat_map(|block| &block.locals)
+            .map(|local| (local.id, local.ty))
+            .collect();
+        self
+    }
+
+    fn with_region_parents(mut self) -> Self {
+        self.region_parent_by_id = self
+            .module
+            .regions
+            .iter()
+            .map(|region| (region.id(), region.parent()))
+            .collect();
+        self
+    }
+
+    pub(super) fn transfer_context(&self) -> BorrowTransferContext<'_> {
+        BorrowTransferContext {
+            external_package_registry: self.external_package_registry,
+            public_call_summaries: &self.public_call_summaries,
+            imported_call_summaries: &self.module.imported_call_summaries,
+            module_private_call_summaries: &self.module.module_private_call_summaries,
+            generated_call_summaries: &self.module.generated_call_summaries,
+            local_types: &self.local_types,
+            structs: &self.module.structs,
+            choices: &self.module.choices,
+            expressions: &self.module.expressions,
+            type_environment: self.type_environment,
+            type_projection: self.type_projection,
+            diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
+        }
+    }
+
+    pub(super) fn run(
+        mut self,
+        summaries: Option<FxHashMap<FunctionId, PublicCallSummary>>,
+    ) -> Result<BorrowCheckReport, BorrowCheckError> {
+        if let Some(summaries) = summaries {
+            self.public_call_summaries = summaries;
+        } else {
+            self.build_public_call_summaries()?;
+        }
 
         let mut report = BorrowCheckReport::default();
 
@@ -115,7 +349,7 @@ impl<'a> BorrowChecker<'a> {
         Ok(report)
     }
 
-    fn analyze_function(
+    pub(super) fn analyze_function(
         &mut self,
         function_index: usize,
         report: &mut BorrowCheckReport,
@@ -126,24 +360,15 @@ impl<'a> BorrowChecker<'a> {
         // 3) Persist facts + entry/exit snapshots for reachable blocks.
         let function = &self.module.functions[function_index];
         let reachable_blocks = self.collect_reachable_blocks(function)?;
-        let reachable_block_set = reachable_blocks.iter().copied().collect::<FxHashSet<_>>();
         let layout = self.build_function_layout(function, &reachable_blocks)?;
         let visible_locals_by_block = &layout.visible_locals_by_block;
 
-        let transfer_context = BorrowTransferContext {
-            external_package_registry: self.external_package_registry,
-            public_call_summaries: &self.public_call_summaries,
-            imported_call_summaries: &self.module.imported_call_summaries,
-            module_private_call_summaries: &self.module.module_private_call_summaries,
-            generated_call_summaries: &self.module.generated_call_summaries,
-            expressions: &self.module.expressions,
-            diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
-        };
+        let transfer_context = self.transfer_context();
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
-        let mut invoke_results_by_block =
-            FxHashMap::<BlockId, Vec<(LocalId, LocalState)>>::default();
+        let mut invoke_by_block = FxHashMap::<BlockId, InvokeTransfer>::default();
+        let mut observations = FunctionObservations::default();
         // HIR expression rows are immutable and may be shared across blocks. Keep only the
         // latest facts for each block during fixed-point iteration, then merge those surviving
         // snapshots after the state has stabilized.
@@ -152,6 +377,14 @@ impl<'a> BorrowChecker<'a> {
 
         // Entry state starts as UNINIT, with parameters immediately initialized.
         let mut initial_state = BorrowState::new_uninitialized(layout.local_count());
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            initial_state = probe.borrow().entry.clone();
+        }
+        #[cfg(test)]
+        let supplied_entry = self.forward_probe.is_some();
+        #[cfg(not(test))]
+        let supplied_entry = false;
         for param in &function.params {
             let Some(param_index) = layout.index_of(*param) else {
                 return Err(self.diagnostics.internal_error(format!(
@@ -160,7 +393,9 @@ impl<'a> BorrowChecker<'a> {
                 )));
             };
 
-            initial_state.initialize_parameter(param_index);
+            if !supplied_entry {
+                initial_state.initialize_parameter(param_index);
+            }
         }
 
         if let Some(mask) = visible_locals_by_block.get(&function.entry) {
@@ -168,12 +403,13 @@ impl<'a> BorrowChecker<'a> {
         }
         in_states.insert(function.entry, initial_state);
 
-        // `pending` mirrors queue membership so a block whose input grows from several
-        // predecessors before it runs is visited once with the accumulated input.
-        let mut worklist = VecDeque::new();
-        let mut pending = FxHashSet::default();
-        worklist.push_back(function.entry);
-        pending.insert(function.entry);
+        let mut worklist = ForwardWorklist::new(function.entry, &layout.block_successors);
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            let probe = probe.borrow();
+            worklist.fifo = probe.fifo.then(|| VecDeque::from([function.entry]));
+            worklist.reverse_siblings = probe.reverse_siblings;
+        }
 
         let mut summary = FunctionBorrowSummary {
             reachable_blocks: reachable_blocks.len(),
@@ -188,10 +424,12 @@ impl<'a> BorrowChecker<'a> {
             reachable_blocks.len()
         ));
 
-        // Standard forward fixed-point iteration over reachable blocks.
-        while let Some(block_id) = worklist.pop_front() {
-            // Clear before transfer so a self-loop or later back edge can queue the block again.
-            pending.remove(&block_id);
+        // Keep diagnostic priority independent of fact publication order.
+        while let Some(block_id) = worklist.pop() {
+            #[cfg(test)]
+            if let Some(probe) = &self.forward_probe {
+                probe.borrow_mut().dequeues.push(block_id);
+            }
             summary.worklist_iterations += 1;
 
             // Stored inputs are already narrowed to this block's visibility: the entry state and
@@ -200,6 +438,11 @@ impl<'a> BorrowChecker<'a> {
             let Some(input_state) = in_states.get(&block_id) else {
                 continue;
             };
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(
+                FrontendCounter::BorrowValidationRowsCloned,
+                input_state.validation_row_count(),
+            );
             let mut output_state = input_state.clone();
 
             let block = self.block_by_id_or_error(block_id, function.id)?;
@@ -226,48 +469,120 @@ impl<'a> BorrowChecker<'a> {
                     .insert(terminator_block, fact);
             }
             final_value_facts_by_block.insert(block_id, block_stats.value_facts);
-            let changed_out = match out_states.get(&block_id) {
-                Some(existing) => existing != &output_state,
-                None => true,
-            } || (!block_stats.invoke_results.is_empty()
-                && invoke_results_by_block.get(&block_id) != Some(&block_stats.invoke_results));
+            let divergence_changed =
+                observations.record_block(block_id, block_stats.observations, block_stats.diverges);
+            let invoke = block_stats.invoke;
+            let previous_invoke = invoke_by_block.get(&block_id);
+            let has_invoke_effects = !invoke.is_empty();
+            let changed_out = out_states.get(&block_id) != Some(&output_state)
+                || divergence_changed
+                || previous_invoke.map_or(has_invoke_effects, |previous| previous != &invoke);
 
             // If output state is unchanged, successor joins cannot change either.
             if !changed_out {
                 continue;
             }
 
-            try_for_each_terminator_target(&block.terminator, |successor| {
-                if !reachable_block_set.contains(&successor) {
+            let mut deliver_edge = |edge_index, successor| {
+                let edge = (block_id, edge_index);
+                #[cfg(test)]
+                if let Some(probe) = &self.forward_probe {
+                    probe.borrow_mut().deliveries.push(edge);
+                }
+                if block_stats.diverges {
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
+                    observations.edges.remove(&edge);
+                    return Ok::<(), BorrowCheckError>(());
+                }
+                let invoke_lane = if matches!(&block.terminator, HirTerminator::Invoke { .. }) {
+                    Some([&invoke.success, &invoke.error][edge_index])
+                } else {
+                    None
+                };
+                if invoke_lane.is_some_and(|lane| lane.unreachable) {
+                    observations.edges.remove(&edge);
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
+                    return Ok::<(), BorrowCheckError>(());
+                }
+                if !worklist.ranks.contains_key(&successor) {
+                    return Ok::<(), BorrowCheckError>(());
+                }
+                if !super::transfer::access::option_edge_is_possible(
+                    OperationView::from_layout(&layout),
+                    &output_state,
+                    &self.module.expressions,
+                    &block.terminator,
+                    successor,
+                ) {
+                    observations.edges.remove(&edge);
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
                     return Ok::<(), BorrowCheckError>(());
                 }
 
-                let mut successor_input = output_state.clone();
-                apply_invoke_edge_transfer(
-                    &layout,
-                    &block.terminator,
-                    successor,
-                    &block_stats.invoke_results,
-                    &mut successor_input,
+                #[cfg(feature = "benchmark_counters")]
+                add_frontend_counter(
+                    FrontendCounter::BorrowValidationRowsCloned,
+                    output_state.validation_row_count(),
                 );
-                self.apply_jump_argument_transfer(
-                    function.id,
-                    &layout,
-                    &block.terminator,
+                let mut successor_input = output_state.clone();
+                let mut edge_observations = self.apply_forward_edge(
+                    &ForwardEdgeSource {
+                        function: function.id,
+                        block,
+                        view: EdgeTransferView::from(&layout),
+                        order: layout.terminator_order_or_unknown(block_id),
+                    },
                     successor,
+                    invoke_lane,
                     &mut successor_input,
                 )?;
 
                 // Apply lexical visibility kills before join to prevent
                 // branch-local aliases from leaking into outer regions.
-                if let Some(mask) = visible_locals_by_block.get(&successor) {
+                if let Some(mask) = visible_locals_by_block.get(&successor)
+                    && !mask.covers_all(layout.local_count())
+                {
+                    let before = edge_observations.before_rekey(&successor_input);
                     successor_input.kill_invisible(mask);
+                    edge_observations.after_rekey(
+                        before,
+                        &successor_input,
+                        |slot| slot.retired(|local| !mask.contains(local)),
+                        |id| successor_input.visible_allocation(id, mask),
+                    );
+                }
+                #[cfg(test)]
+                if let Some(probe) = &self.forward_probe {
+                    probe
+                        .borrow_mut()
+                        .edges
+                        .insert(edge, successor_input.clone());
+                }
+                if !edge_observations.is_empty() {
+                    observations.edges.insert(edge, edge_observations);
+                } else {
+                    observations.edges.remove(&edge);
                 }
 
                 // Revisit successors only when their input state grows.
                 let changed_in = match in_states.get_mut(&successor) {
                     Some(existing) => {
                         report.stats.state_joins += 1;
+                        #[cfg(feature = "benchmark_counters")]
+                        add_frontend_counter(
+                            FrontendCounter::BorrowValidationRowsJoined,
+                            existing.validation_row_count()
+                                + successor_input.validation_row_count(),
+                        );
                         existing.join_in_place(&successor_input)
                     }
                     None => {
@@ -275,17 +590,78 @@ impl<'a> BorrowChecker<'a> {
                         true
                     }
                 };
-                if changed_in && pending.insert(successor) {
-                    worklist.push_back(successor);
+                if changed_in {
+                    worklist.push(successor);
                 }
 
                 Ok::<(), BorrowCheckError>(())
-            })?;
+            };
+            #[cfg(test)]
+            let reverse_delivery = self
+                .forward_probe
+                .as_ref()
+                .is_some_and(|probe| probe.borrow().reverse_delivery);
+            #[cfg(not(test))]
+            let reverse_delivery = false;
+            if reverse_delivery {
+                let mut edges = Vec::new();
+                try_for_each_terminator_target(&block.terminator, |successor| {
+                    edges.push((edges.len(), successor));
+                    Ok::<_, BorrowCheckError>(())
+                })?;
+                for (index, successor) in edges.into_iter().rev() {
+                    deliver_edge(index, successor)?;
+                }
+            } else {
+                let mut edge_index = 0;
+                try_for_each_terminator_target(&block.terminator, |successor| {
+                    let index = edge_index;
+                    edge_index += 1;
+                    deliver_edge(index, successor)
+                })?;
+            }
+            #[cfg(test)]
+            worklist.finish_successors();
 
             out_states.insert(block_id, output_state);
-            if !block_stats.invoke_results.is_empty() {
-                invoke_results_by_block.insert(block_id, block_stats.invoke_results);
+            if has_invoke_effects {
+                invoke_by_block.insert(block_id, invoke);
+            } else {
+                invoke_by_block.remove(&block_id);
             }
+        }
+        #[cfg(test)]
+        if let Some(probe) = &self.forward_probe {
+            let mut probe = probe.borrow_mut();
+            probe.block_observations = observations.blocks.clone();
+            probe.observations = observations
+                .edges
+                .iter()
+                .map(|(&edge, observations)| (edge, observations.clone()))
+                .collect();
+        }
+
+        // The verdict uses final executable edges and cannot change forward state.
+        if let Some((block, at, carrier)) =
+            observations.solve(&layout, &out_states, &invoke_by_block)
+        {
+            let local = match carrier {
+                Carrier::Cell(CellId::Slot(slot), ..) | Carrier::Route(slot, ..) => {
+                    Some(slot.local)
+                }
+                Carrier::Cell(CellId::Projected(holder, _), ..) => {
+                    out_states[&block].alloc_origin_local(*holder)
+                }
+            };
+            let diagnostics = &transfer_context.diagnostics;
+            let name = |local: usize| diagnostics.local_place(layout.local_ids[local]);
+            return Err(diagnostics.invalid_mutable_access(
+                at.actor.map_or(DiagnosticPlace::Unknown, name),
+                InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+                local.map(name),
+                local.and_then(|local| diagnostics.local_source_span(layout.local_ids[local])),
+                at.span,
+            ));
         }
 
         // A row may be observed under different final states in different blocks or functions.
@@ -335,7 +711,7 @@ impl<'a> BorrowChecker<'a> {
         Ok(summary)
     }
 
-    fn finalize_public_call_summary_effects_to_fixed_point(
+    pub(super) fn finalize_public_call_summary_effects_to_fixed_point(
         &mut self,
         report: &mut BorrowCheckReport,
     ) -> Result<(), BorrowCheckError> {
@@ -349,14 +725,14 @@ impl<'a> BorrowChecker<'a> {
 
         for _ in 0..max_iterations {
             let mut changed = false;
-            for function_index in 0..self.module.functions.len() {
-                let function = self.module.functions[function_index].clone();
-                let reachable_blocks = self.collect_reachable_blocks(&function)?;
-                changed |= self.finalize_public_call_summary_effects(
-                    &function,
-                    &reachable_blocks,
-                    report,
-                )?;
+            let module = self.module;
+            for function in &module.functions {
+                if function.params.is_empty() {
+                    continue;
+                }
+                let reachable_blocks = self.collect_reachable_blocks(function)?;
+                changed |=
+                    self.finalize_public_call_summary_effects(function, &reachable_blocks, report)?;
             }
 
             if !changed {
@@ -445,8 +821,7 @@ impl<'a> BorrowChecker<'a> {
         let mut locals = Vec::new();
 
         for (index, local_id) in layout.local_ids.iter().enumerate() {
-            let local_state = state.local_state(index);
-            if local_state.mode.contains(LocalMode::SLOT) {
+            if state.binding_mode(index).contains(LocalMode::SLOT) {
                 locals.push(*local_id);
             }
         }
@@ -512,23 +887,263 @@ impl<'a> BorrowChecker<'a> {
         total.conflicts_checked += block.conflicts_checked;
     }
 
+    /// Keep alternatives of the fixed support separate until boundary export.
+    pub(super) fn evaluate_sparse_support(
+        &self,
+        function: &HirFunction,
+        mut entry: BorrowState,
+        support: &super::metadata::ProjectedSupport<'_>,
+    ) -> Result<SparseEvaluation, BorrowCheckError> {
+        use super::transfer::transfer_sparse_block;
+
+        let context = self.transfer_context();
+        let recurring = support.recurring_blocks();
+        let acyclic = recurring.is_empty();
+        entry.use_indexed_recurring_blocks(recurring);
+        if let Some(mask) = support.visibility(function.entry) {
+            entry.kill_invisible(mask);
+        }
+        let entry_block = support.continuation(function.entry);
+        let mut worklist = ForwardWorklist::with_ranks(entry_block, support.ranks());
+        let entry = Rc::new(entry);
+        let mut inputs = FxHashMap::<_, (FxHashSet<_>, Vec<_>)>::default();
+        inputs.insert(
+            entry_block,
+            (FxHashSet::from_iter([Rc::clone(&entry)]), vec![entry]),
+        );
+        let mut result = SparseEvaluation {
+            exits: FxHashMap::default(),
+            retained: BTreeSet::new(),
+        };
+        while let Some(block_id) = worklist.pop() {
+            let block = self.block_by_id_or_error(block_id, function.id)?;
+            if matches!(block.terminator, HirTerminator::Uninitialized) {
+                return Err(context
+                    .diagnostics
+                    .internal_error("Missing terminator during sparse borrow transfer"));
+            }
+            let pending = if acyclic {
+                // Every predecessor has already run in topological order.
+                inputs.remove(&block_id).expect("queued sparse inputs").1
+            } else {
+                std::mem::take(&mut inputs.get_mut(&block_id).expect("queued sparse inputs").1)
+            };
+            for state in pending {
+                let view = support.block_view(block_id);
+                let source = ForwardEdgeSource {
+                    function: function.id,
+                    block,
+                    view: EdgeTransferView {
+                        operations: view.operations,
+                    },
+                    order: view.terminator_order,
+                };
+                let transfer_terminator =
+                    view.transfer_terminator || view.structural_terminator.is_some();
+                for (state, invoke) in
+                    transfer_sparse_block(&context, view, block, state, &mut result.retained)?
+                {
+                    self.transfer_sparse_successors(
+                        &source,
+                        transfer_terminator.then_some(&invoke),
+                        &state,
+                        support,
+                        |successor, incoming| {
+                            let (seen, pending) = inputs.entry(successor).or_default();
+                            if seen.insert(Rc::clone(&incoming)) {
+                                pending.push(incoming);
+                                worklist.push(successor);
+                            }
+                        },
+                    )?;
+                    if cfg!(test)
+                        || matches!(
+                            block.terminator,
+                            HirTerminator::Return(_) | HirTerminator::ReturnError(_)
+                        )
+                    {
+                        result.exits.entry(block_id).or_default().insert(state);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    #[cfg(test)]
+    pub(super) fn drive_sparse_support(
+        &self,
+        function: &HirFunction,
+        entry: BorrowState,
+        support: &super::metadata::ProjectedSupport<'_>,
+    ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
+        Ok(self
+            .evaluate_sparse_support(function, entry, support)?
+            .exits
+            .into_iter()
+            .map(|(block, states)| {
+                let mut states = states.into_iter();
+                let mut joined = states.next().expect("exits are nonempty");
+                for incoming in states {
+                    Rc::make_mut(&mut joined).join_in_place(&incoming);
+                }
+                (block, joined)
+            })
+            .collect())
+    }
+
+    fn transfer_sparse_successors(
+        &self,
+        source: &ForwardEdgeSource<'_>,
+        terminator_effects: Option<&InvokeTransfer>,
+        state: &Rc<BorrowState>,
+        support: &super::metadata::ProjectedSupport<'_>,
+        mut deliver: impl FnMut(BlockId, Rc<BorrowState>),
+    ) -> Result<(), BorrowCheckError> {
+        let terminator = &source.block.terminator;
+        let mut lanes = terminator_effects
+            .filter(|_| matches!(terminator, HirTerminator::Invoke { .. }))
+            .map(|invoke| [&invoke.success, &invoke.error].into_iter());
+        let jump_rebinds = terminator_effects.is_some()
+            && matches!(terminator, HirTerminator::Jump { args, .. } if !args.is_empty());
+        try_for_each_terminator_target(terminator, |successor| {
+            let lane = lanes.as_mut().and_then(Iterator::next);
+            if lane.is_some_and(|lane| lane.unreachable) {
+                return Ok(());
+            }
+            if !super::transfer::access::option_edge_is_possible(
+                source.view.operations,
+                state,
+                &self.module.expressions,
+                terminator,
+                successor,
+            ) {
+                return Ok(());
+            }
+            let mut deliver = |mut incoming: Rc<BorrowState>| {
+                let target = support.continuation(successor);
+                match (
+                    support.visibility(successor),
+                    support.replay_visibility(source.block.id, target),
+                ) {
+                    (Some(lexical), Some(mut replay)) => {
+                        replay.intersect_with(lexical);
+                        Rc::make_mut(&mut incoming).kill_invisible(&replay);
+                    }
+                    (Some(visible), None) => Rc::make_mut(&mut incoming).kill_invisible(visible),
+                    (None, Some(visible)) => Rc::make_mut(&mut incoming).kill_invisible(&visible),
+                    (None, None) => {}
+                }
+                deliver(target, incoming);
+            };
+            if let Some(batch) = lane.and_then(|lane| lane.typed.as_ref())
+                && let HirTerminator::Invoke {
+                    success_results,
+                    error_result,
+                    ..
+                } = terminator
+            {
+                let outcomes: Vec<_> = success_results
+                    .iter()
+                    .chain(std::iter::once(error_result))
+                    .filter_map(|&local| source.view.operations.index_of(local))
+                    .collect();
+                replay_captured_sparse_support(
+                    source.view,
+                    Cow::Borrowed(batch),
+                    &outcomes,
+                    source.order,
+                    Rc::clone(state),
+                    deliver,
+                )?;
+            } else {
+                let mut incoming = Rc::clone(state);
+                if jump_rebinds || lane.is_some() {
+                    self.apply_forward_edge(source, successor, lane, Rc::make_mut(&mut incoming))?;
+                }
+                deliver(incoming);
+            }
+            Ok(())
+        })
+    }
+
+    fn apply_forward_edge(
+        &self,
+        source: &ForwardEdgeSource<'_>,
+        successor: BlockId,
+        invoke: Option<&super::transfer::InvokeLaneTransfer>,
+        state: &mut BorrowState,
+    ) -> Result<ValueObservations, BorrowCheckError> {
+        let ForwardEdgeSource {
+            function,
+            block,
+            view,
+            order,
+        } = *source;
+        let terminator = &block.terminator;
+        if let Some(lane) = invoke {
+            if let Some(batch) = &lane.typed
+                && let HirTerminator::Invoke {
+                    success_results,
+                    error_result,
+                    ..
+                } = terminator
+            {
+                let outcomes = success_results
+                    .iter()
+                    .chain(std::iter::once(error_result))
+                    .filter_map(|&local| view.operations.index_of(local));
+                return Ok(apply_captured_call_batch(
+                    view,
+                    batch.clone(),
+                    outcomes,
+                    order,
+                    state,
+                )?);
+            }
+            let operations = view.operations;
+            let fresh = lane.operations.is_empty()
+                && !state.layer_is_empty()
+                && !state.block_may_repeat(block.id, operations.block_successors);
+            Ok(apply_invoke_edge_transfer(
+                view,
+                terminator,
+                lane,
+                order,
+                |index| {
+                    fresh && operations.local_first_write_order[index] == order
+                        && matches!(
+                            self.diagnostics.local_origin_kind(operations.local_ids[index]),
+                            Some(crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind::CompilerTemp)
+                        )
+                },
+                state,
+            ))
+        } else {
+            self.apply_jump_argument_transfer(function, view, terminator, successor, order, state)
+        }
+    }
+
     pub(super) fn apply_jump_argument_transfer(
         &self,
         function_id: FunctionId,
-        layout: &FunctionLayout,
+        view: EdgeTransferView<'_>,
         terminator: &HirTerminator,
         successor: BlockId,
+        order: OrderKey,
         successor_input: &mut BorrowState,
-    ) -> Result<(), BorrowCheckError> {
+    ) -> Result<ValueObservations, BorrowCheckError> {
+        let layout = view.operations;
+        let mut observations = ValueObservations::default();
         let HirTerminator::Jump { target, args } = terminator else {
-            return Ok(());
+            return Ok(observations);
         };
 
         if *target != successor || args.is_empty() {
-            return Ok(());
+            return Ok(observations);
         }
 
-        let destination_states = args
+        let mut destination_states = args
             .iter()
             .map(|argument| {
                 let Some(source_index) = layout.index_of(argument.source) else {
@@ -540,29 +1155,41 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                let source_state = successor_input.local_state(source_index);
-                let destination_state = if source_state.mode.is_definitely_uninit() {
+                if successor_input.has_dependency_carriers() {
+                    let mut resolved =
+                        successor_input.resolve_place_path(source_index, layout.local_mutable, []);
+                    if layout.local_has_in_place_mutation_surface[source_index] {
+                        successor_input.load_place_content(&mut resolved, layout.local_mutable, false);
+                    }
+                    let mut access = AccessFootprint::cells(resolved.address, PlaceUse::Read);
+                    access.content = resolved.content;
+                    observations.tail.observe(successor_input, &access, true, Some(source_index));
+                }
+                let payload = successor_input.capture_jump_value(
+                    source_index,
+                    !layout.local_has_in_place_mutation_surface[source_index],
+                    false,
+                );
+                let detached = successor_input.detached_holders(source_index).collect::<Vec<_>>();
+                let destination_state = if successor_input
+                    .binding_mode(source_index)
+                    .is_definitely_uninit()
+                {
                     LocalState::uninit(layout.local_count())
                 } else {
-                    // Jump arguments enter the destination's binding slot. Preserve the source
-                    // value's effective allocation provenance, including a plain source slot's
-                    // own root, without turning the destination into a write-through alias view.
-                    // Cell identity belongs to the source binding; a fresh jump destination is a
-                    // new binding, so it must not inherit the source's direct alias cells or write
-                    // targets. The derivation ledger travels with the transported value: a read
-                    // through the joined destination still derives from the exclusive alias the
-                    // branch produced it from. The join intersects it, so a path that did not
-                    // derive loses the exemption.
-                    let mut destination = LocalState::slot_with_value_roots(
+                    // A jump transports the selected value into an independent slot, not the
+                    // source's cell or route. Preserve its provenance and must derivation so a
+                    // read through the destination still derives from the loan on every path
+                    // that supplied that proof.
+                    let mut destination = LocalState::slot_from_value_roots(
                         successor_input.effective_roots(source_index),
-                        RootSet::empty(layout.local_count()),
                     );
                     destination.derived_from_roots =
                         successor_input.derived_roots_from_source(source_index);
                     destination
                 };
 
-                Ok(destination_state)
+                Ok((source_index, destination_state, payload, detached))
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
@@ -596,48 +1223,622 @@ impl<'a> BorrowChecker<'a> {
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
-        for (destination_state, destination_index) in
-            destination_states.into_iter().zip(destination_indices)
-        {
-            successor_input.update_local_state(destination_index, destination_state);
+        let retires = |local| destination_indices.contains(&local);
+        for (source, destination_state, payload, _) in &mut destination_states {
+            for &retired in &destination_indices {
+                destination_state.derived_from_roots.remove(retired);
+            }
+            if payload.is_none() && destination_state.value_roots.iter_ones().any(retires) {
+                // A root-only source also needs an override when the edge overwrites its root.
+                *payload = successor_input.capture_jump_value(
+                    *source,
+                    !layout.local_has_in_place_mutation_surface[*source],
+                    true,
+                );
+            }
         }
 
-        Ok(())
+        if !successor_input.layer_is_empty()
+            || destination_states
+                .iter()
+                .any(|(_, _, payload, detached)| payload.is_some() || !detached.is_empty())
+        {
+            for &index in &destination_indices {
+                let before = observations.before_rekey(successor_input);
+                let retirement = successor_input.retire_binding_allocation(index, order);
+                successor_input.update_local_state(index, LocalState::uninit(layout.local_count()));
+                observations.after_retirement(before, successor_input, retirement);
+            }
+        }
+
+        // No destination is installed until all sources and their detachments have been captured
+        // and every old destination has been retired.
+        for ((_, destination_state, payload, mut detached), &destination_index) in
+            destination_states.into_iter().zip(&destination_indices)
+        {
+            successor_input.update_local_state(destination_index, destination_state);
+            let remap = |id| successor_input.remap_retired_alloc_id(id, order, retires);
+            for holder in &mut detached {
+                *holder = remap(*holder);
+            }
+            if let Some(mut value) = payload {
+                value.remap_allocations(remap);
+                let readonly = value.readonly();
+                let explicit_allocation = value.alternatives.is_empty() || !value.values.is_empty();
+                let store = TypedStore::receive_result(
+                    successor_input.resolve_cells(destination_index),
+                    value,
+                    destination_index,
+                    readonly,
+                );
+                let store = if explicit_allocation {
+                    store.with_explicit_slot_payload()
+                } else {
+                    store
+                };
+                observations.publish(successor_input.publish_store(&store, order, None));
+            }
+            if !detached.is_empty() {
+                successor_input.bind_detached_holders(destination_index, detached);
+            }
+        }
+        observations.prune_retired_wrappers(successor_input);
+        Ok(observations)
     }
 }
 
-/// Retire both previous outcomes before installing the selected operation's captured results.
-fn apply_invoke_edge_transfer(
-    layout: &FunctionLayout,
-    terminator: &HirTerminator,
-    successor: BlockId,
-    operation_results: &[(LocalId, LocalState)],
-    edge_state: &mut BorrowState,
+struct ForwardWorklist {
+    ranks: Rc<FxHashMap<BlockId, usize>>,
+    rpo: BinaryHeap<(usize, u32)>,
+    pending: FxHashSet<BlockId>,
+    #[cfg(test)]
+    fifo: Option<VecDeque<BlockId>>,
+    #[cfg(test)]
+    reverse_siblings: bool,
+    #[cfg(test)]
+    siblings: Vec<BlockId>,
+}
+
+impl ForwardWorklist {
+    fn new(entry: BlockId, successors: &FxHashMap<BlockId, Vec<BlockId>>) -> Self {
+        Self::with_ranks(entry, Rc::new(reverse_postorder_ranks(entry, successors)))
+    }
+
+    fn with_ranks(entry: BlockId, ranks: Rc<FxHashMap<BlockId, usize>>) -> Self {
+        let rpo = BinaryHeap::from([(ranks[&entry], entry.0)]);
+        Self {
+            ranks,
+            rpo,
+            pending: [entry].into_iter().collect(),
+            #[cfg(test)]
+            fifo: None,
+            #[cfg(test)]
+            reverse_siblings: false,
+            #[cfg(test)]
+            siblings: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, block: BlockId) {
+        if !self.pending.insert(block) {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(fifo) = &mut self.fifo {
+            if self.reverse_siblings {
+                self.siblings.push(block);
+            } else {
+                fifo.push_back(block);
+            }
+            return;
+        }
+        self.rpo.push((self.ranks[&block], block.0));
+    }
+
+    fn pop(&mut self) -> Option<BlockId> {
+        #[cfg(test)]
+        if let Some(fifo) = &mut self.fifo {
+            let block = fifo.pop_front()?;
+            self.pending.remove(&block);
+            return Some(block);
+        }
+        // Clear before transfer so a self-edge can queue this block again.
+        let (_, index) = self.rpo.pop()?;
+        let block = BlockId(index);
+        self.pending.remove(&block);
+        Some(block)
+    }
+
+    #[cfg(test)]
+    fn finish_successors(&mut self) {
+        if let Some(fifo) = &mut self.fifo {
+            fifo.extend(self.siblings.drain(..).rev());
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) struct ForwardProbe {
+    pub entry: BorrowState,
+    pub fifo: bool,
+    pub reverse_siblings: bool,
+    pub reverse_delivery: bool,
+    pub deliveries: Vec<(BlockId, usize)>,
+    pub dequeues: Vec<BlockId>,
+    pub edges: FxHashMap<(BlockId, usize), BorrowState>,
+    pub observations: FxHashMap<(BlockId, usize), ValueObservations>,
+    pub block_observations: FxHashMap<BlockId, ValueObservations>,
+}
+
+/// A larger finishing rank means earlier reverse-postorder priority.
+pub(super) fn reverse_postorder_ranks(
+    entry: BlockId,
+    successors: &FxHashMap<BlockId, Vec<BlockId>>,
+) -> FxHashMap<BlockId, usize> {
+    let mut ranks = FxHashMap::default();
+    ranks.reserve(successors.len());
+    ranks.insert(entry, 0);
+    // DFS follows successors backwards so independent successors keep their authored order
+    // when postorder is reversed.
+    let mut stack = vec![(entry, successors[&entry].iter().rev())];
+    let mut rank = 0;
+    while let Some((block, children)) = stack.last_mut() {
+        if let Some(&child) = children.next() {
+            if let Entry::Vacant(seen) = ranks.entry(child) {
+                seen.insert(0);
+                stack.push((child, successors[&child].iter().rev()));
+            }
+        } else {
+            ranks.insert(*block, rank);
+            rank += 1;
+            stack.pop();
+        }
+    }
+    ranks
+}
+
+/// Replay a matched outcome onto a support before another operation reads its effects.
+pub(super) fn replay_captured_sparse_support(
+    view: EdgeTransferView<'_>,
+    batch: Cow<'_, CapturedCallBatch<MatchedLane>>,
+    outcomes: &[usize],
+    order: OrderKey,
+    mut state: Rc<BorrowState>,
+    mut deliver: impl FnMut(Rc<BorrowState>),
+) -> Result<(), BorrowCheckError> {
+    if let [stratum] = batch.post.as_slice()
+        && stratum
+            .components
+            .iter()
+            .all(|component| component.alternatives.len() == 1)
+    {
+        apply_captured_call_batch(
+            view,
+            batch.into_owned(),
+            outcomes.iter().copied(),
+            order,
+            Rc::make_mut(&mut state),
+        )?;
+        deliver(state);
+        return Ok(());
+    }
+    for stratum in &batch.post {
+        let mut replay = |components| {
+            let mut branch = Rc::clone(&state);
+            apply_captured_call_batch(
+                view,
+                CapturedCallBatch {
+                    post: vec![MatchedStratum {
+                        #[cfg(test)]
+                        guard: stratum.guard.clone(),
+                        components,
+                    }],
+                    destinations: batch.destinations.clone(),
+                    member_reads: batch.member_reads.clone(),
+                    checkpoints: batch.checkpoints.clone(),
+                    detachment: batch.detachment.clone(),
+                },
+                outcomes.iter().copied(),
+                order,
+                Rc::make_mut(&mut branch),
+            )?;
+            deliver(branch);
+            Ok::<(), BorrowCheckError>(())
+        };
+        let mut varying = stratum
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| component.alternatives.len() > 1);
+        if let Some((index, component)) = varying.next()
+            && varying.next().is_none()
+        {
+            // A single relevant component retains its joint alternatives.
+            for post in &component.alternatives {
+                let components = stratum
+                    .components
+                    .iter()
+                    .enumerate()
+                    .map(|(at, component)| {
+                        if at == index {
+                            MatchedComponent {
+                                support: component.support,
+                                alternatives: vec![post.clone()],
+                            }
+                        } else {
+                            component.clone()
+                        }
+                    })
+                    .collect();
+                replay(components)?;
+            }
+        } else {
+            // The product certifies independence in this stratum. Apply it
+            // by component, without enumerating combinations of its choices.
+            replay(stratum.components.clone())?;
+        }
+    }
+    Ok(())
+}
+
+/// Apply the captures of one selected outcome and no effects from its sibling.
+/// Reads use entry coordinates; a receiving destination never supplies a
+/// source for another captured operation.
+pub(super) fn apply_captured_call_batch(
+    view: EdgeTransferView<'_>,
+    batch: CapturedCallBatch<impl CapturedPosts>,
+    outcomes: impl IntoIterator<Item = usize>,
+    order: OrderKey,
+    state: &mut BorrowState,
+) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
+    apply_captured_call_batch_rekey(view, batch, outcomes, order, state, &mut |_, _| {})
+}
+
+fn apply_captured_call_batch_rekey(
+    view: EdgeTransferView<'_>,
+    mut batch: CapturedCallBatch<impl CapturedPosts>,
+    outcomes: impl IntoIterator<Item = usize>,
+    order: OrderKey,
+    state: &mut BorrowState,
+    rekey: &mut impl FnMut(&BorrowState, AllocationRetirement),
+) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
+    if batch
+        .post
+        .posts()
+        .flat_map(|post| &post.results)
+        .any(|result| result.slot >= batch.destinations.len())
+    {
+        return Err(
+            crate::compiler_frontend::public_call_summary::allocation_error(
+                "typed call result has no receiving destination",
+            ),
+        );
+    }
+    let layout = view.operations;
+    let mut observations = ValueObservations::default();
+    for checkpoint in std::mem::take(&mut batch.checkpoints) {
+        observations.split(ObservationBoundary::Checkpoint(checkpoint));
+    }
+    observations
+        .tail
+        .read(std::mem::take(&mut batch.member_reads));
+    let mut retired = FxHashSet::default();
+    // Include immediate definitions as well as the predecessor's invoke outcomes.
+    let destinations = 0..batch.destinations.len();
+    let retirement_order = outcomes.into_iter().map(Ok).chain(destinations.map(Err));
+    for next in retirement_order {
+        let index = match next {
+            Ok(index) => index,
+            Err(slot) => match batch.destinations[slot] {
+                CapturedDestination::Define(index) => index,
+                CapturedDestination::Update { .. } => continue,
+            },
+        };
+        if !retired.insert(index) {
+            continue;
+        }
+        let wrapper = WrapperId::current(index);
+        let retained = batch.post.posts().any(|post| post.names_wrapper(wrapper))
+            || batch.destinations.iter().any(|destination| {
+                matches!(destination, CapturedDestination::Update { address, .. }
+                    if address.cells().contains(&CellId::Slot(wrapper)))
+            });
+        if !retained
+            && layout.local_first_write_order[index] == order
+            && state.can_publish_first_definition(index)
+        {
+            continue;
+        }
+        let before = observations.before_rekey(state);
+        if retained {
+            state.retain_captured_wrapper(index);
+        }
+        let retirement = state.retire_binding_allocation(index, order);
+        state.update_local_state(index, LocalState::uninit(layout.local_count()));
+        observations.after_retirement(before, state, retirement);
+        batch.post.remap(state, retirement);
+        rekey(state, retirement);
+        remap_receivers(
+            &mut batch.destinations,
+            batch.detachment.as_mut(),
+            state,
+            retirement,
+        );
+    }
+
+    let (results, receipt) = batch.post.apply(state, order);
+    observations.publish(receipt);
+    let mut receiving = results.into_iter();
+    let mut detached_result = None;
+    while let Some(mut result) = receiving.next() {
+        let (actor, mut address, define) = match &batch.destinations[result.slot] {
+            CapturedDestination::Define(index) => {
+                state.update_local_state(*index, LocalState::slot(layout.local_count()));
+                (*index, state.resolve_cells(*index), true)
+            }
+            CapturedDestination::Update { actor, address } => (*actor, address.clone(), false),
+        };
+        if !define
+            && let Some(CellId::Slot(wrapper)) = address.definite()
+            && !wrapper.is_call_owned()
+            && layout.local_has_in_place_mutation_surface[wrapper.local]
+        {
+            // Replacing an owned value retires its allocation, not the slot.
+            let before = observations.before_rekey(state);
+            let retirement = state.retire_slot_value(wrapper.local, order);
+            observations.after_retirement(before, state, retirement);
+            rekey(state, retirement);
+            result.remap(state, retirement);
+            address.remap_allocations(state, retirement);
+            for pending in receiving.as_mut_slice() {
+                pending.remap(state, retirement);
+            }
+            remap_receivers(
+                &mut batch.destinations,
+                batch.detachment.as_mut(),
+                state,
+                retirement,
+            );
+        }
+        use super::transfer::typed_call::CapturedDerivation;
+        let derivation = match result.derivation {
+            Some(CapturedDerivation::Roots(roots)) => roots,
+            source => {
+                let mut roots = RootSet::empty(layout.local_count());
+                if let Some(CapturedDerivation::Wrapper(wrapper)) = source
+                    && wrapper.local < layout.local_count()
+                    && !retired.contains(&wrapper.local)
+                {
+                    roots.insert(wrapper.local);
+                }
+                roots
+            }
+        };
+        let slot = match address.definite() {
+            Some(CellId::Slot(wrapper)) if !wrapper.is_call_owned() => wrapper.local,
+            _ => actor,
+        };
+        let readonly = result.value.readonly();
+        if batch
+            .detachment
+            .as_ref()
+            .is_some_and(|removal| removal.result == Some(result.slot))
+        {
+            detached_result = match address.definite() {
+                Some(CellId::Slot(wrapper)) if wrapper.age == super::state::WrapperAge::Current => {
+                    Some(wrapper.local)
+                }
+                _ => None,
+            };
+        }
+        let store = TypedStore::receive_result(address, result.value, actor, readonly)
+            .with_explicit_slot_payload()
+            .with_slot_roots(
+                result
+                    .roots
+                    .unwrap_or_else(|| RootSet::empty(layout.local_count())),
+            );
+        observations.publish(state.publish_store(&store, order, None));
+        state.mark_slot_derivation(slot, derivation);
+    }
+    if let Some(detachment) = batch.detachment {
+        // Removal observes the newly installed receiver before detaching it.
+        observations.publish(state.remove_alloc_element(
+            &detachment.holders,
+            detachment.map,
+            detached_result,
+        ));
+    }
+    observations.prune_retired_wrappers(state);
+    Ok(observations)
+}
+
+fn remap_receivers(
+    destinations: &mut [CapturedDestination],
+    detachment: Option<&mut super::transfer::CapturedDetachment>,
+    state: &BorrowState,
+    retirement: AllocationRetirement,
 ) {
+    for destination in destinations {
+        if let CapturedDestination::Update { address, .. } = destination {
+            address.remap_allocations(state, retirement);
+        }
+    }
+    if let Some(detachment) = detachment {
+        for holder in &mut detachment.holders {
+            retirement.remap_id(state, holder);
+        }
+    }
+}
+
+/// Retire both previous outcomes before installing the selected lane's captures.
+fn apply_invoke_edge_transfer(
+    view: EdgeTransferView<'_>,
+    terminator: &HirTerminator,
+    lane: &super::transfer::InvokeLaneTransfer,
+    order: OrderKey,
+    virgin_outcome: impl Fn(usize) -> bool,
+    edge_state: &mut BorrowState,
+) -> ValueObservations {
     let HirTerminator::Invoke {
-        success,
         success_results,
-        failure,
         error_result,
         ..
     } = terminator
     else {
-        return;
+        return ValueObservations::default();
     };
-    for local in success_results.iter().chain(std::iter::once(error_result)) {
+    let layout = view.operations;
+    let mut observations = ValueObservations::default();
+    for checkpoint in &lane.checkpoints {
+        observations.split(ObservationBoundary::Checkpoint(checkpoint.clone()));
+    }
+    observations.tail.read(lane.member_reads.iter().cloned());
+    let apply_layer_effects = !lane.operations.is_empty();
+    let outcomes = || success_results.iter().chain(std::iter::once(error_result));
+    for local in outcomes() {
         if let Some(index) = layout.index_of(*local) {
-            edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+            // An acyclic first write to compiler-owned result storage has no old capture.
+            if virgin_outcome(index) && edge_state.can_publish_first_definition(index) {
+                edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+                continue;
+            }
+            let before = observations.before_rekey(edge_state);
+            let retirement = if apply_layer_effects {
+                if lane.operations.iter().any(
+                    |op| matches!(op, InvokeLayerOp::Store(store) if store.captures_slot(index)),
+                ) {
+                    edge_state.retain_captured_wrapper(index);
+                }
+                // Captures can create the first sparse facts on this edge. Still snapshot any
+                // existing root-only observers before changing the result binding.
+                let retirement = edge_state.retire_binding_allocation(index, order);
+                edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+                retirement
+            } else {
+                edge_state.rebind_local(index, LocalState::uninit(layout.local_count()), order)
+            };
+            observations.after_retirement(before, edge_state, retirement);
         }
     }
-    if successor == *success {
-        for (local, result) in operation_results {
-            if let Some(index) = layout.index_of(*local) {
-                edge_state.update_local_state(index, result.clone());
+    for (local, result) in &lane.results {
+        if let Some(index) = layout.index_of(*local) {
+            let mut result = result.clone();
+            for retired in outcomes() {
+                if let Some(retired) = layout.index_of(*retired) {
+                    result.derived_from_roots.remove(retired);
+                }
+            }
+            edge_state.update_local_state(index, result);
+        }
+    }
+    let retires = |index| {
+        let local = layout.local_ids[index];
+        local == *error_result || success_results.contains(&local)
+    };
+    for op in &lane.operations {
+        observations.publish(op.apply_with_indices(
+            &|local| layout.index_of(local),
+            edge_state,
+            Some((order, &retires)),
+        ));
+    }
+    observations.prune_retired_wrappers(edge_state);
+    observations
+}
+
+impl InvokeLayerOp {
+    pub(super) fn captures_current(
+        &self,
+        local: usize,
+        names: &impl Fn(super::state::AllocId) -> bool,
+    ) -> bool {
+        match self {
+            Self::Store(store) => store.captures_current(local, names),
+            Self::Contribute { holder, value, .. } => names(*holder) || names(value.id),
+            Self::Bind { value, .. } => value.names_allocation(names),
+        }
+    }
+
+    pub(super) fn apply_owned(
+        self,
+        view: super::transfer::OperationView<'_>,
+        state: &mut BorrowState,
+    ) -> StoreReceipt {
+        let index_of = |local| view.index_of(local);
+        match self {
+            Self::Bind { local, value } => {
+                Self::publish_bound_value(&index_of, state, local, value)
+            }
+            other => other.apply_with_indices(&index_of, state, None),
+        }
+    }
+
+    fn publish_bound_value(
+        index_of: &impl Fn(LocalId) -> Option<usize>,
+        state: &mut BorrowState,
+        local: LocalId,
+        value: CapturedValue,
+    ) -> StoreReceipt {
+        let Some(index) = index_of(local) else {
+            return StoreReceipt::default();
+        };
+        // The receiving place is resolved after retirement. Only the value uses entry IDs.
+        let readonly = value.readonly();
+        let store = TypedStore::receive_result(state.resolve_cells(index), value, index, readonly);
+        state.publish_store(&store, UNKNOWN_ORDER_KEY, None)
+    }
+
+    fn apply_with_indices(
+        &self,
+        index_of: &impl Fn(LocalId) -> Option<usize>,
+        state: &mut BorrowState,
+        rebase: Option<(OrderKey, &dyn Fn(usize) -> bool)>,
+    ) -> StoreReceipt {
+        let remap_id = |state: &BorrowState, id| match rebase {
+            Some((order, retires)) => state.remap_retired_alloc_id(id, order, retires),
+            None => id,
+        };
+        match self {
+            Self::Store(store) => {
+                let (order, retires) = rebase
+                    .map_or((UNKNOWN_ORDER_KEY, None), |(order, retires)| {
+                        (order, Some(retires))
+                    });
+                state.publish_store(store, order, retires)
+            }
+            Self::Contribute { holder, key, value } => {
+                let holder = remap_id(state, *holder);
+                let mut value = *value;
+                value.id = remap_id(state, value.id);
+                let store = TypedStore::write_projected(
+                    [holder],
+                    *key,
+                    super::state::Coverage::Partial,
+                    CapturedValue::new(vec![value], Vec::new()),
+                    false,
+                );
+                state.publish_store(&store, UNKNOWN_ORDER_KEY, None)
+            }
+            Self::Bind { local, value } => {
+                let mut value = value.clone();
+                if rebase.is_some() {
+                    value.remap_allocations(|id| remap_id(state, id));
+                }
+                Self::publish_bound_value(index_of, state, *local, value)
             }
         }
-    } else if successor == *failure
-        && let Some(index) = layout.index_of(*error_result)
-    {
-        edge_state.update_local_state(index, LocalState::slot(layout.local_count()));
+    }
+
+    /// Carry owned captures across one result rebind before publishing any of their effects.
+    pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        match self {
+            Self::Store(store) => store.remap(state, retirement),
+            Self::Contribute { holder, value, .. } => {
+                retirement.remap_id(state, holder);
+                retirement.remap_value(state, value);
+            }
+            Self::Bind { value, .. } => value.remap(state, retirement),
+        }
     }
 }

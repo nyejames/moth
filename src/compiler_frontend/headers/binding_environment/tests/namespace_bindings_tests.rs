@@ -53,6 +53,9 @@ use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelection, DependencySelectionRange, HeaderExportMode,
     RetainedDependencyClause,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -2310,7 +2313,12 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
             origin: method_origin,
             summary: PublicCallSummary {
                 parameters: Vec::new(),
-                return_alias: FunctionReturnAliasSummary::Fresh,
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(
+                    TypedCallAllocationFacts {
+                        success: Lane::Returning(Product::default()),
+                        ..Default::default()
+                    },
+                )),
                 escapes_builtin_failure: false,
                 uses_fast_semantics: false,
                 may_trap: false,
@@ -3617,7 +3625,10 @@ fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure()
     let origin = OriginFunctionId::new_free(module_origin, "make".to_owned());
     let first = PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -3625,7 +3636,7 @@ fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure()
     };
     let second = PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Unknown,
+        return_alias: FunctionReturnAliasSummary::Known(Box::default()),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

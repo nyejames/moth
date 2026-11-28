@@ -72,9 +72,24 @@ never receives a runtime body.
 - The `#` between the name and parameter list marks required compile-time
   evaluation.
 - Every argument must be a compile-time constant.
-- Const functions admit immutable ordinary-value parameters and one ordinary
-  success slot in V1. Mutable references, fallible return channels, receiver
-  methods and recursive dependency cycles are rejected.
+- Const functions admit immutable ordinary-value parameters and one or more
+  ordinary success slots. Zero success slots, mutable parameters, fallible
+  return channels, Never contracts and recursive dependency cycles are rejected.
+  Non-generic shared receiver methods on eligible same-file source nominal types
+  follow the const receiver contract. Mutable receiver methods and generic const
+  declarations remain outside the initial supported surface.
+- A const function with several success slots follows the ordinary
+  @#returns-and-multiple-values (multi-return rules). Each call runs once at
+  its receiving site and delivers every slot in order.
+- A const body may use statement matches with the ordinary
+  @../branching/pattern-matching (pattern contract). The compiler evaluates
+  the scrutinee once and tests arms in order. A guard runs only after its
+  pattern matches. Unselected arms never execute, but they are still
+  type-checked.
+- A const body may use multi-bind and value-producing `if`, match and `catch`
+  blocks at their ordinary receiving sites. All results are read before any
+  existing target is written. A branch or handler can also leave through
+  `return`, or through `break` or `continue` when it is inside a loop.
 - A call in an ordinary function is folded during compilation. A call that
   cannot be evaluated is a source error rather than a runtime fallback.
 - Invalid const operations, unresolved runtime arguments and nonterminating
@@ -82,12 +97,34 @@ never receives a runtime body.
 - A const function with no calls is still type-checked and checked for static
   eligibility, but its parameterised body does not execute.
 
-Release builds additionally fold ordinary functions whose whole transitive
-body proves const-safe and whose call arguments are known constants. This is
-an optimisation only: a refused or budget-limited call remains a runtime call,
-and required const calls still report errors. Release budget advice is a
-`Note`, not a failure. It names the setting to raise for a configurable
-limit, and asks for a simpler call when a fixed compiler safety limit is hit.
+#### References inside const functions
+
+Const functions use Moth's ordinary reference, mutation and explicit-copy rules, but their access checks differ from runtime code. They execute sequentially and can mutate local state. They cannot access external mutable state, perform IO or execute asynchronous work.
+
+[codeblock, $code "moth":
+    calculate #|| -> I32:
+        value ~= 10
+        reader = value
+        first ~= value
+        second ~= value
+        before = reader + 1
+        ~first = 20
+        ~second = second + 1
+        return before + second
+    ;
+]
+
+This returns `32`. The two mutable aliases are legal during const execution. The first write invalidates `reader`, but the function never uses it again. Returning or otherwise reading `reader` after that write would diagnose the compilation. A fresh immutable reference acquired from a valid source after the write can observe the new value. A mutable alias still requires a mutation-capable source, so a shared parameter cannot be made mutable by declaring an alias.
+
+The same rule applies to overlapping projections. An independent sibling field can retain a valid immutable reference. Reference identity also survives nested const calls and aggregate storage. No live interpreter reference escapes the evaluation into runtime code.
+
+These checks run only along executed paths. An unused const function or an unselected branch may contain a dynamic access failure until a call reaches it. Static typing and eligibility still apply to the whole authored declaration. Access failures are compiler diagnostics, not recoverable Moth errors. See @../memory (Memory) for the reference rules and @../progress (Progress) for implementation status.
+
+Ordinary functions remain runtime functions in all build profiles; a call
+with constant arguments is still a runtime call. Optional whole-function
+folding is not part of required const execution. A future post-semantic
+optimisation may be considered after benchmarking against backend optimisers,
+but it cannot change source acceptance, static selection or constraint proof.
 
 ### Never return contract
 

@@ -1,0 +1,12 @@
+-- Every authored arm is type-checked, even when no call ever selects it.
+
+pick #|value I32| -> I32:
+    if value is:
+        1 => return "one"
+        else => return 0
+    ;
+;
+
+result #I32 = pick(2)
+
+~[:unreachable]

@@ -562,7 +562,7 @@ fn grouped_integer_subexpression_does_not_override_division_result_type() {
         builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
     assert!(
-        matches!(&value.payload, ConstValuePayload::FixedScalar(scalar) if scalar.as_f64() == Some(50.0))
+        matches!(ast.const_values.payload(value_id), Some(ConstValuePayload::FixedScalar(scalar)) if scalar.as_f64() == Some(50.0))
     );
 }
 

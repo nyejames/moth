@@ -331,6 +331,20 @@ impl<'a> GeneratedFunctionTransaction<'a> {
             })
     }
 
+    /// Reset the authoritative unpublished roots before callers read final-graph inputs.
+    #[allow(
+        dead_code,
+        reason = "B2b.3b starts a new graph epoch after lane installation"
+    )]
+    pub(super) fn reset_graph_payloads<'identity>(
+        &mut self,
+        dirty_roots: impl IntoIterator<Item = &'identity GeneratedFunctionIdentity>,
+    ) {
+        for identity in dirty_roots {
+            self.summary_mut(identity).reset_graph_payload();
+        }
+    }
+
     /// Retain only completed sidecars reachable from the final executable call graph.
     ///
     /// The request and completion IDs are transaction-local, so they are rebuilt together after

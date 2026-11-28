@@ -1,0 +1,14 @@
+Link = |items {I32}|
+
+wrap |items {I32}| -> Link:
+    return Link(items)
+;
+
+probe || -> I32:
+    items = {1}
+    result ~= wrap(items)
+    ~result.items.push(2)
+    return result.items.length()
+;
+
+~[:[probe()]]

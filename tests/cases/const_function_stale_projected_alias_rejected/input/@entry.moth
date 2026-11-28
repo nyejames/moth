@@ -1,0 +1,13 @@
+Inner = |values {I32}|
+Outer = |inner Inner|
+
+stale #|| -> I32:
+    root ~= Outer(Inner({1}))
+    writer ~= root.inner.values
+    ~root.inner = Inner({2})
+    again ~= writer
+    return 1
+;
+
+result #I32 = stale()
+~[:result=[result]]

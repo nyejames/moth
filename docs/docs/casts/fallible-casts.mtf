@@ -88,8 +88,9 @@ may remove a runtime check but cannot change the evidence class.
 An authored cast can qualify a safety catch even when the conversion is
 infallible. That eligibility does not fabricate an error source. A `catch`
 cannot legalise an unsupported pair, missing evidence or statically invalid
-numeric operation. Known failures remain diagnostics, even with a catch or a
-builtin `Error!` slot.
+numeric operation. Failures known during source checking remain diagnostics,
+even with a catch or a builtin `Error!` slot. A conversion failure discovered
+from a const function's bound argument during execution can enter its catch.
 
 An optional `T?` receiver casts or recovers inner `T`, then wraps the result.
 The handler produces `T`, so `then none` remains invalid. Optional source

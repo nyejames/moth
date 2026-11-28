@@ -27,7 +27,6 @@
 //! JS path calls it.
 
 use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
-use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
@@ -156,7 +155,6 @@ fn compile_raw_fixed_f64_fixture(
     let mut project_source_builder = None;
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut surface,

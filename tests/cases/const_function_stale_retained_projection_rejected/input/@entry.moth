@@ -1,0 +1,13 @@
+Pair = |left I32, right I32|
+
+stale #|| -> I32:
+    source ~= Pair(1, 2)
+    shared = source.left
+    pair ~= Pair(shared, 3)
+    view = pair
+    ~source.left = 4
+    return view.right
+;
+
+result #I32 = stale()
+~[:result=[result]]

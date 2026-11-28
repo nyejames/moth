@@ -1,0 +1,160 @@
+-- Const-function matches follow the ordinary pattern contract: literal, relational, choice
+-- payload and option patterns, guards over captures, nested matches, matches inside loops and
+-- early returns from an arm.
+
+Shape ::
+    Circle | radius I32 |,
+    Rect | width I32, height I32 |,
+    Empty,
+;
+
+word_value #|spelling String| -> I32:
+    if spelling is:
+        "one" => return 1
+        "two" => return 2
+        else => return 0
+    ;
+;
+
+letter_rank #|letter Char| -> I32:
+    if letter is:
+        'a' => return 1
+        <= 'm' => return 2
+        else => return 3
+    ;
+;
+
+scalar_order #|letter Char| -> Bool:
+    return letter > 'Ａ'
+;
+
+runtime_scalar_order |letter Char| -> Bool:
+    return letter > 'Ａ'
+;
+
+runtime_scalar_pattern |letter Char?| -> I32:
+    if letter is:
+        > 'Ａ' => return 2
+        |present| => return 1
+        none => return 0
+    ;
+;
+
+area #|shape Shape| -> I32:
+    if shape is:
+        Circle(radius) => return radius * radius * 3
+        Rect(width, height as tall) => return width * tall
+        Empty => return 0
+    ;
+;
+
+square_side #|shape Shape| -> I32:
+    if shape is:
+        Rect(width, height) if width is height => return width
+        else => return -1
+    ;
+;
+
+describe #|maybe I32?| -> I32:
+    if maybe is:
+        none => return -1
+        0 => return 0
+        > 100 => return 100
+        |present| if present < 0 => return present * -1
+        |present| => return present * 2
+    ;
+;
+
+tally #|limit I32| -> I32:
+    total ~= 0
+    loop 0 to limit |index|:
+        if index is:
+            0 => ~total = total + word_value("one")
+            < 3 =>
+                if index is:
+                    1 => ~total = total + 10
+                    else => ~total = total + 100
+                ;
+            else => ~total = total + 1000
+        ;
+    ;
+    return total
+;
+
+first_large #|values {I32}| -> I32:
+    loop values |value|:
+        if value is:
+            >= 10 => return value
+            else =>
+        ;
+    ;
+    return 0
+;
+
+-- `count` takes its numeric type from the body, so its patterns materialise after the subject.
+step_kind #|limit I32| -> I32:
+    count ~= 0
+    loop 0 to limit |index|:
+        ~count = count + 1
+    ;
+    if count is:
+        0 => return 0
+        < 3 => return 1
+        else => return 2
+    ;
+;
+
+bands #|price Dec2, ratio F64, raw Byte| -> I32:
+    band ~= 0
+    if price is:
+        1.50 => ~band = 1
+        > 10.00 => ~band = 2
+        else =>
+    ;
+    if ratio is:
+        < 0.5 => ~band = band + 10
+        else => ~band = band + 20
+    ;
+    if raw is:
+        255 => ~band = band + 100
+        else =>
+    ;
+    return band
+;
+
+removed_or #|fallback I32| -> I32:
+    values ~= {1}
+    removed = ~values.remove(5) catch |err|:
+        if fallback is:
+            0 => then -1
+            else => then fallback
+        ;
+    ;
+    return removed
+;
+
+word #I32 = word_value("two")
+missing_word #I32 = word_value("three")
+ranks #String = [:[letter_rank('a')][letter_rank('k')][letter_rank('z')]]
+circle #I32 = area(Shape::Circle(2))
+rect #I32 = area(Shape::Rect(3, 4))
+empty #I32 = area(Shape::Empty)
+square #I32 = square_side(Shape::Rect(5, 5))
+not_square #I32 = square_side(Shape::Rect(5, 6))
+absent #I32 = describe(none)
+zero #I32 = describe(0)
+big #I32 = describe(500)
+negative #I32 = describe(-7)
+positive #I32 = describe(21)
+loop_total #I32 = tally(5)
+early #I32 = first_large({3, 12, 40})
+steps #String = [:[step_kind(0)][step_kind(2)][step_kind(7)]]
+cheap #I32 = bands(1.50, 0.25, 255)
+dear #I32 = bands(12.00, 0.75, 1)
+recovered #String = [:[removed_or(0)],[removed_or(9)]]
+scalar_folded #Bool = scalar_order('😀')
+scalar_runtime = runtime_scalar_order('😀')
+scalar_pattern = runtime_scalar_pattern('😀')
+scalar_pattern_none = runtime_scalar_pattern(none)
+
+~[: words=[word],[missing_word] ranks=[ranks] shapes=[circle],[rect],[empty],[square],[not_square] options=[absent],[zero],[big],[negative],[positive] loop=[loop_total] early=[early] steps=[steps] bands=[cheap],[dear] handler=[recovered] scalar=[scalar_folded],[scalar_runtime],[scalar_pattern],[scalar_pattern_none] ]

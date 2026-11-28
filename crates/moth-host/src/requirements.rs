@@ -117,11 +117,7 @@ impl HostRequirements {
         }
 
         let mut exports = exports.into_iter().collect::<Vec<_>>();
-        exports.sort_by(|left, right| {
-            left.export_name
-                .cmp(&right.export_name)
-                .then_with(|| left.facade_name.cmp(&right.facade_name))
-        });
+        exports.sort_by(|left, right| left.export_name.cmp(&right.export_name));
         for pair in exports.windows(2) {
             if pair[0].export_name == pair[1].export_name {
                 return Err(RequirementsError::DuplicateExportName {

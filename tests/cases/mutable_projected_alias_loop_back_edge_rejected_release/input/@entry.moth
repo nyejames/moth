@@ -1,6 +1,6 @@
--- A loop back edge can introduce a freshly built holder value on one path. The joined value
--- cannot name every alternative precisely, so the projected write target keeps the holder cell
--- and the later shared read conflicts with the live alias.
+-- A loop back edge can introduce a freshly built holder value on one path and snapshot it.
+-- The joined state keeps `snap` as a possible alias of the holder, so taking a mutable
+-- projection of the holder conflicts with the later read of `snap`.
 
 Pair = | first {I32}, second {I32} |
 

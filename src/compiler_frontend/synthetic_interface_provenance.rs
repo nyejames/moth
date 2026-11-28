@@ -100,6 +100,19 @@ impl SyntheticInterfaceProvenance {
         Self::default()
     }
 
+    /// Heap storage owned by this provenance, excluding the inline value itself.
+    pub(crate) fn owned_allocation_bytes(&self) -> usize {
+        let mut bytes = self
+            .members
+            .capacity()
+            .saturating_mul(std::mem::size_of::<SyntheticInterfaceMemberIdentity>());
+        for member in &self.members {
+            bytes = bytes.saturating_add(member.interface.capacity());
+            bytes = bytes.saturating_add(member.member.capacity());
+        }
+        bytes
+    }
+
     /// Construct provenance from a set of member identities.
     ///
     /// Compiler-internal: sorts and deduplicates the members so the value is canonical regardless

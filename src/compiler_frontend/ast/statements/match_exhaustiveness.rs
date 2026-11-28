@@ -47,8 +47,13 @@ struct OptionExhaustivenessFacts {
 }
 
 impl MatchExhaustivenessFacts {
-    fn record_choice_variant(&mut self, variant_name: StringId) -> bool {
-        self.matched_choice_variants.insert(variant_name)
+    /// Returns whether an earlier unguarded arm already covered this variant.
+    fn record_choice_variant(&mut self, variant_name: StringId, guard_is_present: bool) -> bool {
+        if guard_is_present {
+            self.matched_choice_variants.contains(&variant_name)
+        } else {
+            !self.matched_choice_variants.insert(variant_name)
+        }
     }
 
     fn record_guard(&mut self, guard_is_present: bool) {
@@ -165,8 +170,10 @@ impl MatchArmCoverageTracker {
             DeferredArmPattern::PendingChoice(_) => {
                 // The declared owner names the variant before the subject instance is selected, so
                 // the duplicate rule runs now, exactly as it does for a built choice pattern.
-                let unreachable = matched_choice_variant
-                    .is_some_and(|variant_name| !self.facts.record_choice_variant(variant_name));
+                let unreachable = matched_choice_variant.is_some_and(|variant_name| {
+                    self.facts
+                        .record_choice_variant(variant_name, guard_is_present)
+                });
                 self.facts.record_guard(guard_is_present);
                 MatchArmCoverageRecord { unreachable }
             }
@@ -222,7 +229,9 @@ impl MatchArmCoverageTracker {
 
         if !unreachable {
             if let Some(variant_name) = matched_choice_variant
-                && !self.facts.record_choice_variant(variant_name)
+                && self
+                    .facts
+                    .record_choice_variant(variant_name, guard_is_present)
             {
                 unreachable = true;
             }

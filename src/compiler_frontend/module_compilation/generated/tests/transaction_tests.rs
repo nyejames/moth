@@ -9,6 +9,13 @@ use super::*;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
     PublishedBoundary, assert_compiler_bug, facts, generated_identity, summary, test_sidecar,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    EntryPort, Guard, Lane, PortId, Predicate, Product, TypedCallAllocationFacts,
+};
+use crate::compiler_frontend::public_call_summary::{
+    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
+    PublicCallParameterSummary, PublicCallTransferEffect,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
@@ -184,6 +191,58 @@ fn transaction_summary_lookup_stays_inside_its_own_boundary() {
         second_transaction.summary(&identity),
         "equal identities in unrelated boundaries must not share summaries"
     );
+}
+
+#[test]
+fn graph_epoch_reset_clears_only_dirty_unpublished_root_payloads() {
+    let published = generated_identity("published");
+    let dirty = generated_identity("dirty");
+    let clean = generated_identity("clean");
+    let seed = PublicCallSummary {
+        parameters: vec![PublicCallParameterSummary {
+            access: PublicCallParameterAccess::Mutable,
+            mutation: PublicCallMutationEffect::NoWrite,
+            transfer_effect: PublicCallTransferEffect::MayConsume,
+        }],
+        return_alias: FunctionReturnAliasSummary::Pending,
+        escapes_builtin_failure: true,
+        uses_fast_semantics: true,
+        may_trap: true,
+        may_fail: true,
+    };
+    let mut solved = seed.clone();
+    solved.parameters[0].mutation = PublicCallMutationEffect::Writes;
+    solved.return_alias = FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+        ports: vec![EntryPort::Terminal(0)],
+        success: Lane::guarded(
+            Guard::new([(Predicate::Writable(PortId(0)), true)]).unwrap(),
+            Product::default(),
+        ),
+        error: Lane::Returning(Product::default()),
+        may_retain: vec![0],
+        ..Default::default()
+    }));
+    let known = PublishedBoundary::with(published.clone(), solved.clone());
+    let mut transaction = GeneratedFunctionTransaction::new(known.view());
+    for (identity, name) in [(&dirty, "dirty"), (&clean, "clean")] {
+        let request = transaction.register_requests([facts(name)])[0];
+        assert_eq!(
+            transaction.enter(request),
+            GeneratedRequestEntry::Materialise
+        );
+        transaction.complete(
+            request,
+            solved.clone(),
+            test_sidecar(identity.clone(), solved.clone()),
+            Default::default(),
+        );
+    }
+
+    transaction.reset_graph_payloads([&dirty]);
+
+    assert_eq!(transaction.summary(&dirty), Some(&seed));
+    assert_eq!(transaction.summary(&clean), Some(&solved));
+    assert_eq!(transaction.summary(&published), Some(&solved));
 }
 
 #[test]

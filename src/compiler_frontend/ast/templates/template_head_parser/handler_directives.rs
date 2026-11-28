@@ -29,8 +29,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
-    StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
-    StyleDirectiveHandlerSpec,
+    StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveHandlerSpec,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -70,10 +69,11 @@ pub(super) fn apply_handler_style_directive(
         path_fork,
     )?;
 
-    apply_style_directive_effects(build_state, handler_spec.effects);
+    build_state.style.id = handler_spec.style_id;
+    build_state.style.suppress_child_templates |= handler_spec.suppress_child_templates;
 
-    if let Some(factory) = handler_spec.formatter_factory {
-        let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
+    let formatter =
+        (handler_spec.formatter_factory)(parsed_argument.value.as_ref()).map_err(|message| {
             let message_id = string_table.get_or_intern(message);
             let diagnostic = templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
@@ -83,26 +83,10 @@ pub(super) fn apply_handler_style_directive(
             TemplateError::from(with_argument_span(diagnostic, parsed_argument.error_span))
         })?;
 
-        build_state.style.formatter = Some(formatter);
-    }
+    build_state.style.formatter = Some(formatter);
 
     // The head parser must not skip a separator when the directive already consumed its operand.
     Ok(parsed_argument.value.is_some())
-}
-
-fn apply_style_directive_effects(
-    build_state: &mut TemplateBuildState,
-    effects: StyleDirectiveEffects,
-) {
-    // Effects mutate semantic template style state. Formatter identity is set
-    // separately by the optional formatter factory output.
-    let style = &mut build_state.style;
-    if let Some(style_id) = effects.style_id {
-        style.id = style_id;
-    }
-    if let Some(suppress_child_templates) = effects.suppress_child_templates {
-        style.suppress_child_templates = suppress_child_templates;
-    }
 }
 
 /// Parses the optional handler argument and validates whether this directive

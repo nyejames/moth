@@ -6,9 +6,10 @@
 //! mixed-family rejection keep their explicit negative rows.
 
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, NumericSemantics, binary_operation_domain, common_fixed_integer,
-    comparison_supported, fast_numeric_trap_codes, negation_domain, numeric_failure_codes,
-    numeric_operation_cannot_fail, numeric_semantics, range_iteration_domain,
+    NumericOperator, NumericSemantics, binary_operation_domain, checked_result_range,
+    common_fixed_integer, comparison_supported, fast_numeric_trap_codes, negation_domain,
+    numeric_failure_codes, numeric_operation_cannot_fail, numeric_semantics,
+    range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -445,6 +446,46 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
     );
     assert_eq!(negation_domain(fixed(I8)), Some(fixed(I8)));
     assert_eq!(negation_domain(fixed(I16)), Some(fixed(I16)));
+}
+
+#[test]
+fn checked_interval_arithmetic_handles_endpoints_and_unrepresentable_results() {
+    use NumericOperator as Op;
+    assert_eq!(
+        checked_result_range(Op::Add, (-5, 2), Some((3, 7))),
+        Some((-2, 9))
+    );
+    assert_eq!(
+        checked_result_range(Op::Subtract, (-5, 2), Some((3, 7))),
+        Some((-12, -1))
+    );
+    assert_eq!(
+        checked_result_range(Op::Multiply, (-5, 2), Some((-3, 7))),
+        Some((-35, 15))
+    );
+    assert_eq!(
+        checked_result_range(Op::Negate, (-5, 2), None),
+        Some((-2, 5))
+    );
+    assert_eq!(
+        checked_result_range(Op::Add, (i128::MAX, i128::MAX), Some((1, 1))),
+        None
+    );
+    assert_eq!(
+        checked_result_range(Op::Subtract, (i128::MIN, i128::MIN), Some((1, 1))),
+        None
+    );
+    assert_eq!(
+        checked_result_range(Op::Multiply, (i128::MAX, i128::MAX), Some((2, 2))),
+        None
+    );
+    assert_eq!(checked_result_range(Op::Negate, (i128::MIN, 0), None), None);
+    assert_eq!(checked_result_range(Op::Add, (0, 0), None), None);
+    assert_eq!(checked_result_range(Op::Negate, (0, 0), Some((0, 0))), None);
+    assert_eq!(
+        checked_result_range(Op::IntegerDivide, (1, 1), Some((1, 1))),
+        None
+    );
 }
 
 #[test]

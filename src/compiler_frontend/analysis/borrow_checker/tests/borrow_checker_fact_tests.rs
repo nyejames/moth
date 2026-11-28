@@ -7,7 +7,9 @@
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     ValueAccessClassification, ValueBorrowFact,
 };
-use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BorrowCheckError, LocalMode, OptionalTransferStatus,
+};
 use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
@@ -17,8 +19,12 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    SharedMutableConflictView, UseOfUninitializedLocalView,
+    InvalidMutableAccessView, MultipleMutableBorrowsView, SharedMutableConflictView,
+    UseOfUninitializedLocalView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
@@ -52,10 +58,10 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
-    run_borrow_checker_with_types,
+    run_borrow_checker_with_types, run_prepared_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::hir_fixture_support::{PreparedHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast, multi_bind_target,
@@ -737,6 +743,229 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             .expect("target initializer should have a borrow fact")
             .optional_transfer,
         OptionalTransferStatus::Transfer
+    );
+}
+
+pub(super) fn check_place_access_source(source: &str) -> Result<(), BorrowCheckError> {
+    run_prepared_borrow_checker(&PreparedHirFixture::new(source)).map(|_| ())
+}
+
+pub(super) fn assert_lookup_conflict(source: &str, operation: &str) {
+    let draft = check_place_access_source(source)
+        .expect_err("the receiver edit must be rejected")
+        .into_draft_or_infrastructure()
+        .expect("typed borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    let view = diagnostic
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access");
+    assert_eq!(
+        view.reason,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess
+    );
+    let start = source.find(operation).expect("authored operation");
+    let end = source[start..]
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset);
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span.local().inline_range()
+                .is_some_and(|range| (start..end).contains(&(range.start() as usize)))
+        ),
+        "expected rejection at {operation}, got {:?}",
+        diagnostic.primary_site()
+    );
+}
+
+#[test]
+fn scalar_map_lookup_protects_its_receiver_but_not_an_independent_map() {
+    let fixture = |receiver, capture| {
+        format!(
+            r#"
+scores ~{{String = I32}} = {{"k" = 7}}
+other ~{{String = I32}} = {{"k" = 9}}
+score = scores.get("k")!
+observed = {capture}
+~{receiver}.set("different", 11) catch:
+;
+~[:[observed]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("scores", "score"), "~scores.set");
+    check_place_access_source(&fixture("other", "score")).expect("independent receiver");
+    check_place_access_source(&fixture("scores", "copy score")).expect("independent copy");
+}
+
+#[test]
+fn collection_lookup_value_keeps_receiver_live_until_its_last_use() {
+    let lookup = "items ~= {1, 2}\nitem = items.get(0)!\n";
+    let write = "~items.push(3)\n";
+    let read = "seen = item + 0\n";
+    let render = "~[:[seen]]\n";
+    assert_lookup_conflict(&format!("{lookup}{write}{read}{render}"), "~items.push");
+    check_place_access_source(&format!("{lookup}{read}{write}{render}"))
+        .expect("the last lookup use precedes the edit");
+}
+
+#[test]
+fn map_get_and_collection_get_failure_do_not_acquire_lookup_dependencies() {
+    for (declaration, get, change) in [
+        (
+            r#"receiver ~{String = I32} = {"k" = 7}"#,
+            r#"get("missing")"#,
+            "~receiver.clear()",
+        ),
+        ("receiver ~= {1, 2}", "get(99)", "~receiver.push(3)"),
+    ] {
+        let source = format!(
+            "{declaration}\n\
+             value = receiver.{get} catch:\n\
+                 {change}\n\
+                 then 0\n\
+             ;\n\
+             ~[:[value]]\n"
+        );
+        check_place_access_source(&source).expect("only the success edge acquires a dependency");
+    }
+}
+
+#[test]
+fn clear_refill_kills_only_definitely_erased_lookup_members() {
+    let fixture = |clear: &str, refill: &str| {
+        format!(
+            r#"
+probe |flag Bool| -> I32, Error!:
+    src ~{{String = I32}} = {{"k" = 7}}
+    score = src.get("k")!
+    dst ~{{String = I32}} = {{"k" = score}}
+    {clear}
+    ~src.clear()
+    {refill}
+    return dst.get("k")!
+;
+~[:[probe(true)!],[probe(false)!]]
+"#
+        )
+    };
+    check_place_access_source(&fixture("~dst.clear()", "~dst.set(\"k\", 11) catch:\n;"))
+        .expect("definite erase kills the old member before refill");
+    assert_lookup_conflict(&fixture("if flag:\n~dst.clear()\n;", ""), "~src.clear()");
+}
+
+#[test]
+fn member_forward_remove_live() {
+    for member in [r#"~dst.remove("k")!"#, r#"dst.get("k")!"#] {
+        let fixture = |before, after| {
+            format!(
+                r#"
+src ~{{String = I32}} = {{"k" = 7}}
+score = src.get("k")!
+dst ~{{String = I32}} = {{"k" = score}}
+{before}
+forwarded = {member}
+seen = forwarded + 0
+{after}
+~[:[seen]]
+"#
+            )
+        };
+        assert_lookup_conflict(&fixture("~src.clear()", ""), "~src.clear()");
+        check_place_access_source(&fixture("", "~src.clear()"))
+            .expect("the member was last observed before the source edit");
+    }
+}
+
+#[test]
+fn remove_transports_existing_dependencies_without_acquiring_its_own() {
+    let fixture = |receiver| {
+        format!(
+            r#"
+src ~{{String = I32}} = {{"k" = 7}}
+score = src.get("k")!
+dst ~{{String = I32}} = {{"k" = score}}
+removed = ~dst.remove("k")!
+~{receiver}.clear()
+~[:[removed]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("src"), "~src.clear()");
+    check_place_access_source(&fixture("dst"))
+        .expect("a removed value does not depend on the receiver it left");
+}
+
+#[test]
+fn same_call_projected_arguments_reserve_cells_not_holder_names() {
+    let fixture = |parameter, first, second| {
+        format!(
+            "Pair = |left I32, right I32|\n\
+             combine |first {parameter}, second ~I32| -> I32:\n\
+                 ~second = 7\n\
+                 return first + second\n\
+             ;\n\
+             pair ~= Pair(1, 2)\n\
+             result = combine({first}, {second})\n\
+             ~[:[result]]\n"
+        )
+    };
+
+    for (parameter, first) in [("I32", "pair.left"), ("~I32", "~pair.left")] {
+        check_place_access_source(&fixture(parameter, first, "~pair.right"))
+            .expect("sibling cells can be reserved together");
+    }
+    let shared = check_place_access_source(&fixture("I32", "pair.left", "~pair.left"))
+        .expect_err("a mutable argument cannot reserve the shared argument's cell");
+    assert_borrow_error_view::<SharedMutableConflictView>(shared);
+    let exclusive = check_place_access_source(&fixture("~I32", "~pair.left", "~pair.left"))
+        .expect_err("two mutable arguments cannot reserve the same cell");
+    assert_borrow_error_view::<MultipleMutableBorrowsView>(exclusive);
+}
+
+#[test]
+fn only_a_must_derived_child_can_use_a_live_parent_loan() {
+    let source = |body| {
+        format!(
+            "probe || -> I32:\n\
+                 data ~= 1\n\
+                 parent ~= data\n\
+                 child ~= parent\n\
+                 {body}\n\
+             ;\n\
+             ~[:[probe()]]\n"
+        )
+    };
+    check_place_access_source(&source("~child = 2\nreturn parent"))
+        .expect("the child can exercise its live parent loan");
+    let parent = check_place_access_source(&source("~parent = 2\nreturn child"))
+        .expect_err("the parent cannot ignore its live child");
+    assert_invalid_mutable_access_reason(
+        parent,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+
+    let joined = check_place_access_source(
+        "probe |flag Bool| -> I32:\n\
+             first ~= 1\n\
+             second ~= 2\n\
+             parent ~= first\n\
+             child ~= 0\n\
+             if flag:\n\
+                 ~child = parent\n\
+             else\n\
+                 ~child = second\n\
+             ;\n\
+             ~child = 4\n\
+             return parent\n\
+         ;\n\
+         ~[:[probe(true)]]\n",
+    )
+    .expect_err("derivation on only one incoming path does not authorise the joined child");
+    assert_invalid_mutable_access_reason(
+        joined,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
     );
 }
 
@@ -2418,12 +2647,15 @@ identity |value User| -> User:
 return value
 ;
 
-load_user || -> User, Error!:
+load_user |available Bool| -> User, Error!:
+if available:
+return User(1)
+;
 return! Error("missing user")
 ;
 
-compute || -> User, Error!:
-return identity(load_user()!)
+compute |available Bool| -> User, Error!:
+return identity(load_user(available)!)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -2531,7 +2763,7 @@ return identity(load_user()!)
 }
 
 #[test]
-fn retained_unknown_result_borrows_possible_final_use_argument() {
+fn a_retained_native_slot_borrows_the_argument_without_aliasing_the_fresh_slot() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let types = TypeEnvironment::new();
@@ -2548,7 +2780,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             }],
             return_contract: external_returns(
                 vec![
-                    ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+                    ExternalReturnSlot::alias_args(ExternalAbiType::Utf8Str, vec![0]),
                     ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
                 ],
                 Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
@@ -2758,14 +2990,19 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         })
         .expect("should locate the unknown-return function")
         .id;
-    assert_eq!(
-        report
-            .analysis
-            .public_call_summaries
-            .get(&unknown_function_id)
-            .expect("unknown-return function should have a call summary")
-            .return_alias,
-        FunctionReturnAliasSummary::Unknown
+    let FunctionReturnAliasSummary::Known(facts) =
+        &report.analysis.public_call_summaries[&unknown_function_id].return_alias
+    else {
+        panic!("the native forwarder should publish the ordered success slots");
+    };
+    use crate::compiler_frontend::public_call_summary::typed::{EntryPort, ObjectRef, ValueSource};
+    assert!(
+        super::borrow_checker_call_summary_tests::result_sources(&facts.success, 0)
+            .iter()
+            .any(|source| {
+                let ValueSource::Allocation(ObjectRef::Entry(port)) = source else { return false };
+                matches!(&facts.ports[port.0 as usize], EntryPort::Value { parameter: 0, path } if path.is_empty())
+            })
     );
 
     let argument_local = find_local_by_name(&hir, &path_fork, &string_table, "argument")
@@ -2809,7 +3046,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         "a retained unknown result must not move a possible source root, got mode {:?}",
         argument_snapshot.mode
     );
-    for call_result_local in success_results {
+    for (slot, call_result_local) in success_results.iter().enumerate() {
         let result_snapshot = entry_state
             .locals
             .iter()
@@ -2826,9 +3063,10 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             "retained unknown result should not be a write-through alias binding, got mode {:?}",
             result_snapshot.mode
         );
-        assert!(
+        assert_eq!(
             result_snapshot.alias_roots.contains(&argument_local),
-            "retained unknown result should retain the possible argument root, got {:?}",
+            slot == 0,
+            "only the first native slot retains the argument, got {:?}",
             result_snapshot.alias_roots
         );
     }
@@ -3356,7 +3594,7 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
 }
 
 #[test]
-fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
+fn unequal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     use crate::compiler_frontend::tests::hir_fixture_support::{
         bool_expression, expression, statement,
     };
@@ -3423,12 +3661,12 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     assert_eq!(*target, view);
     *value = right_value;
 
-    // Both arms sit one edge from the entry, so breadth-first scheduling reaches the merge from
-    // the left arm and grows its input from the right arm before the merge is popped.
+    // Add an extra hop on the right so a FIFO worklist visits the merge before that arm arrives.
     let base = hir.blocks.len() as u32;
     let left_arm = BlockId(base);
     let right_arm = BlockId(base + 1);
-    let merge = BlockId(base + 2);
+    let right_relay = BlockId(base + 2);
+    let merge = BlockId(base + 3);
     let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
     let condition = bool_expression(true, builtin_type_ids::BOOL, region, &mut hir.expressions);
     hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
@@ -3460,6 +3698,16 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
             region,
             locals: vec![],
             statements: vec![right_definition],
+            terminator: HirTerminator::Jump {
+                target: right_relay,
+                args: vec![],
+            },
+        },
+        HirBlock {
+            id: right_relay,
+            region,
+            locals: vec![],
+            statements: vec![],
             terminator: jump_to_merge,
         },
         HirBlock {
@@ -3482,8 +3730,8 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     assert!(merge_view.alias_roots.contains(&left));
     assert!(merge_view.alias_roots.contains(&right));
 
-    // Entry, both arms and the merge: the grown merge input is visited once, not once per arm.
+    // The merge runs once even though the two arms need different numbers of visits.
     let summary = &report.analysis.function_summaries[&start];
-    assert_eq!(summary.reachable_blocks, 4);
-    assert_eq!(summary.worklist_iterations, 4);
+    assert_eq!(summary.reachable_blocks, 5);
+    assert_eq!(summary.worklist_iterations, 5);
 }

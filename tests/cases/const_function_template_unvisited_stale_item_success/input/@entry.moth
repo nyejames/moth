@@ -1,0 +1,14 @@
+Row = |shown I32, hidden I32|
+
+render #|| -> String:
+    x ~= 1
+    held = x
+    values ~{I32} = {1, held, 3}
+    rows ~= {Row(4, held)}
+    selected ~Row? = Row(5, held)
+    ~x = 2
+    return [:visited=[loop values by 2 |item|:[item];] count=[loop values by 2:x] nested=[loop rows |row|:[row.shown];] option=[if selected is |present|:[present.shown]]]
+;
+
+result #String = render()
+~[:[result]]

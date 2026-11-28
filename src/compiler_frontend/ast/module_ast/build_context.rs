@@ -20,7 +20,6 @@
 //! Finalisation consumes the phase context and moves its builder into freeze after the last
 //! TIR reader has been released so no replacement builder remains beside the frozen store.
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::const_values::store::{ConstExecutionMeter, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -162,9 +161,6 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Whether preparation synthesized the compiler-owned entry `start` body.
     pub synthesizes_entry_start: bool,
 
-    /// Current build profile (dev/release) affecting optimization and diagnostic levels.
-    pub build_profile: FrontendBuildProfile,
-
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
@@ -235,7 +231,6 @@ pub(crate) struct AstPhaseContext<'a> {
     /// Names of source `$config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) synthesizes_entry_start: bool,
-    pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 
@@ -300,7 +295,6 @@ impl<'a> AstPhaseContext<'a> {
         const_values: ConstValueStore,
     ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), InfrastructureFailure> {
         let AstBuildContext {
-            build_profile,
             external_package_registry,
             style_directives,
             string_table,
@@ -331,7 +325,6 @@ impl<'a> AstPhaseContext<'a> {
                 style_directives,
                 entry_dir,
                 synthesizes_entry_start,
-                build_profile,
                 file_value_resolution,
                 config_resolution,
                 build_config_values,

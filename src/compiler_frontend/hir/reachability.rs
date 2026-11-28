@@ -39,6 +39,30 @@ use crate::compiler_frontend::semantic_identity::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
+pub(in crate::compiler_frontend) fn statement_call_target(
+    statement: &HirStatementKind,
+) -> Option<&CallTarget> {
+    match statement {
+        HirStatementKind::Call { target, .. } => Some(target),
+        _ => None,
+    }
+}
+
+/// A terminal call contributes a dependency without contributing an edge to a
+/// continuation. Keep call discovery independent of successor enumeration.
+pub(in crate::compiler_frontend) fn terminator_call_target(
+    terminator: &HirTerminator,
+) -> Option<&CallTarget> {
+    match terminator {
+        HirTerminator::Invoke {
+            operation: HirFallibleOperation::Call { target, .. },
+            ..
+        }
+        | HirTerminator::NeverCall { target, .. } => Some(target),
+        _ => None,
+    }
+}
+
 /// The first reachable local function with a direct ProjectContext dependency.
 ///
 /// The function ID and direct provenance remain paired so boundary diagnostics identify the
@@ -182,16 +206,51 @@ impl HirModuleLinkFacts {
             .flat_map(|block| block.direct_facts.reachable_external_calls.iter())
     }
 
-    /// Return the validated HIR call targets in deterministic block and call-site order.
-    ///
-    /// WHAT: exposes the existing per-function link-fact call extraction to transient build
-    ///       observations that need topology without rescanning HIR or source.
-    /// WHY: convergence derives its read-only dependency model from the same validated call
-    ///      targets that already own backend reachability facts. Yielding owned targets avoids an
-    ///      intermediate vector and a second retained call graph. Caller identity stays on the
-    ///      internal block facts because convergence models each module as one node; per-function
-    ///      ownership is validated through backend-selection reachability.
+    pub(crate) fn local_call_edges(&self) -> impl Iterator<Item = (FunctionId, FunctionId)> + '_ {
+        self.blocks.iter().flat_map(|block| {
+            block
+                .direct_facts
+                .direct_user_calls
+                .iter()
+                .map(|&callee| (block.function_id, callee))
+        })
+    }
+
+    /// Return owners with executable calls to an updated non-local allocation contract.
+    pub(crate) fn callers_of(
+        &self,
+        generated: &FxHashSet<&GeneratedFunctionIdentity>,
+        public: &FxHashSet<&OriginFunctionId>,
+        private: &FxHashSet<&ModulePrivateExecutableIdentity>,
+    ) -> FxHashSet<FunctionId> {
+        self.blocks
+            .iter()
+            .filter_map(|block| {
+                let facts = &block.direct_facts;
+                (facts
+                    .direct_generated_calls
+                    .iter()
+                    .any(|id| generated.contains(id))
+                    || facts
+                        .direct_cross_module_calls
+                        .iter()
+                        .any(|id| public.contains(id))
+                    || facts
+                        .direct_module_private_calls
+                        .iter()
+                        .any(|id| private.contains(id)))
+                .then_some(block.function_id)
+            })
+            .collect()
+    }
+
+    /// Return retained non-external targets in block order, without an intermediate call list.
     pub(crate) fn direct_call_targets(&self) -> impl Iterator<Item = CallTarget> + '_ {
+        self.direct_call_edges().map(|(_, target)| target)
+    }
+
+    /// Retain each executable call's owner so convergence can route changes to exact callers.
+    pub(crate) fn direct_call_edges(&self) -> impl Iterator<Item = (FunctionId, CallTarget)> + '_ {
         self.blocks.iter().flat_map(|block| {
             let facts = &block.direct_facts;
             facts
@@ -220,6 +279,7 @@ impl HirModuleLinkFacts {
                         .cloned()
                         .map(|identity| CallTarget::Generated(Box::new(identity))),
                 )
+                .map(move |target| (block.function_id, target))
         })
     }
 }
@@ -776,10 +836,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         for statement in &block.statements {
             self.collect_runtime_feature_uses_from_statement(statement);
 
-            let HirStatementKind::Call { target, .. } = &statement.kind else {
-                continue;
-            };
-            self.collect_call_target(target, statement.span);
+            if let Some(target) = statement_call_target(&statement.kind) {
+                self.collect_call_target(target, statement.span);
+            }
         }
     }
 
@@ -975,9 +1034,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         span: Option<SourceSpan>,
     ) {
         match operation {
-            HirFallibleOperation::Call { target, .. } => {
-                self.collect_call_target(target, span);
-            }
+            HirFallibleOperation::Call { .. } => {}
             HirFallibleOperation::MapOp { op, .. } => {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Operation(*op),
@@ -1036,6 +1093,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
     fn collect_runtime_feature_uses_from_terminator(&mut self, block: &HirBlock) {
         let fallback_span = self.index.hir.side_table.terminator_span(block.id).copied();
+        if let Some(target) = terminator_call_target(&block.terminator) {
+            let span = match &block.terminator {
+                HirTerminator::Invoke { span, .. } => span.or(fallback_span),
+                _ => fallback_span,
+            };
+            self.collect_call_target(target, span);
+        }
         let expression_collector =
             RuntimeFeatureUseCollector::new(self.index.hir, self.owner_function);
 
@@ -1073,11 +1137,8 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
             }
 
-            HirTerminator::NeverCall { target, args } => {
-                // A Never call is a normal call edge. Its evaluated arguments carry the same
-                // resource and project-context facts as an ordinary call, and the terminator has
-                // no result provenance because it produces no value.
-                self.collect_call_target(target, fallback_span);
+            HirTerminator::NeverCall { args, .. } => {
+                // The terminal site still evaluates its inputs, without a receiving value.
                 for value in self.index.hir.expressions.values(*args) {
                     expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
                 }

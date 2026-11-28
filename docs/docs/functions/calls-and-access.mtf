@@ -22,6 +22,36 @@ Named arguments can skip earlier defaults.
 User functions, struct constructors, choice payload constructors and
 source-authored receiver methods share this routing policy.
 
+### Evaluation order
+
+Arguments are evaluated once, in the order they are written, then routed to
+their parameters. Named arguments follow the same written order. A `copy`
+argument reads its source when it is evaluated, so a later argument that
+changes that source does not change the copied value:
+
+[codeblock, $code "moth":
+    inspect(old = copy holder, next_length = replace(~holder))
+]
+
+A shared place argument, such as `holder.items`, is also read where it is
+written. The call still needs that read when a later argument runs, so a later
+argument that mutates the same root is rejected, just as if the place had been
+bound to a name first. Conflicts are checked per root: mutating `pair.right`
+conflicts with an earlier `pair.left` argument. Use `copy` when the call should
+see the old value:
+
+[codeblock, $code "moth":
+    -- Rejected: `replace` mutates `holder` while `holder.items` is still needed.
+    inspect(holder.items, replace(~holder))
+    inspect(copy holder.items, replace(~holder))
+]
+
+A mutable projection, such as `~holder.inner.item` or `~holder.inner.update(...)`,
+designates its storage before the later operands run. A later operand cannot
+replace the containing aggregate while the call still needs that place. The
+callee writes through to the captured location. Capturing a place does not
+copy its value.
+
 Host functions and compiler-owned builtin member calls are positional-only.
 
 ### Implicit failure at calls

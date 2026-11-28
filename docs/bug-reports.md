@@ -11,7 +11,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Found: runtime template helper escape fix review, 2026-11. Confirmed by a source probe. Reported as pre-existing.
 - Where: final-value validation of function-body constant bindings.
 - Observed: inside an ordinary function, `insert #= [$in title:Priya]` is rejected with `MOTH-SYNTAX-0022` at `$in`, even when the only use composes it into `[card:[insert]]` and `card` defines `[$slot title]`. The equivalent stored insert at module scope is accepted for composition.
-- Investigate: preserve function-local constant insert helpers until their receiving template consumes them, while still rejecting helpers that escape as runtime values.
+- Investigate: first distinguish [direct composition from runtime arguments](#stored-insert-reads-are-gated-by-context-kind-rather-than-position). Simply removing the declaration before HIR lets `return [: [show(insert)]]` reach HIR and fail with `MOTH-INFRA-0001` instead of a source diagnostic. Removing the declaration before static selection also loses the span of a helper-only inactive branch and leaks its `$fast_math` evidence into `$safe_math` validation. Preserve authored validation, then omit the helper from runtime lowering while leaving it available to composition.
 
 ### Stored inserts read through namespaces or constant records do not compose
 
@@ -48,12 +48,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: if capture pauses after verifying a contained alias, the alias is retargeted to another contained file and its former target is replaced by an out-of-root symlink, the reopen publishes the external bytes under the alias's HTTP key. The directory branch also checks and reopens by name. An unowned hard link to an external file is served in both the old and new code; path containment cannot distinguish it.
 - Investigate: anchor traversal at the verified output-root handle and open entries beneath it (openat with no-follow semantics, or a capability-style filesystem crate), then read the same handles. This needs platform-specific APIs or a new dependency, so decide the approach before implementing. Decide separately whether hard links to external files are inside the boundary.
 
-### `$infallible` verification consumes release-folded HIR
+### Nested match ending without `else` fails to parse in a non-final arm
 
-- Found: release/debug divergence investigation, 2026-11. Accepted outstanding correctness defect, confirmed by probes on this branch. The demonstrated cases are recorded in the implementation plan rather than as expected-failing tests.
-- Where: `rewrite_release_calls` in `src/compiler_frontend/ast/const_values/const_execution/rewrite.rs` runs from `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs` and rewrites pure constant calls before HIR exists. `BlockLiteralFacts` and the constraint walkers in `src/compiler_frontend/hir/constraint_facts/` then verify the folded HIR through `src/compiler_frontend/hir/constraint_verification.rs`.
-- Observed: debug keeps the authored call and rejects, release folds it and accepts, for a local defined from a folded call, a direct folded divisor, an earlier local invalidated by a later folded call, a folded call inside an `Invoke` terminator, a multi-value return order, a wholesale fold that erases a checked argument and a cast-wrapped folded value. The constraints reference already requires checks before optional optimisation erases evidence. The overview currently has HIR receive the final folded AST.
-- Investigate: fix under the Release call folding after semantic verification plan. Move optional release call folding after HIR construction and semantic constraint verification, verify authored HIR, preserve control flow, evaluation order, failure evidence and cross-module constraint summaries and delete the pre-fold compensations that exist only for the current ordering.
+- Found: const evaluator Phase 3 audit, 2026-11. Reproduced with the baseline binary.
+- Where: match arm body parsing in `src/compiler_frontend/ast/statements/branching.rs`.
+- Observed: an arm `0 =>` whose body is an option match ending in `|x| => return x`, followed by `else => return 3`, reports MOTH-SYNTAX-0028. The same nested match parses when it ends with `else =>` or sits in the last arm.
+- Investigate: `parse_match_block` assumes that an arm header after `;` belongs to the match it just closed. Dropping that check for all nested matches fixes the valid outer-arm case but loses the dedicated diagnostic for a stray `;` between `none =>` and `|x| =>` in an inner option match. Decide how to detect a misplaced delimiter without treating indentation as syntax or trial-parsing the next arm against multiple subjects.
 
 ### Repeated work in single-file namespace validation
 
@@ -83,35 +83,19 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
   `docs/docs/branching/statement-if.mtf` requires both bodies to be frontend-validated before a known `Bool` selects one, and `tests/cases/catch_and_inactive_branch_source_validation_rejected` already pins syntax and type validation in discarded branches. Add matching debug/release rejection cases.
 
-### JS projected call arguments still retarget when a later argument rebinds the base
+### Binding a place into an option drops its alias provenance
 
-- Found: projected-alias backend audit, 2026-11. Confirmed by Node probe on the current branch; pre-dates it. Needs a design decision; see Investigate.
-- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` keeps an earlier projected or copied argument as an unevaluated place load while a later argument's nested call is flushed into the prelude before the enclosing call. The JS computed-place helpers capture their base storage when constructed (`src/backends/js/runtime/places.rs`), so the retarget comes from that construction happening after the hoisted later argument ran.
-- Observed: `read_count(holder.items, replace(~holder))` returns the replacement's length. The same ordering affects whole-place copies (`read_count(copy holder, replace_holder(~holder))` returns 3 instead of 2) and nested fields (`read_count(outer.inner.items, replace_inner(~outer.inner))`). Authored index projections cannot reach this path because places only carry field projections.
-- Attempted fix (reverted, 2026-11): capturing earlier operands into compiler locals in HIR before borrow checking fixed the runtime order but kept changing borrow verdicts relative to the existing behaviour. Four review rounds each found new divergences:
-  - mutable-capture actor (`old = pair.first; set_first(~pair.first, stamp())` accepted);
-  - alias liveness through a capture (`observe(writer.first, rewrite(~pair))` accepted);
-  - copy independence (`keep(copy pair, stamp())` falsely tied to `pair`);
-  - early shared borrow (`set_first(~pair.first, read_slot(writer))` rejected);
-  - same-call copy read (`f(copy pair, ~pair, stamp())` accepted);
-  - designated cells after scope exit;
-  - a copy checked at the capture instead of at the call;
-  - copy-source liveness across a branch merge;
-  - `__hir_tmp_*` named in a diagnostic.
-
-  The current borrow verdicts are computed on late-evaluation HIR, so any HIR-level capture alters what the checker sees.
-- Investigate: decide where source-order operand evaluation is owned. Options:
-  - borrow-check the existing HIR unchanged, then reorder operand evaluation in a post-borrow-check lowering step consumed by the JS backend (verdicts unchanged by construction);
-  - redefine borrow verdicts under source-order evaluation as a deliberate language decision, then capture in HIR.
-
-  Either way, add Node-executed cases for the projected, copied and nested-field shapes.
+- Found: shared call-operand capture work, 2026-11. Confirmed on `32c9c4208`; pre-existing.
+- Where: Stage 6 local binding transfer for a `some` construction around a place load. Capturing the whole implicit `some` wrapper of a call operand in HIR exposed it, so `src/compiler_frontend/hir/hir_expression/calls.rs` binds only the load under the wrapper.
+- Observed: with `holder ~= Holder({1})`, `maybe {I32}? = holder.items`, then `first = replace(~holder)` and `inspect(maybe, first)`, the program is accepted. Declaring `maybe = holder.items` instead rejects at `~holder` with `MOTH-BORROW-0007`.
+- Investigate: whether option construction should carry the payload's alias roots into the bound local, and which option fixtures change verdict.
 
 ### Rooted in-memory template sources may not reach disk resources on Windows
 
 - Found: template path simplification review, 2026-11. Unverified hypothesis from code reading; no Windows host was available.
-- Where: `src/projects/html_project/moth_template/input.rs` resource containment for in-memory `Sources` with rooted display paths.
-- Suspected: `portable_path_text` strips the `\\?\` verbatim prefix while `fs::canonicalize` returns it, so the containment check may reject a sibling resource such as `[@logo.svg]` that the same request accepts on Unix. `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` is Unix-only for this reason.
-- Investigate: run that case on Windows. If it fails, compare both sides of the containment check in one canonical spelling.
+- Where: `prepare_file_value_bundle` in `src/projects/html_project/moth_template/bundle.rs` passes the display path's parent to `SingleFileReferenceResolver`. Its constructor clones that path as the containment root, while `resolve_physical_target_cached` compares canonical targets against it in `src/build_system/create_project_modules/file_reference_resolution.rs`.
+- Suspected: a normal drive path and the verbatim path from `fs::canonicalize` compare differently on Windows, so a sibling resource such as `[@logo.svg]` may fail containment. The Unix-only `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` test passes an ordinary display spelling.
+- Investigate: run the case on Windows. If containment fails, keep the lexical display identity separate and compare the canonical target, root and module-boundary probes in one spelling.
 
 ### Projected alias write targets keep the holder cell as a conservative identity
 
@@ -155,9 +139,64 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: `render type T |value T| -> String: return [$in style: [: red]];` with no call is accepted, while `result = render("x"); ~[:[result]]` reports MOTH-SYNTAX-0022 at the helper. The same split occurs for a runtime-dependent helper: `render type T |value T, x String| -> String: return [$in style: [x]];` is accepted while unused and rejected once instantiated.
 - Investigate: validate the authored generic body once before instantiation or materialise every generic body for validation without publishing an instance. The helper shape is not type-dependent, so a pre-instantiation validation pass may suffice. Check that it does not reject generic bodies that are valid only under an instance's type arguments.
 
+### A generic fallible body cannot construct the built-in `Error`
+
+- Found: const C4 ordinary-call controls, 2026-11. Reproduced on the retained pre-C4 compiler.
+- Where: referenced built-in types surviving generic body materialisation into HIR.
+- Observed: `choose type T |value T, fail Bool| -> T, T, Error!` returns `Error("selected failure")` with `return!` on the failure branch, and `value, value` on success. `left, right = choose(1, false) catch: then 2, 3;` fails with MOTH-INFRA-0001, "Unresolved struct 'Error' during HIR lowering", even though the call selects success.
+- Investigate: why the generated body does not carry the canonical built-in `Error` constructor. Passing a concrete `Error` into a generic `E!` parameter does not reproduce the missing layout.
+
 ### Imported const template helper defaults lack a donor `$in` label
 
 - Found: runtime template helper escape fix verification, 2026-11. Confirmed by a two-module probe and pre-dates this branch.
 - Where: `fold_signature_default` in `src/compiler_frontend/ast/statements/functions.rs` validates the rebuilt default template, and `PublicConstTemplate` in `src/compiler_frontend/folded_value.rs` carries no donor `$in` site. The primary diagnostic correctly points at the importing reference because the stored const insert is legal in its donor, but there is no related label at the authored directive.
 - Observed: `helpers/utils.moth` declares `insert #= [$in style: [: red]]`, `helpers/@mod.moth` exports `@utils insert` and `@entry.moth` uses `@helpers insert` as `render |value String = insert| -> String`. The compiler reports one MOTH-SYNTAX-0022 on the `insert` reference in the default at `@entry.moth:3:24`. It does not point to the authored `$in` at `helpers/utils.moth:2:5`.
 - Investigate: carry diagnostic provenance for the donor `$in` site on public const templates, separate from semantic equality and fingerprints. Attach it as a related label and keep the primary at the invalid use site. The fallback to the use-site span is correct when no authored site is available.
+
+### Multi-bind through a mutable alias is rejected at runtime
+
+- Found: const multi-return phase, 2026-11. Confirmed by a runtime-only probe; pre-dates this branch.
+- Where: HIR borrow checking of a multi-bind whose existing target is a mutable alias. The hidden result temporary is read while the alias is still live.
+- Observed: in an ordinary function, `base ~= value + 0`, `view ~= base`, `~view, extra = pair(3)`, then `seen = view * 10 + extra` reports MOTH-BORROW-0003 at the multi-bind: "Cannot read `__hir_tmp_2` while mutable alias `view` is still needed later". The docs say updates through mutable aliases write through to their referents. The same body in a const function evaluates and writes through (`base` becomes 3), so const and runtime acceptance diverge. The diagnostic also exposes a compiler temporary name.
+- Investigate: the result temporaries are fresh values and should not conflict with the alias. Check how multi-bind lowering orders the temporary reads against the alias write, and keep generated names out of user diagnostics.
+
+### Ordinary struct construction bypasses an immutable parameter's access
+
+- Found: const storage C1 controls, 2026-11. Confirmed by executing the emitted JavaScript. Independent of const execution and the existing-target multi-bind issue.
+- Where: ordinary aggregate construction and projected mutation validation. A writable aggregate must not grant mutation of a stored read-only referent.
+- Reproducer:
+
+  ```moth
+  Box = | child {I32} |
+
+  marshal |items {I32}| -> I32:
+      box ~= Box(child = items)
+      ~box.child.push(2)
+      return box.child.length()
+  ;
+
+  observe || -> I32:
+      source ~{I32} = {1}
+      observed = marshal(source)
+      return observed * 10 + source.length()
+  ;
+
+  ~[:[observe()]]
+  ```
+
+- Observed: the compiler accepts the program and renders `22`. The push writes through to the caller's allocation. Direct mutation through a fresh result of `identity(items)` instead receives `MOTH-BORROW-0007`.
+- Expected: reject mutation of the stored immutable referent at the push. Still allow replacing `box.child` and mutating independent storage introduced with `copy`. Investigate how ordinary borrow validation preserves permission through aggregate-retained edges.
+
+### Const interpreter lacks generational access and complete reference identity
+
+- Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary. The owner has since approved dynamic const access validation instead of runtime borrow checking.
+- Where: const execution frame bindings, mutable alias refresh, projection handling and call/result delivery.
+- Observed on the earlier binary: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiled and folded despite its immutable parameter. The C3 checks now reject this and executed stale references inside const evaluation. Multiple overlapping mutable aliases and checks restricted to executed paths are intentional.
+- Still open: verify owned graph publication without weakening ordinary runtime access, then run the integrated C1-C5 gate. Runtime alias provenance and the immutable aggregate permission bypass remain separate BC-06 work. Do not introduce validation-only HIR.
+
+### Retained stale paths can make the next output manifest invalid
+
+- Found: output-publication Correctness audit, 2026-11, at `d6b323082777e73663c8eacd6e03852f97d7e769`. Confirmed by a concrete source trace; the filesystem regression has not been executed.
+- Where: `src/build_system/output/manifest.rs`: `remove_manifest_tracked_stale_artifacts`, `finalize_output_cleanup`, `write_build_manifest` and `parse_manifest_paths`. The current output batch is checked by portable identity in `writer.rs`, but finalisation combines managed and retained paths using native `PathBuf` equality. The reader rejects duplicate ASCII-case-folded output identities.
+- Observed by trace: on a case-sensitive filesystem, start with a valid HTML dev manifest owning `page.html`. Replace that file with a directory (a stale non-regular node the cleanup must retain), then publish managed files `PAGE.html` and `removed.html` under the same owner. The new destinations are valid and distinct. The old directory is not a current managed path, so cleanup retains `page.html`. Finalisation extends the current path set with it and writes both case spellings, which the next read classifies as `RecoverableWithOwner(InvalidMetadata)`. A third build dropping `removed.html` cannot perform normal stale cleanup and loses that file's tracking when it rewrites the manifest. This violates the build output ownership and portable manifest identity invariant. Existing `failed_stale_deletion_remains_owned_in_next_manifest` and `case_variant_manifest_paths_enter_recoverable_mode_with_owner` in `src/build_system/tests/build_cleanup_tests.rs` test the two sides separately.
+- Investigate: reproduce through the existing writer/cleanup harness on a case-sensitive temporary filesystem, including the third build. Establish the ownership policy for a retained native path whose portable identity conflicts with a new managed path, then enforce it before publishing a self-invalidating manifest. Do not delete a directory, guess that case variants are the same native file or silently drop a retained ownership record. A demonstrated pre-publication rejection or a valid ownership-preserving manifest representation would disprove the faulty trace; current batch-only collision checks do neither. Preserve normal case-only renames where the stale file is successfully removed, foreign-owner rejection and non-regular-node retention.

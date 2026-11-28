@@ -259,8 +259,8 @@ pub(crate) fn project_const_template_value(
 ) -> Result<ProjectedConstTemplateValue, ConstValueStoreError> {
     let FoldServices {
         string_table,
-        scope: _,
         registry,
+        ..
     } = fold_services;
     let reference = template.tir_reference;
     let view = TirView::with_minimum_phase(

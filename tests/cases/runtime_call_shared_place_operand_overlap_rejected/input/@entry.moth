@@ -1,0 +1,17 @@
+-- `holder.items` is read where it is written. `replace(~holder)` then mutates
+-- the same root while that read is still needed by the call, exactly as if
+-- the operand had been bound first. The diagnostic names the authored place.
+Holder = |items {I32}|
+
+inspect |items {I32}, count I32| -> I32:
+    return items.length() * 10 + count
+;
+
+replace |holder ~Holder| -> I32:
+    ~holder.items = {9, 9, 9}
+    return 0
+;
+
+holder ~= Holder({1})
+result = inspect(holder.items, replace(~holder))
+~[:[result]]

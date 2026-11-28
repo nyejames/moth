@@ -57,6 +57,8 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
     labels: &[
         LabelMessageCode::PREVIOUS_DECLARATION,
         LabelMessageCode::CONFLICTING_ACCESS,
+        LabelMessageCode::CONST_REFERENCE_ACQUIRED,
+        LabelMessageCode::CONST_INVALIDATING_WRITE,
         LabelMessageCode::VALUE_MOVED_HERE,
         LabelMessageCode::CONFIG_INPUT_ORIGIN,
         LabelMessageCode::TRAIT_REQUIREMENT_SITE,
@@ -103,6 +105,14 @@ fn label_cases(
         (
             LabelDraftMessage::ConflictingAccess,
             "earlier conflicting access here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ConstReferenceAcquired,
+            "reference acquired here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ConstInvalidatingWrite,
+            "invalidating write here".to_owned(),
         ),
         (
             LabelDraftMessage::ValueMovedHere,

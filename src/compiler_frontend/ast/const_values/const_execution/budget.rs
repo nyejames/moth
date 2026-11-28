@@ -9,8 +9,7 @@
 use super::values::{hard_limit_error, limit_error};
 use super::{
     ConstExecutionMeter, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
-    FxHashSet, PathId, Rc, SourceSpan, TemplateOutputLimits, TemplateOutputMeter,
-    TemplateWorkBudget,
+    PathId, Rc, SourceSpan, TemplateOutputLimits, TemplateOutputMeter, TemplateWorkBudget,
 };
 use crate::compiler_frontend::ast::const_eval::{
     ConstBudgetCategory, ConstBudgetUnit, ConstantFoldError,
@@ -35,16 +34,14 @@ pub(super) struct ExecutionBudget {
     pub(super) meter: Rc<RefCell<ConstExecutionMeter>>,
     /// Last operation reached, so a budget refusal still points at the source that spent it.
     pub(super) span: Option<SourceSpan>,
-    /// Aggregate values copied into live frames and projected writes in this attempt.
+    /// Live cells, aggregate edges and folded value slots retained by this attempt.
     pub(super) retained_values: usize,
-    /// Aggregate UTF-8 bytes retained by folded text in this attempt.
+    /// Attempt memory, including scratch while it is held.
     pub(super) retained_memory_bytes: usize,
     /// Work steps consumed by this attempt, shared with bounded template folds.
     pub(super) steps: Rc<Cell<usize>>,
     /// Contiguous const-value index range charged in this attempt.
     pub(super) charged_values: Option<(usize, usize)>,
-    /// Rows whose allocation was charged before insertion by a copying mutation.
-    pub(super) precharged_value_indices: FxHashSet<usize>,
     /// Active interpreted function calls with their call sites, outermost first.
     ///
     /// Call depth is a resource bound and the chain labels escaping diagnostics, so it stays with
@@ -89,7 +86,6 @@ impl ExecutionBudget {
             retained_memory_bytes: 0,
             steps: Rc::new(Cell::new(0)),
             charged_values: None,
-            precharged_value_indices: FxHashSet::default(),
             call_stack: Vec::new(),
         }
     }
@@ -133,7 +129,6 @@ impl ExecutionBudget {
                 ConstBudgetUnit::RetainedValues,
                 MAX_TOTAL_RETAINED_VALUES as u64,
                 None,
-                true,
             ));
         }
         Ok(())
@@ -150,25 +145,21 @@ impl ExecutionBudget {
             .limits
             .max_total_memory_bytes
             .saturating_sub(meter.retained_memory_bytes);
-        let byte_aggregate = total_bytes < attempt_bytes;
         let attempt_pieces = MAX_RETAINED_VALUES.saturating_sub(self.retained_values);
         let total_pieces = MAX_TOTAL_RETAINED_VALUES.saturating_sub(meter.retained_values);
-        let piece_aggregate = total_pieces < attempt_pieces;
         TemplateOutputLimits {
             max_bytes: attempt_bytes.min(total_bytes),
-            byte_limit: if byte_aggregate {
+            byte_limit: if total_bytes < attempt_bytes {
                 meter.limits.max_total_memory_bytes
             } else {
                 meter.limits.max_attempt_memory_bytes
             },
-            byte_aggregate,
             max_structural_pieces: attempt_pieces.min(total_pieces),
-            piece_limit: if piece_aggregate {
+            piece_limit: if total_pieces < attempt_pieces {
                 MAX_TOTAL_RETAINED_VALUES
             } else {
                 MAX_RETAINED_VALUES
             },
-            piece_aggregate,
             span,
             meter: Rc::new(TemplateOutputMeter::default()),
         }
@@ -198,7 +189,6 @@ impl ExecutionBudget {
                 ConstBudgetUnit::Mib,
                 meter.limits.max_attempt_memory_bytes as u64,
                 Some("const_memory_limit_mb"),
-                false,
             ));
         }
         if meter.retained_memory_bytes > meter.limits.max_total_memory_bytes {
@@ -208,10 +198,51 @@ impl ExecutionBudget {
                 ConstBudgetUnit::Mib,
                 meter.limits.max_total_memory_bytes as u64,
                 Some("const_memory_limit_mb"),
-                true,
             ));
         }
         Ok(())
+    }
+
+    pub(super) fn charge_scratch(
+        &mut self,
+        held: &mut usize,
+        bytes: usize,
+    ) -> Result<(), ConstantFoldError> {
+        *held += bytes;
+        self.retain_memory_bytes(bytes, self.span)
+    }
+
+    pub(super) fn reserve_scratch<T>(
+        &mut self,
+        buffer: &mut Vec<T>,
+        additional: usize,
+        held: &mut usize,
+    ) -> Result<(), ConstantFoldError> {
+        let required = buffer.len() + additional;
+        let capacity = buffer.capacity();
+        if required > capacity {
+            let target = required.max(4).next_power_of_two();
+            self.charge_scratch(held, (target - capacity) * std::mem::size_of::<T>())?;
+            buffer.reserve_exact(target - buffer.len());
+        }
+        Ok(())
+    }
+
+    pub(super) fn with_scratch<T>(
+        &mut self,
+        run: impl FnOnce(&mut Self, &mut usize) -> Result<T, ConstantFoldError>,
+    ) -> Result<T, ConstantFoldError> {
+        let mut held = 0;
+        let result = run(self, &mut held);
+        self.release_memory_bytes(held);
+        result
+    }
+
+    pub(super) fn release_memory_bytes(&mut self, bytes: usize) {
+        if bytes != 0 {
+            self.retained_memory_bytes -= bytes;
+            self.meter.borrow_mut().retained_memory_bytes -= bytes;
+        }
     }
 
     pub(super) fn enter_call(
@@ -238,15 +269,40 @@ pub(super) fn charge_new_value_text(
     start: usize,
     budget: &mut ExecutionBudget,
 ) -> Result<(), ConstantFoldError> {
-    let end = constants.value_count();
+    charge_value_range(
+        constants,
+        string_table,
+        start,
+        constants.value_count(),
+        budget,
+    )
+}
+
+/// Extend the tracked range over a value whose allocation was checked before insertion.
+pub(super) fn register_precharged_value(
+    constants: &ConstValueStore,
+    string_table: &StringTable,
+    index: usize,
+    budget: &mut ExecutionBudget,
+) -> Result<(), ConstantFoldError> {
+    charge_value_range(constants, string_table, index, index, budget)?;
+    if let Some((_, end)) = &mut budget.charged_values {
+        *end = (*end).max(index + 1);
+    }
+    Ok(())
+}
+
+fn charge_value_range(
+    constants: &ConstValueStore,
+    string_table: &StringTable,
+    start: usize,
+    end: usize,
+    budget: &mut ExecutionBudget,
+) -> Result<(), ConstantFoldError> {
     let (mut from, mut to) = budget.charged_values.unwrap_or((start, start));
     if start < from {
         charge_value_rows(constants, string_table, start, from, budget)?;
         from = start;
-    }
-    if start > to {
-        charge_value_rows(constants, string_table, to, start, budget)?;
-        to = start;
     }
     if end > to {
         charge_value_rows(constants, string_table, to, end, budget)?;
@@ -256,7 +312,7 @@ pub(super) fn charge_new_value_text(
     Ok(())
 }
 
-pub(super) fn charge_value_rows(
+fn charge_value_rows(
     constants: &ConstValueStore,
     string_table: &StringTable,
     start: usize,
@@ -264,9 +320,6 @@ pub(super) fn charge_value_rows(
     budget: &mut ExecutionBudget,
 ) -> Result<(), ConstantFoldError> {
     for index in start..end {
-        if budget.precharged_value_indices.contains(&index) {
-            continue;
-        }
         let Some(value) = constants.value_id_at(index) else {
             continue;
         };
@@ -289,10 +342,17 @@ pub(super) fn value_own_allocation(
     string_table: &StringTable,
     value: ConstValueId,
 ) -> (usize, usize) {
-    let Some(payload) = constants.payload(value) else {
+    let Some(metadata) = constants.metadata(value) else {
         return (0, 0);
     };
-    let row_bytes = std::mem::size_of::<ConstValue>();
+    let row_bytes = std::mem::size_of::<ConstValue>().saturating_add(
+        metadata
+            .synthetic_interface_provenance
+            .owned_allocation_bytes(),
+    );
+    let Some(payload) = constants.owned_payload(value) else {
+        return (row_bytes, 1);
+    };
     let (owned_bytes, string_pieces) = match payload {
         ConstValuePayload::String(string) => (
             string_bytes(string, string_table)

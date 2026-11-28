@@ -1,5 +1,6 @@
 //! Native fallible call emission and postfix propagation.
 
+use super::super::calls::{CallReceiver, method_receiver, receiver_access};
 use super::EmittedFallibleResults;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ArgumentListView, CallView, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
@@ -17,32 +18,21 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_invoke_arguments(
         &mut self,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueRange, HirConstructionFailure> {
-        let mut values = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
-        if let Some(receiver) = receiver {
-            values.push(self.lower_expression_value_to_current_block(receiver)?);
-        }
-        for (index, argument) in args.iter().enumerate() {
-            let lowered = self.lower_call_argument_value(
-                argument,
-                span,
-                index + usize::from(receiver.is_some()),
-            )?;
-            for statement in lowered.prelude {
-                self.emit_statement_to_current_block(statement)?;
-            }
-            values.push(lowered.value);
-        }
-        self.module.expressions.append_values(&values, *span)
+        let mut lowered = self.lower_call_operands(args, receiver, span)?;
+        self.flush_pending_call_prelude(&mut lowered.prelude)?;
+        self.module
+            .expressions
+            .append_values(&lowered.values, *span)
     }
 
     pub(in crate::compiler_frontend::hir) fn emit_result_call_to_current_block(
         &mut self,
         target: CallTarget,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         result_type_ids: &[TypeId],
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
@@ -79,7 +69,7 @@ impl<'a> HirBuilder<'a> {
                 self.emit_resolved_result_call(value, call, None)
             }
             ExpressionOperationView::MethodCall { receiver, call } => {
-                self.emit_resolved_result_call(value, call, Some(receiver))
+                self.emit_resolved_result_call(value, call, Some(method_receiver(receiver, call)?))
             }
             ExpressionOperationView::MapBuiltin { receiver, facts, arguments } => {
                 let op = super::super::calls::hir_map_op_from_builtin(facts.operation);
@@ -89,9 +79,14 @@ impl<'a> HirBuilder<'a> {
                 let Some(error_type) = value.error_type() else {
                     return Err(InfrastructureFailure::hir_transformation("Fallible map producer lacks an error channel").into());
                 };
-                // Commit receiver work before arguments can enter a failure continuation.
-                let receiver = self.lower_expression_value_to_current_block(receiver)?;
-                let args = self.lower_invoke_arguments(arguments, None, &span)?;
+                let mut lowered = self.lower_call_operands(
+                    arguments, Some((receiver, receiver_access(facts.receiver_requires_mutable))), &span,
+                )?;
+                self.flush_pending_call_prelude(&mut lowered.prelude)?;
+                let (&receiver, arguments) = lowered.values.split_first().ok_or_else(|| {
+                    InfrastructureFailure::hir_transformation("Fallible map producer lacks a receiver")
+                })?;
+                let args = self.module.expressions.append_values(arguments, span)?;
                 let types = self.lower_call_result_types(value.success_types())?;
                 let error = self.lower_type_id(error_type)?;
                 self.emit_fallible_operation(
@@ -103,7 +98,8 @@ impl<'a> HirBuilder<'a> {
                     return Err(InfrastructureFailure::hir_transformation("Fallible collection producer lacks error channel").into());
                 };
                 self.emit_external_result_call_to_current_block(
-                    facts.operation.external_function_id(), arguments, Some(receiver),
+                    facts.operation.external_function_id(), arguments,
+                    Some((receiver, receiver_access(facts.operation.requires_mutable_receiver()))),
                     value.success_types(), false, error, &span,
                 )
             }
@@ -124,7 +120,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: ExpressionView<'_>,
         call: CallView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
         let metadata = call.metadata();
         let span = value.span();

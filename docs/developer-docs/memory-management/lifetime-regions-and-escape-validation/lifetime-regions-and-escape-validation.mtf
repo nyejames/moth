@@ -5,7 +5,7 @@
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
-Lifetime-region and escape validation is the mandatory semantic proof that every retained reference is legal under one lifetime owner. It is distinct from physical memory-strategy selection, which happens afterwards.
+Lifetime-region and escape validation is the mandatory runtime semantic proof that every retained reference is legal under one lifetime owner. It is distinct from physical memory-strategy selection, which happens afterwards. Required const bodies use bounded interpreter-owned storage and the dynamic access contract in @../access-and-aliasing (Access and aliasing). They have no runtime lifetime topology or memory plan.
 
 **Mandatory semantic proof** covers:
 

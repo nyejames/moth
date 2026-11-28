@@ -145,7 +145,7 @@ owned, move or parameter-alias return annotation.
 
 Returning an existing value follows ordinary shared-reference semantics. The
 compiler infers freshness and alias effects from validated bodies and calls.
-Public interfaces preserve those inferred relationships. External bindings may
+Public runtime interfaces preserve those inferred relationships. Within a const evaluation, the interpreter preserves actual reference identities and ordered results instead of inferring runtime borrow summaries. Live handles end at the folded-value publication boundary. External bindings may
 declare equivalent alias behaviour because their foreign bodies are
 unavailable.
 
@@ -177,4 +177,4 @@ Fallible success values may alias a parameter allocation. Multiple return values
 may alias parameters or each other. Each returned value enters its own caller
 binding, defined only on the successful path. The separate error channel defines
 no success value on failure. Any physical result carrier belongs to the target
-ABI and proves neither fresh allocations nor disjoint results. Runtime lowering preserves those allocation relationships.
+ABI and proves neither fresh allocations nor disjoint results. Runtime lowering preserves those allocation relationships. Nested const calls and value-producing receivers likewise preserve live result relationships under the const access contract.

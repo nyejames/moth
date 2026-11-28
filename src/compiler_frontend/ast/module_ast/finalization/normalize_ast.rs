@@ -473,7 +473,7 @@ fn normalize_ast_node_templates(
         NodeKind::ReturnError(value) => normalize_expression_templates(value, context),
 
         NodeKind::NeverCall(call) => {
-            if let Some(receiver) = &mut call.receiver {
+            if let Some((receiver, _)) = &mut call.receiver {
                 normalize_expression_templates(receiver, context)?;
             }
             for argument in &mut call.arguments {

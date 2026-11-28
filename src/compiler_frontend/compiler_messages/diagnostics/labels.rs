@@ -32,6 +32,8 @@ pub(crate) struct GenericSubstitutionDiagnostic {
 pub(crate) enum LabelDraftMessage {
     PreviousDeclaration,
     ConflictingAccess,
+    ConstReferenceAcquired,
+    ConstInvalidatingWrite,
     #[cfg(test)]
     ValueMovedHere,
     ConfigInputOrigin {
@@ -124,6 +126,8 @@ impl LabelMessageCode {
     pub(super) const CONSTRAINT_DIRECTIVE: Self = Self(33);
     pub(super) const CONSTRAINT_EVIDENCE: Self = Self(34);
     pub(super) const CONSTRAINT_CALL_HOP: Self = Self(35);
+    pub(super) const CONST_REFERENCE_ACQUIRED: Self = Self(36);
+    pub(super) const CONST_INVALIDATING_WRITE: Self = Self(37);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -150,6 +154,8 @@ impl LabelMessageCode {
             Self::NONE => "NONE",
             Self::PREVIOUS_DECLARATION => "PREVIOUS_DECLARATION",
             Self::CONFLICTING_ACCESS => "CONFLICTING_ACCESS",
+            Self::CONST_REFERENCE_ACQUIRED => "CONST_REFERENCE_ACQUIRED",
+            Self::CONST_INVALIDATING_WRITE => "CONST_INVALIDATING_WRITE",
             #[cfg(test)]
             Self::VALUE_MOVED_HERE => "VALUE_MOVED_HERE",
             Self::CONFIG_INPUT_ORIGIN => "CONFIG_INPUT_ORIGIN",
@@ -255,6 +261,12 @@ pub(super) fn encode_label(
     Ok(match message {
         LabelDraftMessage::PreviousDeclaration => plain(LabelMessageCode::PREVIOUS_DECLARATION),
         LabelDraftMessage::ConflictingAccess => plain(LabelMessageCode::CONFLICTING_ACCESS),
+        LabelDraftMessage::ConstReferenceAcquired => {
+            plain(LabelMessageCode::CONST_REFERENCE_ACQUIRED)
+        }
+        LabelDraftMessage::ConstInvalidatingWrite => {
+            plain(LabelMessageCode::CONST_INVALIDATING_WRITE)
+        }
         #[cfg(test)]
         LabelDraftMessage::ValueMovedHere => plain(LabelMessageCode::VALUE_MOVED_HERE),
         LabelDraftMessage::ConfigInputOrigin { input_name, origin } => DraftLabel {
@@ -433,6 +445,12 @@ impl LabelWord {
             LabelMessageCode::NONE => DurableLabelMessage::None,
             LabelMessageCode::PREVIOUS_DECLARATION => DurableLabelMessage::PreviousDeclaration,
             LabelMessageCode::CONFLICTING_ACCESS => DurableLabelMessage::ConflictingAccess,
+            LabelMessageCode::CONST_REFERENCE_ACQUIRED => {
+                DurableLabelMessage::ConstReferenceAcquired
+            }
+            LabelMessageCode::CONST_INVALIDATING_WRITE => {
+                DurableLabelMessage::ConstInvalidatingWrite
+            }
             #[cfg(test)]
             LabelMessageCode::VALUE_MOVED_HERE => DurableLabelMessage::ValueMovedHere,
             LabelMessageCode::CONFIG_INPUT_ORIGIN => {
@@ -566,6 +584,8 @@ pub(crate) enum DurableLabelMessage<'a> {
     None,
     PreviousDeclaration,
     ConflictingAccess,
+    ConstReferenceAcquired,
+    ConstInvalidatingWrite,
     #[cfg(test)]
     ValueMovedHere,
     ConfigInputOrigin {

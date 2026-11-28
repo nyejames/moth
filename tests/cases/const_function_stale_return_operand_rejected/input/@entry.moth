@@ -1,0 +1,13 @@
+stale #|| -> {I32}, I32:
+    values ~= {1, 2}
+    -- The first return operand holds a shared reference before remove writes values.
+    return values, (~values.remove(0)) catch then 0
+;
+
+consume #|| -> I32:
+    collection, removed = stale()
+    return collection.length() + removed
+;
+
+result #I32 = consume()
+~[:result=[result]]

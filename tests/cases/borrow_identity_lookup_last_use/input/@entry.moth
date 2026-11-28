@@ -1,0 +1,12 @@
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+Bucket = |scores {String = {I32}}|
+
+bucket ~= Bucket({"k" = {1, 2}})
+score = bucket.scores.get("k")!
+forwarded = identity(score)
+~bucket.scores.clear()
+observed = bucket.scores.length
+~[:[observed]]

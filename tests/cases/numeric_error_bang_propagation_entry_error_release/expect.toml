@@ -1,8 +1,8 @@
 entry = "."
 
-# Release folding must not turn the runtime propagation into a compile-time failure:
-# the same checked division escapes through the declared Error! chain with the same
-# builtin code, and the fragment staged before the escaping call stays unpublished.
+# Release must not turn the runtime propagation into a compile-time failure: the same checked
+# division escapes through the declared Error! chain with the same builtin code, and the
+# fragment staged before the escaping call stays unpublished.
 [backends.html]
 mode = "success"
 flags = ["release"]

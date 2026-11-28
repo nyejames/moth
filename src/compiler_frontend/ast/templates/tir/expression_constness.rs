@@ -173,7 +173,8 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
         V::Constant(_) => Ok(true),
         V::Reference(path) => Ok(loop_binding_paths.contains(&path)),
         V::Template(template) => nested_template(template.tir_reference, loop_binding_paths),
-        V::Coerce { .. }
+        V::FieldAccess { .. }
+        | V::Coerce { .. }
         | V::NumericUnary { .. }
         | V::NumericBinary { .. }
         | V::LogicalNot { .. }
@@ -422,7 +423,7 @@ impl StructuralConstness<'_> {
                 let expression = self.expressions.view(*scrutinee)?;
                 let decidable = match expression.operation() {
                     ExpressionOperationView::Constant(id) => matches!(
-                        self.const_values.value(id).map(|value| &value.payload),
+                        self.const_values.payload(id),
                         Some(
                             ConstValuePayload::OptionNone
                                 | ConstValuePayload::OptionSome(_)
@@ -490,7 +491,7 @@ pub(crate) fn const_conditional_loop_condition_value(
         condition = value;
     }
     match condition.operation() {
-        ExpressionOperationView::Constant(id) => match &const_values.value(id)?.payload {
+        ExpressionOperationView::Constant(id) => match const_values.payload(id)? {
             ConstValuePayload::Bool(value) => Some(*value),
             _ => None,
         },

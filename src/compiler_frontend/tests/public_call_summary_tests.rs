@@ -1,8 +1,764 @@
 use super::super::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallSummaryTransition,
-    PublicCallTransferEffect, validate_public_call_summary_transition,
+    CallEndpoint, CallField, CallFieldHir, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallSummaryTransition, PublicCallTransferEffect, same_typed_allocation_transfer_as,
+    validate_public_call_summary_transition, validate_typed_allocation_transition,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::hir::ids::{FieldId, StructId};
+use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
+use crate::compiler_frontend::symbols::path_interner::PathId;
+
+use super::super::public_call_summary::typed::{
+    BindingPost, CellPort, CellPost, Component, Coverage, Derivation, EntryPort, ExportPort,
+    Footprint, Guard, IdentityKind, Lane, ObjectRef, OutputPort, PathAccess, Permission, PortId,
+    Post, Predicate, Product, ReachBound, ReachKind, ReceiverDependency, RetainedRoute, Role,
+    ScalarSource, ScalarSourceBound, Shape, StorageKind, SupportId, TypedCallAllocationFacts,
+    ValueRef, ValueSource,
+};
+
+fn scalar(source: ScalarSource) -> ValueRef {
+    ValueRef {
+        source: ValueSource::Scalar(source),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: vec![],
+    }
+}
+
+fn binary_effect(index: u32) -> Post {
+    Post {
+        cells: vec![(
+            CellPort::Terminal(PortId(index)),
+            CellPost::Replace(vec![Some(scalar(ScalarSource::Independent))]),
+        )],
+        ..Post::default()
+    }
+}
+
+fn collecting_product(worlds: u8) -> Lane {
+    if worlds == 0 {
+        return Lane::Bottom;
+    }
+    let components = (0..2)
+        .map(|index| Component {
+            support: SupportId(index),
+            alternatives: (0..4)
+                .filter(|world| worlds & (1 << world) != 0)
+                .map(|world| {
+                    if world & (1 << index) == 0 {
+                        Post::default()
+                    } else {
+                        binary_effect(index)
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    Lane::Returning(Product::new(components).unwrap())
+}
+
+#[test]
+fn typed_product_normalisation_is_closed_under_incremental_delivery() {
+    for left in 0..16 {
+        for right in 0..16 {
+            let expected = collecting_product(left | right);
+            assert_eq!(
+                collecting_product(left).union(&collecting_product(right)),
+                expected
+            );
+            assert_eq!(
+                collecting_product(right).union(&collecting_product(left)),
+                expected
+            );
+            for cut in 0..=4 {
+                let low = (1 << cut) - 1;
+                assert_eq!(
+                    collecting_product(left & low)
+                        .union(&collecting_product(right))
+                        .union(&collecting_product(left & !low)),
+                    expected
+                );
+            }
+        }
+    }
+    let independent = Product::new(
+        (0..24)
+            .map(|index| Component {
+                support: SupportId(index),
+                alternatives: vec![Post::default(), binary_effect(index)],
+            })
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(
+        independent
+            .components()
+            .iter()
+            .map(|component| component.alternatives.len())
+            .sum::<usize>(),
+        48
+    );
+}
+
+#[test]
+fn typed_guard_rejects_inconsistent_equations_and_keeps_broad_preserve() {
+    let equal = |a, b| Predicate::Equal(IdentityKind::Allocation, PortId(a), PortId(b));
+    let ab = equal(0, 1);
+    let ac = equal(0, 2);
+    let bc = equal(1, 2);
+    assert!(Guard::new([(ab, true), (bc, true), (ac, false)]).is_none());
+    assert!(
+        Guard::new([
+            (Predicate::Role(PortId(0), Role::WholeAlias), true),
+            (Predicate::Role(PortId(0), Role::ProjectedAlias), true),
+        ])
+        .is_none()
+    );
+
+    let written = Product::new(vec![Component {
+        support: SupportId(0),
+        alternatives: vec![binary_effect(0)],
+    }])
+    .unwrap();
+    let effect = Lane::guarded(Guard::new([(ab, true)]).unwrap(), written);
+    let preserve = Lane::Returning(Product::default());
+    let joined = preserve.union(&effect);
+    assert_eq!(joined, effect.union(&preserve));
+    assert_eq!(
+        joined.for_presentation(|_| false),
+        Some(&Product::default())
+    );
+    assert_eq!(
+        joined.for_presentation(|_| true).unwrap().components()[0].alternatives,
+        [Post::default(), binary_effect(0)]
+    );
+}
+
+#[test]
+fn typed_shape_requires_explicit_scalar_results_and_monotone_executed_facts() {
+    let ports = [EntryPort::Value {
+        parameter: 0,
+        path: Box::new([]),
+    }];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Shared],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(1),
+        error_slot: false,
+    };
+    let returning = |source| TypedCallAllocationFacts {
+        ports: ports.to_vec(),
+        support_count: 1,
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    results: vec![(0, scalar(source))],
+                    ..Post::default()
+                }],
+            }])
+            .unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    let input = returning(ScalarSource::EntryValue(PortId(0)));
+    let independent = returning(ScalarSource::Independent);
+    let both = TypedCallAllocationFacts {
+        success: input.success.union(&independent.success),
+        may_retain: vec![0],
+        ..input.clone()
+    };
+    assert!(input.validate_transition(&both, &shape).is_ok());
+    assert!(both.validate_transition(&input, &shape).is_err());
+    assert!(
+        returning(ScalarSource::EntryValue(PortId(1)))
+            .validate(&shape)
+            .is_err()
+    );
+    assert!(
+        returning(ScalarSource::Unresolved(ScalarSourceBound::Values(vec![])))
+            .validate(&shape)
+            .is_err()
+    );
+    assert!(
+        returning(ScalarSource::Unresolved(ScalarSourceBound::Values(vec![
+            PortId(0)
+        ])))
+        .validate(&shape)
+        .is_ok()
+    );
+    assert!(
+        TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..TypedCallAllocationFacts::default()
+        }
+        .validate(&shape)
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_retention_only_widening_notifies_callers_without_a_lane() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[],
+        support_count: 0,
+        success_slots: None,
+        error_slot: false,
+    };
+    let bottom = TypedCallAllocationFacts::default();
+    let retaining = TypedCallAllocationFacts {
+        may_retain: vec![0],
+        ..bottom.clone()
+    };
+    assert!(same_typed_allocation_transfer_as(None, Some(&bottom)));
+    assert!(!same_typed_allocation_transfer_as(None, Some(&retaining)));
+    assert!(!same_typed_allocation_transfer_as(
+        Some(&bottom),
+        Some(&retaining)
+    ));
+    assert!(same_typed_allocation_transfer_as(
+        Some(&retaining),
+        Some(&retaining)
+    ));
+    assert!(retaining.executed_may_retain(0));
+    assert!(!retaining.lane(false).can_return());
+    assert!(!retaining.lane(true).can_return());
+    assert_eq!(
+        validate_typed_allocation_transition(Some(&bottom), Some(&retaining), &shape).unwrap(),
+        PublicCallSummaryTransition::Widened
+    );
+    assert!(validate_typed_allocation_transition(Some(&retaining), Some(&bottom), &shape).is_err());
+    assert!(validate_typed_allocation_transition(Some(&bottom), None, &shape).is_err());
+}
+
+#[test]
+fn typed_layout_checks_scalar_selectors_occurrence_and_reach_bounds() {
+    use super::super::canonical_type_identity::{
+        CanonicalBuiltinType as Builtin, CanonicalTypeIdentity as Type,
+    };
+    use super::super::public_call_summary::CallEndpoint;
+    use super::super::public_call_summary::typed::{FamilyPort, FamilyPost, Layout, Occurrence};
+    let boolean = || Type::Builtin(Builtin::Bool);
+    let string = || Type::Builtin(Builtin::String);
+    struct FixtureLayout(Type);
+    impl Layout for FixtureLayout {
+        type Type = Type;
+        fn parameter(&self, _: usize) -> Option<CallEndpoint<Type>> {
+            self.stable(&self.0)
+        }
+        fn result(&self, _: bool, _: usize) -> Option<CallEndpoint<Type>> {
+            self.stable(&Type::Builtin(Builtin::Bool))
+        }
+        fn child(&self, ty: &Type, selector: CallField) -> Option<CallEndpoint<Type>> {
+            let Type::OrderedMap { key, value } = ty else {
+                return None;
+            };
+            self.stable(match selector {
+                CallField::MapKey => key,
+                CallField::Elem => value,
+                _ => return None,
+            })
+        }
+        fn stable(&self, ty: &Type) -> Option<CallEndpoint<Type>> {
+            Some(CallEndpoint {
+                ty: ty.clone(),
+                allocation: matches!(ty, Type::OrderedMap { .. } | Type::Builtin(Builtin::String)),
+            })
+        }
+        fn children(&self, ty: &Type, visit: &mut dyn FnMut(CallEndpoint<Type>)) {
+            for selector in [CallField::MapKey, CallField::Elem] {
+                if let Some(child) = self.child(ty, selector) {
+                    visit(child);
+                }
+            }
+        }
+    }
+    let map = Type::OrderedMap {
+        key: Box::new(string()),
+        value: Box::new(boolean()),
+    };
+    let layout = FixtureLayout(map);
+    let path = |fields: &[CallField]| EntryPort::Value {
+        parameter: 0,
+        path: fields.into(),
+    };
+    let ports = [
+        path(&[]),
+        path(&[CallField::Elem]),
+        path(&[CallField::MapKey]),
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(1),
+        error_slot: false,
+    };
+    let receiver = ObjectRef::Entry(PortId(0));
+    let facts = |post| TypedCallAllocationFacts {
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        ),
+        ..Default::default()
+    };
+    let mut post = Post {
+        results: vec![(0, scalar(ScalarSource::EntryValue(PortId(1))))],
+        coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+            roots: vec![PortId(0)],
+            region: ReachKind::EntryStructure,
+            types: vec![boolean()],
+        })),
+        ..Default::default()
+    };
+    assert!(facts(post.clone()).validate_layout(&shape, &layout).is_ok());
+    post.results[0].1 = scalar(ScalarSource::EntryValue(PortId(2)));
+    assert!(
+        facts(post.clone())
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+    post.results[0].1 = scalar(ScalarSource::Independent);
+    let Coverage::Unresolved(Footprint::WritableReach(bound)) = &mut post.coverage else {
+        unreachable!()
+    };
+    bound.types = vec![Type::Builtin(Builtin::Char)];
+    assert!(
+        facts(post.clone())
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+
+    post.coverage = Coverage::Complete;
+    let family = ObjectRef::Family(StorageKind::Allocation, string());
+    post.retained = vec![(family.clone(), StorageKind::Allocation, string())];
+    post.families = vec![(
+        FamilyPort {
+            receiver,
+            selector: CallField::MapKey,
+        },
+        FamilyPost::ReplaceAll(vec![(
+            ValueRef {
+                source: ValueSource::Allocation(family),
+                access: PathAccess {
+                    restriction: None,
+                    derived_from: None,
+                },
+                dependencies: Vec::new(),
+            },
+            Occurrence::AtMostOnce,
+        )]),
+    )];
+    // The member can occur once in this snapshot even if its allocation is a family.
+    assert!(facts(post.clone()).validate_layout(&shape, &layout).is_ok());
+    let FamilyPost::ReplaceAll(members) = &mut post.families[0].1 else {
+        unreachable!()
+    };
+    members[0].1 = Occurrence::MaybeMany;
+    assert!(facts(post).validate_layout(&shape, &layout).is_ok());
+    let mut wrong_selector = Post::default();
+    wrong_selector.results = vec![(0, scalar(ScalarSource::Independent))];
+    wrong_selector.families = vec![(
+        FamilyPort {
+            receiver: ObjectRef::Entry(PortId(0)),
+            selector: CallField::MapKey,
+        },
+        FamilyPost::ReplaceAll(vec![(
+            scalar(ScalarSource::Independent),
+            Occurrence::AtMostOnce,
+        )]),
+    )];
+    assert!(
+        facts(wrong_selector)
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+}
+
+#[test]
+fn typed_unknown_and_preserve_rows_do_not_absorb_each_other() {
+    let prefix = binary_effect(0);
+    let mut unknown = prefix.clone();
+    unknown.coverage = Coverage::Unresolved(Footprint::Locations(vec![OutputPort::Cell(
+        CellPort::Terminal(PortId(1)),
+    )]));
+    let lane = |post| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        )
+    };
+    let preserve = lane(Post::default());
+    let known = lane(prefix.clone());
+    let incomplete = lane(unknown.clone());
+    let joined = preserve.union(&known).union(&incomplete);
+    assert_eq!(joined, incomplete.union(&known).union(&preserve));
+    assert_eq!(
+        joined
+            .for_presentation(|_| unreachable!())
+            .unwrap()
+            .components()[0]
+            .alternatives,
+        [Post::default(), prefix, unknown],
+    );
+}
+
+#[test]
+fn typed_guard_role_partitions_have_the_same_normal_form() {
+    let port = PortId(0);
+    let lane = |role, truth| {
+        Lane::guarded(
+            Guard::new([(Predicate::Role(port, role), truth)]).unwrap(),
+            Product::default(),
+        )
+    };
+    let not_slot = lane(Role::Slot, false);
+    let whole = lane(Role::WholeAlias, true);
+    let projected = lane(Role::ProjectedAlias, true);
+    assert_eq!(not_slot, whole.union(&projected));
+    assert_eq!(not_slot, projected.union(&whole));
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[EntryPort::Wrapper(0)],
+        support_count: 0,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let facts = |success| TypedCallAllocationFacts {
+        success,
+        ports: shape.ports.to_vec(),
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(
+        facts(not_slot)
+            .validate_transition(&facts(whole.union(&projected)), &shape)
+            .is_ok()
+    );
+}
+
+#[test]
+fn typed_equality_guard_partitions_have_the_same_normal_form() {
+    let equal = |a, b| Predicate::Equal(IdentityKind::Cell, PortId(a), PortId(b));
+    let ab = equal(0, 1);
+    let bc = equal(1, 2);
+    let lane = |literals| Lane::guarded(Guard::new(literals).unwrap(), Product::default());
+    let direct = lane(vec![(bc, true)]);
+    let equal = lane(vec![(ab, true), (bc, true)]);
+    let distinct = lane(vec![(ab, false), (bc, true)]);
+    assert_eq!(direct, equal.union(&distinct));
+    assert_eq!(direct, distinct.union(&equal));
+    assert_ne!(direct, equal);
+    assert_ne!(direct, distinct);
+}
+
+#[test]
+fn typed_products_reject_overlapping_and_readonly_writes() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 2],
+        ports: &[EntryPort::Terminal(0), EntryPort::Terminal(1)],
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let component = |support, port| Component {
+        support: SupportId(support),
+        alternatives: vec![binary_effect(port)],
+    };
+    let facts = |literals, supports| TypedCallAllocationFacts {
+        success: Lane::guarded(
+            Guard::new(literals).unwrap(),
+            Product::new(supports).unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(
+        facts(vec![], vec![component(0, 0), component(1, 0)])
+            .validate(&shape)
+            .is_err()
+    );
+    let equal = Predicate::Equal(IdentityKind::Cell, PortId(0), PortId(1));
+    for (holds, valid) in [(true, false), (false, true)] {
+        assert_eq!(
+            facts(vec![(equal, holds)], vec![component(0, 0), component(1, 1)])
+                .validate(&shape)
+                .is_ok(),
+            valid,
+        );
+    }
+    assert!(
+        facts(
+            vec![(Predicate::Writable(PortId(0)), false)],
+            vec![component(0, 0)]
+        )
+        .validate(&shape)
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_support_ownership_includes_own_slots_and_bounded_reaches() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 2],
+        ports: &[
+            EntryPort::Wrapper(0),
+            EntryPort::Terminal(0),
+            EntryPort::Terminal(1),
+            EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            },
+            EntryPort::Value {
+                parameter: 1,
+                path: Box::new([]),
+            },
+        ],
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let mut slot = binary_effect(1);
+    slot.cells[0].0 = CellPort::Slot(ObjectRef::Entry(PortId(0)));
+    let reach = |root, region| Post {
+        coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+            roots: vec![PortId(root)],
+            region,
+            types: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)],
+        })),
+        ..Post::default()
+    };
+    let validate = |first, second, relation: Option<_>| {
+        let mut literals = vec![(Predicate::Role(PortId(0), Role::Slot), true)];
+        literals.extend(relation);
+        let product = Product::new(
+            [first, second]
+                .into_iter()
+                .enumerate()
+                .map(|(i, post)| Component {
+                    support: SupportId(i as u32),
+                    alternatives: vec![post],
+                })
+                .collect(),
+        )
+        .unwrap();
+        TypedCallAllocationFacts {
+            success: Lane::guarded(Guard::new(literals).unwrap(), product),
+            ..TypedCallAllocationFacts::default()
+        }
+        .validate(&shape)
+        .is_ok()
+    };
+    let distinct = Some((
+        Predicate::Equal(IdentityKind::Cell, PortId(1), PortId(2)),
+        false,
+    ));
+    let cell = |root| reach(root, ReachKind::Cell);
+    assert!(!validate(slot.clone(), binary_effect(1), None));
+    assert!(validate(slot.clone(), binary_effect(2), distinct));
+    assert!(!validate(cell(1), slot, None));
+    assert!(!validate(binary_effect(1), cell(1), None));
+    assert!(!validate(cell(1), cell(1), None));
+    assert!(validate(cell(1), cell(2), distinct));
+    let compare_referents = |equal| {
+        validate(
+            reach(3, ReachKind::Referent),
+            reach(4, ReachKind::EntryStructure),
+            Some((
+                Predicate::Equal(IdentityKind::Allocation, PortId(3), PortId(4)),
+                equal,
+            )),
+        )
+    };
+    assert!(!compare_referents(true));
+    assert!(compare_referents(false));
+}
+
+#[test]
+fn typed_reach_uses_guarded_equality_of_a_holder_ancestor() {
+    let field = CallField::Field;
+    let ports = [
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(0)]),
+        },
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(1)]),
+        },
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(1), field(0)]),
+        },
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &ports,
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let mut edit = binary_effect(0);
+    edit.cells[0].0 = CellPort::Edge(ObjectRef::Entry(PortId(2)), field(0));
+    let product = Product::new(vec![
+        Component {
+            support: SupportId(0),
+            alternatives: vec![Post {
+                coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+                    roots: vec![PortId(0)],
+                    region: ReachKind::Referent,
+                    types: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)],
+                })),
+                ..Post::default()
+            }],
+        },
+        Component {
+            support: SupportId(1),
+            alternatives: vec![edit],
+        },
+    ])
+    .unwrap();
+    let equal = Predicate::Equal(IdentityKind::Allocation, PortId(0), PortId(1));
+    for holds in [false, true] {
+        let facts = TypedCallAllocationFacts {
+            success: Lane::guarded(Guard::new([(equal, holds)]).unwrap(), product.clone()),
+            ..TypedCallAllocationFacts::default()
+        };
+        assert_eq!(facts.validate(&shape).is_err(), holds);
+    }
+}
+
+#[test]
+fn typed_exact_cell_absence_is_not_preserve_or_a_scalar() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[
+            EntryPort::Terminal(0),
+            EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            },
+        ],
+        support_count: 1,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let lane = |contents| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    cells: vec![(CellPort::Terminal(PortId(0)), CellPost::Replace(contents))],
+                    ..Post::default()
+                }],
+            }])
+            .unwrap(),
+        )
+    };
+    let value = Some(ValueRef {
+        source: ValueSource::Allocation(ObjectRef::Entry(PortId(1))),
+        access: PathAccess {
+            restriction: Some(Permission::ReadOnly),
+            derived_from: None,
+        },
+        dependencies: vec![],
+    });
+    let erased = lane(vec![None]);
+    let mixed = lane(vec![None, value.clone()]);
+    let preserve = Lane::Returning(Product::default());
+    assert_ne!(erased, preserve);
+    assert_ne!(mixed, lane(vec![value]));
+    for (success, valid) in [(erased, true), (mixed, true), (lane(vec![]), false)] {
+        assert_eq!(
+            TypedCallAllocationFacts {
+                success,
+                ..TypedCallAllocationFacts::default()
+            }
+            .validate(&shape)
+            .is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
+fn typed_projected_routes_keep_their_own_loans_and_retained_derivation() {
+    let ports = [
+        EntryPort::Wrapper(0),
+        EntryPort::Wrapper(1),
+        EntryPort::Terminal(2),
+        EntryPort::Value {
+            parameter: 3,
+            path: Box::new([]),
+        },
+        EntryPort::Value {
+            parameter: 4,
+            path: Box::new([]),
+        },
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 5],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let anchor = ObjectRef::Exact(ExportPort::PrivateTerminal(2));
+    let route = |receiver| {
+        BindingPost::Projected(
+            CellPort::Terminal(PortId(2)),
+            RetainedRoute {
+                access: PathAccess {
+                    restriction: Some(Permission::ReadOnly),
+                    derived_from: Some(Derivation::Retained(anchor.clone())),
+                },
+                dependencies: vec![ReceiverDependency::Known(vec![ObjectRef::Entry(PortId(
+                    receiver,
+                ))])],
+            },
+        )
+    };
+    let mut post = Post {
+        bindings: vec![
+            (ObjectRef::Entry(PortId(0)), route(3)),
+            (ObjectRef::Entry(PortId(1)), route(4)),
+        ],
+        retained: vec![(
+            anchor.clone(),
+            StorageKind::Wrapper,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        )],
+        ..Post::default()
+    };
+    assert_ne!(post.bindings[0].1, post.bindings[1].1);
+    let facts = |post| TypedCallAllocationFacts {
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(facts(post.clone()).validate(&shape).is_ok());
+    post.retained.clear();
+    assert!(facts(post).validate(&shape).is_err());
+}
 
 fn parameter(
     access: PublicCallParameterAccess,
@@ -36,7 +792,7 @@ fn identical_summary_is_an_unchanged_transition() {
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
 
     assert_eq!(
@@ -47,7 +803,7 @@ fn identical_summary_is_an_unchanged_transition() {
 
 #[test]
 fn builtin_failure_bit_widens_but_never_narrows() {
-    let initial = summary(vec![], FunctionReturnAliasSummary::Fresh);
+    let initial = summary(vec![], known_empty_success());
     let mut escaping = initial.clone();
     escaping.escapes_builtin_failure = true;
 
@@ -69,14 +825,14 @@ fn mutation_effect_widens_but_does_not_narrow() {
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
     let writes = summary(
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::Writes,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
 
     assert_eq!(
@@ -86,59 +842,75 @@ fn mutation_effect_widens_but_does_not_narrow() {
     assert!(validate_public_call_summary_transition(&writes, &no_write).is_err());
 }
 
-#[test]
-fn return_aliases_widen_from_fresh_to_supersets_or_unknown() {
-    let parameters = vec![parameter(
-        PublicCallParameterAccess::Mutable,
-        PublicCallMutationEffect::NoWrite,
-    )];
-    let fresh = summary(parameters.clone(), FunctionReturnAliasSummary::Fresh);
-    let aliases_parameter = summary(
-        parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(vec![0]),
-    );
-    let unknown = summary(parameters, FunctionReturnAliasSummary::Unknown);
-
-    assert_eq!(
-        validate_public_call_summary_transition(&fresh, &aliases_parameter).unwrap(),
-        PublicCallSummaryTransition::Widened
-    );
-    assert_eq!(
-        validate_public_call_summary_transition(&aliases_parameter, &unknown).unwrap(),
-        PublicCallSummaryTransition::Widened
-    );
-    assert!(validate_public_call_summary_transition(&unknown, &aliases_parameter).is_err());
-    assert!(validate_public_call_summary_transition(&unknown, &fresh).is_err());
+fn known_empty_success() -> FunctionReturnAliasSummary {
+    FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+        success: Lane::Returning(Product::default()),
+        ..Default::default()
+    }))
 }
 
 #[test]
-fn alias_parameter_sets_must_grow_by_subset() {
-    let parameters = vec![
-        parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-        ),
-        parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-        ),
-    ];
-    let one = summary(
-        parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(vec![0]),
-    );
-    let superset = summary(
-        parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(vec![0, 1]),
-    );
-    let incomparable = summary(parameters, FunctionReturnAliasSummary::AliasParams(vec![1]));
+fn allocation_transition_distinguishes_pending_bottom_and_empty_success() {
+    let pending = summary(vec![], FunctionReturnAliasSummary::Pending);
+    let bottom = summary(vec![], FunctionReturnAliasSummary::Known(Box::default()));
+    let empty = summary(vec![], known_empty_success());
 
-    assert_eq!(
-        validate_public_call_summary_transition(&one, &superset).unwrap(),
-        PublicCallSummaryTransition::Widened
+    for (previous, next) in [(&pending, &bottom), (&bottom, &empty)] {
+        assert_eq!(
+            validate_public_call_summary_transition(previous, next).unwrap(),
+            PublicCallSummaryTransition::Widened
+        );
+        assert!(validate_public_call_summary_transition(next, previous).is_err());
+    }
+}
+
+#[test]
+fn result_slots_and_reachable_lanes_follow_the_callable_contract() {
+    let returning = |slot| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    results: vec![(slot, scalar(ScalarSource::Independent))],
+                    ..Default::default()
+                }],
+            }])
+            .unwrap(),
+        )
+    };
+    let success = TypedCallAllocationFacts {
+        support_count: 1,
+        success: returning(0),
+        ..Default::default()
+    };
+    assert!(
+        success
+            .validate(&success.shape(&[], Some(1), false))
+            .is_ok()
     );
-    assert!(validate_public_call_summary_transition(&superset, &one).is_err());
-    assert!(validate_public_call_summary_transition(&one, &incomparable).is_err());
+    assert!(
+        success
+            .validate(&success.shape(&[], Some(2), false))
+            .is_err()
+    );
+    assert!(success.validate(&success.shape(&[], None, false)).is_err());
+
+    let error = TypedCallAllocationFacts {
+        support_count: 1,
+        error: returning(0),
+        ..Default::default()
+    };
+    assert!(error.validate(&error.shape(&[], Some(0), true)).is_ok());
+    assert!(error.validate(&error.shape(&[], Some(0), false)).is_err());
+    let wrong_slot = TypedCallAllocationFacts {
+        error: returning(1),
+        ..error
+    };
+    assert!(
+        wrong_slot
+            .validate(&wrong_slot.shape(&[], Some(0), true))
+            .is_err()
+    );
 }
 
 #[test]
@@ -148,14 +920,14 @@ fn invariant_parameter_access_cannot_change() {
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
     let shared = summary(
         vec![parameter(
             PublicCallParameterAccess::Shared,
             PublicCallMutationEffect::NoWrite,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
 
     assert!(validate_public_call_summary_transition(&mutable, &shared).is_err());
@@ -168,7 +940,7 @@ fn invalid_transfer_effect_and_parameter_count_are_rejected() {
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
         )],
-        FunctionReturnAliasSummary::Fresh,
+        known_empty_success(),
     );
 
     let mut invalid_transfer = current.parameters[0].clone();
@@ -176,7 +948,7 @@ fn invalid_transfer_effect_and_parameter_count_are_rejected() {
     assert!(
         validate_public_call_summary_transition(
             &current,
-            &summary(vec![invalid_transfer], FunctionReturnAliasSummary::Fresh)
+            &summary(vec![invalid_transfer], current.return_alias.clone())
         )
         .is_err()
     );
@@ -190,7 +962,7 @@ fn invalid_transfer_effect_and_parameter_count_are_rejected() {
             &current,
             &summary(
                 vec![current.parameters[0].clone(), extra_parameter],
-                FunctionReturnAliasSummary::Fresh,
+                current.return_alias.clone(),
             )
         )
         .is_err()
@@ -198,51 +970,66 @@ fn invalid_transfer_effect_and_parameter_count_are_rejected() {
 }
 
 #[test]
-fn invalid_alias_shape_is_rejected_before_transition() {
-    let current = summary(
-        vec![
-            parameter(
-                PublicCallParameterAccess::Mutable,
-                PublicCallMutationEffect::NoWrite,
-            ),
-            parameter(
-                PublicCallParameterAccess::Mutable,
-                PublicCallMutationEffect::NoWrite,
-            ),
-        ],
-        FunctionReturnAliasSummary::AliasParams(vec![0]),
-    );
-    let invalid = summary(
-        current.parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(vec![1, 0]),
-    );
+fn field_ordinals_resolve_to_the_consumer_local_hir_ids() {
+    let register = |types: &mut TypeEnvironment| {
+        let member = types.builtins().string;
+        let (_, record) = types.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path: PathId::ROOT,
+            fields: Box::new([FieldDefinition {
+                name: PathId::ROOT,
+                type_id: member,
+                span: None,
+            }]),
+            generic_parameters: None,
+            const_record: false,
+        });
+        (record, member)
+    };
+    let mut provider_types = TypeEnvironment::new();
+    let (provider_record, provider_member) = register(&mut provider_types);
+    let mut consumer_types = TypeEnvironment::new();
+    let padding = consumer_types.builtins().bool;
+    consumer_types.intern_option(padding);
+    let (record, member) = register(&mut consumer_types);
+    assert_ne!(provider_record, record);
 
-    assert!(validate_public_call_summary_transition(&current, &invalid).is_err());
+    let layout = |record, member, id| HirStruct {
+        id: StructId(1),
+        frontend_type_id: record,
+        fields: vec![HirField {
+            id: FieldId(id),
+            ty: member,
+        }],
+    };
+    let selector = CallField::Field(0);
+    let provider_layouts = [layout(provider_record, provider_member, 7)];
+    let consumer_layouts = [layout(record, member, 42)];
+    assert!(matches!(
+        selector.hir_child(provider_record, &provider_types, &provider_layouts, &[]),
+        Some((CallFieldHir::Field(7), ty)) if ty == provider_member
+    ));
+    assert!(matches!(
+        selector.hir_child(record, &consumer_types, &consumer_layouts, &[]),
+        Some((CallFieldHir::Field(42), ty)) if ty == member
+    ));
+    assert!(matches!(
+        selector.hir_child(record, &consumer_types, &[], &[]),
+        Some((CallFieldHir::UnmaterializedField(0), ty)) if ty == member
+    ));
     assert!(
-        validate_public_call_summary_transition(
-            &current,
-            &summary(
-                current.parameters.clone(),
-                FunctionReturnAliasSummary::AliasParams(vec![0, 0]),
-            )
-        )
-        .is_err()
+        CallField::Field(42)
+            .hir_child(record, &consumer_types, &consumer_layouts, &[])
+            .is_none()
     );
-}
-
-#[test]
-fn empty_alias_params_summary_is_rejected() {
-    let current = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-        )],
-        FunctionReturnAliasSummary::Fresh,
+    assert!(
+        CallEndpoint::hir(member, &consumer_types)
+            .unwrap()
+            .allocation
     );
-    let empty = summary(
-        current.parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(Vec::new()),
+    assert!(
+        !CallEndpoint::hir(padding, &consumer_types)
+            .unwrap()
+            .allocation
     );
-
-    assert!(validate_public_call_summary_transition(&current, &empty).is_err());
 }

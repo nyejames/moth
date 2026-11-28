@@ -571,7 +571,10 @@ fn fixed_build_value_from_metadata(
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
-        | PublicFoldedValue::Range { .. } => None,
+        | PublicFoldedValue::Range { .. }
+        | PublicFoldedValue::AllocationDefinition { .. }
+        | PublicFoldedValue::AllocationReference { .. }
+        | PublicFoldedValue::AllocationCoercion { .. } => None,
     }
 }
 
@@ -589,6 +592,9 @@ fn primitive_build_value_from_metadata(value: &PublicFoldedValue) -> Option<Prim
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
         | PublicFoldedValue::Range { .. }
+        | PublicFoldedValue::AllocationDefinition { .. }
+        | PublicFoldedValue::AllocationReference { .. }
+        | PublicFoldedValue::AllocationCoercion { .. }
         | PublicFoldedValue::OptionSome(_)
         | PublicFoldedValue::OptionNone => None,
     }

@@ -14,7 +14,6 @@ use crate::compiler_frontend::module_compilation::{
     ProviderMaterialisationRegistry,
 };
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
@@ -2682,7 +2681,6 @@ pub(super) fn commit_successful_source_package_warnings(
 )]
 pub(super) fn compile_source_package_inventories(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &BuilderSurface,
     external_packages: &Arc<ExternalPackageRegistry>,
@@ -2756,7 +2754,6 @@ pub(super) fn compile_source_package_inventories(
                 canonical::compile_module_waves_in_premerge_lane(
                     canonical::BoundaryCompilationContext::new(
                         config,
-                        build_profile,
                         &path_resolver,
                         Arc::clone(source_files.sources()),
                         style_directives,
@@ -2864,7 +2861,6 @@ pub(super) fn compile_source_package_inventories(
             let check_only_batches = deferred_check_only::compile_check_only_jobs_after_canonical(
                 canonical::BoundaryCompilationContext::new(
                     config,
-                    build_profile,
                     &path_resolver,
                     Arc::clone(source_files.sources()),
                     style_directives,
@@ -2943,11 +2939,10 @@ pub(super) fn compile_source_package_inventories(
 ///      terminal diagnostic finalization happen exactly once at this outer tail.
 #[allow(
     clippy::too_many_arguments,
-    reason = "directory compilation keeps configuration, build profile, validated output settings, directives, mutable builder, warning/report, source, build-config inputs and compilation mode separate"
+    reason = "directory compilation keeps configuration, validated output settings, directives, mutable builder, warning/report, source, build-config inputs and compilation mode separate"
 )]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -2961,7 +2956,6 @@ pub(crate) fn compile_directory_frontend(
         let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
         compile_directory_frontend_in_premerge_lane(
             config,
-            build_profile,
             validated_output_settings,
             style_directives,
             builder_surface,
@@ -3000,11 +2994,10 @@ pub(crate) fn compile_directory_frontend(
 /// the terminal wrapper converts a diagnosed result into reports.
 #[allow(
     clippy::too_many_arguments,
-    reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
+    reason = "premerge directory orchestration keeps configuration, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
 )]
 pub(super) fn compile_directory_frontend_in_premerge_lane(
     config: &Config,
-    build_profile: FrontendBuildProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -3465,7 +3458,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         let (completed_source_packages, mut transient_batches) =
             compile_source_package_inventories(
                 config,
-                build_profile,
                 style_directives,
                 builder_surface,
                 &external_packages,
@@ -3486,7 +3478,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         let (project_boundary, project_batches) = canonical::compile_module_waves_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
-                build_profile,
                 &project_path_resolver,
                 project_source_files,
                 style_directives,

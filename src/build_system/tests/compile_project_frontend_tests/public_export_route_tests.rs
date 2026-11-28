@@ -196,7 +196,6 @@ fn diagnosed_package_facade_is_prepared_once_and_reported_by_the_walk() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -304,7 +303,6 @@ fn unreferenced_descendant_local_provider_collides_with_package_route() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -415,7 +413,6 @@ fn route_collision_canonicalises_a_symlink_spelled_display_root() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -548,7 +545,6 @@ fn route_under_an_ambiguous_base_reports_the_base_collision() {
             ("src/b/forms/@package.moth", "$export @y\nvalue #= 2\n"),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
     assert!(
@@ -577,7 +573,6 @@ fn ambiguous_base_route_overlapping_a_local_source_is_rejected_eagerly() {
             ("src/b/forms/@package.moth", "$export @cards\nvalue #= 3\n"),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
     assert!(
@@ -609,7 +604,6 @@ fn unreferenced_route_colliding_with_child_facade_reports_both_sites() {
             ("src/vendor/forms/@mod.moth", "$export\nvalue #= 2\n"),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
     assert!(
@@ -639,7 +633,6 @@ fn ambiguous_base_route_colliding_with_child_facade_reports_both_sites() {
             ("src/forms/cards/@mod.moth", "$export\nvalue #= 3\n"),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
     assert!(
@@ -695,7 +688,6 @@ fn ambiguous_base_route_colliding_with_registered_binding_prefix_is_rejected() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -792,7 +784,6 @@ fn paired_support_alias_collision_names_the_support_facade() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1188,7 +1179,6 @@ fn consumed_prepass_infrastructure_survives_route_collision_cleanup() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1306,7 +1296,6 @@ fn package_internal_route_colliding_with_binding_package_is_rejected() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2443,7 +2432,6 @@ fn published_package_route_colliding_with_local_provider_is_rejected_eagerly() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2505,7 +2493,6 @@ fn local_facade_route_overlapping_registered_prefix_reports_package_facade() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2565,7 +2552,6 @@ fn local_facade_route_colliding_with_package_route_reports_operand() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2646,7 +2632,6 @@ fn ancestor_package_prefix_collision_reports_same_site_in_both_registration_orde
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let result = compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -2742,7 +2727,6 @@ fn package_route_collision_reports_both_sites_after_an_unrelated_package_boundar
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -3104,7 +3088,6 @@ fn single_file_package_inventory_lane_rejects_unreferenced_package_route_collisi
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -3534,7 +3517,6 @@ fn reexport_clause_before_declaration_reports_the_earlier_authored_route_site() 
             ("src/@mod.moth", FACADE),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_site_facts(&result, "MOTH-RULE-0092");
     // Pass 1 records the later declaration first; the diagnostic must still point at the later
@@ -3562,7 +3544,6 @@ fn repeated_route_claims_keep_the_earliest_authored_operand() {
             ("src/@mod.moth", FACADE),
         ],
         false,
-        BuildProfile::Dev,
     );
     let (primary, related) = diagnostic_site_facts(&result, "MOTH-RULE-0092");
     // The final `@Forms` declaration is pass-1's first claim, but the earlier authored `@Forms`
@@ -3582,7 +3563,6 @@ fn duplicate_leaf_in_one_route_across_declaration_and_reexport_reports_both_site
             ),
         ],
         false,
-        BuildProfile::Dev,
     );
     assert_two_site_diagnostic(&result, "MOTH-RULE-0081");
 }
@@ -3601,7 +3581,6 @@ fn routed_facade_export_of_private_struct_field_type_is_rejected() {
             ),
         ],
         false,
-        BuildProfile::Dev,
     );
     assert_has_diagnostic_code(&result, "MOTH-RULE-0082");
 }
@@ -3648,7 +3627,6 @@ fn same_leaf_from_different_targets_across_routes_keeps_local_name_collision() {
             ),
         ],
         false,
-        BuildProfile::Dev,
     );
     assert_has_diagnostic_code(&result, "MOTH-IMPORT-0009");
 }
@@ -3754,7 +3732,6 @@ fn compile_route_reuse_family(
             ),
         ],
         false,
-        BuildProfile::Dev,
     )
 }
 
@@ -4273,16 +4250,15 @@ fn namespaced_route_diagnostics_are_deterministic_across_creation_order() {
     let mut reversed = files.to_vec();
     reversed.reverse();
 
-    let diagnosed_reports =
-        |files: &[(&str, &str)]| match compile_fixture_result(files, false, BuildProfile::Dev) {
-            Ok(CompilationOutcome::Diagnosed(reports)) => reports,
-            Ok(CompilationOutcome::Success { .. }) => {
-                panic!("a case-conflicting public route must be rejected")
-            }
-            Err(errors) => {
-                panic!("source route conflicts must not reach infrastructure errors: {errors:?}")
-            }
-        };
+    let diagnosed_reports = |files: &[(&str, &str)]| match compile_fixture_result(files, false) {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a case-conflicting public route must be rejected")
+        }
+        Err(errors) => {
+            panic!("source route conflicts must not reach infrastructure errors: {errors:?}")
+        }
+    };
 
     let first = diagnosed_reports(&files);
     let second = diagnosed_reports(&reversed);

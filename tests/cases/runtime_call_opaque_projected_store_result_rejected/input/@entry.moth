@@ -1,0 +1,17 @@
+Link = |items {I32}|
+
+store_items |items {I32}| -> Link:
+    holder ~= Link({0})
+    ~holder.items = items
+    return holder
+;
+
+probe || -> I32:
+    child ~= {1}
+    observer ~= Link(child)
+    result ~= store_items(child)
+    ~result.items.push(2)
+    return result.items.length() * 10 + observer.items.length()
+;
+
+~[:[probe()]]

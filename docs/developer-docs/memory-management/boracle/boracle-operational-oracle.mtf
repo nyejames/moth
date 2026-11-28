@@ -641,6 +641,29 @@ An access to the argument place after the effect is legal and does not exercise 
 
 Two arguments of one call with incompatible kinds on overlapping targets therefore conflict at the later of the two granular argument events, where the earlier argument's still-open interval meets the later argument's access. Extending the interval to the `CallEffect` event keeps the capability open across the call itself. That is the call argument interval under current semantics and it yields one truthful witness per call.
 
+The BC-06 capture controls distinguish a location from the value read through it. A scalar
+projection still designates a cell, and one concrete execution picks a single target even when a
+static solver must cover several. Compare the captured operand and the explicitly sequenced
+projected alias in the same execution. Testing one concrete target does not prove that a static
+target set covers the other feasible paths.
+
+For lookup research, model the receiver entry's stability interval separately from the returned
+value's node. A structural write to the same receiver overlaps while the `get` result remains
+live, even when the element has a distinct node or no allocation. Mutation after last use and
+mutation of an independent receiver are positive controls. `remove` detaches its result and
+must not be treated as another lookup. If the operational input cannot represent a needed
+location or stability interval, report `Inconclusive` rather than safety. These are handoff
+requirements, not a claim that the current operational oracle implements them.
+
+For future operational coverage, compare a receiver edit followed by use of a
+saved aggregate field, an identity return or a nested lookup with the same
+edit after the last dependent observation. Retiring one local name must not
+retire another reachable holder. A definite overwrite retires the old value
+of its actual cell, not the independent value carried elsewhere. Model that
+distinction with concrete cell and edge storage, not production diagnostics
+or a table keyed by source-local name. These controls do not activate the
+broader Boracle research plan.
+
 Two rules keep the exercise records of sibling arguments and repeated invocations apart, and neither reopens an ended interval. While an invocation is still open, it withholds its own argument capabilities from its sibling argument accesses, so no sibling access consumes a capability that belongs to its sibling. Withholding is bookkeeping separation, not a legality carve-out: because the later argument does not exercise the earlier argument's withheld capability, the completed interval scan still compares that pair and reports the conflict of the preceding paragraph at the later granular argument event. Once that invocation records its `CallEffect`, its argument capabilities are closed for good, and a later invocation of the same static call is a distinct dynamic instance with capabilities of its own. An access between two invocations therefore exercises neither: the earlier instance ended at its effect and the later instance has not been issued yet. A conflict at that point must come from another capability that is genuinely live across the call, such as a loan the caller holds, which is what makes the ceiling safe rather than merely convenient.
 
 `CallEffect` completion binds the result place from `CallResult` and `CallResultProvenance`:
@@ -687,6 +710,14 @@ That confirmation is bound to the generation the effect installed. It is exempt 
 The oracle never forks executions for a provenance alternative. It does not need to for
 `AliasParams`, because the result's role is independent of its arguments and each index contributes
 its own capability. Branch targets are the only execution forks.
+
+Call results and argument stores describe different effects. Receiving a value
+in a result slot doesn't model a write through a captured mutable argument.
+The current operational call event lacks the graph transition to replace that
+cell, mutate an allocation reached through it or retarget a slot to another
+cell. A call with such a normalized opaque store reports
+`Inconclusive(OpaqueCallStores)` unless execution already found a conflict.
+The production checker's verdict supplies no evidence for either outcome.
 
 ## Unsupported shapes and malformed input
 
@@ -1053,6 +1084,20 @@ The module layout is:
 Every file in this layout exists. The generator produces deterministic bounded problems from a retained seed and belongs to the oracle, because it reads no static result. The reducer and the differential layer both read both sides, so both sit one level out. The reducer's tests stay under `oracle/tests/` because they consume the oracle fixtures there, and the independence rule exempts test sources.
 
 See the Reduction workflow section for generator and reducer behaviour.
+
+## BC-06 replay evidence and limits
+
+The reference solver's BC-06 evidence section records the reduced caller-cell retarget and the production outcomes. Independent source replay reports a `RuntimeConflict` for the inlined retarget and `Inconclusive(OpaqueCallStores)` at the mutable heap call. The mixed `guard` control reaches one complete execution and refuses the other path with `OpaqueCallStores`. One completed path doesn't make the search complete. Earlier source runs recorded `MissingSummary`, rather than guessed `Fresh`, for a generated call and `OpaqueCallStores` for mutating collection builtins.
+
+A scalar reduction makes two caller slots refer to the same callee-local `I32` cell. Before the source adapter fix, its normalized events omitted that effect and the oracle returned `CompleteSafe { executions: 1 }`. Now both that caller and the scalar forwarding caller report `Inconclusive(OpaqueCallStores)`. The inlined escape still reports `RuntimeConflict`. A local scalar value-only write whose HIR rules out cell acquisition and delegated calls keeps a complete execution. The adapter doesn't use production acceptance and the oracle hasn't added a new storage model.
+
+The historical W3 and W4 source replays did report `RuntimeConflict`. Both analyses treated a value stored in an aggregate as a loan of the source projection. They could agree on a conflict at its replacement even when the stored value reached a separate old allocation, as in W3. L4 also reported `RuntimeConflict` despite its expected acceptance after a write through an alias retired the old child edge. A W4 rejection at the replacement does not show that the model detects the intended later mutation conflict. See the BC-06 Witness set and Boracle results in `docs/roadmap/plans/production-borrow-checker-bc06-redesign.md`.
+
+Other historical replays expose different gaps. W1 and W1c left `remove` result provenance unknown and W7a lacked a local call summary, so the oracle produced no operational evidence for their intended outcomes. The immutable-parameter aggregate permission control reported `CompleteSafe` under that historical input even though the contract requires rejection. A complete traversal only covers the events and access permissions that extraction represents.
+
+For these replays, check normalized input before comparing verdicts. An allocation generation and residual path cannot alone say whether a mutable actual supplied a retargetable slot or an existing alias. Replacing the slot can also leave the old generation reachable by a different route. A missing or incomplete call effect neither proves no write nor makes a continuation unreachable. The current oracle has no such caller-cell transition. Keep its typed refusal for opaque stores and keep an incomplete replay distinct from complete safety.
+
+Any future replay support needs independent event extraction from validated HIR and normalized contracts, not a copy of production borrow facts or verdicts. The oracle would execute explicit effects for captured cells and projected edges on the chosen outcome. It would still derive legality from its own state, not from the static solver or the const interpreter. The inactive proposal in `docs/roadmap/plans/boracle-next-research-plans/README.md` records this boundary and the prerequisites for revisiting it.
 
 ## Related reading for the operational oracle
 

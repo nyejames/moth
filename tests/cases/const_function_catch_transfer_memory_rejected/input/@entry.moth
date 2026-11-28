@@ -1,0 +1,15 @@
+-- A failed lookup with an error binding retains values even when the handler continues.
+-- Check the memory ceiling before delivering that pending transfer.
+recover #|limit I32| -> I32:
+    values = {3}
+    loop 0 to limit |index|:
+        item = values.get(index) catch |err|:
+            continue
+        ;
+        assert(item is 3)
+    ;
+    return 7
+;
+
+value #I32 = recover(40000)
+io.line(value)

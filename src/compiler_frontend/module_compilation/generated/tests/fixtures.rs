@@ -24,6 +24,9 @@ use crate::compiler_frontend::module_compilation::generated::artefacts::{
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedRequestFacts;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -126,7 +129,10 @@ pub(crate) fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
 pub(crate) fn summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

@@ -25,6 +25,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
@@ -37,7 +40,10 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn empty_public_call_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: vec![],
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -57,11 +63,7 @@ fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCa
             mutation,
             transfer_effect: PublicCallTransferEffect::MayConsume,
         }],
-        return_alias: FunctionReturnAliasSummary::Fresh,
-        escapes_builtin_failure: false,
-        uses_fast_semantics: false,
-        may_trap: false,
-        may_fail: false,
+        ..empty_public_call_summary()
     }
 }
 
@@ -381,6 +383,35 @@ fn finalization_excludes_private_and_start_summaries() {
             .any(|record| record.origin != public_origin),
         "private and start summaries must not enter the completed public phase"
     );
+}
+
+#[test]
+fn finalization_publishes_empty_and_bottom_but_rejects_pending() {
+    let origin = OriginFunctionId::new_free(module_origin(), "render".to_owned());
+    let id = FunctionId(1);
+    let hir = public_hir_for_origins(&[(id, origin.clone())]);
+    let mut borrow_analysis = BorrowAnalysis::default();
+    let mut summary = empty_public_call_summary();
+
+    for return_alias in [
+        summary.return_alias.clone(),
+        FunctionReturnAliasSummary::Known(Box::default()),
+    ] {
+        summary.return_alias = return_alias;
+        borrow_analysis
+            .public_call_summaries
+            .insert(id, summary.clone());
+        let completed = draft_with_records(vec![function_draft_record(origin.clone(), vec![])])
+            .finalize_after_borrow_validation(&borrow_analysis, &hir)
+            .expect("settled allocation facts must be publishable");
+        assert_eq!(completed.concrete_call_summaries[0].summary, summary);
+    }
+
+    summary.return_alias = FunctionReturnAliasSummary::Pending;
+    borrow_analysis.public_call_summaries.insert(id, summary);
+    let result = draft_with_records(vec![function_draft_record(origin, vec![])])
+        .finalize_after_borrow_validation(&borrow_analysis, &hir);
+    assert!(result.is_err());
 }
 
 #[test]

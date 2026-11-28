@@ -1,0 +1,4 @@
+@donor stale
+
+result #I32 = stale()
+~[:result=[result]]

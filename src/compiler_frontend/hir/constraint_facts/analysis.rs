@@ -365,23 +365,6 @@ pub(crate) fn analyze_function(
         &resolve_callee,
         &mut WalkScope::WholeFunction,
     );
-    // Release folding removed these calls from the CFG. Their live rows are the exact executable
-    // hazard evidence the debug build's call statement would have provided.
-    if let Some(facts) = hir.function_failure_facts.get(&function_id) {
-        for selected in &facts.constraint.live_erased_call_sites {
-            // A release candidate always carries an infallible-shaped contract, so an inherited
-            // `may_fail` is implicit failure propagation. HIR models that as a generated failure
-            // edge with no authored span, and a debug build therefore reports the escaped error
-            // without an evidence span. Only the trap hazard keeps the authored call span.
-            note_live_call_hazards(
-                &mut analysis,
-                resolve_callee(&selected.target),
-                Some(selected.span),
-                None,
-            );
-        }
-    }
-
     analysis
 }
 
@@ -452,22 +435,6 @@ pub(crate) fn analyze_statement_region(
     };
     let mut analysis = FunctionConstraintAnalysis::default();
     walk_live_blocks(hir, entry.id, &mut analysis, resolve_callee, &mut scope);
-    // A folded call that stood in this region had the same executable hazards as the runtime call
-    // the debug build retains, so it attributes to the region by its authored span.
-    if let Some(facts) = hir.function_failure_facts.get(&function_id) {
-        for selected in &facts.constraint.live_erased_call_sites {
-            if !sources.span_within(selected.span, start, end) {
-                continue;
-            }
-            note_live_call_hazards(
-                &mut analysis,
-                resolve_callee(&selected.target),
-                Some(selected.span),
-                Some(selected.span),
-            );
-        }
-    }
-
     RegionConstraintAnalysis {
         fast_witness,
         trap_witness: analysis.trap_witness,
@@ -1103,7 +1070,7 @@ fn scan_statement_for_traps(
             }
         }
         HirStatementKind::Call { target, .. } => {
-            note_live_call_hazards(analysis, resolve_callee(target), witness_span, witness_span);
+            note_live_call_hazards(analysis, resolve_callee(target), witness_span);
         }
         _ => {}
     }
@@ -1113,20 +1080,18 @@ fn scan_statement_for_traps(
 ///
 /// WHAT: a trap witness for a callee that may trap and an escaping-failure witness for a plain
 ///       Moth-source callee whose summary widened to `may_fail`.
-/// WHY: retained HIR call statements and release-folded calls both present an executable callee
-///      hazard. One helper keeps their analysis identical while each owner supplies its own
-///      authored span and liveness proof.
+/// WHY: trap and escaping-failure hazards are liveness-conditioned, so only calls the live walk
+///      reaches may contribute them.
 fn note_live_call_hazards(
     analysis: &mut FunctionConstraintAnalysis,
     callee: ConstraintCalleeFacts,
-    trap_span: Option<SourceSpan>,
-    fail_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
 ) {
     if callee.bits.may_trap {
         record_trap_witness(
             analysis,
             call_trap_witness_kind(callee.unknown_external),
-            trap_span,
+            span,
         );
     }
     // A plain external call is infallible-shaped, so its contract cannot contribute an error
@@ -1137,7 +1102,7 @@ fn note_live_call_hazards(
         if analysis.fail_witness.is_none() {
             analysis.fail_witness = Some(ConstraintWitness::new(
                 ConstraintWitnessKind::EscapingError,
-                fail_span,
+                span,
             ));
         }
     }

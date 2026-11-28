@@ -29,7 +29,6 @@
 //! `ExternalSymbolId` values. Expression and type resolution must use these IDs directly;
 //! they must never re-resolve names globally through the registry.
 
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::AstFastOperationWitness;
@@ -104,7 +103,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(crate) use crate::compiler_frontend::ast::receiver_methods::{
     ReceiverMethodCatalog, ReceiverMethodEntry,
@@ -119,9 +117,6 @@ mod required_services;
 mod scope_frame;
 
 pub(crate) use scope_frame::{LocalDeclarationSlot, ScopeArena, ScopeFrameId};
-
-/// Global counter for generating unique synthetic scope paths in child control-flow contexts.
-pub(super) static CONTROL_FLOW_SCOPE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static EMPTY_TRAIT_ENVIRONMENT: Rc<TraitEnvironment> = Rc::new(TraitEnvironment::new());
@@ -479,7 +474,6 @@ pub struct ScopeShared {
     // External package and frontend services.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
-    pub(crate) build_profile: FrontendBuildProfile,
     /// Whether this body is a const function body whose operations must all be const-capable.
     pub(crate) const_body: bool,
     /// The authored declaration site a const-body eligibility diagnostic points back to.
@@ -1082,7 +1076,6 @@ impl ScopeContext {
             top_level_declarations,
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
-            build_profile: FrontendBuildProfile::Dev,
             const_body: false,
             const_declaration_span: None,
             file_visibility: None,
@@ -1169,8 +1162,10 @@ impl ScopeContext {
             self.loop_depth
         };
 
-        let scope_id = CONTROL_FLOW_SCOPE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let scope_component = string_table.get_or_intern(format!("__scope_{scope_id}"));
+        // Separate parse arenas can share this path fork (for example while resolving an early
+        // const declaration). The fork's next path ordinal stays unique across those arenas and
+        // independent of other compilation workers. `$` cannot start an authored binding.
+        let scope_component = string_table.get_or_intern(format!("$scope_{}", path_fork.len()));
         let scope = path_fork
             .try_intern_child(self.scope, scope_component)
             .ok_or_else(token_lexical::logical_path_capacity)?;

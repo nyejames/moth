@@ -1,0 +1,12 @@
+results #|seen I32| -> I32, I32:
+    return 2, seen
+;
+
+stale #|| -> I32:
+    value ~= 1
+    ~value, captured = results(value)
+    return captured
+;
+
+result #I32 = stale()
+~[:result=[result]]

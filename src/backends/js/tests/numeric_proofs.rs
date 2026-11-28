@@ -2067,6 +2067,7 @@ fn proven_narrowing_elides_checked_cast_helpers() {
     for (source, target, value) in [
         (FixedScalar::I32, FixedScalar::I8, 100),
         (FixedScalar::I64, FixedScalar::I32, 1000),
+        (FixedScalar::I32, FixedScalar::U64, 100),
     ] {
         let lowered = lower_recoverable_fixture("proven_narrow", |_types, region, expressions| {
             let source_type = builtin_type_ids::fixed_scalar(source);
@@ -2121,12 +2122,22 @@ fn proven_narrowing_elides_checked_cast_helpers() {
             1,
             "the empty proof table keeps the checked narrowing branch"
         );
-        let driver = format!("console.log(JSON.stringify({}()));", lowered.function_name);
+        let driver = format!(
+            "const result = {}(); console.log(result.tag, String(result.value), typeof result.value);",
+            lowered.function_name
+        );
         let (analysed, retained) = run_both_tables(&lowered, &driver);
         assert_same_runtime(&analysed, &retained, "proven narrowing ABI");
         assert_eq!(
             analysed.stdout.trim(),
-            format!("{{\"tag\":\"ok\",\"value\":{value}}}")
+            format!(
+                "ok {value} {}",
+                if target == FixedScalar::U64 {
+                    "bigint"
+                } else {
+                    "number"
+                }
+            )
         );
     }
 }

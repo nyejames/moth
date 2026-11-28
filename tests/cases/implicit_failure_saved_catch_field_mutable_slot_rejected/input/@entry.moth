@@ -1,0 +1,13 @@
+Failure = | message String |
+
+load || -> String, Failure!:
+    return! Failure("closed")
+;
+
+msg ~= ""
+recovered = load() catch |err|:
+    saved Failure = err
+    ~msg = saved.message
+    then "fallback"
+;
+~[: message=[msg] recovered=[recovered]]

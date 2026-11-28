@@ -1,9 +1,8 @@
 //! Native fallible external call emission, retaining boundary float-validation facts.
 
+use super::super::calls::CallReceiver;
 use super::EmittedFallibleResults;
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    ArgumentListView, ExpressionView,
-};
+use crate::compiler_frontend::ast::expressions::expression_store::ArgumentListView;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
@@ -20,7 +19,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         id: ExternalFunctionId,
         args: ArgumentListView<'_>,
-        receiver: Option<ExpressionView<'_>>,
+        receiver: Option<CallReceiver<'_>>,
         result_type_ids: &[TypeId],
         requires_external_float_validation: bool,
         error_type_id: TypeId,

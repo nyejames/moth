@@ -61,6 +61,9 @@ use crate::compiler_frontend::paths::module_resources::{
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -231,7 +234,10 @@ fn generated_identity_for_origin(
 fn generated_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
@@ -1381,7 +1387,6 @@ fn canonical_tail_success_retains_warning_source_context() {
 #[cfg(feature = "data_layout_memory_probe")]
 #[test]
 fn canonical_tail_retains_donor_only_package_identity() {
-    use crate::build_system::BuildProfile;
     use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
     use crate::build_system::create_project_modules::{
         FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -1424,7 +1429,6 @@ fn canonical_tail_retains_donor_only_package_identity() {
     let mut project_source_builder = None;
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &StyleDirectiveRegistry::built_ins(),
         &mut surface,
@@ -1922,7 +1926,6 @@ run || -> String:
     let compiled_frontend = successful_compilation_value(
         crate::build_system::create_project_modules::compile_project_frontend(
             &mut config,
-            crate::build_system::BuildProfile::Dev,
             None,
             &style_directives,
             &mut builder_surface,

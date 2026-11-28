@@ -1,0 +1,32 @@
+Link = |items {I32}|
+
+ping |depth I32, holder ~Link| -> Link?:
+    if depth > 0:
+        return pong(depth - 1, ~holder)
+    ;
+    return none
+;
+
+pong |depth I32, holder ~Link| -> Link?:
+    if depth is 1:
+        return holder
+    ;
+    return ping(depth, ~holder)
+;
+
+relay |holder ~Link, next {I32}, depth I32| -> Link?:
+    writer ~= ping(depth, ~holder)?
+    ~writer.items = next
+    return writer
+;
+
+run |depth I32| -> I32:
+    holder ~= Link({0})
+    written ~= 0
+    if relay(~holder, {4, 5, 6}, depth) is |value|:
+        ~written = value.items.length()
+    ;
+    return written * 10 + holder.items.length()
+;
+
+~[:[run(3)] / [run(0)]]

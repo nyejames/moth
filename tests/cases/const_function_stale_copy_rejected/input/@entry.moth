@@ -1,0 +1,10 @@
+stale #|| -> I32:
+    values ~= {1}
+    view = values
+    ~values.push(2)
+    copied = copy view
+    return copied.length()
+;
+
+result #I32 = stale()
+~[:result=[result]]

@@ -23,17 +23,24 @@ use super::super::{
 use super::test_support::{module_origin, struct_origin};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
-    CanonicalTraitIdentity, CanonicalTypeIdentity, ExternalOpaqueTypeIdentity,
-    ModulePrivateNominalIdentity, StableTraitRequirementIdentity,
+    CanonicalTraitIdentity, CanonicalTypeIdentity, ExportedGenericParameterIdentity,
+    ExternalOpaqueTypeIdentity, GenericDeclarationOrigin, ModulePrivateNominalIdentity,
+    StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalPackageRegistry,
     ExternalSymbolCategory, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    CellPort, CellPost, Component, Coverage, EntryPort, ExportPort, Footprint, Lane, ObjectRef,
+    OutputPort, PathAccess, PortId, Post, Product, ScalarSource, StorageKind, SupportId,
+    TypedCallAllocationFacts, ValueRef, ValueSource,
+};
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    CallField, CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
@@ -47,12 +54,43 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
+        })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
         may_fail: false,
     }
+}
+
+fn returning_post(post: Post) -> Lane {
+    Lane::Returning(
+        Product::new(vec![Component {
+            support: SupportId(0),
+            alternatives: vec![post],
+        }])
+        .unwrap(),
+    )
+}
+
+fn value(source: ValueSource) -> ValueRef {
+    ValueRef {
+        source,
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    }
+}
+
+fn result_object() -> ObjectRef {
+    ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }))
 }
 
 fn shared_summary(parameter_count: usize) -> PublicCallSummary {
@@ -64,11 +102,7 @@ fn shared_summary(parameter_count: usize) -> PublicCallSummary {
                 transfer_effect: PublicCallTransferEffect::MayConsume,
             })
             .collect(),
-        return_alias: FunctionReturnAliasSummary::Fresh,
-        escapes_builtin_failure: false,
-        uses_fast_semantics: false,
-        may_trap: false,
-        may_fail: false,
+        ..empty_summary()
     }
 }
 
@@ -695,6 +729,273 @@ fn rejects_missing_concrete_receiver_summary() {
 }
 
 #[test]
+fn validates_nested_generic_call_path_ordinals_against_the_closed_layout() {
+    let envelope = struct_origin("Envelope");
+    let parameter = ExportedGenericParameterIdentity::new(
+        GenericDeclarationOrigin::nominal_type(envelope.clone()).unwrap(),
+        0,
+        "T".to_owned(),
+    );
+    let layout = PublicDeclarationRecord {
+        origin: OriginDeclarationId::Type(envelope.clone()),
+        synthetic_interface_provenance: Default::default(),
+        semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
+            generic_parameters: vec![super::super::model::PublicGenericParameterSurface {
+                identity: parameter.clone(),
+                bounds: Vec::new(),
+            }],
+            fields: vec![PublicFieldTypeSlot {
+                name: "payload".to_owned(),
+                type_identity: CanonicalTypeIdentity::Option(Box::new(
+                    CanonicalTypeIdentity::GenericParameter(parameter),
+                )),
+                folded_default: None,
+            }],
+            receiver_methods: Vec::new(),
+        }),
+    };
+    let origin = OriginFunctionId::new_free(module_origin(), "unwrap_first".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    let string = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String);
+    function.parameters.push(PublicParameterTypeSlot {
+        name: None,
+        type_identity: CanonicalTypeIdentity::GenericInstance {
+            base: envelope,
+            arguments: Box::new([CanonicalTypeIdentity::Collection {
+                element: Box::new(string.clone()),
+                fixed_capacity: None,
+            }]),
+        },
+        access: PublicCallParameterAccess::Shared,
+        folded_default: None,
+        contract: super::super::model::PublicParameterContract::Value,
+    });
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: string,
+        }],
+        error: None,
+    };
+    let make_summary = |path: Vec<_>| PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            ports: vec![EntryPort::Value {
+                parameter: 0,
+                path: path.into_boxed_slice(),
+            }],
+            support_count: 1,
+            success: returning_post(Post {
+                results: vec![(
+                    0,
+                    value(ValueSource::Allocation(ObjectRef::Entry(PortId(0)))),
+                )],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })),
+        ..shared_summary(1)
+    };
+    let mut interface = PublicSemanticInterface {
+        module_origin: module_origin(),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![declaration, layout],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: vec![ConcreteCallSummaryRecord {
+            origin,
+            summary: make_summary(vec![
+                CallField::Field(0),
+                CallField::Payload {
+                    variant: 1,
+                    field: 0,
+                },
+                CallField::Elem,
+            ]),
+        }],
+    };
+    interface
+        .validate_for_publication()
+        .expect("instantiated payload matches String");
+    for path in [
+        vec![CallField::Field(1)],
+        vec![CallField::Field(0)],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 0,
+                field: 0,
+            },
+        ],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 1,
+                field: 0,
+            },
+            CallField::MapKey,
+        ],
+        vec![
+            CallField::Field(0),
+            CallField::Payload {
+                variant: 1,
+                field: 0,
+            },
+        ],
+    ] {
+        interface.concrete_call_summaries[0].summary = make_summary(path);
+        assert!(interface.validate_for_publication().is_err());
+    }
+
+    interface.concrete_call_summaries[0].summary = make_summary(vec![CallField::Field(0)]);
+    let PublicDeclarationSemantics::Function(function) = &mut interface.declarations[0].semantics
+    else {
+        unreachable!("function declaration fixture");
+    };
+    let CanonicalTypeIdentity::GenericInstance { arguments, .. } =
+        &function.parameters[0].type_identity
+    else {
+        unreachable!("generic parameter fixture");
+    };
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: CanonicalTypeIdentity::Option(Box::new(arguments[0].clone())),
+        }],
+        error: None,
+    };
+    interface
+        .validate_for_publication()
+        .expect("compound generic leaf is exactly substituted");
+
+    interface.declarations.pop();
+    interface
+        .validate_closure_input()
+        .expect("a provider may still supply the projected layout");
+    assert!(interface.validate_for_publication().is_err());
+}
+
+#[test]
+fn scalar_result_cannot_publish_an_allocation_source() {
+    let origin = OriginFunctionId::new_free(module_origin(), "flag".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    function.return_contract = PublicCallableReturnContract::Returns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool),
+        }],
+        error: None,
+    };
+    let mut interface = evidence_interface(&[]);
+    interface.declarations.push(declaration);
+    let string = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String);
+    let allocation = result_object();
+    interface
+        .concrete_call_summaries
+        .push(ConcreteCallSummaryRecord {
+            origin,
+            summary: PublicCallSummary {
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(
+                    TypedCallAllocationFacts {
+                        support_count: 1,
+                        success: returning_post(Post {
+                            results: vec![(0, value(ValueSource::Allocation(allocation.clone())))],
+                            retained: vec![(allocation, StorageKind::Allocation, string)],
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                )),
+                ..empty_summary()
+            },
+        });
+    assert!(interface.validate_for_publication().is_err());
+
+    interface.concrete_call_summaries[0].summary.return_alias = empty_summary().return_alias;
+    assert!(interface.validate_for_publication().is_err());
+
+    interface.concrete_call_summaries[0].summary.return_alias =
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            support_count: 1,
+            success: returning_post(Post {
+                results: vec![(0, value(ValueSource::Scalar(ScalarSource::Independent)))],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+    interface
+        .validate_for_publication()
+        .expect("a scalar postcondition matches the declaration");
+}
+
+#[test]
+fn unpublished_error_channel_requires_the_private_builtin_failure_reservation() {
+    let origin = OriginFunctionId::new_free(module_origin(), "helper".to_owned());
+    let mut declaration = function_record(origin.clone(), PublicFunctionCategory::ConcreteLocal);
+    let PublicDeclarationSemantics::Function(function) = &mut declaration.semantics else {
+        unreachable!("function declaration fixture");
+    };
+    function.parameters.push(PublicParameterTypeSlot {
+        name: None,
+        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        access: PublicCallParameterAccess::Shared,
+        folded_default: None,
+        contract: super::super::model::PublicParameterContract::Value,
+    });
+    let mut interface = evidence_interface(&[]);
+    interface.declarations.push(declaration);
+    let error_facts = |field| {
+        let error = result_object();
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            ports: vec![EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            }],
+            support_count: 1,
+            error: returning_post(Post {
+                cells: vec![(
+                    CellPort::Edge(error.clone(), field),
+                    CellPost::Replace(vec![Some(value(ValueSource::Allocation(
+                        ObjectRef::Entry(PortId(0)),
+                    )))]),
+                )],
+                results: vec![(0, value(ValueSource::Allocation(error.clone())))],
+                retained: vec![(
+                    error,
+                    StorageKind::Allocation,
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+                )],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+    };
+    interface
+        .concrete_call_summaries
+        .push(ConcreteCallSummaryRecord {
+            origin,
+            summary: PublicCallSummary {
+                return_alias: error_facts(CallField::Field(0)),
+                ..shared_summary(1)
+            },
+        });
+    assert!(interface.validate_for_publication().is_err());
+
+    interface.concrete_call_summaries[0]
+        .summary
+        .escapes_builtin_failure = true;
+    interface
+        .validate_for_publication()
+        .expect("a private builtin Error lane need not alter the canonical authored signature");
+
+    interface.concrete_call_summaries[0].summary.return_alias = error_facts(CallField::Field(1));
+    assert!(interface.validate_for_publication().is_err());
+}
+
+#[test]
 fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding() {
     let provider_module = provider_module_origin();
     let hidden_origin = OriginTypeId::new(
@@ -750,6 +1051,17 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             },
         }),
     };
+    let make_summary = PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            support_count: 1,
+            success: returning_post(Post {
+                coverage: Coverage::Unresolved(Footprint::Locations(vec![OutputPort::Result(0)])),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })),
+        ..empty_summary()
+    };
     let provider = PublicSemanticInterface {
         module_origin: provider_module.clone(),
         export_bindings: vec![
@@ -778,7 +1090,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         reusable_evidence: Vec::new(),
         concrete_call_summaries: vec![ConcreteCallSummaryRecord {
             origin: make_origin.clone(),
-            summary: empty_summary(),
+            summary: make_summary.clone(),
         }],
     };
 
@@ -829,7 +1141,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             .iter()
             .find(|record| record.origin == make_origin)
             .map(|record| &record.summary),
-        Some(&empty_summary())
+        Some(&make_summary)
     );
 }
 
@@ -874,6 +1186,21 @@ fn accepts_source_owned_evidence_for_canonical_core_trait() {
         }],
         error: None,
     };
+    let result = result_object();
+    interface.concrete_call_summaries[0].summary.return_alias =
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: returning_post(Post {
+                results: vec![(0, value(ValueSource::Allocation(result.clone())))],
+                retained: vec![(
+                    result,
+                    StorageKind::Allocation,
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                )],
+                ..Default::default()
+            }),
+            support_count: 1,
+            ..Default::default()
+        }));
 
     interface
         .validate_for_publication()

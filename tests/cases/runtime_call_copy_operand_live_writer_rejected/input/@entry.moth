@@ -1,0 +1,22 @@
+-- Reject the authored `copy holder.items` read while the overlapping writer
+-- is live. The diagnostic should identify that source operation, not a HIR
+-- temporary. Copying creates independence only after the source read is legal.
+Holder = |items {I32}|
+
+stamp || -> I32:
+    return 0
+;
+
+inspect |snapshot {I32}, extra I32| -> I32:
+    return snapshot.length() + extra
+;
+
+probe || -> I32:
+    holder ~= Holder({1, 2})
+    writer ~= holder.items
+    result = inspect(copy holder.items, stamp())
+    ~writer.push(3)
+    return result + writer.length()
+;
+
+~[:[probe()]]

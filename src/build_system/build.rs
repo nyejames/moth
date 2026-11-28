@@ -58,6 +58,8 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
 };
+#[cfg(test)]
+use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::public_interface::{
@@ -598,6 +600,23 @@ impl ProjectCompilation {
                 .iter()
                 .flat_map(|package| package.boundary.successful_module_views()),
         )
+    }
+
+    /// Iterate project and source-package facade artefacts in their owning boundary's module
+    /// order. Generated sidecars are executable-only and publish no facade.
+    #[cfg(test)]
+    pub(crate) fn facade_artefacts(
+        &self,
+    ) -> impl Iterator<Item = (Option<&str>, &CompiledModuleArtifact)> + '_ {
+        self.project
+            .successful_artefacts_in_module_id_order()
+            .map(|artefact| (None, artefact))
+            .chain(self.source_packages.iter().flat_map(|package| {
+                package
+                    .boundary
+                    .successful_artefacts_in_module_id_order()
+                    .map(|artefact| (Some(package.package_prefix()), artefact))
+            }))
     }
 
     /// Number of successful module views (base artefacts plus generated sidecars).
@@ -2127,7 +2146,6 @@ pub(crate) fn build_project<E>(
     let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(string_table);
     let frontend_outcome = match compile_project_frontend_with_inputs(
         &mut config,
-        build_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

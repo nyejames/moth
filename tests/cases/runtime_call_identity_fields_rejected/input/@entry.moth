@@ -1,0 +1,19 @@
+Box = |items {I32}|
+
+pair #|| -> Box, {I32}:
+    items {I32} = {1}
+    return Box(items), items
+;
+
+identity |value Box| -> Box:
+    return value
+;
+
+probe || -> I32:
+    box Box, items ~{I32} = pair()
+    forwarded = identity(box)
+    ~items.push(2)
+    return forwarded.items.length()
+;
+
+~[:[probe()]]

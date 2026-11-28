@@ -1,0 +1,14 @@
+Pair = |left {I32}, right {I32}|
+
+probe |flag Bool| -> I32:
+    items ~= {3, 4}
+    pair ~= Pair({1}, {2})
+    if flag:
+        ~pair = Pair(items, items)
+    ;
+    observed = pair.left
+    ~pair.right.push(7)
+    return observed.length()
+;
+
+~[:[probe(true)],[probe(false)]]

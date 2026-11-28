@@ -5,6 +5,7 @@ use crate::compiler_frontend::ast::const_eval::{
     BindingFold, ConstantFoldError, ConstantFoldOutcome, ConstantFoldRefusalReason,
     FoldRequirement, FoldServices, constant_fold, fold_expression_with_bindings,
 };
+use crate::compiler_frontend::ast::const_values::const_execution::TirCollectionCapture;
 use crate::compiler_frontend::ast::const_values::{
     ConstValueId, ConstValuePayload, ConstValueStore,
 };
@@ -13,12 +14,12 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstCollectionCursor, ConstRangeCursor, TemplateBranchSelector, TemplateFoldBinding,
-    TemplateLoopHeader, build_collection_iteration_bindings, build_range_iteration_bindings,
-    const_collection_items, const_collection_step,
+    ConstCollectionCursor, ConstRangeCursor, TemplateBindingValue, TemplateBranchSelector,
+    TemplateFoldBinding, TemplateLoopHeader, build_collection_iteration_bindings,
+    build_range_iteration_bindings, const_collection_items, const_collection_step,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    FoldedCondition, TemplateEmission, TemplateFoldResult, TirFoldContext,
+    FoldedCondition, TemplateEmission, TemplateFoldResult, TirFoldContext, TirSiteInputs,
     fold_condition_with_provenance, resolve_fold_bindings_in_expression,
     selected_option_capture_payload_with_provenance,
 };
@@ -463,6 +464,12 @@ pub(super) fn fold_tir_conditional_with_insertion(
     }
 }
 
+/// The executor retains a live witness; host folding retains immutable item expressions.
+enum TirCollectionSource {
+    Live(TirCollectionCapture),
+    Folded(Vec<ExprId>),
+}
+
 /// Folds a TIR loop node, including its aggregate wrapper.
 #[allow(
     clippy::too_many_arguments,
@@ -664,23 +671,44 @@ pub(super) fn fold_tir_loop(
             let effective_iterable = fold_input
                 .effective_expression_for_site(&*fold_context.expression_builder, iterable_site)?;
             let iterable_ref = effective_iterable.unwrap_or(*iterable);
-            let resolved_iterable =
-                resolve_fold_bindings_in_expression(iterable_ref, fold_context)?.expression;
             output_state.provenance.merge(&expression_provenance(
                 fold_context.expression_builder.view(iterable_ref)?,
             ));
-            let resolved_iterable_provenance =
-                expression_provenance(fold_context.expression_builder.view(resolved_iterable)?);
+            // Capture the live source before resolving the step. The host-only path still
+            // extracts immutable expressions, but the executor must not freeze unvisited edges.
+            let (source, source_len, resolved_iterable_provenance) = if let Some(rewriter) =
+                fold_context.required_call_rewriter.as_deref_mut()
+            {
+                let capture = rewriter.capture_collection(
+                    iterable_ref,
+                    bindings.item.is_some(),
+                    TirSiteInputs {
+                        expression_builder: fold_context.expression_builder,
+                        const_values: fold_context.const_values,
+                        string_table: fold_context.string_table,
+                        source_scope: fold_context.source_scope,
+                        bindings: &fold_context.bindings,
+                    },
+                )?;
+                let len = capture.len;
+                let provenance =
+                    expression_provenance(fold_context.expression_builder.view(iterable_ref)?)
+                        .union(&capture.provenance);
+                (TirCollectionSource::Live(capture), len, provenance)
+            } else {
+                let resolved_iterable =
+                    resolve_fold_bindings_in_expression(iterable_ref, fold_context)?.expression;
+                let provenance =
+                    expression_provenance(fold_context.expression_builder.view(resolved_iterable)?);
+                let items = const_collection_items(
+                    resolved_iterable,
+                    fold_context.expression_builder,
+                    &*fold_context.const_values,
+                )?;
+                let len = items.len();
+                (TirCollectionSource::Folded(items), len, provenance)
+            };
             output_state.provenance.merge(&resolved_iterable_provenance);
-
-            // The source is captured before the step, so a source that is not a const collection
-            // keeps its own diagnostic instead of being preempted by the step.
-            let items = const_collection_items(
-                resolved_iterable,
-                fold_context.expression_builder,
-                &*fold_context.const_values,
-            )?;
-
             // The authored step position is the header's own expression span. Substitution
             // replaces that expression with a fold-binding value whose span names the source
             // binding, so the diagnostic anchor is read before resolution.
@@ -737,7 +765,7 @@ pub(super) fn fold_tir_loop(
             // The step sign selects the start index and the zero-step check runs before the
             // empty-source check, so an empty source still rejects a const-known zero step.
             let mut cursor = ConstCollectionCursor::new(
-                items.len(),
+                source_len,
                 step,
                 fold_context.template_const_loop_iteration_limit,
                 authored_step_span,
@@ -746,7 +774,7 @@ pub(super) fn fold_tir_loop(
             // The reservation follows visited iterations, not source indices, so a stride over a
             // long source stays proportional to the output it can produce.
             let estimated_iterations = estimated_collection_iteration_count(
-                items.len(),
+                source_len,
                 step,
                 fold_context.template_const_loop_iteration_limit,
             );
@@ -758,37 +786,70 @@ pub(super) fn fold_tir_loop(
                 FoldOutputState::bounded(estimated_aggregate, fold_context, fold_input);
 
             while let Some(index) = cursor.next_index()? {
-                let item = *items.get(index).ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "TIR fold: const collection index left the captured source.",
-                    )
-                })?;
-                add_ast_counter(AstCounter::TemplateFoldLoopIterations, 1);
-                let resolved_item =
-                    resolve_fold_bindings_in_expression(item, fold_context)?.expression;
-                let resolved_item = if resolved_item != item {
-                    let item_provenance =
-                        expression_provenance(fold_context.expression_builder.view(item)?);
-                    let combined =
-                        expression_provenance(fold_context.expression_builder.view(resolved_item)?)
+                let item = match &source {
+                    TirCollectionSource::Live(_) if bindings.item.is_none() => None,
+                    TirCollectionSource::Live(capture) => {
+                        let item = fold_context
+                            .required_call_rewriter
+                            .as_deref_mut()
+                            .ok_or_else(|| {
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
+                                    "TIR fold: collection capture lost its executor.",
+                                )
+                            })?
+                            .collection_item(
+                                capture,
+                                index,
+                                loop_span,
+                                &resolved_iterable_provenance,
+                                TirSiteInputs {
+                                    expression_builder: fold_context.expression_builder,
+                                    const_values: fold_context.const_values,
+                                    string_table: fold_context.string_table,
+                                    source_scope: fold_context.source_scope,
+                                    bindings: &[],
+                                },
+                            )?;
+                        output_state.provenance.merge(&item.provenance);
+                        Some(TemplateBindingValue::Live(item))
+                    }
+                    TirCollectionSource::Folded(items) => {
+                        let item = *items.get(index).ok_or_else(|| {
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
+                                "TIR fold: const collection index left the captured source.",
+                            )
+                        })?;
+                        let resolved_item =
+                            resolve_fold_bindings_in_expression(item, fold_context)?.expression;
+                        let resolved_item = if resolved_item != item {
+                            let item_provenance =
+                                expression_provenance(fold_context.expression_builder.view(item)?);
+                            let combined = expression_provenance(
+                                fold_context.expression_builder.view(resolved_item)?,
+                            )
                             .union(&item_provenance);
-                    fold_context
-                        .expression_builder
-                        .with_synthetic_interface_provenance(
-                            fold_context.expression_builder.own(resolved_item),
-                            combined,
-                        )?
-                        .id()
-                } else {
-                    resolved_item
+                            fold_context
+                                .expression_builder
+                                .with_synthetic_interface_provenance(
+                                    fold_context.expression_builder.own(resolved_item),
+                                    combined,
+                                )?
+                                .id()
+                        } else {
+                            resolved_item
+                        };
+                        output_state.provenance.merge(&expression_provenance(
+                            fold_context.expression_builder.view(resolved_item)?,
+                        ));
+                        Some(TemplateBindingValue::Folded(resolved_item))
+                    }
                 };
-                output_state.provenance.merge(&expression_provenance(
-                    fold_context.expression_builder.view(resolved_item)?,
-                ));
+                add_ast_counter(AstCounter::TemplateFoldLoopIterations, 1);
                 let iteration_bindings = build_collection_iteration_bindings(
                     bindings,
-                    resolved_item,
+                    item,
                     index,
                     &resolved_iterable_provenance,
                     fold_context.expression_builder,

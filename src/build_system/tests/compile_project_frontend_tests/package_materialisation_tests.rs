@@ -1,4 +1,5 @@
 use super::*;
+use crate::build_system::BuildProfile;
 use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::create_project_modules_tests::successful_compilation_value;
@@ -99,7 +100,6 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
 
         let result = compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -188,7 +188,6 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
 
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -331,7 +330,6 @@ pub(super) fn compile_registered_packages_project_with_damaged_sources(
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -766,7 +764,6 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
 
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -860,7 +857,6 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
 
         let result = compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -974,7 +970,6 @@ io.line(result)
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -1066,7 +1061,6 @@ independent_result I32 = independent(42)
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),
@@ -1095,9 +1089,10 @@ independent_result I32 = independent(42)
         // compiles.
         assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 3.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
-        // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
-        // whose direct callee summaries widen. `seed_helper` and `independent` keep their
-        // materialisation reports because convergence installs no changed summary into them.
+        // Four final diagnostic transfers, plus the two allocation refreshes with newly
+        // reachable lanes: `mutating_helper` receives `public_helper`, then `caller` receives
+        // `mutating_helper`. Installing a proved unreachable callee in place of Pending
+        // does not change allocation transfer; later mutation-only refreshes do not count.
         assert_eq!(
             counter_value("convergence_generated_sidecar_borrow_passes"),
             6.0
@@ -1456,7 +1451,6 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         let frontend = super::super::create_project_modules_tests::successful_compilation_value(
             compile_project_frontend(
                 &mut config,
-                BuildProfile::Dev,
                 None,
                 &style_directives,
                 &mut BuilderSurface::with_mandatory_core(),
@@ -1550,7 +1544,6 @@ fn compile_single_api_facade_project(
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1575,7 +1568,6 @@ fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendC
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1711,7 +1703,6 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),
@@ -1827,7 +1818,6 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),
@@ -1915,7 +1905,6 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -1987,7 +1976,6 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     let _path_fork = PathInternerFork::empty();
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -2077,7 +2065,6 @@ html #= ()\n",
         .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2252,7 +2239,6 @@ outer type T |value T| -> T:
         .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -2374,7 +2360,6 @@ same_private_box PrivateBox of Bool = forward(private_box)
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -2585,7 +2570,6 @@ result = combine(Box(Label("payload")))
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &StyleDirectiveRegistry::built_ins(),
             &mut BuilderSurface::with_mandatory_core(),
@@ -2738,7 +2722,6 @@ result String = outer(LocalMarker(1), "trigger")
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),
@@ -2908,7 +2891,6 @@ wrapped Wrapper = identity(make())
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -2985,7 +2967,6 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -3079,7 +3060,6 @@ product type T |marker T, left I32, right I32| -> I32, Error!:
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
             &mut config,
-            BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
@@ -3207,7 +3187,6 @@ fn compile_later_request_rejection(
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -3597,7 +3576,6 @@ fn source_package_warning_staged_by_frontend_outcome() {
         .expect("test source root should register");
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -3803,7 +3781,6 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
 
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -3876,7 +3853,6 @@ fn compile_paired_root_fixture(case: &str) -> ProjectFrontendCompilation {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -4032,7 +4008,6 @@ fn compile_inline_root_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompila
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
@@ -4220,7 +4195,6 @@ fn paired_root_facade_warning_remaps_through_cached_adoption() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -4683,7 +4657,6 @@ fn project_and_project_local_package_sharing_a_name_are_rejected() {
     let mut project_source_files = None;
     let result = compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -4859,7 +4832,6 @@ fn routed_registered_const_call_folds_from_nested_check_only_content() {
     let build_config_inputs = BuildConfigInputSet::new();
     let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -4930,7 +4902,6 @@ fn single_file_const_functions_fold_local_and_registered_package_bodies() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -4989,7 +4960,6 @@ fn registered_package_const_chain_mounts_only_selected_closure_paths() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -5159,7 +5129,6 @@ fn registered_package_const_work_limit_keeps_the_package_primary_and_project_cal
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -5289,7 +5258,6 @@ fn generated_sidecars_share_the_requester_aggregate_const_work_limit() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let result = compile_project_frontend(
         &mut config,
-        BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,

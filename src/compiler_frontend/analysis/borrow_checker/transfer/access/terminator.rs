@@ -20,179 +20,21 @@ pub(crate) fn transfer_terminator(
     let location = context.diagnostics.terminator_error_span(block_id);
     let conflicts_before = stats.conflicts_checked;
     let terminator_order = layout.terminator_order_or_unknown(block_id);
-
-    match terminator {
-        // Jump argument passing is CFG plumbing, not a semantic read.
-        HirTerminator::Jump { .. } => {}
-
-        HirTerminator::If { condition, .. } => {
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: terminator_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *condition,
-                location,
-                &mut RootSet::empty(layout.local_count()),
-            )?;
-        }
-
-        HirTerminator::Invoke { .. } => {
-            super::statement::transfer_invoke(
-                &mut super::statement::CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: terminator_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                terminator,
-            )?;
-        }
-
-        HirTerminator::Match { scrutinee, arms } => {
-            {
-                let mut read_env = SharedReadEnv {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    tracker: &mut tracker,
-                    location,
-                    current_order: terminator_order,
-                    stats,
-                    value_fact_buffer,
-                };
-                record_shared_reads_in_expression(
-                    &mut read_env,
-                    *scrutinee,
-                    location,
-                    &mut RootSet::empty(layout.local_count()),
-                )?;
-            }
-
-            for arm in arms {
-                let mut read_env = SharedReadEnv {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    tracker: &mut tracker,
-                    location,
-                    current_order: terminator_order,
-                    stats,
-                    value_fact_buffer,
-                };
-                record_shared_reads_in_pattern(&mut read_env, arm)?;
-            }
-        }
-
-        HirTerminator::Return(values) => {
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: terminator_order,
-                stats,
-                value_fact_buffer,
-            };
-            for value in context.expressions.values(*values) {
-                record_shared_reads_in_expression(
-                    &mut read_env,
-                    *value,
-                    location,
-                    &mut RootSet::empty(layout.local_count()),
-                )?;
-            }
-        }
-        HirTerminator::ReturnError(value) => {
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: terminator_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *value,
-                location,
-                &mut RootSet::empty(layout.local_count()),
-            )?;
-        }
-
-        HirTerminator::AssertFailure { message, .. } => {
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: terminator_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *message,
-                location,
-                &mut RootSet::empty(layout.local_count()),
-            )?;
-        }
-
-        HirTerminator::RuntimeFailure { .. } => {
-            // Compiler-generated runtime-failure messages are text data, not expressions.
-        }
-
-        HirTerminator::Uninitialized => {
-            return Err(context
-                .diagnostics
-                .internal_error("Uninitialized terminator reached borrow validation"));
-        }
-
-        // A terminating call applies ordinary argument access, mutation and optional final-use
-        // effects, then leaves the block without a result or a successor. There is deliberately
-        // no post-call state: the fixed-point driver never propagates this block's exit state.
-        HirTerminator::NeverCall { target, args } => {
-            super::statement::transfer_never_call(
-                &mut super::statement::CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: terminator_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                target,
-                context.expressions.values(*args),
-            )?;
-        }
-
-        HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {}
-    }
+    let mut input = super::statement::CallTransferContext::new(
+        context,
+        OperationView::from_layout(layout),
+        state,
+        block_id,
+        terminator_order,
+        location,
+        stats,
+        Some(ValidationSink {
+            layout,
+            tracker: &mut tracker,
+            value_facts: value_fact_buffer,
+        }),
+    );
+    transfer_terminator_operation(&mut input, context, terminator)?;
 
     stats.terminator_fact = Some((
         block_id,
@@ -203,5 +45,43 @@ pub(crate) fn transfer_terminator(
         },
     ));
 
+    Ok(())
+}
+
+pub(in super::super) fn transfer_terminator_operation(
+    input: &mut super::statement::CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    context: &BorrowTransferContext<'_>,
+    terminator: &HirTerminator,
+) -> Result<(), BorrowCheckError> {
+    use super::statement::{read_statement_operands, transfer_invoke, transfer_never_call};
+
+    match terminator {
+        HirTerminator::Jump { .. }
+        | HirTerminator::RuntimeFailure { .. }
+        | HirTerminator::Break { .. }
+        | HirTerminator::Continue { .. } => {}
+        HirTerminator::If { condition, .. } => read_statement_operands(input, [*condition])?,
+        HirTerminator::Invoke { .. } => transfer_invoke(input, terminator)?,
+        HirTerminator::Match { scrutinee, arms } => {
+            read_statement_operands(input, [*scrutinee])?;
+            for arm in arms {
+                input.read_match_pattern(arm)?;
+            }
+        }
+        HirTerminator::Return(values) => {
+            read_statement_operands(input, context.expressions.values(*values).iter().copied())?;
+        }
+        HirTerminator::ReturnError(value) | HirTerminator::AssertFailure { message: value, .. } => {
+            read_statement_operands(input, [*value])?;
+        }
+        HirTerminator::Uninitialized => {
+            return Err(context
+                .diagnostics
+                .internal_error("Uninitialized terminator reached borrow validation"));
+        }
+        HirTerminator::NeverCall { target, args } => {
+            transfer_never_call(input, target, context.expressions.values(*args))?;
+        }
+    }
     Ok(())
 }

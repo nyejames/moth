@@ -9,8 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, ConstantFoldOutcome, FoldRequirement, FoldServices,
-    fold_expression_with_constants,
+    ConstantFoldError, ConstantValueFold, FoldRequirement, FoldServices, fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -195,7 +194,7 @@ impl<'a> ConstValueResolver<'a> {
             ))
         })?;
         validate_references(view, environment, &mut self.pending_references)?;
-        let outcome = fold_expression_with_constants(
+        let fold = fold_value_with_constants(
             expression,
             self.expression_builder,
             self.const_values,
@@ -209,7 +208,7 @@ impl<'a> ConstValueResolver<'a> {
             },
         )
         .map_err(|error| match error {
-            // Builder capacity stays on the template lane: runtime classification would hide it.
+            // Capacity exhaustion stays on the template lane: runtime classification would hide it.
             ConstantFoldError::Diagnostic(diagnostic)
             | ConstantFoldError::NumericFailure(diagnostic)
                 if diagnostic.code() == "MOTH-SYNTAX-0037" =>
@@ -226,24 +225,14 @@ impl<'a> ConstValueResolver<'a> {
                 ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(error))
             }
         })?;
-        let resolved = match outcome {
-            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
-            ConstantFoldOutcome::Refused { .. } => {
+        match fold {
+            ConstantValueFold::Value(value) => return Ok(value),
+            ConstantValueFold::NotConstant => {}
+            ConstantValueFold::Refused(_) => {
                 return Err(ConstResolutionError::NonFoldableRuntimeExpression);
             }
-        };
-        let view = self.expression_builder.view(resolved).map_err(|error| {
-            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
-                error.into(),
-            ))
-        })?;
+        }
         match view.operation() {
-            ExpressionOperationView::Constant(value) => {
-                self.const_values
-                    .value(value)
-                    .ok_or(ConstResolutionError::NonConstExpression)?;
-                Ok(value)
-            }
             ExpressionOperationView::Reference(path) => {
                 let value = environment
                     .lookup_local(&path)

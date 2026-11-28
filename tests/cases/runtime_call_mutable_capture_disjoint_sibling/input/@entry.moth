@@ -1,0 +1,10 @@
+Pair = |left {I32}, right {I32}|
+
+next || -> I32:
+    return 7
+;
+
+pair ~= Pair({1}, {2})
+observed = pair.left
+~pair.right.push(next())
+~[:left=[observed.length()] right=[pair.right.length()]]

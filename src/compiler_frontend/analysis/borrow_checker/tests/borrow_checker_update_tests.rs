@@ -1,18 +1,22 @@
-//! Focused tests for mutable binding updates and write-through access.
+//! Focused tests for binding definitions, updates, and write-through access.
 //!
-//! WHAT: checks ordinary and dedicated-result Updates against mixed slot/alias states.
-//! WHY: source fixtures cannot construct some joined holder states without conflicting earlier.
+//! WHAT: checks definition retirement and ordinary/dedicated-result Updates.
+//! WHY: isolated transfers can retain incoming and previous bindings for direct comparison.
 
+use super::borrow_checker_call_summary_tests::assert_borrow_code_at;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState, RootSet,
+    AddressSet, BindingSpec, BorrowState, CellId, Coverage, FieldKey, FunctionLayout, RootSet,
+    WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
-    BorrowTransferContext, transfer_block,
+    BlockTransferStats, BorrowTransferContext, transfer_block,
 };
-use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
+use crate::compiler_frontend::analysis::borrow_checker::types::{
+    LocalMode, ValueAccessClassification,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     InvalidMutableAccessView, SharedMutableConflictView, UseOfUninitializedLocalView,
 };
@@ -21,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::comp
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
@@ -111,19 +115,14 @@ sentinel = 0\n\
         .index_of(target)
         .expect("the update target should be in the function layout");
 
-    for mode in [LocalMode::UNINIT, LocalMode::UNINIT.union(LocalMode::SLOT)] {
+    for possibly_initialized in [false, true] {
         let local_count = layout.local_count();
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(
-            target_index,
-            LocalState {
-                mode,
-                value_roots: RootSet::empty(local_count),
-                direct_alias_roots: RootSet::empty(local_count),
-                write_target_roots: RootSet::empty(local_count),
-                derived_from_roots: RootSet::empty(local_count),
-            },
-        );
+        if possibly_initialized {
+            let mut initialized = state.clone();
+            initialized.initialize_parameter(target_index);
+            assert!(state.join_in_place(&initialized));
+        }
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("an update must not initialize any possibly uninitialized path");
         assert_borrow_error_view::<UseOfUninitializedLocalView>(error);
@@ -230,20 +229,15 @@ sentinel = 0\n\
         .expect("the updated call should retain its block");
     assert_ne!(call_result, target);
 
-    for mode in [LocalMode::UNINIT, LocalMode::UNINIT.union(LocalMode::SLOT)] {
+    for possibly_initialized in [false, true] {
         let local_count = layout.local_count();
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(argument_index, LocalState::slot(local_count));
-        state.update_local_state(
-            target_index,
-            LocalState {
-                mode,
-                value_roots: RootSet::empty(local_count),
-                direct_alias_roots: RootSet::empty(local_count),
-                write_target_roots: RootSet::empty(local_count),
-                derived_from_roots: RootSet::empty(local_count),
-            },
-        );
+        state.initialize_parameter(argument_index);
+        if possibly_initialized {
+            let mut initialized = state.clone();
+            initialized.initialize_parameter(target_index);
+            assert!(state.join_in_place(&initialized));
+        }
         let error =
             transfer_isolated_statement(&checker, &layout, call_block, call_statement, &mut state)
                 .expect_err(
@@ -357,16 +351,14 @@ sentinel = 0\n\
     let local_count = layout.local_count();
     for alias_only in [false, true] {
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(argument_index, LocalState::slot(local_count));
-        state.update_local_state(mutable_root_index, LocalState::slot(local_count));
-        let target_state = if alias_only {
-            let mut roots = RootSet::empty(local_count);
-            roots.insert(mutable_root_index);
-            LocalState::alias_with_direct(roots.clone(), roots)
+        state.initialize_parameter(argument_index);
+        state.initialize_parameter(mutable_root_index);
+        if alias_only {
+            let roots = state.effective_roots(mutable_root_index);
+            seed_whole_alias(&mut state, target_index, mutable_root_index, roots);
         } else {
-            LocalState::slot(local_count)
-        };
-        state.update_local_state(target_index, target_state);
+            state.initialize_parameter(target_index);
+        }
 
         let error =
             transfer_isolated_statement(&checker, &layout, call_block, call_statement, &mut state)
@@ -381,77 +373,183 @@ fn reentered_definition_reinitializes_a_previously_live_local() {
 target ~= \"old\"\n\
 sentinel = 0\n\
 ;";
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let registry = default_external_package_registry(&mut string_table);
-    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the definition fixture should lower");
-    let function = module
-        .functions
-        .iter()
-        .find(|function| {
-            module
-                .side_table
-                .function_name_path(function.id)
-                .and_then(|path| path_fork.component(path))
-                .is_some_and(|name| string_table.resolve(name) == "probe")
-        })
-        .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(
-        &module,
-        &type_environment,
-        &registry,
-        &path_fork,
-        &string_table,
-    );
-    let reachable = checker
-        .collect_reachable_blocks(function)
-        .expect("fixture CFG should be reachable");
-    let layout = checker
-        .build_function_layout(function, &reachable)
-        .expect("fixture local layout should build");
-    let target = local_named(&module, &path_fork, &string_table, "target");
-    let source = local_named(&module, &path_fork, &string_table, "source");
-    let (block, definition) = module
-        .blocks
-        .iter()
-        .find_map(|block| {
-            block
-                .statements
-                .iter()
-                .find(|statement| {
-                    matches!(
-                        &statement.kind,
-                        HirStatementKind::Write {
-                            target: HirWriteTarget::DefineLocal(local),
-                            ..
-                        } if *local == target
-                    )
-                })
-                .map(|statement| (block, statement))
-        })
-        .expect("the fixture should contain a target definition");
-    let local_count = layout.local_count();
-    let source_index = layout
-        .index_of(source)
-        .expect("the source parameter should be in the function layout");
-    let target_index = layout
-        .index_of(target)
-        .expect("the target should be in the function layout");
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-    state.update_local_state(
-        target_index,
-        LocalState::alias_with_direct(source_roots.clone(), source_roots),
-    );
+    with_definition_probe(source, |checker, layout| {
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let source = local_index_named(checker, &layout, "source");
+        let local_count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(local_count);
+        state.initialize_parameter(source);
+        let source_roots = state.effective_roots(source);
+        seed_whole_alias(&mut state, target, source, source_roots);
 
-    transfer_isolated_statement(&checker, &layout, block, definition, &mut state)
-        .expect("a reentered definition should establish the new binding");
-    let target_state = state.local_state(target_index);
-    assert!(target_state.mode.contains(LocalMode::SLOT));
-    assert!(!target_state.mode.contains(LocalMode::ALIAS));
-    assert!(target_state.value_roots.is_empty());
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("a reentered definition should establish the new binding");
+        assert_eq!(state.binding_mode(target), LocalMode::SLOT);
+        assert_eq!(
+            state.resolve_cells(target).cells(),
+            &[CellId::Slot(WrapperId::current(target))]
+        );
+        assert!(state.binding(target).value_roots().is_empty());
+        assert!(state.binding(target).derivation().is_empty());
+    });
+}
+
+const ENTRY_BOX_DEFINITION: &str = r#"
+Box = |items {I32}|
+probe |input Box|:
+    prior ~= Box(input.items)
+    target ~= Box(prior.items)
+;
+"#;
+
+#[test]
+fn first_heap_definition_matches_retirement_with_sparse_facts() {
+    with_definition_probe(ENTRY_BOX_DEFINITION, |checker, layout| {
+        let (prior, prior_block, prior_definition) = definition_named(checker, &layout, "prior");
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let input = local_index_named(checker, &layout, "input");
+        let (field, child_value) = constructor_field(checker.module, definition);
+        let mut state = BorrowState::new_uninitialized(layout.local_count());
+        state.initialize_parameter(input);
+        transfer_isolated_statement(checker, &layout, prior_block, prior_definition, &mut state)
+            .expect("the prefix constructor should store the immutable input child");
+        assert!(
+            !state.layer_is_empty(),
+            "retirement must have sparse state to scan"
+        );
+        assert!(state.has_pristine_alloc_binding(target));
+        assert!(layout.local_has_in_place_mutation_surface[target]);
+        assert_eq!(layout.acyclic_entry_block, Some(block.id));
+        assert_eq!(
+            layout.local_first_write_order[target],
+            layout.statement_order_or_unknown(definition.id)
+        );
+
+        let mut retirement_state = state.clone();
+        let mut retirement_layout = layout.clone();
+        retirement_layout.acyclic_entry_block = None;
+        let entry_facts =
+            transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+                .expect("the entry definition should keep the captured child");
+        let retirement_facts = transfer_isolated_statement(
+            checker,
+            &retirement_layout,
+            block,
+            definition,
+            &mut retirement_state,
+        )
+        .expect("the same definition should also work with full retirement");
+        assert_eq!(state, retirement_state);
+        assert_eq!(
+            entry_facts.statement_facts,
+            retirement_facts.statement_facts
+        );
+        assert_eq!(entry_facts.value_facts, retirement_facts.value_facts);
+        let (_, child_fact) = entry_facts
+            .value_facts
+            .iter()
+            .find(|(value, _)| *value == child_value)
+            .expect("the incoming projected read should publish a value fact");
+        assert_eq!(
+            child_fact.classification,
+            ValueAccessClassification::SharedRead
+        );
+        assert_eq!(child_fact.roots, [layout.local_ids[prior]]);
+
+        let retained = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        let original = state.resolve_alloc_path(input, &layout.local_mutable, [field]);
+        assert!(retained.layer_only);
+        assert_eq!(retained.ids, original.ids);
+        assert!(
+            retained.readonly,
+            "the mutable holders must not grant write permission"
+        );
+        assert_eq!(retained.readonly_source, Some(input));
+    });
+}
+
+#[test]
+fn reentered_heap_definition_rebases_the_captured_and_retained_child() {
+    let source = r#"
+Box = |items {I32}|
+probe |prior Box, flag Bool|:
+    loop flag:
+        target ~= Box(prior.items)
+        retained = target.items
+        observed = retained.length()
+    ;
+;
+"#;
+    with_definition_probe(source, |checker, layout| {
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let (retained, alias_block, alias_definition) =
+            definition_named(checker, &layout, "retained");
+        let prior = local_index_named(checker, &layout, "prior");
+        let (field, _) = constructor_field(checker.module, definition);
+        let count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(count);
+        // Seed the previous dynamic binding and its carried provenance at the statement
+        // frontier, without the CFG driver's lexical-scope kills.
+        state.initialize_parameter(target);
+        let roots = state.effective_roots(target);
+        state.set_binding(prior, BindingSpec::Slot, roots, RootSet::empty(count));
+        transfer_isolated_statement(checker, &layout, alias_block, alias_definition, &mut state)
+            .expect("the previous iteration should retain the old projected value");
+        let old = state.resolve_local_allocs(retained);
+        assert!(old.layer_only && !old.readonly);
+        assert_ne!(layout.acyclic_entry_block, Some(block.id));
+
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("re-entry must retire the old binding without losing the capture");
+        let retained = state.resolve_local_allocs(retained);
+        let captured = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        assert_ne!(retained.ids, old.ids);
+        assert_eq!(captured.ids, retained.ids);
+        assert_eq!(retained.ids.len(), 1);
+        assert_eq!(state.alloc_origin_local(retained.ids[0]), Some(target));
+        assert!(
+            !state.alloc_singular(retained.ids[0]),
+            "the old child must be retired"
+        );
+        assert!(
+            !retained.readonly,
+            "the older projection keeps its permission"
+        );
+        assert!(
+            captured.readonly,
+            "the incoming capture came through immutable prior"
+        );
+    });
+}
+
+#[test]
+fn entry_definition_rebases_a_root_first_interned_by_capture() {
+    with_definition_probe(ENTRY_BOX_DEFINITION, |checker, layout| {
+        let (prior, _, _) = definition_named(checker, &layout, "prior");
+        let (target, block, definition) = definition_named(checker, &layout, "target");
+        let (field, _) = constructor_field(checker.module, definition);
+        let count = layout.local_count();
+        let mut state = BorrowState::new_uninitialized(count);
+        // Valid acyclic execution cannot carry the uninitialized target through prior. Seed
+        // just that coarse provenance to exercise the guard when RHS capture interns the root.
+        let mut roots = RootSet::empty(count);
+        roots.insert(target);
+        state.set_binding(prior, BindingSpec::Slot, roots, RootSet::empty(count));
+        assert_eq!(layout.acyclic_entry_block, Some(block.id));
+        assert!(state.layer_is_empty());
+        assert!(state.has_pristine_alloc_binding(target));
+
+        transfer_isolated_statement(checker, &layout, block, definition, &mut state)
+            .expect("the captured child must be rebased rather than attached to itself");
+        let captured = state.resolve_alloc_path(target, &layout.local_mutable, [field]);
+        let new_root = state.resolve_local_allocs(target).ids[0];
+        assert!(captured.layer_only && !captured.readonly);
+        assert_eq!(captured.ids.len(), 1);
+        let child = captured.ids[0];
+        assert_ne!(child, state.alloc_child(new_root, field));
+        assert_eq!(state.alloc_origin_local(child), Some(target));
+        assert!(!state.alloc_singular(child));
+    });
 }
 
 #[test]
@@ -546,15 +644,13 @@ sentinel = 0\n\
     let local_count = layout.local_count();
     for alias_only in [false, true] {
         let mut state = BorrowState::new_uninitialized(local_count);
-        state.update_local_state(mutable_root_index, LocalState::slot(local_count));
-        let immutable_state = if alias_only {
-            let mut roots = RootSet::empty(local_count);
-            roots.insert(mutable_root_index);
-            LocalState::alias_with_direct(roots.clone(), roots)
+        state.initialize_parameter(mutable_root_index);
+        if alias_only {
+            let roots = state.effective_roots(mutable_root_index);
+            seed_whole_alias(&mut state, immutable_index, mutable_root_index, roots);
         } else {
-            LocalState::slot(local_count)
-        };
-        state.update_local_state(immutable_index, immutable_state);
+            state.initialize_parameter(immutable_index);
+        }
 
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("ordinary assignment to an immutable binding must fail");
@@ -940,6 +1036,33 @@ return old.length()
     }
 }
 
+#[test]
+fn projected_writer_can_outlive_a_directly_constructed_holder() {
+    for (first, second) in [
+        (
+            "new_count = holder.first.length()",
+            "old_count = writer.length()",
+        ),
+        (
+            "old_count = writer.length()",
+            "new_count = holder.first.length()",
+        ),
+    ] {
+        let source = format!(
+            "Pair = |first {{I32}}, second {{I32}}|\n\
+             probe || -> I32:\n\
+             holder ~= Pair({{1}}, {{0}})\n\
+             writer ~= holder.first\n\
+             ~holder = Pair({{2, 3}}, {{4}})\n\
+             {first}\n\
+             {second}\n\
+             return new_count + old_count\n\
+             ;"
+        );
+        check_source(&source).expect("the directly constructed holders are independent");
+    }
+}
+
 // WHAT: a projected mutable alias keeps the holder cell as a conservative write identity even
 //       when the containing allocation roots are recorded. Rebinding the holder to a fresh value
 //       does not retarget the alias, but reading the rebound holder while the alias is live is
@@ -967,6 +1090,23 @@ return read_after + writer.length()
     let error = check_source(source)
         .expect_err("the conservative holder-cell identity must reject the live-alias read");
     assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+#[test]
+fn retained_writer_can_read_the_old_leaf_of_a_rebound_call_result() {
+    let source = "\
+Pair = |first {I32}, second {I32}|\n\
+same_pair |value Pair| -> Pair:\n\
+return value\n\
+;\n\
+probe || -> I32:\n\
+original ~= Pair({1}, {0})\n\
+holder ~= same_pair(original)\n\
+writer ~= holder.first\n\
+~holder = Pair({2}, {3})\n\
+return writer.length()\n\
+;";
+    check_source(source).expect("reading through the writer does not access the rebound holder");
 }
 
 // WHAT: a mutable alias writes through to its referent cell, so its value provenance is not the
@@ -1132,23 +1272,20 @@ after = observer.length()
         .expect("observer should be in the layout");
     assert!(layout.local_mutable[target_index]);
     let local_count = layout.local_count();
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    state.update_local_state(
+    state.initialize_parameter(source_index);
+    let source_roots = state.effective_roots(source_index);
+    state.set_binding(
         target_index,
-        LocalState::alias_with_cells(
-            source_roots.clone(),
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-        ),
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([], Coverage::Partial),
+            route_roots: RootSet::empty(local_count),
+        },
+        source_roots.clone(),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(
-        observer_index,
-        LocalState::alias_with_direct(source_roots.clone(), source_roots.clone()),
-    );
+    let mut unheld = state.clone();
+    seed_whole_alias(&mut state, observer_index, source_index, source_roots);
     let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
         .expect_err("a cell-free alias write must check its provenance roots");
     assert_invalid_mutable_access_reason(
@@ -1157,18 +1294,8 @@ after = observer.length()
     );
 
     // Positive control: the same seeded alias is writable while nothing observes its provenance.
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
-    state.update_local_state(
-        target_index,
-        LocalState::alias_with_cells(
-            source_roots,
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-        ),
-    );
-    state.update_local_state(observer_index, LocalState::slot(local_count));
-    transfer_isolated_statement(&checker, &layout, block, update, &mut state)
+    unheld.initialize_parameter(observer_index);
+    transfer_isolated_statement(&checker, &layout, block, update, &mut unheld)
         .expect("a dead provenance observer must not block the alias write");
 }
 
@@ -1483,45 +1610,388 @@ return observed.length()
         .expect("the joined fresh write should lower");
 
     let local_count = layout.local_count();
-    let mut original_roots = RootSet::empty(local_count);
-    original_roots.insert(original_index);
-    let mut referent_cells = RootSet::empty(local_count);
-    referent_cells.insert(slot_index);
-    referent_cells.insert(spare_index);
-    let mut joined_value_roots = original_roots.clone();
-    joined_value_roots.insert(spare_index);
-
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(original_index, LocalState::slot(local_count));
-    state.update_local_state(
+    state.initialize_parameter(original_index);
+    let original_roots = state.effective_roots(original_index);
+    state.set_binding(
         slot_index,
-        LocalState::slot_with_value_roots(original_roots.clone(), RootSet::empty(local_count)),
+        BindingSpec::Slot,
+        original_roots.clone(),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(spare_index, LocalState::slot(local_count));
-    state.update_local_state(
-        writer_index,
-        LocalState::alias_with_cells(joined_value_roots, referent_cells.clone(), referent_cells),
+    state.initialize_parameter(spare_index);
+    let mut spare_path = state.clone();
+    let spare_roots = spare_path.effective_roots(spare_index);
+    seed_whole_alias(&mut state, writer_index, slot_index, original_roots);
+    seed_whole_alias(&mut spare_path, writer_index, spare_index, spare_roots);
+    assert!(state.join_in_place(&spare_path));
+    assert_eq!(
+        state.resolve_cells(writer_index).cells(),
+        &[
+            CellId::Slot(WrapperId::current(slot_index)),
+            CellId::Slot(WrapperId::current(spare_index)),
+        ]
     );
 
     transfer_isolated_statement(&checker, &layout, block, write, &mut state)
         .expect("a fresh write through a joined alias is legal");
 
     let writer_roots = state
-        .local_state(writer_index)
-        .value_roots
+        .binding(writer_index)
+        .value_roots()
         .iter_ones()
         .collect::<Vec<_>>();
     assert_eq!(writer_roots, vec![slot_index, spare_index]);
     assert!(
         state
-            .local_state(slot_index)
-            .value_roots
+            .binding(slot_index)
+            .value_roots()
             .contains(original_index),
         "a possible referent must keep its old value provenance"
     );
     assert!(
-        state.local_state(spare_index).value_roots.is_empty(),
+        state.binding(spare_index).value_roots().is_empty(),
         "a referent that did not hold the old value gains no provenance"
+    );
+}
+
+#[test]
+fn scalar_projected_aliases_allow_sibling_writes_but_reject_a_second_same_cell_loan() {
+    for (right, expected_code) in [
+        ("right ~= pair.right", None),
+        ("right ~= pair.left", Some("MOTH-BORROW-0007")),
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             left ~= pair.left\n\
+             {right}\n\
+             ~right = 7\n\
+             return left + right\n\
+             ;"
+        );
+        let result = check_source(&source);
+        if let Some(code) = expected_code {
+            let error = result.expect_err("the second mutable acquisition overlaps the first");
+            assert_borrow_code_at(error, &source, right, code);
+        } else {
+            result.expect("the live sibling aliases designate disjoint scalar cells");
+        }
+    }
+}
+
+#[test]
+fn prior_scalar_sibling_store_allows_direct_and_explicit_alias_access() {
+    for sequence in [
+        "observed = pair.right\n~pair.left = observed\nreturn observed + pair.left",
+        "writer ~= pair.left\nobserved = pair.right\n~writer = observed\nreturn observed + writer",
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             ~pair.right = 4\n\
+             {sequence}\n\
+             ;"
+        );
+        check_source(&source).expect("a prior store does not make sibling fields overlap");
+    }
+}
+
+#[test]
+fn shared_scalar_observation_overlaps_the_same_field_or_its_aggregate() {
+    for (observation, later_read, overlaps) in [
+        ("observed = pair.right", "observed", false),
+        ("observed = pair.left", "observed", true),
+        ("observed = pair", "observed.right", true),
+    ] {
+        let source = format!(
+            "Pair = |left I32, right I32|\n\
+             probe || -> I32:\n\
+             pair ~= Pair(1, 2)\n\
+             writer ~= pair.left\n\
+             {observation}\n\
+             ~writer = 7\n\
+             return {later_read} + writer\n\
+             ;"
+        );
+        let result = check_source(&source);
+        if overlaps {
+            let error = result.expect_err("the observation overlaps the live exclusive alias");
+            assert_borrow_code_at(error, &source, observation, "MOTH-BORROW-0003");
+        } else {
+            result.expect("a shared read of the sibling scalar cell is disjoint");
+        }
+    }
+}
+
+#[test]
+fn named_heap_sibling_writes_check_shared_children_across_holder_alternatives() {
+    for (setup, overlaps) in [
+        ("pair ~= Pair(items, {2})", false),
+        ("pair ~= Pair(items, items)", true),
+        (
+            "pair ~= Pair({1}, {2})\nif flag:\n~pair = Pair(items, {5})\n;",
+            false,
+        ),
+        (
+            "pair ~= Pair({1}, {2})\nif flag:\n~pair = Pair(items, items)\n;",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "Pair = |left {{I32}}, right {{I32}}|\n\
+             probe |flag Bool| -> I32:\n\
+             items ~= {{3, 4}}\n\
+             {setup}\n\
+             observed = pair.left\n\
+             ~pair.right.push(7)\n\
+             return observed.length()\n\
+             ;"
+        );
+        if overlaps {
+            let error = check_source(&source).expect_err("a live alias observes the shared child");
+            assert_borrow_code_at(error, &source, "~pair.right.push(7)", "MOTH-BORROW-0007");
+        } else {
+            check_source(&source).expect("the children are disjoint in every holder alternative");
+        }
+    }
+}
+
+#[test]
+fn projected_cell_writes_allow_independent_siblings() {
+    let pair = "pair ~= Pair(Box(1), Box(2))";
+    for write in ["~pair.right = Box(3)", "~pair.right.value = 3"] {
+        let source = projected_cell_fixture(pair, "pair.left", write, "hold.value");
+        check_source(&source).unwrap_or_else(|error| panic!("{write} should be legal: {error:?}"));
+    }
+}
+
+#[test]
+fn projected_cell_writes_reject_live_overlaps() {
+    let independent = "pair ~= Pair(Box(1), Box(2))";
+    let shared = "child ~= Box(1)\npair ~= Pair(child, child)";
+    for (pair, observer, write, read, access) in [
+        (
+            independent,
+            "pair.left",
+            "~pair.left = Box(3)",
+            "hold.value",
+            "= Box(3)",
+        ),
+        (
+            independent,
+            "pair",
+            "~pair.right = Box(3)",
+            "hold.left.value",
+            "= Box(3)",
+        ),
+        (
+            shared,
+            "pair.left",
+            "~pair.right.value = 3",
+            "hold.value",
+            "= 3",
+        ),
+        // The read retained the shared allocation, not a proven distinct cell occurrence.
+        (
+            shared,
+            "pair.left",
+            "~pair.right = Box(3)",
+            "hold.value",
+            "= Box(3)",
+        ),
+    ] {
+        let source = projected_cell_fixture(pair, observer, write, read);
+        assert_layer_conflict_at(&source, access);
+    }
+}
+
+#[test]
+fn projected_cell_replacement_checks_explicit_old_descendants() {
+    let source = "\
+Leaf = |value I32|\n\
+Box = |leaf Leaf|\n\
+Pair = |left Box, right Box|\n\
+probe || -> I32:\n\
+leaf ~= Leaf(1)\n\
+pair ~= Pair(Box(leaf), Box(leaf))\n\
+hold = pair.left.leaf\n\
+~pair.right = Box(Leaf(3))\n\
+return hold.value\n\
+;";
+    assert_layer_conflict_at(source, "= Box(Leaf(3))");
+}
+
+#[test]
+fn projected_cell_replacement_does_not_mutate_old_shared_value() {
+    for binding in ["child ~= Box(2)", "child = Box(2)"] {
+        let pair = format!("{binding}\npair ~= Pair(child, child)");
+        let source = projected_cell_fixture(&pair, "child", "~pair.right = Box(3)", "hold.value");
+        check_source(&source).expect("the old shared value is not being mutated");
+    }
+
+    let pair = "child = Box(2)\npair ~= Pair(child, child)";
+    let source = projected_cell_fixture(pair, "child", "~pair.right.value = 3", "hold.value");
+    let error = check_source(&source).expect_err("mutating through the read-only child must fail");
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
+fn projected_cell_fixture(pair: &str, observe: &str, write: &str, read: &str) -> String {
+    format!(
+        "Box = |value I32|\n\
+         Pair = |left Box, right Box|\n\
+         probe || -> I32:\n\
+         {pair}\n\
+         hold = {observe}\n\
+         {write}\n\
+         return {read}\n\
+         ;"
+    )
+}
+
+#[test]
+fn duplicate_collection_children_remain_aliased_after_removal() {
+    for (binding, removed, surviving) in [
+        ("entries ~= {child, child}", "0", "0"),
+        (
+            r#"entries ~{String = {I32}} = {"first" = child, "second" = child}"#,
+            r#""first""#,
+            r#""second""#,
+        ),
+    ] {
+        let source = format!(
+            "probe || -> I32:\n\
+                child ~= {{1}}\n\
+                {binding}\n\
+                detached ~= ~entries.remove({removed}) catch then {{0}}\n\
+                ~detached.push(2)\n\
+                remaining = entries.get({surviving}) catch then {{0}}\n\
+                return remaining.length()\n\
+            ;"
+        );
+        assert_layer_conflict_at(&source, "detached.push");
+    }
+}
+
+#[test]
+fn copy_keeps_a_lazy_child_reachable_by_two_paths() {
+    let source = "\
+Box = |items {I32}|\n\
+Pair = |right {I32}, left Box|\n\
+probe |input Box| -> I32:\n\
+    source = Pair(input.items, input)\n\
+    owned ~= copy source\n\
+    observed = Box(owned.right)\n\
+    ~owned.left.items.push(2)\n\
+    return observed.items.length()\n\
+;";
+    assert_layer_conflict_at(source, "items.push");
+}
+
+#[test]
+fn scalar_lookup_survives_write_through_until_exact_replacement() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement| {
+        format!(
+            r#"
+scores ~{{String = I32}} = {{"k" = 7}}
+slot ~= 0
+writer ~= slot
+score = scores.get("k")!
+~writer = score
+other ~= writer
+~scores.clear()
+{replacement}
+seen = other + 0
+~[:[seen]]
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture(""), "~scores.clear()");
+    check_place_access_source(&fixture("~other = 0"))
+        .expect("another alias definitely replaces the same occurrence");
+    assert_lookup_conflict(&fixture("~other = other + 1"), "~scores.clear()");
+}
+
+#[test]
+fn lookup_observations_distinguish_direct_and_conditional_overwrite() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement| {
+        format!(
+            r#"
+probe |flag Bool| -> I32, Error!:
+    scores ~{{String = I32}} = {{"k" = 7}}
+    score ~= scores.get("k")!
+    ~scores.clear()
+    {replacement}
+    return score
+;
+~[:[probe(true)!],[probe(false)!]]
+"#
+        )
+    };
+    check_place_access_source(&fixture("~score = 0"))
+        .expect("definite replacement does not observe the old lookup");
+    assert_lookup_conflict(&fixture("if flag:\n~score = 0\n;"), "~scores.clear()");
+    assert_lookup_conflict(&fixture("~score = score + 1"), "~scores.clear()");
+}
+
+#[test]
+fn construction_retains_lookup_on_the_selected_field_only() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |replacement, observed| {
+        format!(
+            r#"
+Bucket = |scores {{String = {{I32}}}}|
+Saved = |item {{I32}}, count I32|
+bucket ~= Bucket({{"k" = {{1, 2}}}})
+score ~= bucket.scores.get("k")!
+saved ~= Saved(score, 3)
+~score = {{0}}
+{replacement}
+first = saved.item
+second = saved.item
+~bucket.scores.clear()
+~[:[{observed}]]
+"#
+        )
+    };
+    assert_lookup_conflict(
+        &fixture("", "first.length() + second.length()"),
+        "~bucket.scores.clear()",
+    );
+    check_place_access_source(&fixture("", "saved.count"))
+        .expect("the sibling scalar field is independent");
+    check_place_access_source(&fixture(
+        "~saved.item = {0}",
+        "first.length() + second.length()",
+    ))
+    .expect("an exact field replacement kills the retained lookup");
+}
+
+fn assert_layer_conflict_at(source: &str, access: &str) {
+    let error = check_source(source).expect_err("a live alias must block this write");
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("typed borrow diagnostic");
+    let bag = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = bag.first().expect("borrow diagnostic");
+    let view = diagnostic
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access");
+    assert_eq!(
+        view.reason,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess
+    );
+    let expected = source.find(access).expect("authored access") as u32;
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span.local().inline_range().is_some_and(|range| range.start() == expected)
+        ),
+        "diagnostic should point to the authored access {access}"
     );
 }
 
@@ -1562,6 +2032,93 @@ fn local_named(
         .unwrap_or_else(|| panic!("fixture local {name} should lower"))
 }
 
+fn with_definition_probe(source: &str, check: impl FnOnce(&BorrowChecker<'_>, FunctionLayout)) {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("definition fixture should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("complete definition fixture should be valid HIR");
+    let function = module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|name| string_table.resolve(name) == "probe")
+        })
+        .expect("probe should lower to HIR");
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
+    let reachable = checker
+        .collect_reachable_blocks(function)
+        .expect("fixture CFG should be reachable");
+    let layout = checker
+        .build_function_layout(function, &reachable)
+        .expect("fixture layout should build");
+    check(&checker, layout);
+}
+
+fn local_index_named(checker: &BorrowChecker<'_>, layout: &FunctionLayout, name: &str) -> usize {
+    let local = local_named(
+        checker.module,
+        checker.path_fork,
+        checker.string_table,
+        name,
+    );
+    layout
+        .index_of(local)
+        .expect("local should be in the layout")
+}
+
+fn definition_named<'a>(
+    checker: &BorrowChecker<'a>,
+    layout: &FunctionLayout,
+    name: &str,
+) -> (usize, &'a HirBlock, &'a HirStatement) {
+    let index = local_index_named(checker, layout, name);
+    let local = layout.local_ids[index];
+    checker
+        .module
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block.statements.iter().find_map(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(id),
+                        ..
+                    } if *id == local
+                )
+                .then_some((index, block, statement))
+            })
+        })
+        .unwrap_or_else(|| panic!("{name} should have an ordinary definition"))
+}
+
+fn constructor_field(module: &HirModule, definition: &HirStatement) -> (FieldKey, HirValueId) {
+    let HirStatementKind::Write { value, .. } = &definition.kind else {
+        panic!("fixture must define the constructor through a write");
+    };
+    let HirExpressionKind::StructConstruct { fields, .. } =
+        &module.expressions.expression(*value).kind
+    else {
+        panic!("fixture must have a struct constructor");
+    };
+    let &[(field, child)] = module.expressions.struct_fields(*fields) else {
+        panic!("fixture constructor must have one field");
+    };
+    (FieldKey::Field(field.0), child)
+}
+
 fn is_local_update(module: &HirModule, statement: &HirStatement, target: LocalId) -> bool {
     matches!(
         &statement.kind,
@@ -1570,6 +2127,21 @@ fn is_local_update(module: &HirModule, statement: &HirStatement, target: LocalId
             ..
         } if place.root == target && module.expressions.projections(place.projections).is_empty()
     )
+}
+
+fn seed_whole_alias(state: &mut BorrowState, alias: usize, source: usize, value_roots: RootSet) {
+    let local_count = value_roots.bit_len();
+    let mut route_roots = RootSet::empty(local_count);
+    route_roots.insert(source);
+    state.set_binding(
+        alias,
+        BindingSpec::Alias {
+            addresses: state.resolve_cells(source),
+            route_roots,
+        },
+        value_roots,
+        RootSet::empty(local_count),
+    );
 }
 
 fn seed_mixed_target_with_observer(
@@ -1591,32 +2163,29 @@ fn seed_mixed_target_with_observer(
         .index_of(observer)
         .expect("observer should be in the layout");
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(source_index, LocalState::slot(local_count));
+    state.initialize_parameter(source_index);
     for local in additional_slots {
         let index = layout
             .index_of(*local)
             .expect("slot local should be in the layout");
-        state.update_local_state(index, LocalState::slot(local_count));
+        state.initialize_parameter(index);
     }
 
-    let mut source_roots = RootSet::empty(local_count);
-    source_roots.insert(source_index);
-    state.update_local_state(
+    state.initialize_parameter(target_index);
+    state.initialize_parameter(observer_index);
+    let mut alias_path = state.clone();
+    let source_roots = state.effective_roots(source_index);
+    seed_whole_alias(
+        &mut alias_path,
         target_index,
-        LocalState {
-            mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-            value_roots: source_roots.clone(),
-            direct_alias_roots: source_roots.clone(),
-            write_target_roots: source_roots.clone(),
-            derived_from_roots: RootSet::empty(local_count),
-        },
+        source_index,
+        source_roots.clone(),
     );
-    let observer_state = if observer_holds_source {
-        LocalState::alias_with_direct(source_roots.clone(), source_roots)
-    } else {
-        LocalState::slot(local_count)
-    };
-    state.update_local_state(observer_index, observer_state);
+    if observer_holds_source {
+        // Only one path acquires the mutable alias, and only the other acquires the observer.
+        seed_whole_alias(&mut state, observer_index, source_index, source_roots);
+    }
+    assert!(state.join_in_place(&alias_path));
     state
 }
 
@@ -1632,10 +2201,14 @@ fn assert_seeded_shared_holder(
     let observer_index = layout
         .index_of(observer)
         .expect("observer should be in the layout");
-    let observer_state = state.local_state(observer_index);
+    let observer_state = state.binding(observer_index);
     assert!(!layout.local_mutable[observer_index]);
-    assert!(observer_state.mode.contains(LocalMode::ALIAS));
-    assert!(observer_state.value_roots.contains(source_index));
+    assert!(
+        state
+            .binding_mode(observer_index)
+            .contains(LocalMode::ALIAS)
+    );
+    assert!(observer_state.value_roots().contains(source_index));
 }
 
 fn transfer_isolated_statement(
@@ -1644,14 +2217,23 @@ fn transfer_isolated_statement(
     original_block: &HirBlock,
     statement: &HirStatement,
     state: &mut BorrowState,
-) -> Result<(), BorrowCheckError> {
+) -> Result<BlockTransferStats, BorrowCheckError> {
     let transfer_context = BorrowTransferContext {
         external_package_registry: checker.external_package_registry,
         public_call_summaries: &checker.public_call_summaries,
         imported_call_summaries: &checker.module.imported_call_summaries,
         module_private_call_summaries: &checker.module.module_private_call_summaries,
         generated_call_summaries: &checker.module.generated_call_summaries,
+        local_types: &checker.local_types,
+        structs: &checker.module.structs,
+        choices: &checker.module.choices,
         expressions: &checker.module.expressions,
+        type_environment: checker.type_environment,
+        type_projection:
+            crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                checker.type_environment,
+                checker.external_package_registry,
+            ),
         diagnostics: BorrowDiagnostics::new(
             checker.module,
             checker.path_fork,
@@ -1669,5 +2251,5 @@ fn transfer_isolated_statement(
             kind: RuntimeFailureKind::NoMatchFallback,
         },
     };
-    transfer_block(&transfer_context, layout, &isolated_block, state).map(|_| ())
+    transfer_block(&transfer_context, layout, &isolated_block, state)
 }

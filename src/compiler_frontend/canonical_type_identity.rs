@@ -527,10 +527,12 @@ pub(crate) trait GenericParameterOriginResolver {
 /// the external package registry. All three are borrowed for the duration of the projection.
 /// WHY: keeps the projection function's signature narrow and explicit about its three external
 /// dependencies. The projection itself owns no state.
+#[derive(Clone, Copy)]
 pub(crate) struct CanonicalTypeProjectionContext<'a> {
     nominal_origins: &'a dyn NominalOriginResolver,
     generic_parameter_origins: &'a dyn GenericParameterOriginResolver,
     external_registry: &'a ExternalPackageRegistry,
+    registered_types: Option<&'a TypeEnvironment>,
 }
 
 impl<'a> CanonicalTypeProjectionContext<'a> {
@@ -547,7 +549,24 @@ impl<'a> CanonicalTypeProjectionContext<'a> {
             nominal_origins,
             generic_parameter_origins,
             external_registry,
+            registered_types: None,
         }
+    }
+
+    /// Borrow the stable registrations from an earlier snapshot of the same type arena.
+    pub(crate) fn with_registered_types(mut self, types: &'a TypeEnvironment) -> Self {
+        self.registered_types = Some(types);
+        self
+    }
+
+    fn registered_identity<'types>(
+        &'types self,
+        types: &'types TypeEnvironment,
+        id: TypeId,
+    ) -> Option<&'types CanonicalTypeIdentity> {
+        types
+            .canonical_identity_for_type_id(id)
+            .or_else(|| self.registered_types?.canonical_identity_for_type_id(id))
     }
 
     /// The nominal origin resolver used to map `NominalTypeId` to stable `OriginTypeId`.
@@ -598,7 +617,7 @@ pub(crate) fn project_type_id_to_canonical_identity(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
 ) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
-    if let Some(identity) = type_environment.canonical_identity_for_type_id(type_id) {
+    if let Some(identity) = context.registered_identity(type_environment, type_id) {
         return Ok(identity.clone());
     }
 
@@ -815,7 +834,7 @@ fn project_generic_instance(
                 instance.base.0,
             ))
         })?;
-    let private_base = match type_environment.canonical_identity_for_type_id(base_type_id) {
+    let private_base = match context.registered_identity(type_environment, base_type_id) {
         Some(CanonicalTypeIdentity::SourceNominal(origin)) => Some(Ok(origin.clone())),
         Some(CanonicalTypeIdentity::ModulePrivateNominal(_)) => None,
         Some(identity) => {
@@ -865,7 +884,7 @@ fn project_generic_instance(
         });
     }
     let Some(CanonicalTypeIdentity::ModulePrivateNominal(base)) =
-        type_environment.canonical_identity_for_type_id(base_type_id)
+        context.registered_identity(type_environment, base_type_id)
     else {
         return Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,

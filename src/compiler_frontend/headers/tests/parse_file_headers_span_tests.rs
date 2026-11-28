@@ -4,7 +4,7 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
-    let source = "$export @tables/layout\nButton = | label String |\n$export @forms\n@button Button, render as render_button\n";
+    let source = "$export @tables/layout\n$doc [: Description]\nButton = | label String |\n$export @forms\n@button Button, render as render_button\n";
     let canonical = PathBuf::from("src/@mod.moth");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -55,6 +55,13 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
         .iter()
         .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
         .expect("the routed declaration should parse");
+    assert_eq!(declaration.source_directives.len(), 1);
+    assert!(
+        declaration.source_directives[0]
+            .operand
+            .expression_range()
+            .is_some()
+    );
     let declaration_route = declaration
         .export_mode
         .route()
@@ -119,7 +126,7 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
 
     drop(sources);
     let final_sources = SourceDatabase::build(
-        [&PathBuf::from("a-earlier.moth"), &canonical],
+        [&PathBuf::from("0-earlier.moth"), &canonical],
         &canonical,
         None,
         &mut merged_strings,
@@ -130,8 +137,7 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
         .expect("the final canonical source")
         .id;
     assert_ne!(
-        final_id,
-        SourceId::COMPILATION_ROOT,
+        final_id, source_id,
         "the fixture must force a non-identity source rebind"
     );
     let final_path = merged_paths
@@ -146,6 +152,12 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
         .iter()
         .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
         .expect("the routed declaration survives rebinding");
+    assert_eq!(declaration.source_directives.len(), 1);
+    let doc_range = declaration.source_directives[0]
+        .operand
+        .expression_range()
+        .expect("the documentation operand survives rebinding");
+    assert_eq!(doc_range.source(), final_id);
     let declaration_route = declaration
         .export_mode
         .route()

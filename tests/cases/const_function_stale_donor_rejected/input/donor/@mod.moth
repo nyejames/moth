@@ -1,0 +1,12 @@
+-- The consumer calls the exported wrapper, not the body that fails.
+helper #|| -> I32:
+    values ~= {1}
+    view = values
+    ~values.push(2)
+    return view.length()
+;
+
+$export
+stale #|| -> I32:
+    return helper()
+;

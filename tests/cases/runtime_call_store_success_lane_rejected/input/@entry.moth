@@ -1,0 +1,20 @@
+store |rows ~{{I32}}, child {I32}, ok Bool| -> I32, Error!:
+    if ok:
+        ~rows.push(child)
+        return 7
+    ;
+    return! Error("failed")
+;
+
+probe |ok Bool| -> String:
+    rows ~{{I32}} = {{0}}
+    child ~= {1}
+    status = store(~rows, child, ok) catch:
+        return "unexpected failure"
+    ;
+    ~child.push(2)
+    observed = rows.get(1) catch then {0, 0, 0}
+    return [:child=[child.length()] observed=[observed.length()] status=[status]]
+;
+
+~[:[probe(true)]]

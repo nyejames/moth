@@ -1,0 +1,30 @@
+$export
+make_shared #|| -> {{I32}}:
+    child ~= {1}
+    return {child, child}
+;
+
+$export
+make_distinct #|| -> {{I32}}:
+    return {{1}, {1}}
+;
+
+$export
+shared_value #= make_shared()
+
+$export
+distinct_value #= make_distinct()
+
+private_shared #= make_shared()
+private_distinct #= make_distinct()
+
+$export
+read_private #|shared Bool| -> {{I32}}:
+    -- Resolve the private constants in the retained body's own declaration scope.
+    if shared:
+        selected_shared #= private_shared
+        return selected_shared
+    ;
+    selected_distinct #= private_distinct
+    return selected_distinct
+;

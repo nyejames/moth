@@ -14,7 +14,8 @@ use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
 use crate::compiler_frontend::ast::const_eval::external_calls::materialise_success_slots;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore, ConstValueStoreError,
+    ConstStringValue, ConstValueId, ConstValueMetadata, ConstValuePayload, ConstValueStore,
+    ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
@@ -56,7 +57,9 @@ use crate::compiler_frontend::semantic_identity::OriginTypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     entry_start_node, fresh_success_returns, function_node, node, symbol,
 };
@@ -317,9 +320,18 @@ impl FoldedValueMaterialiser for ConsumerFixtureMaterialiser {
                     .into()
                 })
             }
+            CanonicalTypeIdentity::Collection {
+                element,
+                fixed_capacity,
+            } => {
+                let element = self.intern_canonical_type(element, _string_table)?;
+                Ok(self
+                    .type_environment
+                    .intern_collection(element, *fixed_capacity))
+            }
             _ => Err(InfrastructureFailure::internal(
                 CompilerStage::ConstantEvaluation,
-                "transport fixture imports builtin types only",
+                "transport fixture imports builtin and collection types only",
             )
             .into()),
         }
@@ -332,6 +344,122 @@ impl FoldedValueMaterialiser for ConsumerFixtureMaterialiser {
     fn type_environment(&self) -> &TypeEnvironment {
         &self.type_environment
     }
+}
+
+#[test]
+fn folded_graph_round_trips_shared_coercions_and_shared_inner_allocations() {
+    let mut provider_types = TypeEnvironment::new();
+    let scalar = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let inner_type = provider_types.intern_collection(scalar, Some(2));
+    let outer_type = provider_types.intern_collection(scalar, None);
+    let root_type = provider_types.intern_collection(outer_type, None);
+    let provenance = |name| {
+        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+            SyntheticInterfaceClass::ProjectContext,
+            "project",
+            name,
+        ))
+    };
+    let first = provenance("first");
+    let repeat = provenance("repeat");
+    let other = provenance("other");
+    let metadata = |ty, provenance| {
+        let mut metadata = ConstValueMetadata::resolved(ty, None, ValueMode::ImmutableOwned);
+        metadata.synthetic_interface_provenance = provenance;
+        metadata
+    };
+    let mut provider = ConstValueStore::default();
+    let root = provider
+        .stage_values(|candidate| {
+            let inner = candidate.insert_value(
+                metadata(inner_type, SyntheticInterfaceProvenance::empty()),
+                ConstValuePayload::Collection(Vec::new()),
+            )?;
+            candidate.mark_shared_allocation(inner)?;
+            let wrapper = candidate.insert_value(
+                metadata(outer_type, first.clone()),
+                ConstValuePayload::Coerced(inner),
+            )?;
+            candidate.mark_shared_allocation(wrapper)?;
+            let occurrence = candidate
+                .insert_shared_occurrence(metadata(outer_type, repeat.clone()), wrapper)?;
+            let distinct = candidate.insert_value(
+                metadata(outer_type, other.clone()),
+                ConstValuePayload::Coerced(inner),
+            )?;
+            candidate
+                .insert_value(
+                    metadata(root_type, SyntheticInterfaceProvenance::empty()),
+                    ConstValuePayload::Collection(vec![wrapper, occurrence, distinct]),
+                )
+                .map(Some)
+        })
+        .unwrap()
+        .unwrap();
+    let mut strings = StringTable::new();
+    let paths = PathInternerFork::empty();
+    let registry = ExternalPackageRegistry::new();
+    let projection = CanonicalTypeProjectionContext::new(
+        &NoNominalOrigins,
+        &FoldedValueGenericParameterResolver,
+        &registry,
+    );
+    let graph = convert_const_value_to_folded_value(
+        &provider,
+        root,
+        &FoldedValueProjectionContext {
+            type_environment: &provider_types,
+            string_table: &strings,
+            projection_context: &projection,
+            path_fork: &paths,
+            resources: None,
+        },
+    )
+    .expect("the graph should project to owned folded data");
+
+    let mut importer = ConsumerFixtureMaterialiser {
+        type_environment: TypeEnvironment::new(),
+        path_fork: PathInternerFork::empty(),
+    };
+    let expected_inner = importer.type_environment.intern_collection(scalar, Some(2));
+    let expected_outer = importer.type_environment.intern_collection(scalar, None);
+    let expected_root = importer
+        .type_environment
+        .intern_collection(expected_outer, None);
+    let mut imported = ConstValueStore::default();
+    let root = materialize_public_folded_value(
+        &mut importer,
+        &graph,
+        expected_root,
+        &mut imported,
+        &mut strings,
+        None,
+    )
+    .expect("the graph should decode in the consumer");
+    let Some(ConstValuePayload::Collection(wrappers)) = imported.payload(root) else {
+        panic!("expected three retyped collection occurrences");
+    };
+    let &[left, again, right] = wrappers.as_slice() else {
+        panic!("expected two allocations, the first referenced twice");
+    };
+    assert_eq!(imported.shared_allocation(again), Some(left));
+    assert_eq!(imported.shared_allocation(right), None);
+    let inner = |row, provenance| {
+        let metadata = imported
+            .metadata(row)
+            .expect("coercion occurrence metadata");
+        assert_eq!(metadata.type_id, expected_outer);
+        assert_eq!(metadata.synthetic_interface_provenance, provenance);
+        let Some(ConstValuePayload::Coerced(inner)) = imported.payload(row) else {
+            panic!("retyping must survive when the nested allocation is shared");
+        };
+        assert_eq!(imported.metadata(*inner).unwrap().type_id, expected_inner);
+        imported
+            .shared_allocation(*inner)
+            .expect("the inner allocation is shared")
+    };
+    assert_eq!(inner(left, first.clone()), inner(again, repeat));
+    assert_eq!(inner(left, first), inner(right, other));
 }
 
 #[test]

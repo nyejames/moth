@@ -1,12 +1,14 @@
 //! Borrow-checker state invariant tests.
 //!
-//! WHAT: protects slot-backed alias rebinding, independent value-provenance and direct-alias root
-//!       sets, must-joined alias derivation, join growth reporting, visibility narrowing, the
-//!       skip a covering visibility mask takes, and the membership shortcut that alias conflict
-//!       scans use in place of the set builder.
+//! WHAT: protects slot-backed rebinding, independent value provenance and cell identity,
+//!       must-joined alias derivation, join growth reporting, visibility narrowing, the skip a
+//!       covering visibility mask takes, and the allocation-free membership shortcut.
 //! WHY: these facts live in transfer state and cannot be inspected from rendered output.
 
-use super::super::state::{BorrowState, LocalState, RootSet};
+use super::super::state::{
+    AddressSet, BindingSpec, BorrowState, CellId, Coverage, FieldKey, RootSet, StoredValue,
+    WrapperAge, WrapperId,
+};
 use super::super::types::LocalMode;
 
 #[test]
@@ -17,9 +19,11 @@ fn slot_backed_alias_rebinding_clears_old_value_roots() {
 
     let mut aliased_root = RootSet::empty(local_count);
     aliased_root.insert(0);
-    state.update_local_state(
+    state.set_binding(
         1,
-        LocalState::slot_with_value_roots(aliased_root, RootSet::empty(local_count)),
+        BindingSpec::Slot,
+        aliased_root,
+        RootSet::empty(local_count),
     );
 
     assert_eq!(
@@ -27,7 +31,7 @@ fn slot_backed_alias_rebinding_clears_old_value_roots() {
         vec![0]
     );
 
-    state.update_local_state(1, LocalState::slot(local_count));
+    state.initialize_parameter(1);
 
     assert!(state.effective_roots(1).contains(1));
     assert!(!state.effective_roots(1).contains(0));
@@ -45,56 +49,92 @@ fn members(set: &RootSet) -> Vec<usize> {
     set.iter_ones().collect()
 }
 
+fn slot(local: usize) -> CellId {
+    CellId::Slot(WrapperId::current(local))
+}
+
+fn prior_slot(local: usize) -> CellId {
+    CellId::Slot(WrapperId {
+        local,
+        age: WrapperAge::Prior,
+    })
+}
+
+fn bind_whole(
+    state: &mut BorrowState,
+    local: usize,
+    source: usize,
+    value_roots: RootSet,
+    derivation: RootSet,
+) {
+    state.set_binding(
+        local,
+        BindingSpec::Link {
+            source: WrapperId::current(source),
+            writable: true,
+        },
+        value_roots,
+        derivation,
+    );
+}
+
+fn assert_uninitialized(state: &BorrowState, local: usize) {
+    let binding = state.binding(local);
+    assert_eq!(state.binding_mode(local), LocalMode::UNINIT);
+    assert!(binding.value_roots().is_empty());
+    assert!(binding.derivation().is_empty());
+    assert!(state.resolve_cells(local).cells().is_empty());
+}
+
 #[test]
 fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
-    let local_count = 3;
-    let mut base = BorrowState::new_uninitialized(local_count);
-    base.update_local_state(
-        2,
-        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0])),
-    );
-
-    // Each incoming state grows exactly one fact of local 2: its mode, its value roots, its
-    // direct-alias roots or its write targets. Worklist scheduling depends on every kind of
-    // growth being reported. Each later state adds a root bit the earlier states do not hold,
-    // because the three root sets are independent facts and each joined bit must report growth
-    // on its own.
-    let mut mode_growth = base.clone();
-    mode_growth.update_local_state(
-        2,
-        LocalState {
-            mode: LocalMode::SLOT,
-            value_roots: roots(local_count, &[0]),
-            direct_alias_roots: roots(local_count, &[0]),
-            write_target_roots: roots(local_count, &[0]),
-            derived_from_roots: RootSet::empty(local_count),
+    let count = 5;
+    let empty = RootSet::empty(count);
+    let source = roots(count, &[0]);
+    let mut base = BorrowState::new_uninitialized(count);
+    base.initialize_parameter(0);
+    base.set_binding(1, BindingSpec::Slot, source.clone(), empty.clone());
+    base.initialize_parameter(3);
+    base.initialize_parameter(4);
+    let holder = base.local_alloc_ids(4).0[0];
+    let field = FieldKey::Field(0);
+    let held = base.local_alloc_ids(0).0[0];
+    base.add_alloc_edge(
+        holder,
+        field,
+        StoredValue {
+            id: held,
+            writable: true,
         },
     );
+    bind_whole(&mut base, 2, 0, source.clone(), empty.clone());
+
+    // Each predecessor adds a fact of local 2. An ordinary slot and two distinct destinations
+    // are separate alternatives, not independent root sets on a single binding.
+    let mut mode_growth = base.clone();
+    mode_growth.set_binding(2, BindingSpec::Slot, source.clone(), empty.clone());
+
     let mut value_growth = base.clone();
-    value_growth.update_local_state(
-        2,
-        LocalState::alias_with_direct(roots(local_count, &[0, 1]), roots(local_count, &[0])),
-    );
+    let values = roots(count, &[0, 3]);
+    value_growth.set_binding(0, BindingSpec::Slot, values.clone(), empty.clone());
+    bind_whole(&mut value_growth, 2, 0, values, empty.clone());
+
     let mut direct_growth = base.clone();
-    direct_growth.update_local_state(
-        2,
-        LocalState::alias_with_cells(
-            roots(local_count, &[0]),
-            roots(local_count, &[0, 2]),
-            roots(local_count, &[0]),
-        ),
-    );
+    bind_whole(&mut direct_growth, 2, 1, source.clone(), empty.clone());
+
+    let projected = CellId::Projected(holder, field);
     let mut target_growth = base.clone();
-    target_growth.update_local_state(
+    target_growth.set_binding(
         2,
-        LocalState::alias_with_cells(
-            roots(local_count, &[0]),
-            roots(local_count, &[0]),
-            roots(local_count, &[0, 1]),
-        ),
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([projected], Coverage::Complete),
+            route_roots: roots(count, &[4]),
+        },
+        source,
+        empty,
     );
 
-    let mut joined = base.clone();
+    let mut joined = base;
     for incoming in [&mode_growth, &value_growth, &direct_growth, &target_growth] {
         assert!(joined.join_in_place(incoming));
         assert!(
@@ -103,31 +143,174 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
         );
     }
 
-    let local = joined.local_state(2);
-    assert_eq!(local.mode, LocalMode::ALIAS.union(LocalMode::SLOT));
-    assert_eq!(members(&local.value_roots), vec![0, 1]);
-    assert_eq!(members(&local.direct_alias_roots), vec![0, 2]);
-    assert_eq!(members(&local.write_target_roots), vec![0, 1]);
+    let binding = joined.binding(2);
+    assert_eq!(
+        joined.binding_mode(2),
+        LocalMode::ALIAS.union(LocalMode::SLOT)
+    );
+    assert_eq!(members(binding.value_roots()), vec![0, 3]);
+    assert_eq!(
+        joined.resolve_cells(2).cells(),
+        &[slot(0), slot(1), slot(2), projected]
+    );
+    assert!(binding.route_roots().contains(4));
+}
+
+#[test]
+fn implicit_slot_provenance_survives_every_predecessor_order() {
+    let count = 3;
+    let empty = RootSet::empty(count);
+    let mut fresh = BorrowState::new_uninitialized(count);
+    for local in 0..count {
+        fresh.initialize_parameter(local);
+    }
+    let mut inherited = fresh.clone();
+    inherited.set_binding(0, BindingSpec::Slot, roots(count, &[2]), empty.clone());
+    let mut alias = fresh.clone();
+    bind_whole(&mut alias, 0, 1, roots(count, &[1]), empty);
+    let inputs = [&fresh, &inherited, &alias];
+
+    for [a, b, c] in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        // Solve the last two predecessors first as well as varying insertion order.
+        let mut pair = (*inputs[b]).clone();
+        pair.join_in_place(inputs[c]);
+        let mut joined = (*inputs[a]).clone();
+        joined.join_in_place(&pair);
+        assert_eq!(joined.resolve_cells(0).cells(), &[slot(0), slot(1)]);
+        assert_eq!(members(&joined.effective_roots(0)), vec![0, 1, 2]);
+    }
+}
+
+#[test]
+fn repeated_retirement_keeps_lazy_and_explicit_payloads() {
+    let count = 4;
+    let empty = RootSet::empty(count);
+    let visible = roots(count, &[1, 2, 3]);
+    for explicit_first in [false, true] {
+        let mut state = BorrowState::new_uninitialized(count);
+        state.initialize_parameter(3);
+        let explicit = state.local_alloc_ids(3).0[0];
+        for observer in [1, 2] {
+            state.initialize_parameter(0);
+            if (observer == 1) == explicit_first {
+                state.bind_alloc_ids(0, &[explicit], false);
+            }
+            bind_whole(&mut state, observer, 0, empty.clone(), empty.clone());
+            state.kill_invisible(&visible);
+            assert_eq!(state.resolve_cells(observer).cells(), &[prior_slot(0)]);
+        }
+
+        let (held, _) = state.local_alloc_ids(1);
+        assert_eq!(held.len(), 2);
+        assert!(held.contains(&explicit));
+        assert_eq!(state.local_alloc_ids(2).0, held);
+    }
+}
+
+#[test]
+fn visibility_edge_preserves_payloads_independently_of_interning() {
+    let count = 3;
+    let empty = RootSet::empty(count);
+    let root = roots(count, &[0]);
+    for with_link in [false, true] {
+        let visible = roots(count, &[1, 2]);
+        let mut fresh = BorrowState::new_uninitialized(count);
+        fresh.initialize_parameter(0);
+        if with_link {
+            bind_whole(&mut fresh, 1, 0, root.clone(), empty.clone());
+        }
+        fresh.set_binding(2, BindingSpec::Slot, root.clone(), empty.clone());
+
+        // Use the same table so the test compares abstract states, not unrelated numeric IDs.
+        // The first edge runs before the sibling has caused a lookup of the implicit root.
+        let mut preinterned = fresh.clone();
+        fresh.kill_invisible(&visible);
+        let current = preinterned.local_alloc_ids(0).0[0];
+        preinterned.kill_invisible(&visible);
+        assert_eq!(fresh, preinterned);
+
+        assert_eq!(fresh.resolve_cells(2).cells(), &[slot(2)]);
+        let retained = fresh.local_alloc_ids(2).0;
+        assert_eq!(retained.len(), 1);
+        assert_ne!(retained[0], current);
+        assert_eq!(fresh.alloc_origin_local(retained[0]), Some(0));
+        if with_link {
+            assert_eq!(fresh.resolve_cells(1).cells(), &[prior_slot(0)]);
+            assert_eq!(fresh.local_alloc_ids(1).0, retained);
+        }
+    }
+}
+
+#[test]
+fn rebind_preserves_uninitialised_root_observers_independently_of_interning() {
+    let count = 3;
+    for after_capture in [false, true] {
+        let mut fresh = BorrowState::new_uninitialized(count);
+        fresh.set_binding(1, BindingSpec::Slot, roots(count, &[0]), roots(count, &[]));
+        fresh.initialize_parameter(2);
+        let unrelated = fresh.local_alloc_ids(2).0[0];
+        fresh.add_alloc_edge(
+            unrelated,
+            FieldKey::Elem,
+            StoredValue {
+                id: unrelated,
+                writable: true,
+            },
+        );
+        let rebind = |state: &mut BorrowState| {
+            let slot = super::super::state::LocalState::slot(count);
+            if after_capture {
+                assert!(
+                    state
+                        .rebind_local_after_capture(0, slot, 5, Some(0), true)
+                        .is_some()
+                );
+            } else {
+                state.rebind_local(0, slot, 5);
+            }
+        };
+        // A sibling state may intern the target's implicit root before its edge runs.
+        let mut preinterned = fresh.clone();
+        rebind(&mut fresh);
+        let mut sibling = preinterned.clone();
+        sibling.initialize_parameter(0);
+        let current = sibling.local_alloc_ids(0).0[0];
+        rebind(&mut preinterned);
+        assert_eq!(fresh, preinterned);
+        assert_eq!(fresh.local_alloc_ids(0).0, [current]);
+        let retained = fresh.local_alloc_ids(1).0;
+        assert_eq!(retained.len(), 1);
+        assert_ne!(retained[0], current);
+        assert_eq!(fresh.alloc_origin_local(retained[0]), Some(0));
+    }
 }
 
 #[test]
 fn join_intersects_derived_alias_facts() {
-    let local_count = 3;
-    let mut left = BorrowState::new_uninitialized(local_count);
-    let mut left_alias =
-        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0]));
-    left_alias.derived_from_roots = roots(local_count, &[0, 2]);
-    left.update_local_state(1, left_alias);
-
-    let mut right = BorrowState::new_uninitialized(local_count);
-    let mut right_alias =
-        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0]));
-    right_alias.derived_from_roots = roots(local_count, &[0, 1]);
-    right.update_local_state(1, right_alias);
+    let count = 5;
+    let empty = RootSet::empty(count);
+    let source = roots(count, &[4]);
+    let mut left = BorrowState::new_uninitialized(count);
+    left.initialize_parameter(4);
+    bind_whole(&mut left, 0, 4, source.clone(), empty);
+    let mut right = left.clone();
+    for (state, intermediate) in [(&mut left, 2), (&mut right, 3)] {
+        let derivation = state.derived_roots_from_source(0);
+        bind_whole(state, intermediate, 0, source.clone(), derivation);
+        let derivation = state.derived_roots_from_source(intermediate);
+        bind_whole(state, 1, intermediate, source.clone(), derivation);
+    }
 
     assert!(left.join_in_place(&right));
     assert_eq!(
-        members(&left.local_state(1).derived_from_roots),
+        members(left.binding(1).derivation()),
         vec![0],
         "only an alias derived on every incoming path is a must fact"
     );
@@ -136,237 +319,279 @@ fn join_intersects_derived_alias_facts() {
 
 #[test]
 fn visibility_narrowing_prunes_each_root_set_independently() {
-    let local_count = 7;
-    let visible = roots(local_count, &[0, 1, 2, 4, 5]);
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.initialize_parameter(0);
-    state.update_local_state(3, LocalState::slot(local_count));
-    // Local 1 keeps a visible root in each set after narrowing. The invisible bits differ, so
-    // no set may be pruned as a side effect of pruning another.
-    let mut partially_visible = LocalState::alias_with_cells(
-        roots(local_count, &[0, 3]),
-        roots(local_count, &[2, 3]),
-        roots(local_count, &[1, 3]),
-    );
-    partially_visible.derived_from_roots = roots(local_count, &[0, 3]);
-    state.update_local_state(1, partially_visible);
-    // Local 2 loses every value root but still observes a visible referent cell. That cell is
-    // the alias view's remaining identity, so the binding must survive as an alias.
-    let mut cell_only =
-        LocalState::alias_with_direct(roots(local_count, &[3]), roots(local_count, &[1, 3]));
-    cell_only.derived_from_roots = roots(local_count, &[3, 4]);
-    state.update_local_state(2, cell_only);
-    // Local 0 keeps only value provenance after its direct cell leaves visibility.
-    let mut value_only =
-        LocalState::alias_with_direct(roots(local_count, &[1]), roots(local_count, &[3]));
-    value_only.derived_from_roots = roots(local_count, &[3]);
-    state.update_local_state(0, value_only);
-    // Local 4 keeps a slot's own storage but loses every root set.
-    state.update_local_state(
-        4,
-        LocalState::slot_with_value_roots(roots(local_count, &[3]), roots(local_count, &[3])),
-    );
-    // Local 5 has no value provenance or direct cell left, but a visible write target keeps it
-    // alive as an alias: it can still mutate that referent.
-    state.update_local_state(
+    let count = 13;
+    let visible = roots(count, &[0, 1, 2, 4, 5, 7, 8, 9, 11]);
+    let empty = RootSet::empty(count);
+    let departing_roots = roots(count, &[3]);
+    let mut state = BorrowState::new_uninitialized(count);
+    state.initialize_parameter(3);
+    state.initialize_parameter(8);
+    for local in [4, 7] {
+        state.set_binding(
+            local,
+            BindingSpec::Slot,
+            departing_roots.clone(),
+            empty.clone(),
+        );
+    }
+
+    let mut departing_path = state.clone();
+    for (incoming, first, second) in [(&mut state, 8, 7), (&mut departing_path, 3, 3)] {
+        // Each alias derives through both a visible and a departing wrapper, independently of
+        // whether the ultimate referent is itself visible.
+        for (local, visible_alias, departing_alias, referent) in
+            [(1, 9, 10, first), (2, 11, 12, second)]
+        {
+            let value = incoming.effective_roots(referent);
+            bind_whole(
+                incoming,
+                departing_alias,
+                referent,
+                value.clone(),
+                empty.clone(),
+            );
+            let derivation = incoming.derived_roots_from_source(departing_alias);
+            bind_whole(
+                incoming,
+                visible_alias,
+                departing_alias,
+                value.clone(),
+                derivation,
+            );
+            let derivation = incoming.derived_roots_from_source(visible_alias);
+            bind_whole(incoming, local, visible_alias, value, derivation);
+        }
+
+        // An unresolved alias can still observe a value, independently of a referent address.
+        for (local, source, values) in [
+            (6, 10, empty.clone()),
+            (0, 6, incoming.effective_roots(first)),
+        ] {
+            let derivation = incoming.derived_roots_from_source(source);
+            incoming.set_binding(
+                local,
+                BindingSpec::Alias {
+                    addresses: AddressSet::from_cells([], Coverage::Partial),
+                    route_roots: empty.clone(),
+                },
+                values,
+                derivation,
+            );
+        }
+    }
+    assert!(state.join_in_place(&departing_path));
+
+    // A projected scalar alias retains its address even though it has no value provenance.
+    let holder = state.local_alloc_ids(8).0[0];
+    let projected = CellId::Projected(holder, FieldKey::Field(0));
+    state.set_binding(
         5,
-        LocalState::alias_with_cells(
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-            roots(local_count, &[1, 3]),
-        ),
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([projected], Coverage::Complete),
+            route_roots: roots(count, &[8]),
+        },
+        empty.clone(),
+        empty,
     );
-    // Local 6 only remembers a derivation; it observes no allocation, so it cannot survive as an
-    // alias and its ledger is cleared with the binding.
-    let mut derived_only =
-        LocalState::alias_with_direct(RootSet::empty(local_count), RootSet::empty(local_count));
-    derived_only.derived_from_roots = roots(local_count, &[0, 3]);
-    state.update_local_state(6, derived_only);
 
     state.kill_invisible(&visible);
 
-    let partially_visible = state.local_state(1);
-    assert_eq!(partially_visible.mode, LocalMode::ALIAS);
-    assert_eq!(members(&partially_visible.value_roots), vec![0]);
-    assert_eq!(members(&partially_visible.direct_alias_roots), vec![2]);
-    assert_eq!(members(&partially_visible.write_target_roots), vec![1]);
-    assert_eq!(members(&partially_visible.derived_from_roots), vec![0]);
+    let partially_visible = state.binding(1);
+    assert_eq!(state.binding_mode(1), LocalMode::ALIAS);
+    assert_eq!(members(partially_visible.value_roots()), vec![8]);
+    assert_eq!(state.resolve_cells(1).cells(), &[prior_slot(3), slot(8)]);
+    assert_eq!(members(&partially_visible.route_roots()), vec![8, 9]);
+    assert_eq!(members(partially_visible.derivation()), vec![9]);
 
-    let cell_only = state.local_state(2);
-    assert_eq!(cell_only.mode, LocalMode::ALIAS);
-    assert!(cell_only.value_roots.is_empty());
-    assert_eq!(members(&cell_only.direct_alias_roots), vec![1]);
-    assert_eq!(members(&cell_only.derived_from_roots), vec![4]);
+    let cell_only = state.binding(2);
+    assert_eq!(state.binding_mode(2), LocalMode::ALIAS);
+    assert!(cell_only.value_roots().is_empty());
+    assert_eq!(state.resolve_cells(2).cells(), &[prior_slot(3), slot(7)]);
+    assert_eq!(members(cell_only.derivation()), vec![11]);
 
-    let value_only = state.local_state(0);
-    assert_eq!(value_only.mode, LocalMode::ALIAS);
-    assert_eq!(members(&value_only.value_roots), vec![1]);
-    assert!(value_only.direct_alias_roots.is_empty());
-    assert!(value_only.derived_from_roots.is_empty());
+    let value_only = state.binding(0);
+    assert_eq!(state.binding_mode(0), LocalMode::ALIAS);
+    assert_eq!(members(value_only.value_roots()), vec![8]);
+    assert!(state.resolve_cells(0).cells().is_empty());
+    assert!(value_only.derivation().is_empty());
 
-    // Losing every root keeps a slot binding's own storage but leaves an alias view with nothing
-    // to observe.
-    let slot_backed = state.local_state(4);
-    assert_eq!(slot_backed.mode, LocalMode::SLOT);
-    assert!(slot_backed.value_roots.is_empty());
-    assert!(slot_backed.direct_alias_roots.is_empty());
-    assert!(slot_backed.write_target_roots.is_empty());
+    let slot_backed = state.binding(4);
+    assert_eq!(state.binding_mode(4), LocalMode::SLOT);
+    assert!(slot_backed.value_roots().is_empty());
+    assert_eq!(state.resolve_cells(4).cells(), &[slot(4)]);
+    assert!(slot_backed.route_roots().is_empty());
 
-    let derived_only = state.local_state(6);
-    assert_eq!(derived_only.mode, LocalMode::UNINIT);
-    assert!(derived_only.derived_from_roots.is_empty());
+    assert_uninitialized(&state, 6);
 
-    let target_only = state.local_state(5);
-    assert_eq!(target_only.mode, LocalMode::ALIAS);
-    assert!(target_only.value_roots.is_empty());
-    assert!(target_only.direct_alias_roots.is_empty());
-    assert_eq!(members(&target_only.write_target_roots), vec![1]);
+    let target_only = state.binding(5);
+    assert_eq!(state.binding_mode(5), LocalMode::ALIAS);
+    assert!(target_only.value_roots().is_empty());
+    assert_eq!(state.resolve_cells(5).cells(), &[projected]);
+    assert_eq!(members(&target_only.route_roots()), vec![8]);
 
-    assert_eq!(state.local_state(3), &LocalState::uninit(local_count));
+    assert_uninitialized(&state, 3);
 }
 
 #[test]
-fn designated_cells_include_binding_ownership_and_write_targets() {
-    let local_count = 4;
-    let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(
-        0,
-        LocalState {
-            mode: LocalMode::SLOT,
-            value_roots: roots(local_count, &[3]),
-            direct_alias_roots: roots(local_count, &[1]),
-            write_target_roots: roots(local_count, &[2]),
-            derived_from_roots: RootSet::empty(local_count),
+fn resolved_cells_include_slot_and_alias_alternatives_but_not_provenance() {
+    let count = 5;
+    let empty = RootSet::empty(count);
+    let value = roots(count, &[3]);
+    let mut state = BorrowState::new_uninitialized(count);
+    state.initialize_parameter(3);
+    state.set_binding(2, BindingSpec::Slot, value.clone(), empty.clone());
+
+    let mut alternate = state.clone();
+    alternate.initialize_parameter(4);
+    let holder = alternate.local_alloc_ids(4).0[0];
+    let key = FieldKey::Field(0);
+    let projected = CellId::Projected(holder, key);
+    let held = alternate.local_alloc_ids(3).0[0];
+    alternate.add_alloc_edge(
+        holder,
+        key,
+        StoredValue {
+            id: held,
+            writable: true,
         },
     );
-    state.update_local_state(
+    let mut whole = alternate.clone();
+    bind_whole(&mut whole, 1, 2, value.clone(), empty.clone());
+    alternate.set_binding(
         1,
-        LocalState::alias_with_cells(
-            roots(local_count, &[3]),
-            roots(local_count, &[1]),
-            roots(local_count, &[2]),
-        ),
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([projected], Coverage::Complete),
+            route_roots: roots(count, &[4]),
+        },
+        value.clone(),
+        empty.clone(),
     );
-    state.update_local_state(
-        2,
-        LocalState::alias_with_cells(
-            roots(local_count, &[3]),
-            RootSet::empty(local_count),
-            RootSet::empty(local_count),
-        ),
+    assert!(whole.join_in_place(&alternate));
+    let addresses = whole.resolve_cells(1);
+    assert_eq!(addresses.cells(), &[slot(2), projected]);
+
+    state.set_binding(1, BindingSpec::Slot, value.clone(), empty.clone());
+    assert!(state.join_in_place(&whole));
+    assert_eq!(
+        state.resolve_cells(1).cells(),
+        &[slot(1), slot(2), projected]
     );
 
-    // A slot owns its own cell; an alias designates only its referents, including a projection's
-    // base cell even though its value provenance is an older allocation.
-    assert_eq!(members(&state.designated_cells(0)), vec![0, 1, 2]);
-    assert_eq!(members(&state.designated_cells(1)), vec![1, 2]);
-    assert!(state.designated_cells(2).is_empty());
+    state.set_binding(
+        0,
+        BindingSpec::Alias {
+            addresses: AddressSet::from_cells([], Coverage::Partial),
+            route_roots: empty.clone(),
+        },
+        value,
+        empty,
+    );
+    assert!(state.resolve_cells(0).cells().is_empty());
 }
 
-// WHAT: an alias whose every root set loses visibility has nothing left to observe, so a
-//       visibility sweep resets it to UNINIT even though the binding itself stays visible.
-// WHY: a cell-only alias carried across a merge must not survive as a rootless alias view.
 #[test]
-fn visible_alias_with_no_roots_left_becomes_uninit() {
+fn visible_alias_retains_a_scalar_slot_through_departing_wrappers() {
     let local_count = 4;
     let mut state = BorrowState::new_uninitialized(local_count);
-    state.update_local_state(
-        1,
-        LocalState::alias_with_cells(
-            roots(local_count, &[3]),
-            roots(local_count, &[3]),
-            roots(local_count, &[3]),
-        ),
+    state.initialize_parameter(3);
+    bind_whole(
+        &mut state,
+        2,
+        3,
+        RootSet::empty(local_count),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(3, LocalState::slot(local_count));
 
-    // Local 1 is visible; every root it observes is local 3, which is not.
-    let visible = roots(local_count, &[0, 1, 2]);
-    state.kill_invisible(&visible);
+    bind_whole(
+        &mut state,
+        1,
+        2,
+        RootSet::empty(local_count),
+        RootSet::empty(local_count),
+    );
 
-    assert_eq!(state.local_state(1), &LocalState::uninit(local_count));
-    assert_eq!(state.local_state(3), &LocalState::uninit(local_count));
+    state.kill_invisible(&roots(local_count, &[0, 1]));
+
+    assert_eq!(state.binding_mode(1), LocalMode::ALIAS);
+    assert!(state.binding(1).value_roots().is_empty());
+    let addresses = state.resolve_cells(1);
+    assert_eq!(addresses.cells(), &[prior_slot(3)]);
+    assert_eq!(addresses.coverage, Coverage::Complete);
+    assert_eq!(
+        addresses.definite(),
+        None,
+        "a prior family is not a single occurrence"
+    );
+    assert_uninitialized(&state, 2);
+    assert_uninitialized(&state, 3);
 }
 
-// WHAT: a cell-only alias survives a join and a visibility edge while its referent cell is
-//       visible, then becomes UNINIT when the referent itself leaves visibility.
-// WHY: the cell is the alias's only remaining identity after a branch-local value root is gone;
-//       dropping the mode at either the join or the sweep loses the conflict the alias reports.
+// Cell identity survives visibility narrowing even without value provenance.
 #[test]
 fn cell_only_alias_survives_join_and_scope_narrowing() {
     let local_count = 4;
+    let empty = RootSet::empty(local_count);
     let mut left = BorrowState::new_uninitialized(local_count);
-    left.update_local_state(
-        1,
-        LocalState::alias_with_cells(
-            RootSet::empty(local_count),
-            roots(local_count, &[0]),
-            RootSet::empty(local_count),
-        ),
-    );
-    let mut right = BorrowState::new_uninitialized(local_count);
-    right.update_local_state(
-        1,
-        LocalState::alias_with_cells(
-            RootSet::empty(local_count),
-            roots(local_count, &[0, 3]),
-            RootSet::empty(local_count),
-        ),
-    );
+    left.initialize_parameter(0);
+    left.initialize_parameter(3);
+    let mut right = left.clone();
+    let mut slot_branch = left.clone();
+    bind_whole(&mut left, 1, 0, empty.clone(), empty.clone());
+    bind_whole(&mut right, 1, 3, empty.clone(), empty);
 
     assert!(left.join_in_place(&right));
-    let joined = left.local_state(1);
-    assert_eq!(joined.mode, LocalMode::ALIAS);
-    assert!(joined.value_roots.is_empty());
-    assert_eq!(members(&joined.direct_alias_roots), vec![0, 3]);
-    assert!(joined.write_target_roots.is_empty());
+    assert_eq!(left.binding_mode(1), LocalMode::ALIAS);
+    assert!(left.binding(1).value_roots().is_empty());
+    assert_eq!(left.resolve_cells(1).cells(), &[slot(0), slot(3)]);
 
-    // The branch-local referent cell leaves visibility; the outer one keeps the alias alive.
+    // The branch-local referent loses its name, but the live alias retains its cell.
     left.kill_invisible(&roots(local_count, &[0, 1, 2]));
-    let narrowed = left.local_state(1);
-    assert_eq!(narrowed.mode, LocalMode::ALIAS);
-    assert!(narrowed.value_roots.is_empty());
-    assert_eq!(members(&narrowed.direct_alias_roots), vec![0]);
-    assert!(narrowed.write_target_roots.is_empty());
+    assert_eq!(left.binding_mode(1), LocalMode::ALIAS);
+    assert!(left.binding(1).value_roots().is_empty());
+    assert_eq!(left.resolve_cells(1).cells(), &[slot(0), prior_slot(3)]);
 
     // A merge with a path that never rebound the binding keeps the alias alternative.
-    let mut slot_branch = BorrowState::new_uninitialized(local_count);
-    slot_branch.update_local_state(1, LocalState::slot(local_count));
+    slot_branch.initialize_parameter(1);
+    slot_branch.kill_invisible(&roots(local_count, &[0, 1, 2]));
     let mut merged = left.clone();
     assert!(merged.join_in_place(&slot_branch));
-    assert!(merged.local_state(1).mode.contains(LocalMode::ALIAS));
+    assert!(merged.binding_mode(1).contains(LocalMode::ALIAS));
     merged.kill_invisible(&roots(local_count, &[0, 1, 2]));
-    let merged_state = merged.local_state(1);
-    assert!(merged_state.mode.contains(LocalMode::ALIAS));
-    assert!(merged_state.value_roots.is_empty());
-    assert_eq!(members(&merged_state.direct_alias_roots), vec![0]);
+    assert!(merged.binding_mode(1).contains(LocalMode::ALIAS));
+    assert!(merged.binding(1).value_roots().is_empty());
+    assert_eq!(
+        merged.resolve_cells(1).cells(),
+        &[slot(0), slot(1), prior_slot(3)]
+    );
 
-    // Losing the last visible referent leaves nothing to observe.
+    // Neither destination keeps a current name.
     let mut pruned = left.clone();
     pruned.kill_invisible(&roots(local_count, &[1, 2, 3]));
-    assert_eq!(pruned.local_state(1), &LocalState::uninit(local_count));
+    assert_eq!(pruned.binding_mode(1), LocalMode::ALIAS);
+    assert_eq!(
+        pruned.resolve_cells(1).cells(),
+        &[prior_slot(0), prior_slot(3)]
+    );
+    assert_eq!(pruned.resolve_cells(1).definite(), None);
 }
 
 #[test]
 fn joining_states_narrowed_to_one_mask_stays_narrowed() {
     let local_count = 4;
     let visible = roots(local_count, &[0, 1, 2]);
+    let empty = RootSet::empty(local_count);
     let mut left = BorrowState::new_uninitialized(local_count);
     left.initialize_parameter(0);
-    left.update_local_state(
+    left.initialize_parameter(3);
+    let mut right = left.clone();
+    bind_whole(&mut left, 1, 0, roots(local_count, &[0]), empty.clone());
+    right.set_binding(
         1,
-        LocalState::alias_with_direct(roots(local_count, &[0, 3]), roots(local_count, &[0, 3])),
+        BindingSpec::Slot,
+        roots(local_count, &[0]),
+        empty.clone(),
     );
-    let mut right = BorrowState::new_uninitialized(local_count);
-    right.update_local_state(3, LocalState::slot(local_count));
-    right.update_local_state(
-        1,
-        LocalState::slot_with_value_roots(roots(local_count, &[2]), roots(local_count, &[2])),
-    );
-    right.update_local_state(
-        2,
-        LocalState::alias_with_direct(roots(local_count, &[3]), roots(local_count, &[3])),
-    );
+    bind_whole(&mut right, 2, 3, roots(local_count, &[3]), empty);
     left.kill_invisible(&visible);
     right.kill_invisible(&visible);
 
@@ -408,13 +633,19 @@ fn visibility_sweep_leaves_a_state_unchanged_under_a_covering_mask() {
     let local_count = LOCAL_COUNT;
     let mut state = BorrowState::new_uninitialized(local_count);
     state.initialize_parameter(0);
-    state.update_local_state(
+    state.initialize_parameter(LAST);
+    bind_whole(
+        &mut state,
         1,
-        LocalState::alias_with_direct(roots(local_count, &[0, LAST]), roots(local_count, &[LAST])),
+        LAST,
+        roots(local_count, &[LAST]),
+        RootSet::empty(local_count),
     );
-    state.update_local_state(
+    state.set_binding(
         2,
-        LocalState::slot_with_value_roots(roots(local_count, &[1]), roots(local_count, &[1])),
+        BindingSpec::Slot,
+        roots(local_count, &[1]),
+        RootSet::empty(local_count),
     );
 
     let before = state.clone();
@@ -426,105 +657,11 @@ fn visibility_sweep_leaves_a_state_unchanged_under_a_covering_mask() {
     narrowed.subtract_with(&roots(local_count, &[1]));
     state.kill_invisible(&narrowed);
 
-    assert_eq!(state.local_state(1), &LocalState::uninit(local_count));
-    let narrowed_slot = state.local_state(2);
-    assert_eq!(narrowed_slot.mode, LocalMode::SLOT);
-    assert!(narrowed_slot.value_roots.is_empty());
-    assert!(narrowed_slot.direct_alias_roots.is_empty());
-    assert_eq!(state.local_state(0).mode, LocalMode::SLOT);
-}
-
-/// `effective_root_contains` must answer exactly what `effective_roots(..).contains` answers, for
-/// every mode and value shape. Alias conflict scans use the shortcut in place of the set builder,
-/// so any disagreement would change which conflicts are reported.
-#[test]
-fn effective_root_contains_matches_effective_roots_membership() {
-    // Two words, so the check covers bits on both sides of the word boundary.
-    let local_count = 70;
-    let modes = [
-        LocalMode::UNINIT,
-        LocalMode::SLOT,
-        LocalMode::ALIAS,
-        LocalMode::UNINIT.union(LocalMode::SLOT),
-        LocalMode::UNINIT.union(LocalMode::ALIAS),
-        LocalMode::SLOT.union(LocalMode::ALIAS),
-        LocalMode::UNINIT
-            .union(LocalMode::SLOT)
-            .union(LocalMode::ALIAS),
-    ];
-    let all_roots: Vec<usize> = (0..local_count).collect();
-
-    for local_index in 0..local_count {
-        let value_shapes = [
-            roots(local_count, &[]),
-            roots(local_count, &[local_index]),
-            roots(local_count, &[0]),
-            roots(local_count, &[local_count - 1]),
-            roots(local_count, &[local_index, local_count - 1]),
-            roots(local_count, &all_roots),
-        ];
-
-        for mode in modes {
-            for value_roots in &value_shapes {
-                let mut state = BorrowState::new_uninitialized(local_count);
-                state.update_local_state(
-                    local_index,
-                    LocalState {
-                        mode,
-                        value_roots: value_roots.clone(),
-                        direct_alias_roots: RootSet::empty(local_count),
-                        write_target_roots: RootSet::empty(local_count),
-                        derived_from_roots: RootSet::empty(local_count),
-                    },
-                );
-
-                let expected = state.effective_roots(local_index);
-                // One past the last index: both sides must reject an index outside the set.
-                for root_index in 0..=local_count {
-                    assert_eq!(
-                        state.effective_root_contains(local_index, root_index),
-                        expected.contains(root_index),
-                        "local {local_index}, root {root_index}, mode {mode:?}, value roots {:?}",
-                        members(value_roots),
-                    );
-                }
-            }
-        }
-    }
-}
-
-/// `intersects` must answer exactly what intersecting a clone answers, including pairs whose only
-/// shared bit sits on either side of the word boundary. Conflict scans use it instead of building
-/// the intersection, so a disagreement would change which call arguments count as aliasing.
-#[test]
-fn intersects_matches_intersection_emptiness() {
-    // Two words, so bit 63 and bit 64 exercise both the last bit of word 0 and the first of word 1.
-    let local_count = 70;
-    let all_roots: Vec<usize> = (0..local_count).collect();
-    let shapes = [
-        roots(local_count, &[]),
-        roots(local_count, &[0]),
-        roots(local_count, &[63]),
-        roots(local_count, &[64]),
-        roots(local_count, &[local_count - 1]),
-        roots(local_count, &[63, 64]),
-        roots(local_count, &[0, 63, 64, local_count - 1]),
-        roots(local_count, &all_roots),
-    ];
-
-    for left in &shapes {
-        for right in &shapes {
-            let mut intersection = left.clone();
-            intersection.intersect_with(right);
-            assert_eq!(
-                left.intersects(right),
-                !intersection.is_empty(),
-                "left {:?}, right {:?}",
-                members(left),
-                members(right),
-            );
-        }
-    }
+    assert_uninitialized(&state, 1);
+    assert_eq!(state.binding_mode(2), LocalMode::SLOT);
+    assert!(state.binding(2).value_roots().is_empty());
+    assert_eq!(state.resolve_cells(2).cells(), &[slot(2)]);
+    assert_eq!(state.binding_mode(0), LocalMode::SLOT);
 }
 
 /// Copy-on-write words must behave exactly like value semantics: an update shows on the receiver,

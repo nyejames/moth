@@ -42,15 +42,16 @@ impl<'a> BorrowDiagnostics<'a> {
     pub(super) fn local_name(&self, local_id: LocalId) -> String {
         self.module
             .side_table
-            .resolve_local_name(local_id, self.path_fork, self.string_table)
-            .map(str::to_owned)
+            .local_display_path(local_id)
+            .and_then(|path| self.path_fork.component(path))
+            .map(|component| self.string_table.resolve(component).to_owned())
             .unwrap_or_else(|| format!("{local_id}"))
     }
 
     pub(super) fn local_place(&self, local_id: LocalId) -> DiagnosticPlace {
         self.module
             .side_table
-            .local_name_path(local_id)
+            .local_display_path(local_id)
             .and_then(|path| self.path_fork.component(path))
             .map(DiagnosticPlace::Local)
             .unwrap_or(DiagnosticPlace::Unknown)

@@ -1,0 +1,6 @@
+src ~{String = I32} = {"k" = 7}
+score = src.get("k")!
+dst ~{String = I32} = {"k" = score}
+~src.clear()
+removed = ~dst.remove("k")!
+~[:[removed]]

@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-BORROW-0010"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-BORROW-0010"
+reason = "invalid_const_access.invalidated_reference"
+path = "input/@entry.moth"
+line = 4
+count = 1

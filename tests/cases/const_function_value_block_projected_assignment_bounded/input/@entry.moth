@@ -1,0 +1,46 @@
+-- Replacing scalar and nested fields must not retain value-block results or
+-- traversal scratch. Both nested allocations are built before the loop.
+Holder = |value I32|
+Nested = |items {I32}|
+Container = |inner Nested|
+Guard = |done Bool|
+
+apply #|limit I32| -> I32:
+    holder ~= Holder(0)
+    first ~= Nested({1, 2})
+    second ~= Nested({3, 4})
+    container ~= Container(first)
+    flip ~= false
+    loop 0 to limit:
+        ~holder.value = if true:
+            then 9
+        else
+            then 0
+        ;
+        ~container.inner = if flip:
+            then first
+        else
+            then second
+        ;
+        ~flip = if flip:
+            then false
+        else
+            then true
+        ;
+    ;
+    return holder.value + container.inner.items.length()
+;
+
+read_unchanged #|limit I32| -> I32:
+    guard ~= Guard(false)
+    loop 0 to limit:
+        if guard.done:
+            return 0
+        ;
+    ;
+    return 1
+;
+
+value #I32 = apply(40000)
+unchanged #I32 = read_unchanged(60000)
+~[:value=[value] unchanged=[unchanged]]

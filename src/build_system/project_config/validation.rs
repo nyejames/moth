@@ -1147,6 +1147,9 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
         }
         PublicFoldedValue::Number(_)
         | PublicFoldedValue::Choice { .. }
+        | PublicFoldedValue::AllocationDefinition { .. }
+        | PublicFoldedValue::AllocationReference { .. }
+        | PublicFoldedValue::AllocationCoercion { .. }
         | PublicFoldedValue::Range { .. } => None,
     }
 }

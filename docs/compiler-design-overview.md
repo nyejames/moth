@@ -61,6 +61,8 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - Cross-module facts use stable origins and canonical types, not donor-local indexes. Published module artefacts and generated sidecars are immutable.
 - Moth-source modules and packages use Moth semantic interfaces even when emitted as Wasm. WIT is a foreign component boundary, not a replacement interface.
 - Semantic stages and validated HIR serve the official native-Wasm and browser-JavaScript/Wasm families. Target-specific analysis and optimisation may exploit this finite set after shared language meaning is fixed. Tooling overlays reuse the compiler without defining another execution target.
+- For identical source, canonical dependencies, explicit project configuration, selected language/test compilation mode and builder-supplied semantic capability inputs, AST semantics and validated HIR must be equivalent across debug/release profiles and target variants. Stable semantic summaries, source acceptance and diagnostics must agree. Physical build-profile choices are not semantic inputs. Builders may legitimately supply different explicit semantic inputs; identical builders are not required when their input contracts differ.
+- Compiler AST/HIR semantic APIs must not consume a build optimisation profile. Instrumentation before the semantic boundary is observation-only; profiling cannot change semantic operations, control flow, analysis or diagnostics. Optional build-specific transformations must not participate in static selection, source-validity decisions or the meaning of the published semantic HIR. Test compilation is an explicit semantic mode, not an alias for a debug profile.
 - Ordinary static `if` validates both branches before selecting executable work and preserves the selected lexical scope. Structural `$feature` selection is a separate pre-graph contract.
 - Authored physical file references establish graph/input validity before executable reachability. Exact output liveness neither creates nor retracts graph membership.
 - File values are `String`, with structural resource and site-root pieces until builder placement. Semantic origins, authored uses, byte sources and rendered URLs remain distinct.
@@ -68,7 +70,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - TIR is AST-local. Completed AST and HIR contain folded values or neutral owned runtime data, never TIR authority. HIR is the first backend-facing semantic IR.
 - Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types. Wiring capabilities do not turn strings into live templates.
 - Callable return contracts are `Returns` or `Never`. Never is not a `TypeId`, a value type or an empty result list. Function types may carry a Never signature without becoming Never values.
-- Borrow and lifetime-topology validation are mandatory. GC choice and build profile preserve access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
+- Borrow and lifetime-topology validation are mandatory for runtime executable bodies. Required source const functions instead use Stage 4 dynamic generational access validation over bounded interpreter-owned storage, without runtime HIR. GC choice and build profile preserve runtime access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
 - A compiler-owned validated memory plan determines each physical variant's layout, strategies, cleanup and count transitions. Lowerers only realise it. Full-control release lowering has no tracing-collector fallback.
 - User diagnostics, operational failures and proven compiler bugs have separate failure lanes. Parallelism and reuse preserve deterministic identities, diagnostics and output order.
 
@@ -119,7 +121,7 @@ bind provider interfaces
 -> validate and return the module result with its generated delta
 ```
 
-Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
+Summary-dependent source/generated work converges inside this transaction. Every published runtime source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Required const declarations publish their static contract and retained materialisation facts, not runtime HIR or borrow summaries. Their executed paths receive dynamic access validation during required evaluation. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
 A new local semantic stage belongs inside this service. API facade and entry roots, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
@@ -350,7 +352,7 @@ A public interface contains the complete semantic facts observable by consumers:
 - summary-carried numeric constraint guarantees for fast use, semantic traps and escaping recoverable failure
 - project-context provenance for every affected exported fact
 
-Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, output routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
+Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Semantic constraint guarantees and public interface facts are derived from profile-independent authored semantics, never from an optional profile-dependent executable optimisation. A future optimiser must separately maintain correct executable reachability/link facts without changing those semantic summaries. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, output routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
 
 Foreign callable evidence enters these summaries only through compiler-authorised implementation provenance. The existing closed external numeric contract records fast semantics, possible semantic traps and possible recoverable failure independently. An opaque user-provided binding has unknown absence facts, even when its signature has no `Error!` slot. Official compiler-maintained packages and approved vendored Rust libraries may supply checked per-callable facts, including known hazards, without certifying their entire package as `$safe_math` or `$infallible`. Builder registrations cannot promote themselves to trusted evidence. See the [constraints reference](docs/directives/constraints.mtf) for the guarantees checked over reachable calls.
 
@@ -374,7 +376,7 @@ The build-owned `@project` interface publishes the predefined project field set,
 
 ## Fingerprints and reuse facts
 
-Each successful base module has five distinct fingerprint domains:
+Each successful base module has five distinct fingerprint domains. Semantic interface, implementation and source-dependency reuse facts must be independent of an optimisation profile for identical semantic inputs; profile-specific physical output artefacts remain distinct where required:
 
 | Fingerprint | Contents and exclusions |
 |---|---|
@@ -530,19 +532,23 @@ The typed abstract syntax tree (AST) stage consumes sorted shells and bound visi
 
 Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and builder root slot contributions. Root slot facts enter the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
 
+Synthetic control-flow scopes take their identity from the module's path interner. The
+compiler-only component cannot collide with a source binding, and unrelated or parallel
+frontend compilations cannot renumber those scopes.
+
 The semantic order is:
 
 ```text
 construct each authored body and collect its eligible numeric constraints
 -> resolve body-local numeric origins, defaults and conflicts; finish body checking
--> fold constants and final compile-time expressions at their owning boundaries
+-> fold required constants and final compile-time expressions, plus deterministic justified pure subexpressions at their owning boundaries
 -> specialise known-Bool if branches
 -> derive active generated requests and executable summaries
 -> validate active terminality
 -> hand the completed active AST to HIR
 ```
 
-This specifies dependencies, not a fixed count of internal passes. `Static Bool control-flow specialisation` defines exactly what remains validated and what selection removes.
+This specifies dependencies, not a fixed count of internal passes. `Static Bool control-flow specialisation` defines exactly what remains validated and what selection removes. A source branch must not become statically selected solely because optional whole-function speculation found a result, whether that speculation is profile-specific or runs in all profiles. Eager folding is permitted only when its fixed semantics and mandatory source validation evidence are preserved.
 
 AST records actual implicit-failure contributors separately from authored catch eligibility at each occurrence. Checked numeric failure is implicit built-in failure, delivered by the enclosing handler or function contract without wrapping or an implicit panic. Private functions without an error slot infer and propagate actual failure inside the same module without postfix `!` at each internal call. This inferred failure is an internal lane, not a public effect row or a third error channel.
 
@@ -601,7 +607,7 @@ Separate these responsibilities at their real owners:
 
 The common expression record does not carry declaration-only fields, cloned type syntax, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts into each report's `TypeDisplaySnapshot` before the module-local `TypeEnvironment` can be released. Frozen report views render from that snapshot and the frozen identity context, so no live `TypeEnvironment` or expression store is retained solely for diagnostic display.
 
-Cold facts retain their semantic meaning through folding and replacement. An empty contributor list is not by itself proof that all facts are absent: catch eligibility, typed producer conflicts, explicit exits and deferred assertion/catch evidence can still matter. Failure summaries do not repeatedly rescan expression subtrees to reconstruct origin lists. Facts needed after expression storage ends move into the consuming HIR or diagnostic owner first.
+Cold facts retain their semantic meaning through folding and replacement. Early pure folding may still need to retain selected fast-operation evidence for `$safe_math`, even when it removes the arithmetic node. An empty contributor list is not by itself proof that all facts are absent: catch eligibility, typed producer conflicts, explicit exits and deferred assertion/catch evidence can still matter. Failure summaries do not repeatedly rescan expression subtrees to reconstruct origin lists. Facts needed after expression storage ends move into the consuming HIR or diagnostic owner first.
 
 One `AstPhaseContext` owns the expression store paired with its module-local `TemplateIrStore`. Dynamic TIR expressions and overrides refer only to committed IDs in that expression domain. Each concrete generated AST build and each config or direct-template service has its own pair. No expression ID crosses those domains.
 
@@ -771,7 +777,7 @@ Ordinary statement and value-producing `if` use the normal folded Bool authority
 
 A known `true` selects the `then` branch. A known `false` selects the `else` branch or an empty scoped result when absent. Preserve the selected lexical scope. Runtime or unknown conditions remain ordinary `if`.
 
-Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. A condition that only release folding makes constant reaches HIR as a constant, so both branches and their evidence survive. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
+Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
 
 Structural references were already graph-active before selection. Frontend errors in inactive ordinary branches remain errors. Structural `$feature` exclusion is a different earlier contract.
 
@@ -911,7 +917,7 @@ Direct content constants use retained local ordering edges. Actual content-depen
 
 A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values and direct-template results. Public values retain independently owned outputs. Projection uses no memoisation, which preserves authored field order, provenance and independently owned repeated-child outputs. Consumers never reconstruct the string from AST expressions or TIR.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses a heap stack to project public values and direct-template results. Public folded roots own their graphs. Ordinary trees retain the recursive value vocabulary. Projection emits one typed definition at each shared allocation's first authored occurrence, then uses root-local references to that completed definition. It retains occurrence provenance and never merges equal but distinct allocations. Import rebuilds the graph in the consumer's store. Consumers never reconstruct a folded string from AST expressions or TIR.
 
 Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 
@@ -947,27 +953,56 @@ A resolved parameter carries its contract (value, wire, or route with an optiona
 
 Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
 
-#### Const-function execution and speculative source folding
+#### Required const execution and deterministic eager folding
 
-A source const function is prepared during Stage 4 from its canonical typed body and is executed by
-one bounded frame machine over typed expressions and `ConstValueStore` values. Required calls fold
-before HIR exists. The executor owns no parser, type system, value domain or template engine; it
-delegates numeric, cast, Text, collection and template operations to their existing owners.
+A source const function is prepared during Stage 4 from its canonical typed body and executed by
+one bounded, sequential frame machine over typed expressions, live interpreter-owned storage and the existing immutable `ConstValueStore`. Required calls must
+fold before HIR exists: constants, TIR, template composition and selected static conditions
+consume their results. Invalid required execution reports a source diagnostic and has no runtime
+fallback. The executor owns no parser, type system, second value domain or second template engine;
+numeric, cast, collection and template semantics retain their established owners.
 
-Release ordinary-function folding is an AST-owned candidate rewrite at the finalization barrier,
-before expression freezing and HIR lowering. Stage 4 emission prepares eligible ordinary bodies once
-while their canonical scope facts are live. One whole-body classifier decides declaration
-eligibility and speculative candidacy with different refusal policy. A successful candidate replaces
-the call expression transactionally; a refused, failing or budget-limited candidate leaves the
-authored call and every runtime check intact. Speculation leaves authored-dead statements and
-statically pruned catch handlers unfolded, so they keep their calls and fast operations. Debug does
-not run speculation. HIR receives the final folded AST together with the
-pre-fold conditions static selection decided, the pre-fold semantic failure contributors and the
-erased-call ledger. It never adapts itself back into typed expressions.
+The accepted const access contract lives in `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf` > `Const execution: generational access validation`. The interpreter preserves real reference relationships, including projected places, shared aggregate children, binding cells and allocation identity. Its attempt-local storage distinguishes live reference handles from immutable value IDs. A checked mutation clock (or equivalent generation facts) tracks successful overlapping writes. Mutable aliases may coexist, while subsequent use of an invalidated immutable reference is a non-catchable source diagnostic. Static type, eligibility and mutation permissions remain authoritative. No runtime HIR, static borrow or lifetime proof, affine transfer, REC or physical planning is required for const bodies. Unexecuted bodies and paths receive normal static checks but no dynamic access verdict.
+
+Nested calls, value blocks, handlers and templates resolve actual storage and preserve reference identity and access witnesses until the surrounding evaluation's required publication boundary. Freeze validated finite data into the existing folded-value owner, preserving exact types, slot order, provenance and internal allocation sharing across fields and result slots. Equal contents do not imply shared allocation identity. The published graph owns its data and contains no live storage, handles, generations or donor-local identities. HIR materialises each shared allocation once per runtime graph and exposes those relationships to ordinary borrow and lifetime validation. Runtime receiving modes determine access to the new allocations.
+
+The interpreter is not a second numeric, type, constant-value or template language. The existing deterministic work and memory policy bounds storage, generation tracking, graph traversal and publication.
+
+Consumers that need only values do not publish replacement rows. In a const body, ordered
+rewriting selects the operations that actually execute; the shared fold then reads the completed
+expression and frame bindings. It does not probe executable operands speculatively. A call
+validates every stored slot against its resolved contract before handing the ordered values
+directly to its receiver. AST consumers still publish a constant result block when several
+slots must survive as one expression, using the same replacement as the host folder. `then`
+delivers a closed value block's results; a catch can recover or transfer control to its
+enclosing function or loop. Handler transfers use the same frame unwind as ordinary statements.
+An authored known-invalid conversion remains a source diagnostic. A supported conversion
+that fails on values discovered during const execution enters the prepared catch handler
+with the builtin error code and message; it skips the rest of the protected expression.
+
+Simple completed pure expressions may fold eagerly when their result is deterministic, their
+source evaluation is semantics-preserving and any selected fast-operation or other validation
+obligation remains available. A statically known invalid numeric operation uses the established
+compile-time diagnostic. `$infallible` guarantees the runtime execution boundary, while
+`$safe_math` is a guarantee about selected fast arithmetic even when folded. Optional evaluation
+of ordinary runtime functions never supplies a value for static source selection.
+
+Stage 4 evaluates ordinary runtime functions in no build profile. It prepares no speculative
+ordinary-call candidates and never replaces an ordinary runtime call with its result; the frontend
+receives no build profile at all. Failure, catch, assertion, selected fast-use and authored
+control-flow facts are retained exactly as source validation requires.
+
+Folding is not mandatory for every eligible expression. Prefer the smallest complete implementation:
+retain a mandatory or measured useful early fold, simplify duplicate value/AST reconstruction or
+remove an optional fold whose compiler cost and maintained complexity are unjustified. Future
+whole-function optimisation may occur only after semantic verification and only with a measured
+advantage over backend tools; it does not change accepted source or the validated HIR.
 
 ### Stage 5: HIR and validation
 
 High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.
+
+HIR is the profile-independent semantic authority. For identical semantic inputs it retains equivalent operation kinds, selected numeric modes, control-flow decisions, call targets, result/error channels, constraint evidence and function summaries in debug and release. The frontend takes no build profile, so this holds by construction: `BuildProfile` first reaches the backend builder and output policy. A permanent equivalence gate builds one project in both profiles through `build_project` and compares the semantic backend handoff (HIR with its side tables, type environments, borrow reports, numeric proofs, link facts, resources, entry metadata, project facade interfaces and interned text), successful-build warnings and rendered diagnostics. The validated graph cannot be optimised into a different *source* verification verdict.
 
 A HIR `RegionId` identifies the lexical scope tree. Source-declared lifetime regions use distinct `DeclaredRegionId` metadata, never a manufactured `TypeId` or a reused lexical-region identity.
 
@@ -1053,6 +1088,8 @@ Validation, remapping, display, borrowing and reachability treat the message as 
 
 #### HIR validation
 
+The semantic compiler constructs and verifies HIR without an optimisation profile. Required constraint, borrow, lifetime and public-summary checks use profile-independent authored semantics. Debug/release physical lowering or future optional whole-function optimisation cannot erase a call before these checks or change the accepted source. Test mode is a separate explicit semantic input. A future post-verification optimiser may use derived executable representation without mutating semantic public interfaces or reopening source validity.
+
 Validation completes before borrow or target validation. It checks definition/type links, dense IDs and ranges, lexical regions, control-flow graph (CFG) shape, block ownership/terminators, locals/places, dominance, side-table mappings, function origins, constants, patterns, expressions and Wiring contracts/captures.
 
 Call validation also checks result count, slot types, channel compatibility, Never versus ordinary contracts and edge-specific definitions. Finite binary-float values remain an invariant. `NaN`, infinity, a missing trusted local or malformed completed control flow are compiler bugs.
@@ -1096,7 +1133,7 @@ Borrow validation resolves calls to access/effect summaries. Target validation a
 
 The live production implementation status, borrow-analysis performance investigations and Boracle-to-production implementation decisions are tracked in `docs/roadmap/plans/production-borrow-checker.md`. This section defines the solver-independent end-state handoff, not a running inventory of alpha code.
 
-Borrow validation runs for every canonical module and generated concrete function. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
+Borrow validation runs for the runtime executable bodies of every canonical module and generated concrete function. Required source const functions use the Stage 4 access contract instead and never enter validation-only HIR. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
 
 Its solver-independent output contains:
 

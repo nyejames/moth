@@ -3,7 +3,7 @@
 //! Constructors consume canonical resolved types and facts. Constant content belongs to the
 //! separate constant store; expression rows retain occurrence metadata and immutable ID edges.
 
-use super::call_argument::CallArgument;
+use super::call_argument::{CallAccessMode, CallArgument};
 use super::expression_kind::Operator;
 use super::expression_rpn::{ResolvedOperation, ResolvedOperationKind};
 use super::expression_store::*;
@@ -407,6 +407,7 @@ impl AstExpressionBuilder {
             value,
             target_param: argument.target_param,
             parameter_slot,
+            authored_ordinal: argument.authored_ordinal,
             access_mode: argument.access_mode,
             passing_mode: argument.passing_mode,
             span: argument.span,
@@ -472,7 +473,7 @@ impl AstExpressionBuilder {
         &mut self,
         target: ResolvedCallableTarget,
         evaluation: CallableEvaluation,
-        receiver: Option<OwnedExpr>,
+        receiver: Option<(OwnedExpr, CallAccessMode)>,
         args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
         slots: Vec<TypeId>,
         handling: Option<HandlingRecord>,
@@ -480,7 +481,7 @@ impl AstExpressionBuilder {
         span: Option<SourceSpan>,
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         let args = args.into();
-        self.preflight_call_inputs(receiver, &args)?;
+        self.preflight_call_inputs(receiver.map(|(value, _)| value), &args)?;
         let arguments = self.resolved_arguments(args, span)?;
         let success = self.success_from_slots(slots, span)?;
         let error_type = handling.as_ref().and_then(|record| record.error_type);
@@ -491,6 +492,7 @@ impl AstExpressionBuilder {
             ResolvedCall {
                 target,
                 evaluation,
+                receiver_access: receiver.map(|(_, access)| access),
                 arguments,
                 handling,
                 requires_external_float_validation: external_validation,
@@ -500,7 +502,7 @@ impl AstExpressionBuilder {
             span,
         )?;
         let operation = match receiver {
-            Some(receiver) => ExpressionOp::MethodCall { receiver, call },
+            Some((receiver, _)) => ExpressionOp::MethodCall { receiver, call },
             None => ExpressionOp::Call(call),
         };
         self.append_with_success_shape(operation, span, success, ValueMode::MutableOwned)
@@ -549,7 +551,7 @@ impl AstExpressionBuilder {
 
     pub(crate) fn method_call_with_typed_arguments<'a>(
         &mut self,
-        receiver: OwnedExpr,
+        receiver: (OwnedExpr, CallAccessMode),
         name: PathId,
         args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
         slots: Vec<TypeId>,
@@ -1011,13 +1013,8 @@ impl AstExpressionBuilder {
         {
             let metadata = call.metadata();
             let mut record = ResolvedCall {
-                target: metadata.target,
-                evaluation: metadata.evaluation,
-                arguments: metadata.arguments,
-                handling: metadata.handling,
-                requires_external_float_validation: metadata.requires_external_float_validation,
                 error_type: Some(error),
-                span: metadata.span,
+                ..metadata.clone()
             };
             let handling = call.handling().map(|handling| HandlingRecord {
                 handling: handling.handling,
@@ -1165,13 +1162,8 @@ impl AstExpressionBuilder {
                 };
                 let metadata = call.metadata();
                 let record = ResolvedCall {
-                    target: metadata.target,
-                    evaluation: metadata.evaluation,
-                    arguments: metadata.arguments,
                     handling: Some(handling),
-                    requires_external_float_validation: metadata.requires_external_float_validation,
-                    error_type: metadata.error_type,
-                    span: metadata.span,
+                    ..metadata.clone()
                 };
                 let call = self.append_call(record, input.span)?;
                 match input.operation {

@@ -136,6 +136,7 @@ impl<E: Copy> CompletedOperation<E> {
                     value: map(a.value),
                     target_param: a.target_param,
                     parameter_slot: a.parameter_slot,
+                    authored_ordinal: a.authored_ordinal,
                     access_mode: a.access_mode,
                     passing_mode: a.passing_mode,
                     span: a.span,
@@ -149,6 +150,7 @@ impl<E: Copy> CompletedOperation<E> {
             CandidateCall {
                 target: c.target,
                 evaluation: c.evaluation,
+                receiver_access: c.receiver_access,
                 arguments: args(c.arguments, map),
                 handling: c.handling,
                 requires_external_float_validation: c.requires_external_float_validation,
@@ -165,6 +167,7 @@ impl<E: Copy> CompletedOperation<E> {
                 .map(|f| ConstructorField {
                     name: f.name,
                     slot: f.slot,
+                    authored_ordinal: f.authored_ordinal,
                     value: map(f.value),
                 })
                 .collect()
@@ -351,6 +354,7 @@ impl CompletedOperation<OwnedExpr> {
                 ResolvedCall {
                     target: c.target,
                     evaluation: c.evaluation,
+                    receiver_access: c.receiver_access,
                     arguments,
                     handling,
                     requires_external_float_validation: c.requires_external_float_validation,

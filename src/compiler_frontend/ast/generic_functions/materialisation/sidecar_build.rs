@@ -142,7 +142,6 @@ impl ModuleMaterialisationPreparation {
                 path_fork,
                 style_directives: &self.style_directives,
                 provider_materialisations,
-                build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
                 #[cfg(feature = "timers")]
                 timing_context,
@@ -1027,7 +1026,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
         .collect();
     PublicCallSummary {
         parameters,
-        return_alias: FunctionReturnAliasSummary::Fresh,
+        return_alias: FunctionReturnAliasSummary::Pending,
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,

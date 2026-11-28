@@ -257,9 +257,7 @@ pub(crate) fn declaration_shell_token_error(
         let style_directives = StyleDirectiveRegistry::built_ins();
         if let Some(spec) = style_directives.find(directive_name) {
             let reason = match spec.kind {
-                StyleDirectiveKind::SourceModifier { .. }
-                    if spec.contexts.allows_source_modifier() =>
-                {
+                StyleDirectiveKind::SourceModifier { .. } => {
                     InvalidTemplateDirectiveReason::WrongTarget
                 }
                 _ => InvalidTemplateDirectiveReason::WrongContext,

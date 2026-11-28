@@ -83,9 +83,8 @@ pub(crate) struct JsEmitter<'hir> {
 ///
 /// WHAT: the function selected for emission plus the block set that map discovery, numeric-helper
 ///       discovery, cast-policy discovery and dispatcher emission all read.
-/// WHY: each scan previously rebuilt and sorted the same closure per function, reclassifying every
-///      numeric Invoke. One precomputed closure per function keeps a single owner for the pass and
-///      keeps the set travelling with the function it describes.
+/// WHY: one precomputed closure per function keeps a single owner for the pass and keeps the set
+///      travelling with the function it describes.
 struct FunctionEmission<'hir> {
     function: &'hir HirFunction,
     /// Blocks reachable through an edge that can execute. Local declarations use the separate
@@ -495,7 +494,7 @@ impl<'hir> JsEmitter<'hir> {
                         id,
                         operation: HirFallibleOperation::CastOp { policy, source },
                         ..
-                    } if self.integer_narrowing_is_proven(*id, *policy) => {
+                    } if self.proven_integer_narrowing(*id, *policy).is_some() => {
                         collect_expression_cast_policies(
                             self.hir,
                             *source,

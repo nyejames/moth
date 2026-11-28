@@ -7,10 +7,10 @@
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
 use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, FoldRequirement, FoldServices,
+    ConstantValueFold, FoldRequirement, FoldServices, fold_value_with_constants,
 };
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstValueMetadata, ConstValuePayload, ConstValueStore,
+    ConstValueId, ConstValueMetadata, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -82,15 +82,11 @@ fn site_span(site: SiteRef<'_>) -> Option<SourceSpan> {
         SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
     }
 }
-fn folded_expression_root(
-    outcome: ConstantFoldOutcome,
-) -> crate::compiler_frontend::ast::expressions::expression_store::ExprId {
-    match outcome {
-        ConstantFoldOutcome::Folded(root) => root,
-        ConstantFoldOutcome::NotConstant(_) => {
-            panic!("expected a foldable constant expression")
-        }
-        ConstantFoldOutcome::Refused { reason, .. } => {
+fn folded_value(fold: ConstantValueFold) -> ConstValueId {
+    match fold {
+        ConstantValueFold::Value(value) => value,
+        ConstantValueFold::NotConstant => panic!("expected a foldable constant expression"),
+        ConstantValueFold::Refused(reason) => {
             panic!("constant expression unexpectedly refused folding: {reason:?}")
         }
     }
@@ -1088,20 +1084,18 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
             ConstRecordState::RuntimeValue,
         )
         .expect("fixture field reference fits store");
-    let folded = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
-        reference.id(),
-        &mut expression_builder,
-        &mut owned_constants,
-        FoldServices::new(&mut string_table, None, None),
-        &type_environment,
-        FoldRequirement::Opportunistic,
-        |path| (path == wrapper_path).then_some(wrapper_id),
-    )
-    .expect("slot wrapper folds as constant content");
-    let folded = folded_expression_root(folded);
-    let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(field_id) = expression_builder.view(folded).expect("folded wrapper belongs to builder").operation() else {
-        panic!("slot wrapper fold must produce a bound constant occurrence");
-    };
+    let field_id = folded_value(
+        fold_value_with_constants(
+            reference.id(),
+            &expression_builder,
+            &mut owned_constants,
+            FoldServices::new(&mut string_table, None, None),
+            &type_environment,
+            FoldRequirement::Opportunistic,
+            |path| (path == wrapper_path).then_some(wrapper_id),
+        )
+        .expect("slot wrapper folds as constant content"),
+    );
     let field = Declaration {
         id: field_path,
         type_id: builtin_type_ids::STRING,
@@ -1166,20 +1160,18 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
             SyntheticInterfaceProvenance::single(project_member.clone()),
         )
         .expect("fixture provenance fits builder");
-    let folded_scalar = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
-        scalar_id.id(),
-        &mut expression_builder,
-        &mut owned_constants,
-        FoldServices::new(&mut string_table, None, None),
-        &type_environment,
-        FoldRequirement::Opportunistic,
-        |_| None,
-    )
-    .expect("scalar constant folds as content");
-    let folded_scalar = folded_expression_root(folded_scalar);
-    let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(constant_id) = expression_builder.view(folded_scalar).expect("folded scalar belongs to builder").operation() else {
-        panic!("scalar fold must produce a bound constant occurrence");
-    };
+    let constant_id = folded_value(
+        fold_value_with_constants(
+            scalar_id.id(),
+            &expression_builder,
+            &mut owned_constants,
+            FoldServices::new(&mut string_table, None, None),
+            &type_environment,
+            FoldRequirement::Opportunistic,
+            |_| None,
+        )
+        .expect("scalar constant folds as content"),
+    );
     owned_constants
         .bind_module_constant(constant_path, constant_id)
         .expect("fixture constant binds");
@@ -1223,21 +1215,18 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
             SyntheticInterfaceProvenance::single(builder_member.clone()),
         )
         .expect("fixture collection provenance fits builder");
-    let folded_collection =
-        crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
+    let collection_default = folded_value(
+        fold_value_with_constants(
             collection_id.id(),
-            &mut expression_builder,
+            &expression_builder,
             &mut owned_constants,
             FoldServices::new(&mut string_table, None, None),
             &type_environment,
             FoldRequirement::Opportunistic,
             |path| (path == constant_path).then_some(constant_id),
         )
-        .expect("collection constant folds as content");
-    let folded_collection = folded_expression_root(folded_collection);
-    let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(collection_default) = expression_builder.view(folded_collection).expect("folded collection belongs to builder").operation() else {
-        panic!("collection fold must produce a bound constant occurrence");
-    };
+        .expect("collection constant folds as content"),
+    );
     let collection_metadata = owned_constants
         .metadata(collection_default)
         .expect("folded collection has content metadata");
@@ -1831,20 +1820,18 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
             ValueMode::ImmutableOwned,
         )
         .expect("fixture limit fits builder");
-    let folded_limit = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
-        limit_id.id(),
-        &mut expression_builder,
-        &mut owned_constants,
-        FoldServices::new(&mut string_table, None, None),
-        &type_environment,
-        FoldRequirement::Opportunistic,
-        |_| None,
-    )
-    .expect("limit folds as constant content");
-    let folded_limit = folded_expression_root(folded_limit);
-    let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(limit_default) = expression_builder.view(folded_limit).expect("folded limit belongs to builder").operation() else {
-        panic!("limit fold must produce a bound constant occurrence");
-    };
+    let limit_default = folded_value(
+        fold_value_with_constants(
+            limit_id.id(),
+            &expression_builder,
+            &mut owned_constants,
+            FoldServices::new(&mut string_table, None, None),
+            &type_environment,
+            FoldRequirement::Opportunistic,
+            |_| None,
+        )
+        .expect("limit folds as constant content"),
+    );
     owned_constants
         .bind_module_constant(limit_path, limit_default)
         .expect("fixture limit binds");
@@ -1897,20 +1884,18 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         ValueMode::ImmutableOwned,
         &type_environment,
     );
-    let folded_sum = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
-        sum_view,
-        &mut expression_builder,
-        &mut owned_constants,
-        FoldServices::new(&mut string_table, None, None),
-        &type_environment,
-        FoldRequirement::Opportunistic,
-        |path| (path == limit_path).then_some(limit_default),
-    )
-    .expect("sum folds as constant content");
-    let folded_sum = folded_expression_root(folded_sum);
-    let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(sum_default) = expression_builder.view(folded_sum).expect("folded sum belongs to builder").operation() else {
-        panic!("sum fold must produce a bound constant occurrence");
-    };
+    let sum_default = folded_value(
+        fold_value_with_constants(
+            sum_view,
+            &expression_builder,
+            &mut owned_constants,
+            FoldServices::new(&mut string_table, None, None),
+            &type_environment,
+            FoldRequirement::Opportunistic,
+            |path| (path == limit_path).then_some(limit_default),
+        )
+        .expect("sum folds as constant content"),
+    );
     let field = Declaration {
         id: path_fork
             .try_intern_child(struct_path, string_table.intern("total"))

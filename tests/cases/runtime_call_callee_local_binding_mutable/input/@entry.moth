@@ -1,0 +1,14 @@
+Box = |items {I32}|
+
+make || -> Box, Box:
+    shared = {1}
+    return Box(shared), Box({5})
+;
+
+probe || -> I32:
+    first ~Box, second Box = make()
+    ~first.items.push(2)
+    return first.items.length() * 10 + second.items.length()
+;
+
+~[:[probe()]]

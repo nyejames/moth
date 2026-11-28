@@ -954,7 +954,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                 external_package_registry: Arc::clone(&self.context.external_package_registry),
                 style_directives: self.context.style_directives.clone(),
-                build_profile: self.context.build_profile,
             }),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
             resolved_public_trait_roots: resolved_public_surface_outputs.trait_roots,
@@ -1086,7 +1085,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Rc::clone(&self.context.template_ir_store),
         )
         .with_style_directives(self.context.style_directives)
-        .with_build_profile(self.context.build_profile)
         .with_resolved_type_aliases(Rc::clone(&self.resolved_type_aliases_by_path))
         .with_generic_declarations(Rc::clone(&self.generic_declarations_by_path))
         .with_resolved_struct_fields_by_path(Rc::clone(&self.resolved_struct_fields_by_path))

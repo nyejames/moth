@@ -64,6 +64,7 @@ fn family_rows_keep_stable_descriptor_codes_and_default_severities() {
         ("MOTH-TYPE-0001", DiagnosticSeverity::Error),
         ("MOTH-IMPORT-0005", DiagnosticSeverity::Error),
         ("MOTH-BORROW-0001", DiagnosticSeverity::Error),
+        ("MOTH-BORROW-0010", DiagnosticSeverity::Error),
         ("MOTH-CONFIG-0001", DiagnosticSeverity::Error),
         ("MOTH-DEFERRED-0001", DiagnosticSeverity::Error),
     ];
@@ -80,7 +81,7 @@ fn family_rows_keep_stable_descriptor_codes_and_default_severities() {
         assert_eq!(row.descriptor.default_severity, expected_severity);
         schema_rows_checked += 1;
     }
-    assert_eq!(schema_rows_checked, 14);
+    assert_eq!(schema_rows_checked, 15);
 }
 
 #[test]

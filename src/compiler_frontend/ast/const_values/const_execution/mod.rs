@@ -1,8 +1,8 @@
 //! Bounded execution of prepared const functions at required call sites.
 //!
 //! WHAT: owns the executable row, the preparation entry points and this module map. Sibling
-//!       modules compile bodies, rewrite source calls, select release candidates and run the
-//!       bounded typed-AST frame machine over `ConstValueStore` values.
+//!       modules compile bodies, rewrite required source calls and run the bounded typed-AST
+//!       frame machine over live storage and immutable `ConstValueStore` payloads.
 //! WHY: constant initializers and required calls fold during environment construction, before
 //!      HIR exists. The typed AST body and the canonical expression store are the only available
 //!      representation at that boundary, so execution stays over that typed vocabulary and never
@@ -19,28 +19,26 @@
 //!
 //! ## Module map
 //!
-//! - `eligibility`: the single operation eligibility policy. It validates prepared bodies, proves
-//!   release candidates pure and scalar, and removes cyclic or incomplete candidate graphs.
-//! - `rewrite`: required and release AST expression rewriting, call-target discovery and
-//!   provenance transfer. `rewrite_required_const_calls` and `rewrite_release_calls` are the
-//!   module-tree entry points for the expression evaluator and finalizer.
+//! - `eligibility`: the single operation eligibility policy that validates prepared bodies.
+//! - `rewrite`: required AST expression rewriting and provenance transfer.
+//!   `rewrite_required_const_calls` is the module-tree entry point for the expression evaluator.
 //! - `instructions`: the compiled instruction vocabulary and declaration-time body compiler.
 //! - `labels`: the operation names shared by classification and execution refusals.
 //! - `state`: the interpreter's borrowed service context, live execution state and handler
 //!   snapshots.
+//! - `storage`: bounded dynamic binding cells, aggregate edges and access permissions.
 //! - `execute`: the one executed-frame machine, including expression evaluation,
 //!   range/collection bindings and the TIR template adapter.
-//! - `places`: interpreted aliases, projected reads and writes, collection mutation and fallible
-//!   handler execution.
+//! - `matching`: match arm selection over the AST's resolved patterns, guards and captures.
+//! - `places`: typed place resolution, collection operations and fallible handler execution.
 //! - `values`: constant folding and projection/index helpers, error constructors and
 //!   expression-with-value construction.
 //! - `budget`: limits, meters and allocation charging. It answers how much work an attempt may
 //!   still spend; live interpreter state belongs to `state`.
 //!
-//! Data flow: `executable_for_const_declaration` compiles and validates one declaration; the
-//! rewrite layer replaces a call with a constant by evaluating the callee through `execute`;
-//! `execute` reads and writes interpreted state through `places`; rewrite, execute and places all
-//! use the shared value helpers, instruction vocabulary and budget owned by this module tree.
+//! Data flow: `executable_for_const_declaration` compiles and validates one declaration;
+//! the frame machine returns ordered live values. The rewrite layer freezes a result only
+//! when an AST consumer needs a replacement. Place operations share the attempt-local arena.
 //! There is exactly one `ConstFunctionExecutable`, one eligibility policy and one executed-frame
 //! machine.
 
@@ -55,12 +53,13 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateOutputLimits, TemplateOutputMeter, TemplateWorkBudget,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 mod budget;
@@ -68,13 +67,16 @@ mod eligibility;
 mod execute;
 mod instructions;
 mod labels;
+mod matching;
 mod places;
 mod rewrite;
 mod state;
+mod storage;
 mod values;
 
 pub(crate) use eligibility::const_body_rejection_diagnostic;
-pub(crate) use rewrite::{rewrite_release_calls, rewrite_required_const_calls};
+pub(crate) use execute::{TirCollectionCapture, TirLiveItem};
+pub(crate) use rewrite::rewrite_required_const_calls;
 pub(crate) use state::ConstExecutionServices;
 
 use eligibility::validate_const_body_expressions;
@@ -83,9 +85,7 @@ use instructions::{ConstInstruction, compile_body};
 /// Why one authored const body cannot become a bounded typed executable.
 ///
 /// WHAT: the first unsupported operation and its authored location, if the body supplied one.
-/// WHY: declaration preparation, imported publication and the release classifier all
-///      need the same refusal site. Callers choose whether that refusal is a source error or an
-///      ineligible runtime candidate.
+/// WHY: declaration preparation and imported publication both need the same refusal site.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstBodyRejection {
     pub(crate) operation: &'static str,
@@ -96,6 +96,7 @@ pub(crate) struct ConstBodyRejection {
 #[derive(Debug)]
 pub(crate) enum ConstBodyPreparationError {
     Unsupported(ConstBodyRejection),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
@@ -111,10 +112,6 @@ pub(crate) struct ConstFunctionExecutable {
     instructions: Rc<[ConstInstruction]>,
     /// Catch bodies compiled once during declaration preparation, keyed by their authored catch
     /// expression.
-    ///
-    /// A rewrite that rebuilds a catch under a fresh `ExprId` registers the same body in
-    /// `ExecutionState::rewritten_handlers` as it produces the rebuild, so selection never depends
-    /// on an authored span or on the rebuilt expression having been prepared.
     handler_bodies: Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>,
     /// Declaring-domain owner for a body imported from a provider boundary.
     ///
@@ -135,13 +132,6 @@ impl ConstFunctionExecutable {
 enum ResolvedPlaceProjection {
     Field(StringId),
     Index(usize),
-}
-
-/// One mutable alias target: a canonical binding root and the projections copied from its place.
-#[derive(Clone, Debug)]
-struct AliasTarget {
-    root: PathId,
-    projections: Vec<ResolvedPlaceProjection>,
 }
 
 /// One constant value with its completed type, span and authored value mode.
@@ -173,16 +163,12 @@ pub(crate) fn executable_for_const_declaration(
     expressions: &AstExpressionBuilder,
     references: ConstBodyReferenceScope<'_>,
 ) -> Result<ConstFunctionExecutable, ConstBodyPreparationError> {
-    let mut executable =
-        executable_for_body(signature, body).map_err(ConstBodyPreparationError::Unsupported)?;
-    if executable.return_slots.len() != 1 {
-        let operation = if executable.return_slots.is_empty() {
-            labels::ZERO_SUCCESS_RESULTS
-        } else {
-            labels::MULTIPLE_SUCCESS_RESULTS
-        };
+    let mut executable = executable_for_body(signature, body, expressions)
+        .map_err(ConstBodyPreparationError::Unsupported)?;
+    // A call must produce a value to fold into its site; several ordered slots commit together.
+    if executable.return_slots.is_empty() {
         return Err(ConstBodyPreparationError::Unsupported(ConstBodyRejection {
-            operation,
+            operation: labels::ZERO_SUCCESS_RESULTS,
             span: None,
         }));
     }
@@ -191,9 +177,10 @@ pub(crate) fn executable_for_const_declaration(
 }
 
 /// Build the executable row for one prepared body when every statement is executable.
-pub(crate) fn executable_for_body(
+fn executable_for_body(
     signature: &FunctionSignature,
     body: &[AstNode],
+    expressions: &AstExpressionBuilder,
 ) -> Result<ConstFunctionExecutable, ConstBodyRejection> {
     let return_slots = signature
         .return_contract
@@ -209,7 +196,7 @@ pub(crate) fn executable_for_body(
             .map(|parameter| (parameter.id, parameter.type_id))
             .collect(),
         return_slots: return_slots.success().to_vec(),
-        instructions: compile_body(body)?,
+        instructions: compile_body(body, expressions)?,
         handler_bodies: Rc::new(FxHashMap::default()),
         donor_identity: None,
     })

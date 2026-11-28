@@ -1,4 +1,9 @@
 @square square
+@square Size
+@square weigh
+@square packed
+@square forwarded_bounds
+@square shared_values
 
 inner #|value I32| -> I32:
     return value + 1
@@ -8,7 +13,40 @@ outer #|value I32| -> I32:
     return inner(value)
 ;
 
+-- A local match over an imported choice compares the same variant identity as the owner.
+doubled_weight #|size Size| -> I32:
+    if size is:
+        Size::Large(weight) => return weight * 2
+        else => return 0
+    ;
+;
+
+-- An imported multi-result const call delivers both slots to a local multi-bind.
+local_forward #|value I32| -> I32, I32:
+    return forwarded_bounds(value)
+;
+
+width #|value I32| -> I32:
+    low, high = local_forward(value)
+    return high - low
+;
+
+imported_aliases #|| -> I32:
+    left ~= {5}
+    right ~= {6}
+    ~left, ~right = shared_values()
+    ~left.push(2)
+    return left.length() * 10 + right.length()
+;
+
 nested #I32 = outer(41)
 imported #I32 = square(6)
+owner_match #I32 = weigh(Size::Large(5))
+local_match #I32 = doubled_weight(Size::Large(5))
+local_default #I32 = doubled_weight(Size::Small)
+spread #I32 = width(5)
+low, high = local_forward(10)
+remote #I32 = packed(3)
+shared #I32 = imported_aliases()
 
-~[: nested=[nested] imported=[imported] ]
+~[: nested=[nested] imported=[imported] choices=[owner_match],[local_match],[local_default] bounds=[spread],[low],[high],[remote] shared=[shared] ]

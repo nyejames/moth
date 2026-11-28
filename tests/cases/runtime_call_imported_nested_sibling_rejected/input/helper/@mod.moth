@@ -1,0 +1,11 @@
+$export
+Inner = |items {I32}|
+
+$export
+Box = |inner Inner|
+
+$export
+pair || -> Box, Box:
+    shared = {1}
+    return Box(Inner(shared)), Box(Inner(shared))
+;

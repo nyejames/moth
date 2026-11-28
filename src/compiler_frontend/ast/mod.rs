@@ -156,7 +156,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, ExpressionStore,
+    AstExpressionBuilder, ExpressionStore,
 };
 use crate::compiler_frontend::ast::expressions::failure_classification::PendingFunctionFailureFacts;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
@@ -342,27 +342,6 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
     witnesses.dedup();
 }
 
-/// One selected ordinary call that release constant folding replaced with its value.
-///
-/// WHAT: the owning callable, the callee's AST declaration path and the authored call span.
-/// WHY: release speculation runs on the completed AST before HIR, so a folded call site is
-///      absent from every HIR block. The erased call is still selected source, though: its callee's
-///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
-///      that keeps the call. HIR projects each row through the same call-target mapping and
-///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
-///      because every projected row carries its authored call site; the release producer declines
-///      to erase a spanless call instead. Catch handler bodies and handled subjects are never
-///      folded, so every recorded row belongs to source HIR lowered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AstReleaseErasedCallSite {
-    /// The callable body whose expression release speculation folded.
-    pub(crate) function: AstFunctionIdentity,
-    /// The callee's ordered declaration path in this module's AST.
-    pub(crate) target: PathId,
-    /// The authored span of the erased call expression.
-    pub(crate) span: SourceSpan,
-}
-
 /// Unified AST output for all source files in one compilation unit.
 ///
 /// WHAT: the fully resolved, typed executable AST produced by Stage 4, ready for HIR lowering.
@@ -389,48 +368,25 @@ pub struct Ast {
     ///
     /// WHAT: one sparse record per selected fast operation, kept from resolution through folding
     ///       and dead-result elimination.
-    /// WHY: `$safe_math` and `$infallible` verification run after optimisation, so evidence of a
+    /// WHY: `$safe_math` and `$infallible` verification run after eager folding, so evidence of a
     ///      selected fast operation cannot live on the (possibly folded) expression node. The
     ///      ledger is recorded beside the executable AST and ordered and deduplicated once in
     ///      finalization after every producer has contributed. HIR then projects it per function
     ///      into constraint evidence before the AST is dropped.
     pub(crate) fast_operation_witnesses: Vec<AstFastOperationWitness>,
 
-    /// Selected ordinary calls erased by release constant folding, in recording order.
-    ///
-    /// WHAT: one sparse row per folded call site, keyed by its owning callable.
-    /// WHY: `$safe_math` and `$infallible` verification run after release speculation, so a folded
-    ///      call has no HIR block that could evidence its callee. The ledger keeps the call site
-    ///      visible to HIR projection without retaining the erased expression tree or disabling a
-    ///      profitable fold. Catch handler bodies and handled subjects stay at runtime, so every
-    ///      row is executable source HIR lowered. It is empty in debug builds because no call is
-    ///      erased there.
-    pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
-
-    /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.
+    /// Failure facts for every concrete callable in `nodes`, keyed by callable identity.
     ///
     /// WHAT: the implicit contributors, deferred custom catches and assertion-message calls the
-    ///       AST classifier decided before release folding. Authored-dead statement tails were
-    ///       excluded from executable contributors per occurrence, so each body's contributor
-    ///       lists keep authored order, but those tails still supply their validation-only
-    ///       obligations (deferred custom catches and assertion-message calls). The map itself is
-    ///       only a lookup. Dormant generic-template identities are dropped because HIR never
-    ///       reads them.
-    /// WHY: release folding must not add, remove or reorder failure facts. Finalization always
-    ///      computes these facts, even when no dormant template needs boundary validation, and HIR
-    ///      projects them instead of reclassifying the post-fold AST, so debug and release publish
+    ///       AST classifier decided. Authored-dead statement tails were excluded from executable
+    ///       contributors per occurrence, so each body's contributor lists keep authored order, but
+    ///       those tails still supply their validation-only obligations (deferred custom catches
+    ///       and assertion-message calls). The map itself is only a lookup. Dormant
+    ///       generic-template identities are dropped because HIR never reads them.
+    /// WHY: finalization already computes these facts for generic boundary validation. HIR
+    ///      projects them instead of reclassifying the frozen AST, so validation and HIR publish
     ///      the same contributors and the same witness order.
-    pub(crate) pre_fold_failure_facts: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
-
-    /// Statement-owned `Bool` conditions the folded-Bool authority decided before release folding.
-    ///
-    /// WHAT: one row per `assert`, `if`, value-`if` and conditional-loop condition, keyed by its
-    ///       expression root.
-    /// WHY: HIR lowering classifies these conditions by the pre-optimisation selection fact. A
-    ///      release fold can replace an ordinary call with its constant result, and reading the
-    ///      post-fold store would then omit a loop body or a trap that a debug build keeps. A
-    ///      condition no profile folded has no row.
-    pub(crate) pre_fold_bool_conditions: FxHashMap<ExprId, bool>,
+    pub(crate) function_failure_facts: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
 
     /// Inactive static-`if` branches, retained so HIR projection can drop their evidence rows.
     ///

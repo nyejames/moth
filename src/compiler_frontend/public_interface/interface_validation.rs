@@ -9,15 +9,16 @@
 
 use super::model::{
     PublicCallableReturnContract, PublicDeclarationSemantics, PublicEvidenceRecord,
-    PublicFunctionCategory, PublicParameterContract, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicSemanticInterface, PublicTraitParameterContract,
-    PublicTraitReceiverAccess, PublicTraitRequirementSurface, PublicTraitReturnContract,
-    TraitSurfaceTypeIdentity,
+    PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterContract,
+    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
+    PublicSemanticInterface, PublicTraitParameterContract, PublicTraitReceiverAccess,
+    PublicTraitRequirementSurface, PublicTraitReturnContract, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::builtins::casts::traits::BUILTIN_CAST_TRAIT_ROWS;
+use crate::compiler_frontend::builtins::error_type::builtin_error_field_type;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity,
@@ -25,14 +26,18 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX;
+use crate::compiler_frontend::public_call_summary::typed::Layout;
 use crate::compiler_frontend::public_call_summary::{
-    PublicCallParameterAccess, validate_public_call_summary,
+    CallEndpoint, CallField, CallPathType, PublicCallParameterAccess, PublicCallSummary,
+    allocation_error, validate_public_call_parameter_contract,
 };
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
 use crate::compiler_frontend::traits::environment::DISPLAYABLE_REQUIREMENT_NAME;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 
 impl PublicSemanticInterface {
     /// Validate locally produced declaration, summary and evidence facts before provider closure.
@@ -55,7 +60,7 @@ impl PublicSemanticInterface {
             }
             validate_declaration_category(&declaration.origin, &declaration.semantics)?;
         }
-        self.validate_concrete_call_summaries(&declarations_by_origin)?;
+        self.validate_concrete_call_summaries(&declarations_by_origin, true)?;
         self.validate_reusable_evidence(&declarations_by_origin, EvidenceJoinScope::LocalOnly)
     }
 
@@ -64,7 +69,7 @@ impl PublicSemanticInterface {
         self.validate_no_private_type_identities()?;
 
         let declarations_by_origin = self.validate_declarations_and_bindings()?;
-        self.validate_concrete_call_summaries(&declarations_by_origin)?;
+        self.validate_concrete_call_summaries(&declarations_by_origin, false)?;
         self.validate_reusable_evidence(&declarations_by_origin, EvidenceJoinScope::Closed)
     }
 
@@ -248,11 +253,13 @@ impl PublicSemanticInterface {
     fn validate_concrete_call_summaries(
         &self,
         declarations_by_origin: &FxHashMap<&OriginDeclarationId, &PublicDeclarationSemantics>,
+        allow_unavailable_layouts: bool,
     ) -> Result<(), InfrastructureFailure> {
         let mut expected = FxHashMap::default();
         for (origin, semantics) in declarations_by_origin {
             collect_expected_callable_summaries(origin, semantics, &mut expected)?;
         }
+        let layouts = call_path_layouts(&self.declarations);
 
         let mut seen = FxHashSet::default();
         for record in &self.concrete_call_summaries {
@@ -262,23 +269,25 @@ impl PublicSemanticInterface {
                     record.origin
                 )));
             }
-            let Some(parameter_access) = expected.remove(&record.origin) else {
+            let Some(signature) = expected.remove(&record.origin) else {
                 return Err(publication_error(format!(
                     "unexpected concrete call summary for {:?}",
                     record.origin
                 )));
             };
-            validate_public_call_summary(&parameter_access, &record.summary).map_err(|error| {
-                publication_error(format!(
-                    "invalid concrete call summary for {:?}: {}",
-                    record.origin, error.message
-                ))
-            })?;
+            signature
+                .validate_summary(&layouts, &record.summary, allow_unavailable_layouts)
+                .map_err(|error| {
+                    publication_error(format!(
+                        "invalid concrete call summary for {:?}: {}",
+                        record.origin, error.message
+                    ))
+                })?;
         }
 
         if let Some((origin, _)) = expected
             .into_iter()
-            .min_by(|left, right| left.0.cmp(&right.0))
+            .min_by(|left, right| left.0.cmp(right.0))
         {
             return Err(publication_error(format!(
                 "missing concrete call summary for {:?}",
@@ -754,10 +763,10 @@ fn validate_declaration_category(
     Ok(())
 }
 
-fn collect_expected_callable_summaries(
-    origin: &OriginDeclarationId,
-    semantics: &PublicDeclarationSemantics,
-    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
+fn collect_expected_callable_summaries<'a>(
+    origin: &'a OriginDeclarationId,
+    semantics: &'a PublicDeclarationSemantics,
+    expected: &mut FxHashMap<&'a OriginFunctionId, CallSignature<'a>>,
 ) -> Result<(), InfrastructureFailure> {
     match semantics {
         PublicDeclarationSemantics::Function(function) => {
@@ -778,7 +787,14 @@ fn collect_expected_callable_summaries(
                 return Ok(());
             }
             if matches!(function.category, PublicFunctionCategory::ConcreteLocal) {
-                insert_expected_summary(origin, &function.parameters, expected)?;
+                insert_expected_summary(
+                    origin,
+                    CallSignature {
+                        parameters: &function.parameters,
+                        returns: &function.return_contract,
+                    },
+                    expected,
+                )?;
             }
         }
         PublicDeclarationSemantics::Struct(structure) => {
@@ -814,10 +830,10 @@ fn collect_expected_callable_summaries(
     Ok(())
 }
 
-fn collect_expected_receiver_summaries(
+fn collect_expected_receiver_summaries<'a>(
     receiver_origin: &OriginTypeId,
-    methods: &[super::model::PublicReceiverMethodSemantics],
-    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
+    methods: &'a [PublicReceiverMethodSemantics],
+    expected: &mut FxHashMap<&'a OriginFunctionId, CallSignature<'a>>,
 ) -> Result<(), InfrastructureFailure> {
     for method in methods {
         if method.method_origin.receiver() != Some(receiver_origin) {
@@ -827,28 +843,506 @@ fn collect_expected_receiver_summaries(
             )));
         }
         if matches!(method.category, PublicReceiverMethodCategory::ConcreteLocal) {
-            insert_expected_summary(&method.method_origin, &method.parameters, expected)?;
+            insert_expected_summary(
+                &method.method_origin,
+                CallSignature {
+                    parameters: &method.parameters,
+                    returns: &method.return_contract,
+                },
+                expected,
+            )?;
         }
     }
     Ok(())
 }
 
-fn insert_expected_summary(
-    origin: &OriginFunctionId,
-    parameters: &[super::model::PublicParameterTypeSlot],
-    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
+fn insert_expected_summary<'a>(
+    origin: &'a OriginFunctionId,
+    signature: CallSignature<'a>,
+    expected: &mut FxHashMap<&'a OriginFunctionId, CallSignature<'a>>,
 ) -> Result<(), InfrastructureFailure> {
-    let parameter_access = parameters
-        .iter()
-        .map(|parameter| parameter.access)
-        .collect();
-    if expected.insert(origin.clone(), parameter_access).is_some() {
+    if expected.insert(origin, signature).is_some() {
         return Err(publication_error(format!(
             "duplicate concrete callable origin {:?}",
             origin
         )));
     }
     Ok(())
+}
+
+type CallPathLayouts<'a> = FxHashMap<&'a OriginTypeId, &'a PublicDeclarationSemantics>;
+
+fn call_path_layouts(
+    declarations: &[super::model::PublicDeclarationRecord],
+) -> CallPathLayouts<'_> {
+    declarations
+        .iter()
+        .filter_map(|declaration| match &declaration.origin {
+            OriginDeclarationId::Type(origin) => Some((origin, &declaration.semantics)),
+            _ => None,
+        })
+        .collect()
+}
+
+struct CallSignature<'a> {
+    parameters: &'a [PublicParameterTypeSlot],
+    returns: &'a PublicCallableReturnContract,
+}
+
+struct TypedSignatureLayout<'a, 'decl, F> {
+    signature: &'a CallSignature<'decl>,
+    layouts: &'a CallPathLayouts<'decl>,
+    builtin_error: bool,
+    private_layout: F,
+    unavailable: &'a std::cell::Cell<bool>,
+}
+
+type StableChildren<'a> = &'a [(CallField, CanonicalTypeIdentity)];
+
+impl<'a, 'decl, F> Layout for TypedSignatureLayout<'a, 'decl, F>
+where
+    F: Fn(&CanonicalTypeIdentity) -> Option<StableChildren<'decl>>,
+{
+    type Type = CanonicalTypeIdentity;
+
+    fn parameter(&self, index: usize) -> Option<CallEndpoint<Self::Type>> {
+        self.stable(&self.signature.parameters.get(index)?.type_identity)
+    }
+
+    fn result(&self, error_lane: bool, slot: usize) -> Option<CallEndpoint<Self::Type>> {
+        let PublicCallableReturnContract::Returns { success, error } = self.signature.returns
+        else {
+            return None;
+        };
+        if error_lane {
+            (slot == 0).then_some(())?;
+            if let Some(error) = error {
+                self.stable(error)
+            } else {
+                self.builtin_error.then(|| {
+                    known_endpoint(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error))
+                })
+            }
+        } else {
+            self.stable(&success.get(slot)?.type_identity)
+        }
+    }
+
+    fn child(&self, ty: &Self::Type, selector: CallField) -> Option<CallEndpoint<Self::Type>> {
+        if matches!(
+            ty,
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+                | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
+        ) {
+            let rows = (self.private_layout)(ty)?;
+            return self.stable(&rows.iter().find(|(field, _)| *field == selector)?.1);
+        }
+        match canonical_path_type(ty, &mut std::iter::once(&selector), self.layouts, None)? {
+            CallPathType::Known(child) => self.stable(&child),
+            CallPathType::Unavailable => {
+                self.unavailable.set(true);
+                None
+            }
+        }
+    }
+
+    fn stable(&self, ty: &Self::Type) -> Option<CallEndpoint<Self::Type>> {
+        if matches!(
+            ty,
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+                | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
+        ) {
+            (self.private_layout)(ty)?;
+        }
+        Some(known_endpoint(ty.clone()))
+    }
+
+    fn children(&self, ty: &Self::Type, visit: &mut dyn FnMut(CallEndpoint<Self::Type>)) {
+        let mut emit = |selector| {
+            if let Some(child) = self.child(ty, selector) {
+                visit(child);
+            }
+        };
+        match ty {
+            CanonicalTypeIdentity::Collection { .. } => emit(CallField::Elem),
+            CanonicalTypeIdentity::OrderedMap { .. } => {
+                emit(CallField::MapKey);
+                emit(CallField::Elem);
+            }
+            CanonicalTypeIdentity::Option(_) => emit(CallField::Payload {
+                variant: OPTION_SOME_VARIANT_INDEX as u32,
+                field: 0,
+            }),
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error) => {
+                for ordinal in 0.. {
+                    if builtin_error_field_type(ordinal).is_none() {
+                        break;
+                    }
+                    emit(CallField::Field(ordinal));
+                }
+            }
+            CanonicalTypeIdentity::SourceNominal(origin)
+            | CanonicalTypeIdentity::GenericInstance { base: origin, .. } => {
+                match self.layouts.get(origin) {
+                    Some(PublicDeclarationSemantics::Struct(structure)) => {
+                        for ordinal in 0..structure.fields.len() {
+                            emit(CallField::Field(ordinal as u32));
+                        }
+                    }
+                    Some(PublicDeclarationSemantics::Choice(choice)) => {
+                        for (variant, layout) in choice.variants.iter().enumerate() {
+                            for field in 0..layout.payload_fields.len() {
+                                emit(CallField::Payload {
+                                    variant: variant as u32,
+                                    field: field as u32,
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+            | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. } => {
+                if let Some(rows) = (self.private_layout)(ty) {
+                    for (selector, _) in rows {
+                        emit(*selector);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn known_endpoint(ty: CanonicalTypeIdentity) -> CallEndpoint<CanonicalTypeIdentity> {
+    CallEndpoint {
+        allocation: has_canonical_allocation_surface(&ty),
+        ty,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn typed_signature_resolves_a_private_field_only_with_its_stable_layout() {
+    use crate::compiler_frontend::canonical_type_identity::ModulePrivateNominalIdentity;
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+    let private = CanonicalTypeIdentity::ModulePrivateNominal(ModulePrivateNominalIdentity::new(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("typed-layout"),
+            "entry".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "InternalTerminal".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+    let signature = CallSignature {
+        parameters: &[],
+        returns: &PublicCallableReturnContract::Never,
+    };
+    let layouts = CallPathLayouts::default();
+    let ty = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
+    let rows = [(CallField::Field(0), ty.clone())];
+    let unavailable = std::cell::Cell::new(false);
+    let with_private = TypedSignatureLayout {
+        signature: &signature,
+        layouts: &layouts,
+        builtin_error: false,
+        unavailable: &unavailable,
+        private_layout: |identity: &CanonicalTypeIdentity| {
+            (identity == &private).then_some(rows.as_slice())
+        },
+    };
+    let without_private = TypedSignatureLayout {
+        signature: &signature,
+        layouts: &layouts,
+        builtin_error: false,
+        unavailable: &unavailable,
+        private_layout: |_: &CanonicalTypeIdentity| None,
+    };
+    assert!(
+        without_private
+            .child(&private, CallField::Field(0))
+            .is_none()
+    );
+    let field = with_private.child(&private, CallField::Field(0)).unwrap();
+    assert_eq!(field.ty, ty);
+    assert!(!field.allocation);
+    assert!(with_private.child(&private, CallField::Elem).is_none());
+}
+
+impl CallSignature<'_> {
+    fn validate_summary(
+        &self,
+        layouts: &CallPathLayouts<'_>,
+        summary: &PublicCallSummary,
+        allow_unavailable_layouts: bool,
+    ) -> Result<(), InfrastructureFailure> {
+        validate_public_call_parameter_contract(
+            self.parameters.iter().map(|parameter| parameter.access),
+            summary,
+        )?;
+        let facts = summary
+            .return_alias
+            .facts()
+            .ok_or_else(|| allocation_error("completed callable still has pending facts"))?;
+        let (success, error) = match self.returns {
+            PublicCallableReturnContract::Never => (None, false),
+            PublicCallableReturnContract::Returns { success, error } => (
+                Some(success.len()),
+                error.is_some() || summary.escapes_builtin_failure,
+            ),
+        };
+        let access: Vec<_> = self.parameters.iter().map(|slot| slot.access).collect();
+        let shape = facts.shape(&access, success, error);
+        let unavailable = std::cell::Cell::new(false);
+        let result = facts.validate_layout(
+            &shape,
+            &TypedSignatureLayout {
+                signature: self,
+                layouts,
+                builtin_error: summary.escapes_builtin_failure,
+                private_layout: |_: &CanonicalTypeIdentity| None,
+                unavailable: &unavailable,
+            },
+        );
+        if allow_unavailable_layouts && unavailable.get() {
+            Ok(())
+        } else {
+            result
+        }
+    }
+}
+
+/// A generic instance's arguments were authored in the enclosing layout's parameter scope.
+/// Keep that scope when following a selected field's parameter back to its argument.
+struct LayoutArguments<'types, 'frame> {
+    parameters: &'types [PublicGenericParameterSurface],
+    arguments: &'types [CanonicalTypeIdentity],
+    outer: Option<&'frame LayoutArguments<'types, 'frame>>,
+}
+
+fn canonical_path_type<'a, 'path>(
+    ty: &'a CanonicalTypeIdentity,
+    path: &mut impl Iterator<Item = &'path CallField>,
+    layouts: &CallPathLayouts<'a>,
+    arguments: Option<&LayoutArguments<'a, '_>>,
+) -> Option<CallPathType<Cow<'a, CanonicalTypeIdentity>>> {
+    let (ty, arguments) = resolve_layout_argument(ty, arguments)?;
+    let Some(&selector) = path.next() else {
+        return instantiate_path_type(ty, arguments).map(CallPathType::Known);
+    };
+
+    match (ty, selector) {
+        (CanonicalTypeIdentity::Option(inner), CallField::Payload { variant, field: 0 })
+            if variant as usize == OPTION_SOME_VARIANT_INDEX =>
+        {
+            canonical_path_type(inner, path, layouts, arguments)
+        }
+        (CanonicalTypeIdentity::Collection { element, .. }, CallField::Elem) => {
+            canonical_path_type(element, path, layouts, arguments)
+        }
+        (CanonicalTypeIdentity::OrderedMap { value, .. }, CallField::Elem)
+        | (CanonicalTypeIdentity::OrderedMap { key: value, .. }, CallField::MapKey) => {
+            canonical_path_type(value, path, layouts, arguments)
+        }
+        (
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+            CallField::Field(ordinal),
+        ) => {
+            let field = builtin_error_field_type(ordinal)?;
+            // The manifest's field types are builtins with no allocation-bearing children.
+            path.next()
+                .is_none()
+                .then_some(CallPathType::Known(Cow::Owned(field)))
+        }
+        (CanonicalTypeIdentity::SourceNominal(origin), _) => {
+            nominal_path_type(origin, &[], selector, path, layouts, arguments)
+        }
+        (
+            CanonicalTypeIdentity::GenericInstance {
+                base,
+                arguments: instance,
+            },
+            _,
+        ) => nominal_path_type(base, instance, selector, path, layouts, arguments),
+        _ => None,
+    }
+}
+
+fn nominal_path_type<'a, 'path>(
+    origin: &OriginTypeId,
+    instance: &'a [CanonicalTypeIdentity],
+    selector: CallField,
+    path: &mut impl Iterator<Item = &'path CallField>,
+    layouts: &CallPathLayouts<'a>,
+    arguments: Option<&LayoutArguments<'a, '_>>,
+) -> Option<CallPathType<Cow<'a, CanonicalTypeIdentity>>> {
+    let kind_matches = matches!(
+        (origin.category(), selector),
+        (OriginTypeCategory::Struct, CallField::Field(_))
+            | (OriginTypeCategory::Choice, CallField::Payload { .. })
+    );
+    if !kind_matches {
+        return None;
+    }
+    let Some(declaration) = layouts.get(origin).copied() else {
+        return Some(CallPathType::Unavailable);
+    };
+    let (child, parameters) = match (declaration, selector) {
+        (PublicDeclarationSemantics::Struct(structure), CallField::Field(ordinal)) => (
+            &structure.fields.get(ordinal as usize)?.type_identity,
+            structure.generic_parameters.as_slice(),
+        ),
+        (PublicDeclarationSemantics::Choice(choice), CallField::Payload { variant, field }) => (
+            &choice
+                .variants
+                .get(variant as usize)?
+                .payload_fields
+                .get(field as usize)?
+                .type_identity,
+            choice.generic_parameters.as_slice(),
+        ),
+        _ => return None,
+    };
+    if parameters.len() != instance.len() {
+        return None;
+    }
+    if parameters.is_empty() {
+        return canonical_path_type(child, path, layouts, arguments);
+    }
+    let arguments = LayoutArguments {
+        parameters,
+        arguments: instance,
+        outer: arguments,
+    };
+    canonical_path_type(child, path, layouts, Some(&arguments))
+}
+
+fn resolve_layout_argument<'types, 'frame>(
+    mut ty: &'types CanonicalTypeIdentity,
+    mut arguments: Option<&'frame LayoutArguments<'types, 'frame>>,
+) -> Option<(
+    &'types CanonicalTypeIdentity,
+    Option<&'frame LayoutArguments<'types, 'frame>>,
+)> {
+    while let CanonicalTypeIdentity::GenericParameter(identity) = ty {
+        let mut frame = arguments;
+        loop {
+            let bindings = frame?;
+            if let Some(index) = bindings
+                .parameters
+                .iter()
+                .position(|parameter| &parameter.identity == identity)
+            {
+                ty = bindings.arguments.get(index)?;
+                arguments = bindings.outer;
+                break;
+            }
+            frame = bindings.outer;
+        }
+    }
+    Some((ty, arguments))
+}
+
+/// Materialize only the compound portions that actually contain a substituted parameter.
+fn instantiate_path_type<'a>(
+    ty: &'a CanonicalTypeIdentity,
+    arguments: Option<&LayoutArguments<'a, '_>>,
+) -> Option<Cow<'a, CanonicalTypeIdentity>> {
+    use CanonicalTypeIdentity::{Collection, GenericInstance, Option as OptionType, OrderedMap};
+
+    let (ty, arguments) = resolve_layout_argument(ty, arguments)?;
+    let result = match ty {
+        OptionType(inner) => {
+            let resolved = instantiate_path_type(inner, arguments)?;
+            if std::ptr::eq(resolved.as_ref(), inner.as_ref()) {
+                return Some(Cow::Borrowed(ty));
+            }
+            OptionType(Box::new(resolved.into_owned()))
+        }
+        Collection {
+            element,
+            fixed_capacity,
+        } => {
+            let resolved = instantiate_path_type(element, arguments)?;
+            if std::ptr::eq(resolved.as_ref(), element.as_ref()) {
+                return Some(Cow::Borrowed(ty));
+            }
+            Collection {
+                element: Box::new(resolved.into_owned()),
+                fixed_capacity: *fixed_capacity,
+            }
+        }
+        OrderedMap { key, value } => {
+            let resolved_key = instantiate_path_type(key, arguments)?;
+            let resolved_value = instantiate_path_type(value, arguments)?;
+            if std::ptr::eq(resolved_key.as_ref(), key.as_ref())
+                && std::ptr::eq(resolved_value.as_ref(), value.as_ref())
+            {
+                return Some(Cow::Borrowed(ty));
+            }
+            OrderedMap {
+                key: Box::new(resolved_key.into_owned()),
+                value: Box::new(resolved_value.into_owned()),
+            }
+        }
+        GenericInstance {
+            base,
+            arguments: instance,
+        } => {
+            let mut resolved: Option<Vec<CanonicalTypeIdentity>> = None;
+            for (index, original) in instance.iter().enumerate() {
+                let argument = instantiate_path_type(original, arguments)?;
+                if let Some(output) = &mut resolved {
+                    output.push(argument.into_owned());
+                } else if !std::ptr::eq(argument.as_ref(), original) {
+                    let mut output = Vec::with_capacity(instance.len());
+                    output.extend_from_slice(&instance[..index]);
+                    output.push(argument.into_owned());
+                    resolved = Some(output);
+                }
+            }
+            let Some(resolved) = resolved else {
+                return Some(Cow::Borrowed(ty));
+            };
+            GenericInstance {
+                base: base.clone(),
+                arguments: resolved.into_boxed_slice(),
+            }
+        }
+        _ => return Some(Cow::Borrowed(ty)),
+    };
+    Some(Cow::Owned(result))
+}
+
+/// Canonical counterpart of HIR's `has_in_place_mutation_surface`. The builtin Error
+/// identity denotes the compiler-owned choice, not a scalar.
+fn has_canonical_allocation_surface(ty: &CanonicalTypeIdentity) -> bool {
+    match ty {
+        CanonicalTypeIdentity::Builtin(builtin) => match builtin {
+            CanonicalBuiltinType::Bool
+            | CanonicalBuiltinType::Char
+            | CanonicalBuiltinType::None
+            | CanonicalBuiltinType::FixedScalar(_)
+            | CanonicalBuiltinType::Number(_) => false,
+            CanonicalBuiltinType::String
+            | CanonicalBuiltinType::Range
+            | CanonicalBuiltinType::Error => true,
+        },
+        CanonicalTypeIdentity::AnonymousConstRecord
+        | CanonicalTypeIdentity::GenericParameter(_) => false,
+        CanonicalTypeIdentity::SourceNominal(_)
+        | CanonicalTypeIdentity::ModulePrivateNominal(_)
+        | CanonicalTypeIdentity::ExternalOpaque(_)
+        | CanonicalTypeIdentity::Collection { .. }
+        | CanonicalTypeIdentity::OrderedMap { .. }
+        | CanonicalTypeIdentity::Option(_)
+        | CanonicalTypeIdentity::GenericInstance { .. }
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. } => true,
+    }
 }
 
 fn receiver_methods(

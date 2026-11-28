@@ -18,6 +18,7 @@ impl<'a> ExpressionView<'a> {
                 value: builder.own(value.value),
                 target_param: value.target_param,
                 parameter_slot: value.parameter_slot,
+                authored_ordinal: value.authored_ordinal,
                 access_mode: value.access_mode,
                 passing_mode: value.passing_mode,
                 span: value.span,
@@ -32,6 +33,7 @@ impl<'a> ExpressionView<'a> {
             CandidateCall {
                 target: c.target,
                 evaluation: c.evaluation,
+                receiver_access: c.receiver_access,
                 arguments: arguments(c.arguments),
                 handling: c.handling.map(|id| owner.handling[id.index()].clone()),
                 requires_external_float_validation: c.requires_external_float_validation,
@@ -47,6 +49,7 @@ impl<'a> ExpressionView<'a> {
             .map(|value| ConstructorField {
                 name: value.name,
                 slot: value.slot,
+                authored_ordinal: value.authored_ordinal,
                 value: builder.own(value.value),
             })
             .collect()

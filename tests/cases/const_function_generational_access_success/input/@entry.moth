@@ -1,0 +1,70 @@
+Pair = |left I32, right I32|
+Box = |items {I32}|
+
+-- Extending one field's lifetime must not make a separate field stale.
+disjoint #|| -> I32:
+    pair ~= Pair(1, 2)
+    old_left = pair.left
+    right = pair.right
+    ~pair.left = 3
+    fresh_left = pair.left
+    return fresh_left * 10 + right
+;
+
+retained_disjoint #|| -> I32:
+    source ~= Pair(1, 2)
+    shared = source.right
+    retained ~= Pair(shared, 9)
+    view = retained
+    ~source.left = 4
+    return view.left * 10 + view.right
+;
+
+-- The failed write selects its handler and does not invalidate the reader.
+failed_write #|| -> I32:
+    values ~= {7}
+    view = values
+    ~values.set(9, 42) catch:
+    ;
+    return view.get(0) catch then 0
+;
+
+-- The projection belongs to the old allocation, not the re-bound name.
+rebound #|| -> I32:
+    box ~= Box({1})
+    view = box.items
+    ~box = Box({2, 3, 4})
+    return view.length() * 10 + box.items.length()
+;
+
+selected #|take_stale Bool| -> I32:
+    slot ~= 4
+    view = slot
+    ~slot = 5
+    if take_stale:
+        return view
+    ;
+    return slot
+;
+
+uncalled #|| -> I32:
+    return selected(true)
+;
+
+results #|seen I32| -> I32, I32:
+    return 2, seen
+;
+
+simultaneous #|| -> I32:
+    value ~= 1
+    ~value, unused = results(value)
+    return value
+;
+
+x #I32 = disjoint()
+y #I32 = failed_write()
+z #I32 = rebound()
+w #I32 = selected(false)
+v #I32 = retained_disjoint()
+u #I32 = simultaneous()
+~[: disjoint=[x] recovered=[y] rebound=[z] selected=[w] retained=[v] simultaneous=[u]]

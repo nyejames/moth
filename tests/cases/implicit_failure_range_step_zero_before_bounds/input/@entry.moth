@@ -16,17 +16,17 @@ positive_wrong_direction = walk(10, 0, 3) catch then -1
 minimum_step = walk(10, 0, -2147483648) catch then -1
 zero_code ~U32 = 0
 zero_wrong_direction = walk(10, 0, 0) catch |zero_error|:
-    ~zero_code = zero_error.code
+    ~zero_code = copy zero_error.code
     then -1
 ;
 equal_code ~U32 = 0
 zero_equal_bounds = walk(5, 5, 0) catch |equal_error|:
-    ~equal_code = equal_error.code
+    ~equal_code = copy equal_error.code
     then -1
 ;
 ascending_code ~U32 = 0
 zero_ascending = walk(0, 10, 0) catch |ascending_error|:
-    ~ascending_code = ascending_error.code
+    ~ascending_code = copy ascending_error.code
     then -1
 ;
 

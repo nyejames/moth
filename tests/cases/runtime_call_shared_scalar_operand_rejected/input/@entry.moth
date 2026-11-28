@@ -1,0 +1,14 @@
+-- A scalar shared operand is a binding of the place, not an implicit copy, so
+-- the later mutation conflicts as with `before = count`. `copy count` is the
+-- accepted spelling that observes the old value.
+pair_text |before I32, after I32| -> String:
+    return [:[before]-[after]]
+;
+
+bump |value ~I32| -> I32:
+    ~value += 1
+    return value
+;
+
+count ~= 1
+~[:[pair_text(count, bump(~count))] [count]]

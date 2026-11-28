@@ -28,6 +28,7 @@ pub(crate) type CandidateRoot<'p> = CandidateEdge<'p>;
 pub(crate) struct CandidateCall<E> {
     pub target: ResolvedCallableTarget,
     pub evaluation: CallableEvaluation,
+    pub receiver_access: Option<CallAccessMode>,
     pub arguments: Vec<ResolvedArgument<E>>,
     pub handling: Option<HandlingRecord>,
     pub requires_external_float_validation: bool,
