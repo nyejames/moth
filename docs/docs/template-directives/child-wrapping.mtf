@@ -1,6 +1,7 @@
 Each `$before` or `$after` takes one compatible compile-time operand. In a
 String construction, use a String or a constant template. In a sequence
-construction the prefix and suffix contribute compatible elements. The wrapper
+construction the prefix and suffix accept compatible scalar or sequence operands
+using the ordinary contribution rules. The wrapper
 applies once to each direct child construction in prefix, child, suffix order.
 Literal text in the parent body and nested children inside that child do not
 get a separate wrapper.

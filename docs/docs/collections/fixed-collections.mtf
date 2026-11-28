@@ -66,8 +66,11 @@ depends on runtime data.
 
 The compiler adds bounds for consecutive contributions and takes the maximum
 over mutually exclusive branches. A nested head row counts once toward its
-outer capacity. Loops, slots and wrappers must have a proven upper bound that
-accounts for every emission, including repeated slot uses. A known constant
+outer capacity. Finite constant ranges and collection loops with a known constant length or
+fixed capacity have an upper bound on iterations. Multiply that bound by the
+proven maximum per iteration. Loops, slots and wrappers must account for every
+emission, including repeated slot uses. An unbounded source or an unknown
+conditional loop cannot prove a maximum. Bounds use checked arithmetic. A known constant
 length can supply a tighter bound than a sequence's capacity.
 
 ### Empty fixed values

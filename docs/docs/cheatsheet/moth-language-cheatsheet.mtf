@@ -27,7 +27,7 @@ Moth reuses a few forms so you can work out what code does from the surrounding 
 - **Constructors and calls.** Parentheses supply arguments. Both constructors in the example use the declared height of 720. A named argument selects a field or parameter. Parentheses containing named entries can also construct an anonymous record. MON uses this constructor syntax for literal data.
 - **Choices and patterns.** `WindowEvent::Resized(1280)` selects a variant and constructs a value. In the match, `Resized(width, height)` gives the stored fields names for that arm.
 - **Brackets.** A bracket construction can produce a String, a collection or a map. Here the colon introduces a text body and the nested brackets insert its values. The call returns `"1280 x 720"`.
-- **Blocks and branches.** Braces mark the boundaries of a body. The choice body lists alternatives. The function body contains statements. One match block holds both arm scopes. Each line-initial `case` starts an arm and its colon ends the header. A Boolean conditional uses bare `else`, while a match or channel readiness fallback uses `else:`.
+- **Blocks and branches.** Braces mark the block and the construct determines scope. The choice body lists alternatives. The function body contains statements. One match block holds both arm scopes. Each line-initial reserved `case` starts an arm and its colon ends the header. A case requires a body. A statement fallback may be empty. A Boolean conditional uses bare `else`, while a match or channel readiness fallback uses `else:`.
 - **Results.** `then` supplies a result to the enclosing value-producing construct. `return` exits the function.
 
 ## Names and statements

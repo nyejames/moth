@@ -259,7 +259,7 @@ edges). Compiler implementation details live in
 - map equality
 - indexing syntax
 - mutable entry APIs
-- const maps
+- const maps (a separate future extension, not part of bracket construction)
 - fixed-capacity maps
 - specialised map variants
 - user-defined key types
