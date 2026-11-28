@@ -1020,7 +1020,6 @@ token_schema! {
         0,
         None
     ),
-    (Yield, YIELD, 94, "`yield`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (
         DatatypeI8,
         DATATYPE_I8,

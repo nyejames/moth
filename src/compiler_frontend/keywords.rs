@@ -28,7 +28,6 @@ pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
         SourceWord::ThisType => TokenTag::TRAIT_THIS,
         SourceWord::Assert => TokenTag::ASSERT,
         SourceWord::Async => TokenTag::ASYNC,
-        SourceWord::Yield => TokenTag::YIELD,
         SourceWord::Loop => TokenTag::LOOP,
         SourceWord::To => TokenTag::EXCLUSIVE_RANGE,
         SourceWord::By => TokenTag::BY,

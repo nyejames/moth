@@ -118,7 +118,6 @@ define_source_words! {
     ThisType => ("This", Keyword, None);
     Assert => ("assert", Keyword, None);
     Async => ("async", Keyword, None);
-    Yield => ("yield", Keyword, None);
     Loop => ("loop", Keyword, None);
     To => ("to", Keyword, None);
     By => ("by", Keyword, None);

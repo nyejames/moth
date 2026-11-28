@@ -1391,7 +1391,7 @@ fn tokenizes_lowercase_this_as_reserved_receiver_keyword() {
 
 #[test]
 fn tokenizes_declared_region_names_as_symbols_and_semantic_scope_words_as_keywords() {
-    let (file_tokens, string_table) = tokenize_source("block group region checked async\n");
+    let (file_tokens, string_table) = tokenize_source("block group region checked async yield\n");
     let tokens = file_tokens.tokens.as_ref();
 
     for (index, word) in [(1, "block"), (2, "group"), (3, "region")] {
@@ -1403,6 +1403,8 @@ fn tokenizes_declared_region_names_as_symbols_and_semantic_scope_words_as_keywor
     }
     assert_eq!(token_at(tokens, 4).tag(), TokenTag::CHECKED);
     assert_eq!(token_at(tokens, 5).tag(), TokenTag::ASYNC);
+    assert_eq!(token_at(tokens, 6).tag(), TokenTag::SYMBOL);
+    assert!(token_string_is(token_at(tokens, 6), &string_table, "yield"));
 }
 
 #[test]
