@@ -126,7 +126,7 @@ return source_a
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
-    let mut layout = checker
+    let layout = checker
         .build_function_layout(function, &reachable)
         .expect("fixture local layout should build");
     let source_a_index = layout
@@ -255,7 +255,6 @@ return source_a
     }
 
     // A same-slot jump still consumes its entry payload before it replaces the destination.
-    layout.lookup_observations = true;
     let mut state = BorrowState::new_uninitialized(count);
     state.initialize_parameter(root_a_index);
     state.initialize_parameter(slot_destination_index);
@@ -480,6 +479,7 @@ probe |flag Bool, nested Bool, saved I32, previous I32| -> I32, Error!:
                     .map(|label| format!("{label:?}"))
                     .collect();
                 (
+                    diagnostic.descriptor().code,
                     view.reason,
                     primary,
                     format!("{subject:?}"),

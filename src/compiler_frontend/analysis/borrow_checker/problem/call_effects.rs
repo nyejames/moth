@@ -13,24 +13,20 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAccessKind, ExternalReturnAlias,
 };
-use crate::compiler_frontend::hir::expressions::ValueKind;
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::HirValueId;
-use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatementKind, HirWriteTarget,
-};
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
-use crate::compiler_frontend::hir::utils::collect_structural_blocks;
+use crate::compiler_frontend::hir::statements::HirLocalDestination;
+#[cfg(test)]
+use crate::compiler_frontend::public_call_summary::CallField;
 use crate::compiler_frontend::public_call_summary::typed::{
-    CellPort, Coverage, Footprint, Lane, ObjectRef, OutputPort, Predicate,
+    CellPort, Coverage, EntryPort, ExportPort, Footprint, IdentityKind, Lane, ObjectRef,
+    OutputPort, PortId, Predicate, ScalarSource, TypedCallAllocationFacts, ValueSource,
 };
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationSource, CallField, CallLaneSummary, CallOutputPath, FunctionReturnAliasSummary,
-    PublicCallParameterAccess,
+    FunctionReturnAliasSummary, PublicCallParameterAccess,
 };
 
-#[allow(dead_code)]
 pub(super) fn typed_lane_has_opaque_stores(
     lane: &Lane,
     observe: impl FnMut(Predicate) -> Result<Option<bool>, InfrastructureFailure>,
@@ -204,7 +200,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
             if let Some(function) = local {
                 let accesses = self.local_parameter_accesses(function, argument_count)?;
-                let opaque_stores = self.may_have_opaque_stores(args, &accesses, local, false)?;
+                let opaque_stores = accesses.contains(&AccessKind::Exclusive);
                 return Ok((
                     accesses,
                     CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
@@ -236,147 +232,115 @@ impl<'a> FunctionProblemBuilder<'a> {
             .collect::<Vec<_>>();
         let (provenance, opaque_stores) = match &summary.return_alias {
             FunctionReturnAliasSummary::Known(facts) => {
-                let lane = if success {
-                    &facts.success
-                } else {
-                    &facts.error
+                let lane = facts.lane(!success);
+                let parameter = |port: PortId| port.parameter(&facts.ports);
+                let observe = |predicate| {
+                    Ok(match predicate {
+                        Predicate::Writable(port) => {
+                            (accesses[parameter(port)] == AccessKind::Shared).then_some(false)
+                        }
+                        Predicate::Equal(IdentityKind::Wrapper, left, right) => {
+                            let a = self.module.expressions.expression(args[parameter(left)]);
+                            let b = self.module.expressions.expression(args[parameter(right)]);
+                            match (&a.kind, &b.kind) {
+                                (HirExpressionKind::Load(a), HirExpressionKind::Load(b))
+                                    if a.root == b.root
+                                        && a.projections.is_empty()
+                                        && b.projections.is_empty() =>
+                                {
+                                    Some(true)
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    })
                 };
-                let mut provenance = lane_root_provenance(lane);
-                // Exact scalar lanes do not need allocation rows. The destination's
-                // validated type, not the absence of rows alone, proves a fresh value.
-                if lane.reachable
-                    && lane.sources.is_empty()
-                    && lane.sharing.is_empty()
-                    && let [destination] = results
-                    && let Some(types) = self.type_environment
-                    && let Some(local) = self
-                        .module
-                        .blocks
-                        .iter()
-                        .flat_map(|block| &block.locals)
-                        .find(|local| local.id == destination.local())
-                    && !classify_hir_type(local.ty, types)?.has_in_place_mutation_surface()
-                {
-                    provenance = CallResultProvenance::Fresh;
-                }
-                let opaque_stores = !lane.stores.is_empty()
-                    || self.may_have_opaque_stores(args, &accesses, local, lane.reachable)?;
+                let provenance = if results.len() == 1 {
+                    lane_root_provenance(facts, lane, observe)?
+                } else {
+                    CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
+                };
+                let opaque_stores = typed_lane_has_opaque_stores(lane, observe, |cell| {
+                    let (CellPort::Terminal(port) | CellPort::Slot(ObjectRef::Entry(port))) = cell
+                    else {
+                        return false;
+                    };
+                    self.type_environment.is_some_and(|types| {
+                        classify_hir_type(
+                            self.module
+                                .expressions
+                                .expression(args[parameter(*port)])
+                                .ty,
+                            types,
+                        )
+                        .is_ok_and(|shape| !shape.has_in_place_mutation_surface())
+                    })
+                })?;
                 (provenance, opaque_stores)
             }
             FunctionReturnAliasSummary::Pending => (
                 CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
-                self.may_have_opaque_stores(args, &accesses, local, false)?,
+                accesses.contains(&AccessKind::Exclusive),
             ),
         };
         Ok((accesses, provenance, opaque_stores))
     }
-
-    fn may_have_opaque_stores(
-        &self,
-        args: &[HirValueId],
-        accesses: &[AccessKind],
-        local: Option<&HirFunction>,
-        has_allocation_store_facts: bool,
-    ) -> Result<bool, InfrastructureFailure> {
-        let mut needs_cell_contract = false;
-        for (&value, &access) in args.iter().zip(accesses) {
-            if access != AccessKind::Exclusive {
-                continue;
-            }
-            let Some(types) = self.type_environment else {
-                return Ok(true);
-            };
-            let ty = self.module.expressions.expression(value).ty;
-            if classify_hir_type(ty, types)?.has_in_place_mutation_surface() {
-                if !has_allocation_store_facts {
-                    return Ok(true);
-                }
-            } else {
-                needs_cell_contract = true;
-            }
-        }
-        Ok(needs_cell_contract
-            && !local.is_some_and(|function| self.proves_no_cell_transition(function)))
-    }
-
-    /// The scalar payload can change without changing the storage graph. A whole-place
-    /// acquisition or an unmodelled delegated call doesn't have that guarantee.
-    fn proves_no_cell_transition(&self, function: &HirFunction) -> bool {
-        collect_structural_blocks(self.module, function.entry)
-            .into_iter()
-            .all(|id| {
-                let Some(block) = self.module.block(id) else {
-                    return false;
-                };
-                if matches!(
-                    block.terminator,
-                    HirTerminator::Invoke {
-                        operation: HirFallibleOperation::Call { .. },
-                        ..
-                    } | HirTerminator::NeverCall { .. }
-                ) {
-                    return false;
-                }
-                block
-                    .statements
-                    .iter()
-                    .all(|statement| match statement.kind {
-                        HirStatementKind::Call { .. } => false,
-                        HirStatementKind::Write {
-                            target: target @ HirWriteTarget::AssignPlace(place),
-                            value,
-                        } if place.projections.is_empty() => {
-                            let value = self.module.expressions.expression(value);
-                            value.value_kind != ValueKind::Place
-                                || target.is_direct_self_update_of(value)
-                        }
-                        _ => true,
-                    })
-            })
-    }
 }
 
-/// The reference event can carry one root origin, not a correlated graph of result paths.
-fn lane_root_provenance(lane: &CallLaneSummary) -> CallResultProvenance {
-    let unknown = CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown);
-    if !lane.reachable || lane.sources.is_empty() || !lane.sharing.is_empty() {
-        return unknown;
-    }
+/// The reference event can carry one root origin, not a correlated graph.
+fn lane_root_provenance(
+    facts: &TypedCallAllocationFacts,
+    lane: &Lane,
+    observe: impl FnMut(Predicate) -> Result<Option<bool>, InfrastructureFailure>,
+) -> Result<CallResultProvenance, InfrastructureFailure> {
     let mut fresh = false;
+    let mut unknown = false;
     let mut indices = Vec::new();
-    for row in &lane.sources {
-        let CallOutputPath::Result(path) = &row.output else {
-            return unknown;
-        };
-        if path.slot != 0 {
-            return unknown;
-        }
-        if !path.path.is_empty() {
-            if row.source != CallAllocationSource::Fresh
-                || !path
-                    .path
-                    .iter()
-                    .all(|field| matches!(field, CallField::Field(_)))
-            {
-                return unknown;
+    lane.visit_compatible(observe, |_, product| {
+        for post in product
+            .components()
+            .iter()
+            .flat_map(|component| &component.alternatives)
+        {
+            if !matches!(post.coverage, Coverage::Complete) {
+                unknown = true;
+                continue;
             }
-            continue;
-        }
-        match &row.source {
-            CallAllocationSource::Parameter(path) if path.path.is_empty() => {
-                indices.push(path.index);
+            for (slot, value) in &post.results {
+                if *slot != 0 || !value.dependencies.is_empty() {
+                    unknown = true;
+                    continue;
+                }
+                match &value.source {
+                    ValueSource::Scalar(ScalarSource::Independent) => fresh = true,
+                    ValueSource::Allocation(ObjectRef::Exact(ExportPort::Result(path)))
+                        if path.slot == 0 && path.path.is_empty() =>
+                    {
+                        fresh = true
+                    }
+                    ValueSource::Allocation(ObjectRef::Entry(port))
+                    | ValueSource::Scalar(ScalarSource::EntryValue(port)) => {
+                        match &facts.ports[port.0 as usize] {
+                            EntryPort::Value { parameter, path } if path.is_empty() => {
+                                indices.push(*parameter)
+                            }
+                            _ => unknown = true,
+                        }
+                    }
+                    _ => unknown = true,
+                }
             }
-            CallAllocationSource::Fresh => fresh = true,
-            _ => return unknown,
         }
-    }
-    if indices.is_empty() && fresh {
+        Ok(())
+    })?;
+    Ok(if !unknown && fresh && indices.is_empty() {
         CallResultProvenance::Fresh
-    } else if indices.is_empty() || fresh || lane.sources.len() != indices.len() {
-        unknown
-    } else {
+    } else if !unknown && !fresh && !indices.is_empty() {
         indices.sort_unstable();
         indices.dedup();
         CallResultProvenance::AliasParams(indices.into_boxed_slice())
-    }
+    } else {
+        CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
+    })
 }

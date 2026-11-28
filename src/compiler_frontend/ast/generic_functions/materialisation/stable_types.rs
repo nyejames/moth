@@ -461,10 +461,6 @@ where
     }
 }
 
-pub(super) struct MaterialisationNominalOriginResolver<'a> {
-    pub(super) type_environment: &'a TypeEnvironment,
-}
-
 pub(super) struct GeneratedFoldedValueMaterialiser<'a, 'b, N: MaterialisationNominalSource> {
     pub(super) type_environment: &'a mut TypeEnvironment,
     pub(super) external_registry: &'b ExternalPackageRegistry,
@@ -592,24 +588,18 @@ pub(super) fn generated_file_value_resolution_services(
     })
 }
 
-impl NominalOriginResolver for MaterialisationNominalOriginResolver<'_> {
+impl NominalOriginResolver for TypeEnvironment {
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
     ) -> Result<OriginTypeId, InfrastructureFailure> {
-        let type_id = self
-            .type_environment
-            .type_id_for_nominal_id(nominal_id)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::GenericMaterialisation,
-                    "Materialisation folded-value projection has an unknown nominal type",
-                )
-            })?;
-        match self
-            .type_environment
-            .canonical_identity_for_type_id(type_id)
-        {
+        let type_id = self.type_id_for_nominal_id(nominal_id).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Materialisation folded-value projection has an unknown nominal type",
+            )
+        })?;
+        match self.canonical_identity_for_type_id(type_id) {
             Some(CanonicalTypeIdentity::SourceNominal(origin)) => Ok(origin.clone()),
             _ => Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,

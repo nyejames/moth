@@ -5,8 +5,10 @@ use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::build_system::create_project_modules::compile_project_frontend;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows, summarize_call_allocations,
+    BorrowCheckReport, check_borrows_with_projection_for_test,
+    summarize_call_allocations_with_projection,
 };
+use crate::compiler_frontend::ast::generic_functions::registered_type_projection;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -45,11 +47,15 @@ use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    CellPort, CellPost, Component, EntryPort, ExportPort, FamilyPort, FamilyPost, IdentityKind,
+    Lane, ObjectRef, Occurrence, PathAccess, PortId, Post, Predicate, Product, StorageKind,
+    SupportId, TypedCallAllocationFacts, ValueRef, ValueSource,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallAllocationSource, CallField, CallLaneSummary, CallOutputPath,
-    CallParameterPath, CallPathSource, CallResultPath, CallSharing, CallSharingCondition,
-    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
+    CallField, CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -107,15 +113,15 @@ fn origin(name: &str) -> OriginFunctionId {
 fn empty_summary(error_reachable: bool) -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-            success: CallLaneSummary {
-                reachable: true,
-                ..Default::default()
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            error: if error_reachable {
+                returning_post(builtin_error_post())
+            } else {
+                Lane::Bottom
             },
-            error: CallLaneSummary {
-                reachable: error_reachable,
-                ..Default::default()
-            },
+            support_count: 1,
+            ..Default::default()
         })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
@@ -130,6 +136,122 @@ fn summary() -> PublicCallSummary {
 
 fn summary_with_error_lane() -> PublicCallSummary {
     empty_summary(true)
+}
+
+fn entry_value(parameter: usize, path: &[CallField]) -> EntryPort {
+    EntryPort::Value {
+        parameter,
+        path: path.into(),
+    }
+}
+
+fn allocation_value(object: ObjectRef) -> ValueRef {
+    ValueRef {
+        source: ValueSource::Allocation(object),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    }
+}
+
+fn builtin_error_post() -> Post {
+    let error = ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }));
+    Post {
+        results: vec![(0, allocation_value(error.clone()))],
+        retained: vec![(
+            error,
+            StorageKind::Allocation,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+        )],
+        ..Default::default()
+    }
+}
+
+fn returning_post(post: Post) -> Lane {
+    Lane::Returning(
+        Product::new(vec![Component {
+            support: SupportId(0),
+            alternatives: vec![post],
+        }])
+        .unwrap(),
+    )
+}
+
+fn lane_has_post(lane: &Lane, predicate: impl FnMut(&Post) -> bool) -> bool {
+    lane_has_post_for(lane, |_| None, predicate)
+}
+
+fn lane_has_post_for(
+    lane: &Lane,
+    mut observe: impl FnMut(Predicate) -> Option<bool>,
+    mut predicate: impl FnMut(&Post) -> bool,
+) -> bool {
+    lane.visit_compatible(
+        |test| Ok(observe(test)),
+        |_, product| {
+            if product
+                .components()
+                .iter()
+                .flat_map(|component| &component.alternatives)
+                .any(&mut predicate)
+            {
+                return Err(());
+            }
+            Ok(())
+        },
+    )
+    .is_err()
+}
+
+fn entry_is(facts: &TypedCallAllocationFacts, object: &ObjectRef, port: &EntryPort) -> bool {
+    matches!(object, ObjectRef::Entry(id) if facts.ports.get(id.0 as usize) == Some(port))
+}
+
+fn is_fresh(source: &ValueSource) -> bool {
+    matches!(
+        source,
+        ValueSource::Allocation(ObjectRef::Exact(_) | ObjectRef::Family(..))
+    )
+}
+
+fn has_element_store(
+    facts: &TypedCallAllocationFacts,
+    lane: &Lane,
+    parameter: usize,
+    source_matches: impl Fn(&ValueSource) -> bool,
+) -> bool {
+    let holder = entry_value(parameter, &[]);
+    lane_has_post(lane, |post| {
+        post.families.iter().any(|(port, edit)| {
+            if port.selector != CallField::Elem || !entry_is(facts, &port.receiver, &holder) {
+                return false;
+            }
+            let (FamilyPost::Extend(values) | FamilyPost::ReplaceAll(values)) = edit;
+            values
+                .iter()
+                .any(|(value, _)| source_matches(&value.source))
+        })
+    })
+}
+
+fn stores_parameter(
+    facts: &TypedCallAllocationFacts,
+    lane: &Lane,
+    target: usize,
+    source: usize,
+) -> bool {
+    let source = entry_value(source, &[]);
+    has_element_store(
+        facts,
+        lane,
+        target,
+        |value| matches!(value, ValueSource::Allocation(object) if entry_is(facts, object, &source)),
+    )
 }
 
 fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
@@ -580,20 +702,45 @@ fn convergence_install_reports_changes_and_preserves_provider_summaries() {
 }
 
 #[test]
-fn pending_and_proved_unreachable_have_the_same_allocation_transfer() {
-    let pending = FunctionReturnAliasSummary::Pending;
-    let unreachable = FunctionReturnAliasSummary::Known(Box::default());
-    assert!(pending.same_allocation_transfer_as(&unreachable));
-    assert!(unreachable.same_allocation_transfer_as(&pending));
-    assert!(!pending.same_allocation_transfer_as(&summary().return_alias));
-    let error_only = FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-        success: CallLaneSummary::default(),
-        error: CallLaneSummary {
-            reachable: true,
+fn installing_settled_bottom_then_retention_only_refreshes_the_direct_caller() {
+    let target = generated_identity("retain");
+    let mut pending = summary();
+    pending.parameters.push(PublicCallParameterSummary {
+        access: PublicCallParameterAccess::Shared,
+        mutation: PublicCallMutationEffect::NoWrite,
+        transfer_effect: PublicCallTransferEffect::MayConsume,
+    });
+    pending.return_alias = FunctionReturnAliasSummary::Pending;
+    let bottom = PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::default()),
+        ..pending.clone()
+    };
+    let retaining = PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            may_retain: vec![0],
             ..Default::default()
-        },
-    }));
-    assert!(!pending.same_allocation_transfer_as(&error_only));
+        })),
+        ..pending.clone()
+    };
+    let links = link_facts_for_calls(vec![CallTarget::Generated(Box::new(target.clone()))]);
+    let mut hir = HirModule::new();
+    hir.generated_call_summaries.insert(target.clone(), pending);
+
+    let settled = [(target.clone(), bottom)];
+    let changes = install_convergence_summaries(&mut hir, &settled, &[], &[]);
+    assert!(!changes.allocations_changed());
+    assert_eq!(hir.generated_call_summaries[&target], settled[0].1);
+
+    let widened = [(target.clone(), retaining)];
+    let changes = install_convergence_summaries(&mut hir, &widened, &[], &[]);
+    assert_eq!(
+        changes.allocation_callers(&links),
+        FxHashSet::from_iter([FunctionId(0)])
+    );
+    assert!(!changes.failure);
+    assert!(!changes.mutation);
+    assert_eq!(hir.generated_call_summaries[&target], widened[0].1);
+    assert!(!install_convergence_summaries(&mut hir, &widened, &[], &[]).allocations_changed());
 }
 
 #[test]
@@ -685,17 +832,23 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
 #[test]
 fn convergence_base_changes_reject_a_narrowing_report() {
     let public_origin = origin("public");
-    let hir = base_hir(&[public_origin], &[]);
+    let hir = base_hir(std::slice::from_ref(&public_origin), &[]);
     let previous = report([(FunctionId(0), summary_with_error_lane())]);
     let next = report([(FunctionId(0), summary())]);
 
-    let error = base_summary_changes(
+    let widened = base_summary_changes(
+        &hir,
+        &next.analysis.public_call_summaries,
+        &previous.analysis.public_call_summaries,
+    )
+    .expect("adding the same error outcome must be a valid widening");
+    assert_eq!(widened.public, [public_origin]);
+    base_summary_changes(
         &hir,
         &previous.analysis.public_call_summaries,
         &next.analysis.public_call_summaries,
     )
     .expect_err("a narrowing base summary must stop convergence");
-    assert!(error.message.contains("narrowed"));
 }
 
 #[test]
@@ -1562,7 +1715,14 @@ fn generated_error_store_widens_pending_and_cannot_be_removed() {
 
     let without_store = PublicCallSummary {
         parameters: pending.parameters.clone(),
-        ..summary_with_error_lane()
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            ports: vec![entry_value(0, &[]), entry_value(1, &[])],
+            support_count: 1,
+            success: Lane::Returning(Product::default()),
+            error: returning_post(builtin_error_post()),
+            ..Default::default()
+        })),
+        ..summary()
     };
     transaction.complete(request, pending, sidecar, Default::default());
     assert!(update_generated_summary(&mut transaction, &identity, without_store.clone()).unwrap());
@@ -1571,19 +1731,18 @@ fn generated_error_store_widens_pending_and_cannot_be_removed() {
     let FunctionReturnAliasSummary::Known(facts) = &mut with_store.return_alias else {
         panic!("the fixture establishes both lanes");
     };
-    facts.error.stores.push(CallPathSource {
-        output: CallOutputPath::Store {
-            target: CallParameterPath {
-                index: 0,
-                path: vec![CallField::Elem],
-            },
-            path: Vec::new(),
+    let mut storing = builtin_error_post();
+    storing.families.push((
+        FamilyPort {
+            receiver: ObjectRef::Entry(PortId(0)),
+            selector: CallField::Elem,
         },
-        source: CallAllocationSource::Parameter(CallParameterPath {
-            index: 1,
-            path: Vec::new(),
-        }),
-    });
+        FamilyPost::Extend(vec![(
+            allocation_value(ObjectRef::Entry(PortId(1))),
+            Occurrence::MaybeMany,
+        )]),
+    ));
+    facts.error = facts.error.union(&returning_post(storing));
     assert!(update_generated_summary(&mut transaction, &identity, with_store.clone()).unwrap());
     assert!(update_generated_summary(&mut transaction, &identity, without_store).is_err());
     assert_eq!(transaction.summary(&identity), Some(&with_store));
@@ -2007,6 +2166,28 @@ fn assert_final_allocation_facts_match_cold(
         );
     }
 
+    // Base convergence projects against the declaring arena, which has the private nominal
+    // registrations. Sidecar convergence projects against each sidecar's executable types.
+    let declaring_types = base
+        .borrow_analysis
+        .declaring_types_for_cold_check
+        .as_ref()
+        .expect("base compilation retains its declaring types for the cold oracle");
+    let projections: Vec<_> = modules
+        .iter()
+        .enumerate()
+        .map(|(index, module)| {
+            registered_type_projection(
+                if index == 0 {
+                    declaring_types
+                } else {
+                    &module.executable.type_environment
+                },
+                &module.link_facts.external_package_registry,
+            )
+        })
+        .collect();
+
     let mut hirs: Vec<_> = modules
         .iter()
         .map(|module| module.executable.hir.clone())
@@ -2036,7 +2217,8 @@ fn assert_final_allocation_facts_match_cold(
         let next: Vec<_> = modules
             .iter()
             .zip(&mut hirs)
-            .map(|(module, hir)| {
+            .zip(&projections)
+            .map(|((module, hir), projection)| {
                 for (identity, summary) in &mut hir.imported_call_summaries {
                     if let Some(id) = base.hir.function_ids_by_origin.get(identity) {
                         summary.return_alias.clone_from(&allocations[0][id]);
@@ -2052,12 +2234,13 @@ fn assert_final_allocation_facts_match_cold(
                         summary.return_alias.clone_from(&allocations[index][&id]);
                     }
                 }
-                summarize_call_allocations(
+                summarize_call_allocations_with_projection(
                     hir,
                     &module.executable.type_environment,
                     &module.link_facts.external_package_registry,
                     &paths,
                     strings,
+                    projection,
                 )
                 .expect("local allocation facts must converge from scratch on final HIR")
                 .analysis
@@ -2078,18 +2261,18 @@ fn assert_final_allocation_facts_match_cold(
         "cold base and generated allocations did not stabilize"
     );
 
-    for (module, cold) in modules.into_iter().zip(allocations) {
+    for ((module, cold), projection) in modules.iter().copied().zip(allocations).zip(&projections) {
         let executable = &module.executable;
         let hir = &executable.hir;
         // Mutation effects need validated transfer. Recompute with final exact nonlocal inputs
         // rather than validating against the deliberately incomplete intermediate rounds above.
-        let exact = check_borrows(
+        let exact = check_borrows_with_projection_for_test(
             hir,
             &executable.type_environment,
             &module.link_facts.external_package_registry,
             &paths,
             strings,
-            None,
+            projection,
         )
         .expect("published HIR must independently pass borrow validation");
         let published = &executable.borrow_analysis.analysis.public_call_summaries;
@@ -3167,25 +3350,10 @@ fn rewritten_generated_handler_store_reaches_its_base_caller() {
     let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
         panic!("forward must publish allocation facts");
     };
-    let rows_element = CallOutputPath::Store {
-        target: CallParameterPath {
-            index: 1,
-            path: vec![CallField::Elem],
-        },
-        path: Vec::new(),
-    };
-    let child = CallAllocationSource::Parameter(CallParameterPath {
-        index: 2,
-        path: Vec::new(),
-    });
-    assert!(facts.success.reachable);
-    assert!(!facts.error.reachable);
+    assert!(facts.success.can_return());
+    assert!(!facts.error.can_return());
     assert!(
-        facts
-            .success
-            .stores
-            .iter()
-            .any(|store| store.output == rows_element && store.source == child),
+        stores_parameter(facts, &facts.success, 1, 2),
         "the internally caught failure must publish its store on forward's success lane"
     );
     assert_eq!(
@@ -3234,23 +3402,9 @@ fn rewritten_generated_handler_store_reaches_its_base_caller() {
     let FunctionReturnAliasSummary::Known(relay_facts) = &relay_summary.return_alias else {
         panic!("relay must publish allocation facts");
     };
-    assert!(relay_facts.success.reachable);
-    assert!(!relay_facts.error.reachable);
-    assert!(relay_facts.success.stores.iter().any(|store| {
-        store.output
-            == CallOutputPath::Store {
-                target: CallParameterPath {
-                    index: 0,
-                    path: vec![CallField::Elem],
-                },
-                path: Vec::new(),
-            }
-            && store.source
-                == CallAllocationSource::Parameter(CallParameterPath {
-                    index: 1,
-                    path: Vec::new(),
-                })
-    }));
+    assert!(relay_facts.success.can_return());
+    assert!(!relay_facts.error.can_return());
+    assert!(stores_parameter(relay_facts, &relay_facts.success, 0, 1));
 }
 
 #[test]
@@ -3307,18 +3461,9 @@ result = recover(~messages, 2)
     let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
         panic!("recover must publish its allocation facts");
     };
-    assert!(facts.success.reachable);
-    assert!(!facts.error.reachable);
-    assert!(facts.success.stores.contains(&CallPathSource {
-        output: CallOutputPath::Store {
-            target: CallParameterPath {
-                index: 0,
-                path: vec![CallField::Elem],
-            },
-            path: Vec::new(),
-        },
-        source: CallAllocationSource::Fresh,
-    }));
+    assert!(facts.success.can_return());
+    assert!(!facts.error.can_return());
+    assert!(has_element_store(facts, &facts.success, 0, is_fresh));
     assert_eq!(
         summary.parameters[0].mutation,
         PublicCallMutationEffect::Writes
@@ -3369,8 +3514,8 @@ fn assert_no_success_private_call_skips_suffix(total: &str, has_error_lane: bool
     let FunctionReturnAliasSummary::Known(facts) = &summary.return_alias else {
         panic!("probe must publish its exact lane facts");
     };
-    assert_eq!(facts.error.reachable, has_error_lane);
-    assert!(!facts.success.reachable);
+    assert_eq!(facts.error.can_return(), has_error_lane);
+    assert!(!facts.success.can_return());
     assert_eq!(
         summary.parameters[0].mutation,
         PublicCallMutationEffect::NoWrite
@@ -3541,36 +3686,23 @@ calm |value I32| -> I32:
     )));
 
     let summary = |function| &executable.borrow_analysis.analysis.public_call_summaries[&function];
-    let store = CallPathSource {
-        output: CallOutputPath::Store {
-            target: CallParameterPath {
-                index: 0,
-                path: vec![CallField::Elem],
-            },
-            path: Vec::new(),
-        },
-        source: CallAllocationSource::Parameter(CallParameterPath {
-            index: 1,
-            path: Vec::new(),
-        }),
-    };
     for function in [ping, pong] {
         let FunctionReturnAliasSummary::Known(facts) = &summary(function).return_alias else {
             panic!("the recursive calls must publish allocation facts");
         };
-        assert!(facts.success.reachable);
-        assert!(facts.success.stores.is_empty());
-        assert!(facts.error.reachable);
-        assert!(facts.error.stores.contains(&store));
+        assert!(facts.success.can_return());
+        assert!(!has_element_store(facts, &facts.success, 0, |_| true));
+        assert!(facts.error.can_return());
+        assert!(stores_parameter(facts, &facts.error, 0, 1));
     }
 
     let pruned = summary(function_named("pruned"));
     let FunctionReturnAliasSummary::Known(facts) = &pruned.return_alias else {
         panic!("the ordinary comparison must publish allocation facts");
     };
-    assert!(facts.success.reachable);
-    assert!(facts.success.stores.is_empty());
-    assert!(!facts.error.reachable);
+    assert!(facts.success.can_return());
+    assert!(!has_element_store(facts, &facts.success, 0, |_| true));
+    assert!(!facts.error.can_return());
     assert_eq!(
         pruned.parameters[0].mutation,
         PublicCallMutationEffect::NoWrite
@@ -3589,9 +3721,8 @@ calm |value I32| -> I32:
 
 #[test]
 fn private_lane_handler_widens_result_topology_through_generated_caller() {
-    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-    use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
-    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+    use crate::compiler_frontend::tests::borrow_fixture_support::summarize_prepared_call_allocations;
+    use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
 
     const DECLARATIONS: &str = r#"Pair = |left {I32}, right {I32}|
 
@@ -3609,20 +3740,48 @@ select |flag Bool, a {I32}, b {I32}, value I32| -> Pair:
     return Pair(b, a)
 ;
 "#;
-    let pair = CallSharing {
-        left: CallOutputPath::Result(CallResultPath {
-            slot: 0,
-            path: vec![CallField::Field(0)],
-        }),
-        right: CallOutputPath::Result(CallResultPath {
-            slot: 0,
-            path: vec![CallField::Field(1)],
-        }),
-        condition: CallSharingCondition::Always,
+    let has_pair = |facts: &TypedCallAllocationFacts, parameters: [usize; 2]| {
+        let a = entry_value(1, &[]);
+        let b = entry_value(2, &[]);
+        let distinct_arguments = |predicate| {
+            let Predicate::Equal(IdentityKind::Allocation, left, right) = predicate else {
+                return None;
+            };
+            let left = facts.ports.get(left.0 as usize);
+            let right = facts.ports.get(right.0 as usize);
+            ((left == Some(&a) && right == Some(&b)) || (left == Some(&b) && right == Some(&a)))
+                .then_some(false)
+        };
+        lane_has_post_for(&facts.success, distinct_arguments, |post| {
+            let Some((_, result)) = post.results.iter().find(|(slot, _)| *slot == 0) else {
+                return false;
+            };
+            let ValueSource::Allocation(holder) = &result.source else {
+                return false;
+            };
+            [CallField::Field(0), CallField::Field(1)]
+                .into_iter()
+                .zip(parameters)
+                .all(|(field, parameter)| {
+                    let expected = entry_value(parameter, &[]);
+                    post.cells.iter().any(|(cell, edit)| {
+                        let CellPort::Edge(object, selector) = cell else {
+                            return false;
+                        };
+                        let (CellPost::Replace(values) | CellPost::WeakJoin(values)) = edit;
+                        object == holder
+                            && *selector == field
+                            && matches!(
+                                values.as_slice(),
+                                [Some(ValueRef { source: ValueSource::Allocation(source), .. })]
+                                    if entry_is(facts, source, &expected)
+                            )
+                    })
+                })
+        })
     };
-    let (ast, mut paths, mut strings) = parse_single_file_ast(DECLARATIONS);
-    let registry = default_external_package_registry(&mut strings);
-    let initial_hir = lower_hir(ast, &mut strings, &mut paths, &registry);
+    let fixture = PreparedHirFixture::new(DECLARATIONS);
+    let initial_hir = &fixture.hir;
     let select = initial_hir
         .functions
         .iter()
@@ -3630,26 +3789,22 @@ select |flag Bool, a {I32}, b {I32}, value I32| -> Pair:
             initial_hir
                 .side_table
                 .function_name_path(function.id)
-                .and_then(|path| paths.component(path))
-                .is_some_and(|name| strings.resolve(name) == "select")
+                .and_then(|path| fixture.paths.component(path))
+                .is_some_and(|name| fixture.strings.resolve(name) == "select")
         })
         .expect("select must lower before lane installation")
         .id;
-    let initial = summarize_call_allocations(
-        &initial_hir,
-        &initial_hir.type_environment,
-        &registry,
-        &paths,
-        &strings,
-    )
-    .expect("initial allocation facts must converge");
+    let initial = summarize_prepared_call_allocations(&fixture)
+        .expect("initial allocation facts must converge");
     let FunctionReturnAliasSummary::Known(before) =
         &initial.analysis.public_call_summaries[&select].return_alias
     else {
         panic!("ordinary exits must publish their result sources");
     };
-    assert!(before.success.reachable);
-    assert!(!before.success.sharing.contains(&pair));
+    assert!(before.success.can_return());
+    assert!(has_pair(before, [1, 2]));
+    assert!(has_pair(before, [2, 1]));
+    assert!(!has_pair(before, [1, 1]));
 
     let source = format!(
         "{DECLARATIONS}\n\
@@ -3679,20 +3834,21 @@ select |flag Bool, a {I32}, b {I32}, value I32| -> Pair:
     else {
         panic!("the caller must publish its result topology");
     };
-    assert_eq!(after.success.sources, before.success.sources);
-    assert!(after.success.sharing.contains(&pair));
+    assert!(has_pair(after, [1, 2]));
+    assert!(has_pair(after, [2, 1]));
+    assert!(has_pair(after, [1, 1]));
     assert!(
         executable
             .hir
             .module_private_call_summaries
             .iter()
-            .any(|(identity, summary)| identity.defining_name() == "select"
-                && matches!(
-                    &summary.return_alias,
-                    FunctionReturnAliasSummary::Known(facts)
-                        if facts.success.sources == before.success.sources
-                            && facts.success.sharing.contains(&pair)
-                ))
+            .any(|(identity, summary)| {
+                identity.defining_name() == "select"
+                    && summary
+                        .return_alias
+                        .facts()
+                        .is_some_and(|facts| has_pair(facts, [1, 1]))
+            })
     );
 }
 
@@ -3721,19 +3877,15 @@ probe |holder ~Holder, value I32| -> {I32}:
 ~[:ok]
 "#;
     {
-        use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-        use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
-        use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+        use crate::compiler_frontend::tests::borrow_fixture_support::summarize_prepared_call_allocations;
+        use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
 
-        // Before lane installation `recover` can only succeed with `produce`'s absent element, so
-        // `probe` writes through a holder with no allocation. That path must stay incomplete
-        // rather than publish a success lane whose write was silently dropped.
-        let (ast, mut paths, mut strings) = parse_single_file_ast(SOURCE);
-        let registry = default_external_package_registry(&mut strings);
-        let hir = lower_hir(ast, &mut strings, &mut paths, &registry);
-        let initial =
-            summarize_call_allocations(&hir, &hir.type_environment, &registry, &paths, &strings)
-                .expect("initial allocation facts must converge");
+        // Before lane installation, the lookup on the known-empty literal cannot return a
+        // holder. Only installing `produce`'s escaping error makes the recovery arm reachable.
+        let fixture = PreparedHirFixture::new(SOURCE);
+        let hir = &fixture.hir;
+        let initial = summarize_prepared_call_allocations(&fixture)
+            .expect("initial allocation facts must converge");
         let facts = |name: &str| {
             let function = hir
                 .functions
@@ -3741,8 +3893,8 @@ probe |holder ~Holder, value I32| -> {I32}:
                 .find(|function| {
                     hir.side_table
                         .function_name_path(function.id)
-                        .and_then(|path| paths.component(path))
-                        .is_some_and(|component| strings.resolve(component) == name)
+                        .and_then(|path| fixture.paths.component(path))
+                        .is_some_and(|component| fixture.strings.resolve(component) == name)
                 })
                 .expect("the function lowers before lane installation");
             let FunctionReturnAliasSummary::Known(facts) =
@@ -3752,10 +3904,13 @@ probe |holder ~Holder, value I32| -> {I32}:
             };
             facts.clone()
         };
-        let recover = facts("recover");
-        assert!(recover.success.reachable);
-        assert!(recover.success.sources.is_empty());
-        assert!(!facts("probe").success.reachable);
+        for name in ["produce", "recover", "probe"] {
+            assert_eq!(
+                facts(name).success,
+                Lane::Bottom,
+                "{name} before lane installation"
+            );
+        }
     }
     let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, false, &[]);
     let CompilationOutcome::Success {
@@ -3785,31 +3940,28 @@ probe |holder ~Holder, value I32| -> {I32}:
     let FunctionReturnAliasSummary::Known(facts) = &probe.return_alias else {
         panic!("probe must publish its exact lane facts");
     };
-    assert!(facts.success.reachable);
-    // `selected` resolves to the holder alone, so the write is strong and the old items vanish.
-    assert!(
-        facts
-            .success
-            .sources
-            .iter()
-            .any(|row| row.source == CallAllocationSource::Fresh)
-    );
-    assert!(!facts.success.sources.iter().any(|row| {
-        row.source
-            == CallAllocationSource::Parameter(CallParameterPath {
-                index: 0,
-                path: vec![CallField::Field(0)],
+    assert!(facts.success.can_return());
+    // A recovered holder allows the write to replace the old items, not join them.
+    let holder = entry_value(0, &[]);
+    assert!(lane_has_post(&facts.success, |post| {
+        let Some((_, returned)) = post.results.iter().find(|(slot, _)| *slot == 0) else {
+            return false;
+        };
+        is_fresh(&returned.source)
+            && post.cells.iter().any(|(cell, edit)| {
+                matches!(cell, CellPort::Edge(object, CallField::Field(0)) if entry_is(facts, object, &holder))
+                    && matches!(
+                        edit,
+                        CellPost::Replace(values)
+                            if matches!(values.as_slice(), [Some(value)] if value.source == returned.source)
+                    )
             })
     }));
-    assert!(facts.success.stores.contains(&CallPathSource {
-        output: CallOutputPath::Store {
-            target: CallParameterPath {
-                index: 0,
-                path: vec![CallField::Field(0)],
-            },
-            path: vec![],
-        },
-        source: CallAllocationSource::Fresh,
+    let old_items = entry_value(0, &[CallField::Field(0)]);
+    assert!(!lane_has_post(&facts.success, |post| {
+        post.results.iter().any(|(_, result)| {
+            matches!(&result.source, ValueSource::Allocation(object) if entry_is(facts, object, &old_items))
+        })
     }));
 }
 

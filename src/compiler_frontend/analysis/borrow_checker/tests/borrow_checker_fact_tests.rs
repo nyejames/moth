@@ -48,9 +48,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
 };
-use crate::compiler_frontend::public_call_summary::{
-    CallAllocationSource, CallOutputPath, FunctionReturnAliasSummary,
-};
+use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
@@ -60,10 +58,10 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
-    run_borrow_checker_with_types,
+    run_borrow_checker_with_types, run_prepared_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::hir_fixture_support::{PreparedHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast, multi_bind_target,
@@ -749,11 +747,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
 }
 
 pub(super) fn check_place_access_source(source: &str) -> Result<(), BorrowCheckError> {
-    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
-    let registry = default_external_package_registry(&mut strings);
-    let (hir, types) = lower_ast(ast, &mut strings, &mut paths, &registry)
-        .expect("place access fixture should lower");
-    run_borrow_checker_with_types(&hir, &types, &registry, &paths, &strings).map(|_| ())
+    run_prepared_borrow_checker(&PreparedHirFixture::new(source)).map(|_| ())
 }
 
 pub(super) fn assert_lookup_conflict(source: &str, operation: &str) {
@@ -3001,10 +2995,15 @@ fn a_retained_native_slot_borrows_the_argument_without_aliasing_the_fresh_slot()
     else {
         panic!("the native forwarder should publish the ordered success slots");
     };
-    assert!(facts.success.sources.iter().any(|row| {
-        matches!(&row.output, CallOutputPath::Result(path) if path.slot == 0)
-            && matches!(&row.source, CallAllocationSource::Parameter(path) if path.index == 0)
-    }));
+    use crate::compiler_frontend::public_call_summary::typed::{EntryPort, ObjectRef, ValueSource};
+    assert!(
+        super::borrow_checker_call_summary_tests::result_sources(&facts.success, 0)
+            .iter()
+            .any(|source| {
+                let ValueSource::Allocation(ObjectRef::Entry(port)) = source else { return false };
+                matches!(&facts.ports[port.0 as usize], EntryPort::Value { parameter: 0, path } if path.is_empty())
+            })
+    );
 
     let argument_local = find_local_by_name(&hir, &path_fork, &string_table, "argument")
         .expect("should locate the possible aliased argument local");

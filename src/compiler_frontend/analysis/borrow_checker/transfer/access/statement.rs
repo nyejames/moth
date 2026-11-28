@@ -32,7 +32,7 @@ use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
-use crate::compiler_frontend::public_call_summary::typed::TypedCallAllocationFacts;
+use crate::compiler_frontend::public_call_summary::typed::{SupportId, TypedCallAllocationFacts};
 
 #[cfg(test)]
 mod typed_argument_tests {
@@ -60,6 +60,10 @@ mod typed_argument_tests {
             choices: &module.choices,
             expressions: &module.expressions,
             type_environment: &types,
+            type_projection:
+                crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                    &types, &packages,
+                ),
             diagnostics: BorrowDiagnostics::new(&module, &paths, &strings),
         };
         let view = OperationView {
@@ -70,6 +74,7 @@ mod typed_argument_tests {
             block_successors: &Default::default(),
             local_first_write_order: &[],
             acyclic_entry_block: None,
+            entry_roots: None,
         };
         let args = [CallArgumentTransfer {
             argument: HirValueId(0),
@@ -202,6 +207,7 @@ mod typed_argument_tests {
             block_successors: &Default::default(),
             local_first_write_order: &[0, 3],
             acyclic_entry_block: None,
+            entry_roots: None,
         };
         let context = BorrowTransferContext {
             external_package_registry: &packages,
@@ -214,6 +220,10 @@ mod typed_argument_tests {
             choices: &module.choices,
             expressions: &module.expressions,
             type_environment: &types,
+            type_projection:
+                crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                    &types, &packages,
+                ),
             diagnostics: BorrowDiagnostics::new(&module, &paths, &strings),
         };
         let mut state = BorrowState::new_uninitialized(2);
@@ -222,14 +232,22 @@ mod typed_argument_tests {
         derived.insert(0);
         state.mark_slot_derivation(0, derived);
         let holder = state.local_alloc_ids(0).0[0];
-        state.store_alloc_field(
-            &[holder],
-            FieldKey::Elem,
-            &[StoredValue {
-                id: holder,
-                writable: true,
-            }],
-            false,
+        state.publish_store(
+            &TypedStore::write_projected(
+                [holder],
+                FieldKey::Elem,
+                Coverage::Partial,
+                CapturedValue::new(
+                    vec![StoredValue {
+                        id: holder,
+                        writable: true,
+                    }],
+                    Vec::new(),
+                ),
+                false,
+            ),
+            0,
+            None,
         );
         let mut stats = BlockTransferStats::default();
         let args = [CallArgumentTransfer {
@@ -251,12 +269,10 @@ mod typed_argument_tests {
             Some(HirLocalDestination::Define(receiving)),
             CallStorage::Get,
         )
-        .unwrap();
+        .unwrap()
+        .expect("populated lookup can return");
         apply_captured_call_batch(
-            EdgeTransferView {
-                operations: view,
-                observations: true,
-            },
+            EdgeTransferView { operations: view },
             batch,
             [],
             3,
@@ -279,7 +295,10 @@ mod typed_argument_tests {
     }
 }
 use crate::compiler_frontend::source::SourceSpan;
-use call_results::{CallActuals, CallLane, bind_result, call_result_ops, capture_graph_values};
+use call_results::{
+    CallActuals, CallLane, MatchedLane, call_result_ops, capture_graph_values,
+    capture_typed_actuals, match_call_actuals,
+};
 
 pub(crate) fn transfer_statement(
     context: &BorrowTransferContext<'_>,
@@ -453,8 +472,18 @@ fn transfer_statement_write(
             context: input.context,
             view: input.view,
             block_id: input.block_id,
+            materialise_contents: input.stats.sparse,
         };
         let plan = plan_assignment(&values, input.state, &place, value, is_definition, local)?;
+        if !is_definition
+            && plan.destination.as_ref().is_some_and(|place| {
+                writes_entry_storage(input.view, input.state, plan.local, &place.address)
+            })
+            && !matches!(&input.context.expressions.expression(value).kind,
+                HirExpressionKind::Load(source) if *source == place)
+        {
+            record_executed_retention(input, value);
+        }
         return publish_assignment(
             &values,
             input.state,
@@ -661,11 +690,16 @@ fn transfer_target_call(
         .zip(semantics.arg_effects())
         .map(|(argument, effect)| CallArgumentTransfer { argument, effect })
         .collect();
-    let returns = if matches!(result_transfer, CallResultTransfer::Diverges) {
-        CallReturns::Fresh
-    } else {
-        semantics.returns()
-    };
+    let returns = semantics.returns();
+    if let CallReturns::Summary(summary) = returns {
+        return transfer_typed_user_call(
+            input,
+            &arguments,
+            results,
+            summary.facts(),
+            result_transfer,
+        );
+    }
     transfer_call_arguments_and_result(
         input,
         &arguments,
@@ -759,6 +793,16 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn call_member_result
     .then_some(0)
 }
 
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn call_member_writes(
+    target: &CallTarget,
+) -> &'static [crate::compiler_frontend::public_call_summary::CallField] {
+    use crate::compiler_frontend::public_call_summary::CallField;
+    match CallStorage::for_target(target) {
+        CallStorage::Store(_) | CallStorage::Remove { .. } => &[CallField::Elem],
+        _ => &[],
+    }
+}
+
 impl CallStorage {
     fn for_target(target: &CallTarget) -> Self {
         let CallTarget::External(id) = target else {
@@ -799,6 +843,7 @@ pub(in super::super) struct CallTransferContext<'a, 'module, 'state, 'tracker, '
     block_id: BlockId,
     current_order: i32,
     location: Option<SourceSpan>,
+    pub(in super::super) call_components: Option<&'a [SupportId]>,
     stats: &'stats mut BlockTransferStats,
     validation: Option<ValidationSink<'a, 'tracker, 'facts>>,
 }
@@ -824,6 +869,7 @@ impl<'a, 'module, 'state, 'tracker, 'stats, 'facts>
             block_id,
             current_order,
             location,
+            call_components: None,
             stats,
             validation,
         }
@@ -940,6 +986,22 @@ fn transfer_call_arguments_and_result(
         }
     }
 
+    if let CallStorage::Store(positions) = storage
+        && input.view.entry_roots.is_some()
+        && let Some(receiver) = args.first()
+        && let HirExpressionKind::Load(place) =
+            &input.context.expressions.expression(receiver.argument).kind
+        && let Some(resolved) =
+            resolve_place(input.view, input.state, input.context.expressions, place)
+        && let Some(local) = input.view.index_of(place.root)
+        && writes_entry_storage(input.view, input.state, local, &resolved.address)
+    {
+        for &(index, _) in positions {
+            if let Some(arg) = args.get(index) {
+                record_executed_retention(input, arg.argument);
+            }
+        }
+    }
     check_call_arguments(
         input,
         &mut actuals,
@@ -948,8 +1010,6 @@ fn transfer_call_arguments_and_result(
         |arg_index| {
             (retains_success && success_lane.may_retain(arg_index, &arg_value_roots))
                 || (retains_error && error_lane.may_retain(arg_index, &arg_value_roots))
-                || success_lane.may_store(arg_index)
-                || (error.is_some() && error_lane.may_store(arg_index))
         },
         error.is_some(),
     )?;
@@ -959,9 +1019,6 @@ fn transfer_call_arguments_and_result(
 
     if matches!(result_transfer, CallResultTransfer::Diverges) {
         return Ok(());
-    }
-    if error.is_none() && success_lane.unreachable() {
-        input.stats.diverges = true;
     }
     publish_call_continuations(
         input,
@@ -1005,9 +1062,44 @@ fn plan_executed_call_arguments(
     Ok(plans)
 }
 
+fn writes_entry_storage(
+    view: OperationView<'_>,
+    state: &BorrowState,
+    local: usize,
+    addresses: &AddressSet,
+) -> bool {
+    view.entry_roots.is_some_and(|entry| {
+        entry.contains(local)
+            || state
+                .effective_roots(local)
+                .iter_ones()
+                .any(|root| entry.contains(root))
+            || addresses.cells().iter().any(|cell| match *cell {
+                CellId::Slot(wrapper) => !wrapper.is_call_owned() && entry.contains(wrapper.local),
+                CellId::Projected(holder, _) => state
+                    .alloc_origin_local(holder)
+                    .is_some_and(|root| entry.contains(root)),
+            })
+    })
+}
+
+fn record_executed_retention(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    value: HirValueId,
+) {
+    layer::visit_retained_locals(input.context.expressions, value, &mut |source| {
+        if let Some(local) = input.view.index_of(source) {
+            input.stats.executed_retention.insert(local);
+            input
+                .stats
+                .executed_retention
+                .extend(input.state.effective_roots(local).iter_ones());
+        }
+    });
+}
+
 /// Record argument execution once, not once per feasible continuation. For a
 /// deferred call only operand evaluation is known; no optional transfer is final.
-#[allow(dead_code)]
 fn account_typed_call_arguments(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
@@ -1029,11 +1121,11 @@ fn account_typed_call_arguments(
     for (index, arg) in args.iter().enumerate() {
         let effect = (!matches!(settled, TypedContinuation::Deferred))
             .then(|| fallback_call_argument_effect(arg.effect));
-        executed(
-            arg.argument,
-            effect,
-            facts.is_some_and(|facts| facts.executed_may_retain(index)),
-        );
+        let retained = facts.is_some_and(|facts| facts.executed_may_retain(index));
+        if input.stats.sparse && retained {
+            record_executed_retention(input, arg.argument);
+        }
+        executed(arg.argument, effect, retained);
     }
     if let Some(facts) = facts {
         check_call_arguments(
@@ -1054,6 +1146,228 @@ fn account_typed_call_arguments(
     Ok(())
 }
 
+fn transfer_typed_user_call(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    args: &[CallArgumentTransfer],
+    results: impl Iterator<Item = HirLocalDestination> + Clone,
+    facts: Option<&TypedCallAllocationFacts>,
+    transfer: CallResultTransfer,
+) -> Result<(), BorrowCheckError> {
+    use crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch;
+    use crate::compiler_frontend::public_call_summary::typed::EntryPort;
+
+    let error = match transfer {
+        CallResultTransfer::Edge(local) => Some(HirLocalDestination::Define(local)),
+        _ => None,
+    };
+    let terminal = matches!(transfer, CallResultTransfer::Diverges);
+    let order = input.current_order;
+    if facts.is_some()
+        && !terminal
+        && input.state.has_recent_call_storage(order)
+        && input
+            .state
+            .block_may_repeat(input.block_id, input.view.block_successors)
+    {
+        // Carry the preceding invocation's storage forward before capturing
+        // actuals. The batch's newly published objects use the recent keys.
+        let before = input.stats.observations.before_rekey(input.state);
+        input.state.age_call_storage(order);
+        input.stats.observations.after_rekey(
+            before,
+            input.state,
+            |wrapper| input.state.aged_call_wrapper(wrapper, order),
+            |id| input.state.aged_call_allocation(id, order),
+        );
+    }
+    let mut actuals = CallActuals::new(args);
+    let mut retained = vec![false; args.len()];
+    if let Some(facts) = facts
+        && !terminal
+        && input.validation.is_some()
+    {
+        let mut uses_opaque_sources = false;
+        for lane in std::iter::once(&facts.success).chain(error.iter().map(|_| &facts.error)) {
+            lane.visit_compatible(|_| Ok::<_, BorrowCheckError>(None), |_, product| {
+                for post in product.components().iter().flat_map(|component| &component.alternatives) {
+                    uses_opaque_sources |= matches!(
+                        &post.coverage,
+                        crate::compiler_frontend::public_call_summary::typed::Coverage::Unresolved(
+                            crate::compiler_frontend::public_call_summary::typed::Footprint::Locations(_)
+                        )
+                    );
+                    post.visit_entry_ports(false, &mut |port| {
+                        let mut port = &facts.ports[port.0 as usize];
+                        if let EntryPort::Edge(holder, _) = port {
+                            port = &facts.ports[holder.0 as usize];
+                        }
+                        let parameter = match port {
+                            EntryPort::Wrapper(index) | EntryPort::Immediate(index) | EntryPort::Terminal(index) => *index,
+                            EntryPort::Value { parameter, .. } => *parameter,
+                            EntryPort::Edge(..) => unreachable!("typed edge holder is an entry value"),
+                        };
+                        retained[parameter] = true;
+                    });
+                }
+                Ok(())
+            })?;
+        }
+        if uses_opaque_sources {
+            // A bounded opaque suffix substitutes possible predecessor values
+            // even when its known prefix does not name a source explicitly.
+            for port in &facts.ports {
+                if let EntryPort::Value { parameter, .. } = *port {
+                    retained[parameter] = true;
+                }
+            }
+        }
+    }
+    account_typed_call_arguments(
+        input,
+        &mut actuals,
+        facts,
+        CallStorage::User,
+        error.is_some(),
+        |index| retained[index],
+        |_, _, _| {},
+    )?;
+    let Some(facts) = facts else {
+        input.stats.deferred = true;
+        input.stats.invoke.success.unreachable = true;
+        input.stats.invoke.error.unreachable = true;
+        return Ok(());
+    };
+    if terminal {
+        input.stats.diverges = true;
+        return Ok(());
+    }
+    let mut entries = capture_typed_actuals(input, &mut actuals, &facts.ports)?;
+    let parameters: Vec<_> = args
+        .iter()
+        .map(|actual| input.context.expressions.expression(actual.argument).ty)
+        .collect();
+    let mut roots = vec![None; args.len()];
+    for (port, capture) in facts.ports.iter().zip(&mut entries) {
+        let parameter = match port {
+            EntryPort::Wrapper(parameter)
+            | EntryPort::Immediate(parameter)
+            | EntryPort::Terminal(parameter)
+            | EntryPort::Value { parameter, .. } => *parameter,
+            EntryPort::Edge(..) => continue,
+        };
+        if !retained[parameter] {
+            continue;
+        }
+        let argument = args[parameter].argument;
+        if roots[parameter].is_none() {
+            roots[parameter] = Some(call_argument_value_roots(
+                input.context,
+                input.view,
+                input.validation.as_ref().map(|sink| sink.layout),
+                input.state,
+                argument,
+                input
+                    .context
+                    .diagnostics
+                    .value_error_span(argument, input.location),
+            )?);
+        }
+        capture.roots.clone_from(&roots[parameter]);
+    }
+    let checkpoints = std::mem::take(&mut input.stats.invoke.success.checkpoints);
+    let success = capture_typed_user_lane(
+        input,
+        &entries,
+        &parameters,
+        facts,
+        results,
+        false,
+        checkpoints,
+    )?;
+    if let Some(error) = error {
+        let failure = capture_typed_user_lane(
+            input,
+            &entries,
+            &parameters,
+            facts,
+            std::iter::once(error),
+            true,
+            Vec::new(),
+        )?;
+        input.stats.invoke.success.unreachable = success.is_none();
+        input.stats.invoke.error.unreachable = failure.is_none();
+        input.stats.invoke.success.typed = success;
+        input.stats.invoke.error.typed = failure;
+    } else if let Some(success) = success {
+        if input.stats.sparse {
+            input.stats.sparse_call = Some(success);
+            return Ok(());
+        }
+        let observations = apply_captured_call_batch(
+            super::super::EdgeTransferView {
+                operations: input.view,
+            },
+            success,
+            [],
+            input.current_order,
+            input.state,
+        )?;
+        input.stats.observations.append(observations);
+    } else {
+        input.stats.diverges = true;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_typed_user_lane(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    entries: &[call_results::EntryCapture],
+    parameters: &[crate::compiler_frontend::datatypes::ids::TypeId],
+    facts: &TypedCallAllocationFacts,
+    destinations: impl Iterator<Item = HirLocalDestination> + Clone,
+    error: bool,
+    checkpoints: Vec<super::super::ObservationCheckpoint>,
+) -> Result<Option<CapturedCallBatch<MatchedLane>>, BorrowCheckError> {
+    let TypedContinuation::Match(lane) = classify_typed_continuation(
+        Some(facts),
+        false,
+        error,
+        input.validation.is_some(),
+        &input.context.diagnostics,
+    )?
+    else {
+        return Ok(None);
+    };
+    let types = destinations
+        .clone()
+        .map(|destination| input.context.local_types[&destination.local()])
+        .collect::<Vec<_>>();
+    let post = match_call_actuals(input, entries, parameters, &types, lane, error)?;
+    if post.is_empty() {
+        return Ok(None);
+    }
+    let destinations = destinations
+        .map(|dest| {
+            let local = call_result_index(input, dest.local())?;
+            Ok(match dest {
+                HirLocalDestination::Define(_) => CapturedDestination::Define(local),
+                HirLocalDestination::Update(_) => CapturedDestination::Update {
+                    actor: local,
+                    address: capture_call_result_address(input, local)?,
+                },
+            })
+        })
+        .collect::<Result<_, BorrowCheckError>>()?;
+    Ok(Some(CapturedCallBatch {
+        post,
+        destinations,
+        checkpoints,
+        member_reads: Demand::default(),
+        detachment: None,
+    }))
+}
+
 struct CallContinuations<'a, Results> {
     results: Results,
     error: Option<HirLocalDestination>,
@@ -1070,18 +1384,75 @@ fn publish_call_continuations(
     result_transfer: CallResultTransfer,
 ) -> Result<(), BorrowCheckError> {
     // Capture both lanes against entry storage before either lane installs stores or bindings.
-    let mut member_reads = Demand::default();
+    if matches!(storage, CallStorage::Remove { .. } | CallStorage::Get) {
+        let batch = capture_typed_builtin_element_batch(
+            input,
+            actuals,
+            continuations.results.clone().next(),
+            storage,
+        )?;
+        if let Some(error) = continuations.error {
+            let lane = continuations.error_lane;
+            let operations = call_result_ops(
+                input,
+                actuals,
+                std::iter::once(error),
+                lane,
+                InvokeLane::Error,
+            )?;
+            let result = call_result_local_state(
+                input,
+                lane.root_sources(0),
+                arg_value_roots,
+                lane.derive_result(0, actuals, input.view.local_count()),
+            )?;
+            input
+                .stats
+                .invoke
+                .error
+                .results
+                .push((error.local(), result));
+            input.stats.invoke.error.operations = operations;
+            if let Some(batch) = batch {
+                input.stats.invoke.success.typed = Some(CapturedCallBatch {
+                    post: vec![call_results::MatchedStratum {
+                        #[cfg(test)]
+                        guard: Vec::new(),
+                        components: vec![call_results::MatchedComponent {
+                            support: SupportId(0),
+                            alternatives: vec![batch.post],
+                        }],
+                    }],
+                    destinations: batch.destinations,
+                    member_reads: batch.member_reads,
+                    checkpoints: batch.checkpoints,
+                    detachment: batch.detachment,
+                });
+            } else {
+                input.stats.invoke.success.unreachable = true;
+            }
+        } else if let Some(batch) = batch {
+            let observations =
+                crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch(
+                    super::super::EdgeTransferView { operations: input.view },
+                    batch, [], input.current_order, input.state,
+                )?;
+            input.stats.observations.append(observations);
+        } else {
+            input.stats.diverges = true;
+        }
+        return Ok(());
+    }
     let (mut success_ops, error_ops) =
-        capture_call_continuations(input, actuals, &continuations, storage, &mut member_reads)?;
+        capture_call_continuations(input, actuals, &continuations, storage)?;
     let CallContinuations {
         results,
         error,
         success_lane,
         error_lane,
     } = continuations;
-    let mut root_sources = Vec::new();
     let mut writes = Vec::new();
-    if matches!(result_transfer, CallResultTransfer::Immediate) && !success_lane.unreachable() {
+    if matches!(result_transfer, CallResultTransfer::Immediate) {
         // Capture and check every update before installing any result definition.
         for (slot, result) in results.clone().enumerate() {
             let HirLocalDestination::Update(local) = result else {
@@ -1089,7 +1460,7 @@ fn publish_call_continuations(
             };
             let value = call_result_local_state(
                 input,
-                success_lane.root_sources(slot, &mut root_sources),
+                success_lane.root_sources(slot),
                 arg_value_roots,
                 success_lane.derive_result(slot, actuals, input.view.local_count()),
             )?;
@@ -1101,43 +1472,36 @@ fn publish_call_continuations(
             )?);
         }
     }
-    if !success_lane.unreachable() {
-        for (slot, result) in results.enumerate() {
-            if error.is_none() && matches!(result, HirLocalDestination::Update(_)) {
-                continue;
-            }
-            let derived = success_lane.derive_result(slot, actuals, input.view.local_count());
-            prepare_call_result_definition(
-                input,
-                result.local(),
-                success_lane.root_sources(slot, &mut root_sources),
-                arg_value_roots,
-                derived,
-                result_transfer,
-                &mut success_ops,
-                &mut writes,
-            )?;
+    for (slot, result) in results.enumerate() {
+        if error.is_none() && matches!(result, HirLocalDestination::Update(_)) {
+            continue;
         }
+        let derived = success_lane.derive_result(slot, actuals, input.view.local_count());
+        prepare_call_result_definition(
+            input,
+            result.local(),
+            success_lane.root_sources(slot),
+            arg_value_roots,
+            derived,
+            result_transfer,
+            &mut success_ops,
+            &mut writes,
+        )?;
     }
     if let Some(error) = error {
-        if !error_lane.unreachable() {
-            let state = call_result_local_state(
-                input,
-                error_lane.root_sources(0, &mut root_sources),
-                arg_value_roots,
-                error_lane.derive_result(0, actuals, input.view.local_count()),
-            )?;
-            input
-                .stats
-                .invoke
-                .error
-                .results
-                .push((error.local(), state));
-        }
-        input.stats.invoke.success.unreachable = success_lane.unreachable();
-        input.stats.invoke.error.unreachable = error_lane.unreachable();
+        let state = call_result_local_state(
+            input,
+            error_lane.root_sources(0),
+            arg_value_roots,
+            error_lane.derive_result(0, actuals, input.view.local_count()),
+        )?;
+        input
+            .stats
+            .invoke
+            .error
+            .results
+            .push((error.local(), state));
         input.stats.invoke.success.operations = success_ops;
-        input.stats.invoke.success.member_reads = member_reads;
         input.stats.invoke.error.operations = error_ops;
     } else {
         apply_immediate_call_operations(input, success_ops, writes);
@@ -1151,7 +1515,6 @@ fn capture_call_continuations(
     actuals: &mut CallActuals<'_>,
     continuations: &CallContinuations<'_, impl Iterator<Item = HirLocalDestination> + Clone>,
     storage: CallStorage,
-    member_reads: &mut Demand,
 ) -> Result<(Vec<InvokeLayerOp>, Vec<InvokeLayerOp>), BorrowCheckError> {
     let CallContinuations {
         results,
@@ -1159,35 +1522,25 @@ fn capture_call_continuations(
         success_lane,
         error_lane,
     } = continuations;
-    let mut results = results.clone();
+    let results = results.clone();
     let success_ops = match storage {
         CallStorage::User | CallStorage::Native | CallStorage::Plain | CallStorage::Builtin => {
-            call_result_ops(
-                input,
-                actuals,
-                results,
-                *success_lane,
-                InvokeLane::Success,
-                error.is_none(),
-            )?
+            call_result_ops(input, actuals, results, *success_lane, InvokeLane::Success)?
         }
         CallStorage::Store(positions) => capture_builtin_store(input, actuals, positions)?,
         CallStorage::ClearMap => call_receiver_allocs(input, actuals)?
             .filter(|receiver| !receiver.ids.is_empty())
             .map_or_else(Vec::new, |receiver| {
-                vec![InvokeLayerOp::Store(TypedStore::EraseFamily {
-                    coverage: receiver.holder_coverage(),
-                    receivers: receiver.ids,
-                    keys: EntryFamilies::MapEntries,
-                })]
+                let coverage = receiver.holder_coverage();
+                vec![InvokeLayerOp::Store(TypedStore::reset_families(
+                    receiver.ids,
+                    coverage,
+                    EntryFamilies::MapEntries,
+                ))]
             }),
-        CallStorage::Remove { .. } | CallStorage::Get => capture_builtin_element_result(
-            input,
-            actuals,
-            results.next(),
-            storage,
-            error.is_some().then_some(member_reads),
-        )?,
+        CallStorage::Remove { .. } | CallStorage::Get => {
+            unreachable!("member calls are captured first")
+        }
     };
     let error_ops = if error.is_some() {
         call_result_ops(
@@ -1196,7 +1549,6 @@ fn capture_call_continuations(
             error.iter().copied(),
             *error_lane,
             InvokeLane::Error,
-            false,
         )?
     } else {
         Vec::new()
@@ -1301,8 +1653,7 @@ fn check_call_arguments(
         )?;
     }
     if let Some(validation) = &input.validation
-        && input.stats.observations.enabled
-        && input.state.has_value_alternatives()
+        && input.state.has_dependency_carriers()
     {
         input.stats.invoke.success.checkpoints = record_call_observations(
             &mut input.stats.observations,
@@ -1349,13 +1700,15 @@ fn capture_builtin_store(
         let Some(argument) = actuals.arguments().get(index) else {
             continue;
         };
-        if !needs_layer_store_capture(
-            input.context,
-            input.state,
-            &holders.ids,
-            key,
-            argument.argument,
-        )? {
+        if !input.stats.sparse
+            && !needs_layer_store_capture(
+                input.context,
+                input.state,
+                &holders.ids,
+                key,
+                argument.argument,
+            )?
+        {
             continue;
         }
         let stored = actuals.root(input, index)?.clone();
@@ -1376,57 +1729,24 @@ struct BuiltinElementCapture {
     removal: Option<(Vec<AllocId>, bool)>,
 }
 
-/// Capture the element before removal and before a result can rebind the receiver.
-fn capture_builtin_element_result(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    result: Option<HirLocalDestination>,
-    storage: CallStorage,
-    deferred_reads: Option<&mut Demand>,
-) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
-    let capture = capture_builtin_element(input, actuals, result, storage, deferred_reads, None)?;
-    let mut ops = Vec::new();
-    if let (Some(result), Some(value)) = (result, capture.result) {
-        bind_result(&mut ops, result, value);
-    }
-    if let Some((holders, map)) = capture.removal {
-        ops.push(InvokeLayerOp::Remove {
-            holders,
-            map,
-            result: result.map(HirLocalDestination::local),
-        });
-    }
-    Ok(ops)
-}
-
 fn capture_builtin_element(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
     result: Option<HirLocalDestination>,
     storage: CallStorage,
-    deferred_reads: Option<&mut Demand>,
+    member_reads: &mut Demand,
     receiver: Option<ResolvedPlace>,
-) -> Result<BuiltinElementCapture, BorrowCheckError> {
+) -> BuiltinElementCapture {
     let heap_result = result
         .and_then(|result| input.view.index_of(result.local()))
         .is_some_and(|index| input.view.local_has_in_place_mutation_surface[index]);
     if !heap_result && input.state.layer_is_empty() && !matches!(storage, CallStorage::Get) {
-        return Ok(BuiltinElementCapture::default());
+        return BuiltinElementCapture::default();
     }
-    let elements = match receiver {
-        Some(value) => Some(value),
-        None => call_receiver_allocs(input, actuals)?,
+    let Some(mut elements) = receiver else {
+        return BuiltinElementCapture::default();
     };
-    let Some(mut elements) = elements else {
-        return Ok(BuiltinElementCapture::default());
-    };
-    if input.validation.is_some() && input.stats.observations.enabled {
-        let reads = selected_members(input.state, &elements);
-        if let Some(deferred) = deferred_reads {
-            deferred.extend(reads);
-        } else {
-            input.stats.observations.tail.read(reads);
-        }
+    if input.validation.is_some() && input.state.has_dependency_carriers() {
+        member_reads.extend(selected_members(input.state, &elements));
     }
     let holders = if matches!(storage, CallStorage::Remove { .. })
         && elements.holder_coverage() == Coverage::Complete
@@ -1491,33 +1811,37 @@ fn capture_builtin_element(
         CallStorage::Remove { map } => Some((holders, map)),
         _ => None,
     };
-    Ok(BuiltinElementCapture {
+    BuiltinElementCapture {
         result: value,
         removal,
-    })
+    }
 }
 
-#[allow(dead_code)]
 fn capture_typed_builtin_element_batch(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
     result: Option<HirLocalDestination>,
     storage: CallStorage,
-) -> Result<CapturedCallBatch, BorrowCheckError> {
+) -> Result<Option<CapturedCallBatch>, BorrowCheckError> {
     let mut member_reads = Demand::default();
     let receiver = if actuals.entry_place(input, 0)?.is_none() {
         Some(ResolvedPlace::from_capture(actuals.root(input, 0)?))
     } else {
-        None
+        call_receiver_allocs(input, actuals)?
     };
-    let capture = capture_builtin_element(
-        input,
-        actuals,
-        result,
-        storage,
-        Some(&mut member_reads),
-        receiver,
-    )?;
+    if matches!(storage, CallStorage::Get)
+        && receiver.as_ref().is_some_and(|receiver| {
+            receiver.holder_coverage() == Coverage::Complete
+                && !receiver.ids.is_empty()
+                && receiver
+                    .ids
+                    .iter()
+                    .all(|&holder| input.state.alloc_group_is_empty(holder, FieldKey::Elem))
+        })
+    {
+        return Ok(None);
+    }
+    let capture = capture_builtin_element(input, result, storage, &mut member_reads, receiver);
     let mut post = call_results::CapturedPost::default();
     let mut destinations = Vec::new();
     let mut result_index = None;
@@ -1580,7 +1904,7 @@ fn capture_typed_builtin_element_batch(
             },
         });
     }
-    Ok(CapturedCallBatch {
+    Ok(Some(CapturedCallBatch {
         post,
         destinations,
         member_reads,
@@ -1590,7 +1914,7 @@ fn capture_typed_builtin_element_batch(
             map,
             result: result_index,
         }),
-    })
+    }))
 }
 
 struct CallAccessPlan {
@@ -2064,22 +2388,14 @@ fn capture_call_result_address(
 
 fn apply_immediate_call_operations(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    mut ops: Vec<InvokeLayerOp>,
+    ops: Vec<InvokeLayerOp>,
     writes: Vec<CallResultWrite>,
 ) {
-    // Removal must observe the installed result to record its detachment.
-    let mut post_result =
-        if !writes.is_empty() && matches!(ops.last(), Some(InvokeLayerOp::Remove { .. })) {
-            ops.pop()
-        } else {
-            None
-        };
     for op in ops {
         input
             .stats
             .observations
-            .tail
-            .replace(op.apply_owned(input.view, input.state));
+            .publish(op.apply_owned(input.view, input.state));
     }
     let mut writes = writes.into_iter();
     while let Some(mut write) = writes.next() {
@@ -2096,24 +2412,14 @@ fn apply_immediate_call_operations(
             for pending in writes.as_mut_slice() {
                 pending.remap(input.state, retirement);
             }
-            if let Some(op) = &mut post_result {
-                op.remap(input.state, retirement);
-            }
         }
         let receipt = input
             .state
             .publish_store(&write.store, input.current_order, None);
-        input.stats.observations.tail.replace(receipt);
+        input.stats.observations.publish(receipt);
         input
             .state
             .mark_slot_derivation(write.definite_slot.unwrap_or(write.actor), write.derivation);
-    }
-    if let Some(op) = post_result {
-        input
-            .stats
-            .observations
-            .tail
-            .replace(op.apply_owned(input.view, input.state));
     }
 }
 

@@ -12,6 +12,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 mod allocation_layer;
@@ -25,6 +26,7 @@ pub(super) use allocation_layer::{
 /// An occurrence of a local binding, whether it owns a slot or links to another place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct WrapperId {
+    /// A dense local for named wrappers, or a key in the call's retained vocabulary.
     pub local: usize,
     pub age: WrapperAge,
 }
@@ -33,6 +35,8 @@ pub(super) struct WrapperId {
 pub(super) enum WrapperAge {
     Current,
     Prior,
+    CallExact,
+    CallFamily,
 }
 
 impl WrapperId {
@@ -41,6 +45,14 @@ impl WrapperId {
             local,
             age: WrapperAge::Current,
         }
+    }
+
+    pub(super) fn is_singleton(self) -> bool {
+        matches!(self.age, WrapperAge::Current | WrapperAge::CallExact)
+    }
+
+    pub(super) fn is_call_owned(self) -> bool {
+        matches!(self.age, WrapperAge::CallExact | WrapperAge::CallFamily)
     }
 
     pub(super) fn retired(self, retires: impl FnOnce(usize) -> bool) -> Self {
@@ -199,20 +211,16 @@ impl AddressSet {
             Coverage::Partial
         };
         self.all_candidates_known = complete;
-        self.definite = match self.cells.as_slice() {
-            [cell @ CellId::Slot(wrapper)] if complete && wrapper.age == WrapperAge::Current => {
-                Some(*cell)
-            }
-            [cell @ CellId::Projected(holder, FieldKey::Field(_) | FieldKey::Payload { .. })]
-                if complete && state.alloc_singular(*holder) =>
-            {
-                Some(*cell)
-            }
-            _ => None,
-        };
+        self.definite =
+            match self.cells.as_slice() {
+                [cell @ CellId::Slot(wrapper)] if complete && wrapper.is_singleton() => Some(*cell),
+                [
+                    cell @ CellId::Projected(holder, FieldKey::Field(_) | FieldKey::Payload { .. }),
+                ] if complete && state.alloc_singular(*holder) => Some(*cell),
+                _ => None,
+            };
     }
 
-    #[allow(dead_code)]
     pub(super) fn add_retained_dependencies(&mut self, dependencies: &[ReceiverDependency]) {
         if dependencies.is_empty() {
             return;
@@ -237,7 +245,6 @@ impl AddressSet {
         &self.routes
     }
 
-    #[allow(dead_code)]
     pub(super) fn into_retained_routes(self) -> CapturedRoutes {
         self.routes
     }
@@ -265,15 +272,15 @@ impl AddressSet {
 
     pub(super) fn with_singleton_proof(mut self) -> Self {
         if self.coverage == Coverage::Complete
-            && let [
-                cell @ (CellId::Slot(WrapperId {
-                    age: WrapperAge::Current,
-                    ..
-                })
-                | CellId::Projected(_, FieldKey::Field(_) | FieldKey::Payload { .. })),
-            ] = self.cells()
+            && let [cell] = self.cells()
         {
-            self.definite = Some(*cell);
+            match cell {
+                CellId::Slot(slot) if slot.is_singleton() => self.definite = Some(*cell),
+                CellId::Projected(_, FieldKey::Field(_) | FieldKey::Payload { .. }) => {
+                    self.definite = Some(*cell);
+                }
+                _ => {}
+            }
         }
         self
     }
@@ -293,12 +300,7 @@ impl AddressSet {
         // A definite destination was already a singleton; a prior slot is never exact.
         if self.definite.is_some() {
             self.definite = match self.cells() {
-                [
-                    CellId::Slot(WrapperId {
-                        age: WrapperAge::Prior,
-                        ..
-                    }),
-                ] => None,
+                [CellId::Slot(slot)] if !slot.is_singleton() => None,
                 [cell] => Some(*cell),
                 _ => unreachable!("remapping cannot add a destination to a singleton"),
             };
@@ -328,21 +330,21 @@ pub(super) enum BindingSpec {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum BindingTarget {
     OwnSlot,
     Link(WrapperId),
     Projected(AllocId, FieldKey),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct Origin {
     pub wrapper: WrapperId,
     pub owner: Option<WrapperId>,
     pub isolated: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct BindingAlt {
     pub target: BindingTarget,
     pub origin: Option<Origin>,
@@ -355,7 +357,7 @@ const OWN_SLOT: BindingAlt = BindingAlt {
     origin: None,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BindingRow {
     wrapper: WrapperId,
     alts: SmallSet<BindingAlt>,
@@ -423,7 +425,7 @@ impl BindingRow {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Init {
     No,
     Yes,
@@ -453,7 +455,7 @@ pub(super) struct ReceiverDependency {
 
 pub(super) type DependencySet = Vec<ReceiverDependency>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) enum ValueKind {
     Scalar,
     Allocation(StoredValue),
@@ -461,7 +463,7 @@ pub(super) enum ValueKind {
     Absent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct ValueAlt {
     pub kind: ValueKind,
     pub deps: DependencySet,
@@ -473,6 +475,14 @@ impl ValueAlt {
             kind,
             deps: Vec::new(),
         }
+    }
+
+    fn same_carrier(&self, other: &Self) -> bool {
+        self.deps == other.deps
+            && match (self.kind, other.kind) {
+                (ValueKind::Allocation(left), ValueKind::Allocation(right)) => left.id == right.id,
+                (left, right) => left == right,
+            }
     }
 
     fn remap(&mut self, remap: &mut impl FnMut(AllocId) -> AllocId) {
@@ -590,16 +600,15 @@ fn remap_value_alternatives(
     alternatives.dedup();
 }
 
-#[derive(Debug, Default)]
-pub(super) struct StoreReceipt {
-    pub replaced: [Option<(CellId, ValueAlternatives)>; 2],
-}
+pub(super) type StoreReceipt = PublicationCarriers;
 
 /// Keep entry and exit coordinates separate: the same key can name two occurrences.
 #[derive(Debug, Default)]
 pub(super) struct PublicationCarriers {
     pub definite_old: Vec<(CellId, ValueAlternatives)>,
     pub introduced: Vec<(CellId, ValueAlternatives)>,
+    pub definite_old_routes: Vec<(WrapperId, CellId, DependencySet)>,
+    pub introduced_routes: Vec<(WrapperId, CellId, DependencySet)>,
 }
 
 impl PublicationCarriers {
@@ -622,22 +631,33 @@ impl PublicationCarriers {
             &mut self.introduced,
             exit_cell,
             incoming.iter().filter(|alt| {
-                !alt.deps.is_empty()
-                    && (definite
-                        || !old.iter().any(|old| {
-                            let same_kind = match (old.kind, alt.kind) {
-                                (ValueKind::Allocation(a), ValueKind::Allocation(b)) => {
-                                    a.id == b.id
-                                }
-                                (a, b) => a == b,
-                            };
-                            same_kind && old.deps == alt.deps
-                        }))
+                !alt.deps.is_empty() && (definite || !old.iter().any(|old| old.same_carrier(alt)))
             }),
         );
     }
 
-    #[allow(dead_code)]
+    pub(super) fn record_routes(
+        &mut self,
+        wrapper: WrapperId,
+        old: &[(CellId, DependencySet)],
+        incoming: &[(CellId, DependencySet)],
+        definite: bool,
+    ) {
+        if definite {
+            self.definite_old_routes.extend(
+                old.iter()
+                    .filter(|(_, deps)| !deps.is_empty())
+                    .map(|(cell, deps)| (wrapper, *cell, deps.clone())),
+            );
+        }
+        self.introduced_routes.extend(
+            incoming
+                .iter()
+                .filter(|route| !route.1.is_empty() && (definite || !old.contains(route)))
+                .map(|(cell, deps)| (wrapper, *cell, deps.clone())),
+        );
+    }
+
     pub(super) fn append(&mut self, receipt: Self) {
         fn append_rows(
             target: &mut Vec<(CellId, ValueAlternatives)>,
@@ -661,9 +681,10 @@ impl PublicationCarriers {
         }
         append_rows(&mut self.definite_old, receipt.definite_old);
         append_rows(&mut self.introduced, receipt.introduced);
+        self.definite_old_routes.extend(receipt.definite_old_routes);
+        self.introduced_routes.extend(receipt.introduced_routes);
     }
 
-    #[allow(dead_code)]
     pub(super) fn intersect(&mut self, other: &Self) {
         let intersect = |rows: &mut Vec<(CellId, ValueAlternatives)>,
                          other: &[(CellId, ValueAlternatives)]| {
@@ -671,12 +692,22 @@ impl PublicationCarriers {
                 let Ok(index) = other.binary_search_by_key(cell, |(cell, _)| *cell) else {
                     return false;
                 };
-                values.retain(|value| other[index].1.binary_search(value).is_ok());
+                let other_values = &other[index].1;
+                values.retain(|value| {
+                    // A row can restrict the same occurrence without changing its carrier.
+                    other_values.binary_search(value).is_ok()
+                        || matches!(value.kind, ValueKind::Allocation(_))
+                            && other_values.iter().any(|other| value.same_carrier(other))
+                });
                 !values.is_empty()
             });
         };
         intersect(&mut self.definite_old, &other.definite_old);
         intersect(&mut self.introduced, &other.introduced);
+        self.definite_old_routes
+            .retain(|route| other.definite_old_routes.contains(route));
+        self.introduced_routes
+            .retain(|route| other.introduced_routes.contains(route));
     }
 
     fn add<'a>(
@@ -720,11 +751,17 @@ pub(super) struct FamilyMember {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum TypedStore {
     Write(TypedWrite),
-    EraseFamily {
-        receivers: Vec<AllocId>,
+    Family {
+        receivers: SmallSet<AllocId>,
         coverage: Coverage,
-        keys: EntryFamilies,
+        update: FamilyUpdate,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum FamilyUpdate {
+    Reset(EntryFamilies),
+    Extend(FieldKey, FamilyMember),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -740,6 +777,18 @@ pub(super) struct TypedWrite {
 }
 
 impl TypedStore {
+    pub(super) fn reset_families(
+        receivers: Vec<AllocId>,
+        coverage: Coverage,
+        keys: EntryFamilies,
+    ) -> Self {
+        Self::Family {
+            receivers: receivers.into_iter().collect(),
+            coverage,
+            update: FamilyUpdate::Reset(keys),
+        }
+    }
+
     pub(super) fn write_projected(
         holders: impl IntoIterator<Item = AllocId>,
         key: FieldKey,
@@ -747,6 +796,19 @@ impl TypedStore {
         value: CapturedValue,
         distinct_occurrence: bool,
     ) -> Self {
+        if matches!(key, FieldKey::Elem | FieldKey::MapKey) {
+            return Self::Family {
+                receivers: holders.into_iter().collect(),
+                coverage,
+                update: FamilyUpdate::Extend(
+                    key,
+                    FamilyMember {
+                        value,
+                        at_most_once: distinct_occurrence,
+                    },
+                ),
+            };
+        }
         Self::Write(TypedWrite {
             addresses: AddressSet::from_cells(
                 holders
@@ -848,40 +910,39 @@ impl TypedStore {
             if write.addresses.cells().contains(&CellId::Slot(WrapperId::current(local))))
     }
 
-    #[allow(dead_code)]
     pub(super) fn without_kill(mut self) -> Self {
         self.weaken();
         self
     }
 
     pub(super) fn weaken(&mut self) {
-        if let Self::Write(write) = self {
-            write.replace = Replacement::May;
-            write.distinct_occurrence = false;
+        match self {
+            Self::Write(write) => {
+                write.replace = Replacement::May;
+                write.distinct_occurrence = false;
+            }
+            Self::Family { coverage, .. } => *coverage = Coverage::Partial,
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn captured_cells(&self) -> Option<&[CellId]> {
         match self {
             Self::Write(write) => Some(write.addresses.cells()),
-            Self::EraseFamily { .. } => None,
+            Self::Family { .. } => None,
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn captured_value(&self) -> Option<&CapturedValue> {
         match self {
             Self::Write(write) => Some(&write.value),
-            Self::EraseFamily { .. } => None,
+            Self::Family { .. } => None,
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn captured_address(&self) -> Option<&AddressSet> {
         match self {
             Self::Write(write) => Some(&write.addresses),
-            Self::EraseFamily { .. } => None,
+            Self::Family { .. } => None,
         }
     }
 
@@ -895,7 +956,13 @@ impl TypedStore {
                         .as_ref()
                         .is_some_and(|roots| roots.contains(local))
             }
-            Self::EraseFamily { receivers, .. } => receivers.iter().copied().any(names),
+            Self::Family {
+                receivers, update, ..
+            } => {
+                receivers.as_slice().iter().copied().any(names)
+                    || matches!(update, FamilyUpdate::Extend(_, member)
+                        if member.value.names_allocation(names))
+            }
         }
     }
 
@@ -912,9 +979,15 @@ impl TypedStore {
                 }
                 value.remap(state, retirement);
             }
-            Self::EraseFamily { receivers, .. } => {
-                for receiver in receivers {
-                    retirement.remap_id(state, receiver);
+            Self::Family {
+                receivers, update, ..
+            } => {
+                receivers.remap(|mut receiver| {
+                    retirement.remap_id(state, &mut receiver);
+                    receiver
+                });
+                if let FamilyUpdate::Extend(_, member) = update {
+                    member.value.remap(state, retirement);
                 }
             }
         }
@@ -925,6 +998,15 @@ impl TypedStore {
 pub(super) enum EntryFamilies {
     Elements,
     MapEntries,
+}
+
+impl EntryFamilies {
+    fn selectors(self) -> &'static [FieldKey] {
+        match self {
+            Self::Elements => &[FieldKey::Elem],
+            Self::MapEntries => &[FieldKey::Elem, FieldKey::MapKey],
+        }
+    }
 }
 
 /// Keep captures borrowed unless retirement changes at least one identity.
@@ -947,7 +1029,6 @@ pub(super) fn remap_invoke_capture<T: Copy + PartialEq>(
 
 /// Projected directly from the current or retained wrapper row, including the
 /// immediate link rather than its resolved terminal.
-#[allow(dead_code)] // Used by boundary projection, not by access validation.
 pub(super) struct BoundaryBinding<'a> {
     pub alternatives: &'a [BindingAlt],
     pub coverage: Coverage,
@@ -1057,7 +1138,6 @@ pub(super) struct FunctionLayout {
     pub block_successors: FxHashMap<BlockId, Vec<BlockId>>,
     /// The entry block if no reachable edge can feed it after parameter initialization.
     pub acyclic_entry_block: Option<BlockId>,
-    pub lookup_observations: bool,
     // Shared by assignment reachability and forward state kills at lexical region exits.
     pub visible_locals_by_block: FxHashMap<BlockId, RootSet>,
     pub may_use_from_block: FxHashMap<BlockId, RootSet>,
@@ -1174,7 +1254,6 @@ impl FunctionLayout {
             block_local_max_use_order: inputs.block_local_max_use_order,
             block_successors: inputs.block_successors,
             acyclic_entry_block: None,
-            lookup_observations: false,
             visible_locals_by_block: inputs.visible_locals_by_block,
             may_use_from_block: inputs.may_use_from_block,
             must_use_from_block: inputs.must_use_from_block,
@@ -1307,6 +1386,13 @@ impl PartialEq for BorrowState {
 
 impl Eq for BorrowState {}
 
+impl Hash for BorrowState {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.locals.hash(hasher);
+        self.layer.hash(hasher);
+    }
+}
+
 fn index_roots(map: &mut BTreeSet<(usize, usize)>, owner: usize, roots: &RootSet, insert: bool) {
     for root in roots.iter_ones() {
         if insert {
@@ -1368,7 +1454,7 @@ impl BorrowState {
         spec: BindingSpec,
         value_roots: RootSet,
         derived_from_roots: RootSet,
-    ) {
+    ) -> StoreReceipt {
         self.update_local_state(
             local,
             LocalState {
@@ -1376,7 +1462,7 @@ impl BorrowState {
                 ..LocalState::slot_from_value_roots(value_roots)
             },
         );
-        self.install_binding_spec(local, spec);
+        self.install_binding_spec(local, spec)
     }
 
     /// The value-provenance roots a local's current binding keeps alive.
@@ -1565,7 +1651,7 @@ impl BorrowState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct LocalState {
     init: Init,
     // Allocation provenance, never a destination.
@@ -1639,6 +1725,17 @@ impl PartialEq for RootSet {
 }
 
 impl Eq for RootSet {}
+
+impl Hash for RootSet {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.bit_len.hash(hasher);
+        // Equality admits different storage representations of the same roots.
+        for root in self.iter_ones() {
+            root.hash(hasher);
+        }
+        self.bit_len.hash(hasher);
+    }
+}
 
 impl RootSet {
     pub(super) fn empty(bit_len: usize) -> Self {

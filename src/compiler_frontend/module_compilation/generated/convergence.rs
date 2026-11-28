@@ -57,9 +57,9 @@ use crate::compiler_frontend::module_compilation::context::ModuleCompilationCont
 use crate::compiler_frontend::module_compilation::external_imports::{
     collect_external_import_candidates_for_packages, collect_external_import_package_ids,
 };
-use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
 use crate::compiler_frontend::public_call_summary::{
     PublicCallMutationEffect, PublicCallSummary, PublicCallSummaryTransition,
+    same_typed_allocation_transfer_as, validate_public_call_summary_transition,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -532,8 +532,10 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     bootstrap_borrow_analysis: BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
+    base_projection: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<BorrowCheckReport, PreparedFailure> {
+    let projection_registry = std::sync::Arc::clone(compiler.external_package_registry);
     let base_public_origins = hir_module
         .function_ids_by_origin
         .keys()
@@ -649,7 +651,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         warnings,
                         None,
                         &mut borrow_analysis,
-                        (function_link_facts, &changed_callers),
+                        (function_link_facts, &changed_callers, base_projection),
                         !matches!(visit, BorrowVisit::Summarize)
                             || convergence_model.node_count() != 1,
                     )
@@ -704,15 +706,19 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     timed_stage_attributed!(
                         crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
                         timing_context,
-                        visit.update(
-                            compiler,
-                            &executable.hir,
+                        crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
                             &executable.type_environment,
-                            sidecar_warnings,
-                            Some(&source_identity_handle),
-                            &mut executable.borrow_analysis,
-                            (links, &changed_callers),
-                            false,
+                            &projection_registry,
+                            |projection| visit.update(
+                                compiler,
+                                &executable.hir,
+                                &executable.type_environment,
+                                sidecar_warnings,
+                                Some(&source_identity_handle),
+                                &mut executable.borrow_analysis,
+                                (links, &changed_callers, projection),
+                                false,
+                            ),
                         )
                     )?;
                     let summary = generated_root_summary(identity, &sidecar.module);
@@ -1122,7 +1128,11 @@ impl BorrowVisit {
         warnings: &mut DiagnosticBag,
         owner: Option<&FrozenIdentityHandle>,
         report: &mut BorrowCheckReport,
-        allocation_inputs: (&HirModuleLinkFacts, &FxHashSet<FunctionId>),
+        allocation_inputs: (
+            &HirModuleLinkFacts,
+            &FxHashSet<FunctionId>,
+            &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
+        ),
         compare_base_summaries: bool,
     ) -> Result<Option<FxHashMap<FunctionId, PublicCallSummary>>, PreparedFailure> {
         let previous =
@@ -1140,7 +1150,15 @@ impl BorrowVisit {
                 )?;
             }
             Self::InferFailure => infer_builtin_failure_summaries(hir, report),
-            Self::Check => check_borrows(compiler, hir, types, warnings, owner, report)?,
+            Self::Check => check_borrows(
+                compiler,
+                hir,
+                types,
+                warnings,
+                owner,
+                report,
+                allocation_inputs.2,
+            )?,
             Self::RefreshMutation => {
                 refresh_call_mutation_effects(compiler, hir, types, warnings, owner, report)?;
             }
@@ -1349,10 +1367,10 @@ fn install_call_inputs<'a, K: Clone + Eq + std::hash::Hash>(
             *mutation = true;
             continue;
         };
-        if !previous
-            .return_alias
-            .same_allocation_transfer_as(&summary.return_alias)
-        {
+        if !same_typed_allocation_transfer_as(
+            previous.return_alias.facts(),
+            summary.return_alias.facts(),
+        ) {
             previous.return_alias.clone_from(&summary.return_alias);
             allocations.insert(target);
         } else if std::mem::discriminant(&previous.return_alias)

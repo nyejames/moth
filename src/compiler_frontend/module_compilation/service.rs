@@ -968,18 +968,38 @@ fn run_semantic_stages(
         .map_err(PreparedFailure::from)?;
         return Err(PreparedFailure::Diagnosed(batch));
     }
-    let borrow_analysis = run_generated_summary_convergence(
-        context,
-        compiler,
-        &mut hir_module,
-        &mut function_link_facts,
-        &mut generated_transaction,
-        bootstrap_borrow_analysis,
-        &mut type_environment,
-        &mut warning_bag,
-        #[cfg(feature = "timers")]
-        timing_context,
-    )?;
+    let projection_registry = Arc::clone(compiler.external_package_registry);
+    let borrow_analysis =
+        crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
+            &materialisation_context_builder.context().type_environment,
+            &projection_registry,
+            |projection| {
+                run_generated_summary_convergence(
+                    context,
+                    compiler,
+                    &mut hir_module,
+                    &mut function_link_facts,
+                    &mut generated_transaction,
+                    bootstrap_borrow_analysis,
+                    &mut type_environment,
+                    &mut warning_bag,
+                    projection,
+                    #[cfg(feature = "timers")]
+                    timing_context,
+                )
+            },
+        )?;
+    #[cfg(test)]
+    let borrow_analysis = {
+        let mut report = borrow_analysis;
+        report.declaring_types_for_cold_check = Some(
+            materialisation_context_builder
+                .context()
+                .type_environment
+                .clone(),
+        );
+        report
+    };
     // Private failure lanes and final link facts are complete. Publication may still
     // rebase interned scalar identities, but expression topology is fixed.
     hir_module.expressions.freeze();

@@ -14,8 +14,11 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::comp
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::validate_hir_module;
-use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
+use crate::compiler_frontend::tests::borrow_fixture_support::{
+    run_borrow_checker_with_types, run_prepared_borrow_checker,
+};
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
 
@@ -252,7 +255,7 @@ fn collapsed_elements_do_not_prove_a_guarded_cell_equality() {
 }
 
 #[test]
-fn typed_matcher_rejects_exact_and_partial_write_collisions_in_both_orders() {
+fn typed_matcher_weakens_exact_and_partial_write_collisions_in_both_orders() {
     use typed::{CellPort, CellPost, PortId};
     let (state, [left, right]) = parameter_allocations::<2>();
     let target = |holder| CellId::Projected(holder, FieldKey::Field(0));
@@ -280,9 +283,121 @@ fn typed_matcher_rejects_exact_and_partial_write_collisions_in_both_orders() {
             .collect(),
         ..Default::default()
     }]);
+    assert!(
+        match_typed_lane(
+            &typed_test_input(&state, &[exact.clone(), exact.clone()]),
+            &lane
+        )
+        .is_err()
+    );
     for entries in [[exact.clone(), partial.clone()], [partial, exact]] {
-        assert!(match_typed_lane(&typed_test_input(&state, &entries), &lane).is_err());
+        let mut replay = state.clone();
+        publish_projected_fixture(
+            &mut replay,
+            left,
+            FieldKey::Field(0),
+            &[StoredValue {
+                id: right,
+                writable: true,
+            }],
+        );
+        let row = typed_test_post(&typed_test_input(&replay, &entries), &lane);
+        assert_eq!(row.edits.len(), 2);
+        for edit in row.edits {
+            let CapturedEdit::Cell(store) = edit else {
+                panic!("expected a cell write")
+            };
+            assert!(
+                replay
+                    .publish_store(&store, 0, None)
+                    .definite_old
+                    .is_empty()
+            );
+        }
+        assert!(
+            replay
+                .resolve_alloc_path(0, &[true; 2], [FieldKey::Field(0)])
+                .ids
+                .contains(&right)
+        );
     }
+}
+
+#[test]
+fn distinct_guard_preserves_both_permutations_of_a_two_cell_swap() {
+    use typed::{
+        CellPort, CellPost, Guard, IdentityKind, ObjectRef, PortId, Predicate, ValueSource,
+    };
+    let (mut entry, [x, y]) = parameter_allocations::<2>();
+    let key = FieldKey::Field(0);
+    for holder in [x, y] {
+        publish_projected_fixture(
+            &mut entry,
+            holder,
+            key,
+            &[StoredValue {
+                id: holder,
+                writable: true,
+            }],
+        );
+    }
+    let either = EntryCapture {
+        value: CapturedValue::new(
+            [x, y].map(|id| StoredValue { id, writable: true }).to_vec(),
+            Vec::new(),
+        ),
+        ..typed_test_allocation(x, Coverage::Complete)
+    };
+    let distinct = Predicate::Equal(IdentityKind::Allocation, PortId(0), PortId(1));
+    let object = |port| ObjectRef::Entry(PortId(port));
+    let value = |port| typed_test_value(ValueSource::Allocation(object(port)));
+    let post = typed::Post {
+        cells: [0, 1]
+            .map(|port| {
+                (
+                    CellPort::Edge(object(port), CallField::Field(0)),
+                    CellPost::Replace(vec![Some(value(1 - port))]),
+                )
+            })
+            .to_vec(),
+        results: vec![(0, value(0)), (1, value(1))],
+        ..Default::default()
+    };
+    let lane = typed::Lane::guarded(
+        Guard::new(vec![(distinct, false)]).unwrap(),
+        typed_test_product(vec![post]),
+    );
+    let entries = [either.clone(), either];
+    let strata = match_typed_lane(&typed_test_input(&entry, &entries), &lane).unwrap();
+    assert_eq!(strata.len(), 1);
+    let mut placements = Vec::new();
+    for row in &strata[0].components[0].alternatives {
+        let mut replay = entry.clone();
+        assert_eq!(row.edits.len(), 2);
+        for edit in &row.edits {
+            let CapturedEdit::Cell(store) = edit else {
+                panic!("expected a cell write")
+            };
+            replay.publish_store(store, 0, None);
+        }
+        assert_eq!(replay.resolve_alloc_path(0, &[true; 2], [key]).ids, [y]);
+        assert_eq!(replay.resolve_alloc_path(1, &[true; 2], [key]).ids, [x]);
+        placements.push([0, 1].map(|slot| {
+            let result = row
+                .results
+                .iter()
+                .find(|result| result.slot == slot)
+                .unwrap();
+            let [value] = result.value.values.as_slice() else {
+                panic!("one selected source")
+            };
+            value.id
+        }));
+    }
+    placements.sort_unstable();
+    let mut expected = [[x, y], [y, x]];
+    expected.sort_unstable();
+    assert_eq!(placements, expected);
 }
 
 #[test]
@@ -471,14 +586,14 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
     let edge = FieldKey::Field(0);
     let inside = FieldKey::Field(1);
     let stored = |id| StoredValue { id, writable: true };
-    state.store_alloc_field(&[root], edge, &[stored(original)], true);
+    publish_projected_fixture(&mut state, root, edge, &[stored(original)]);
     let scalar = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
     let layout = Rc::new(ReachLayout {
         types: [
             (
                 TypeId(0),
                 ReachType {
-                    identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range),
+                    identity: Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range)),
                     allocation: true,
                     children: vec![(edge, TypeId(1))],
                 },
@@ -486,7 +601,7 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
             (
                 TypeId(1),
                 ReachType {
-                    identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                    identity: Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
                     allocation: true,
                     children: vec![(inside, TypeId(2))],
                 },
@@ -494,7 +609,7 @@ fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
             (
                 TypeId(2),
                 ReachType {
-                    identity: scalar.clone(),
+                    identity: Some(scalar.clone()),
                     allocation: false,
                     children: Vec::new(),
                 },
@@ -718,11 +833,9 @@ fn typed_scalar_matcher_expresses_all_seven_receiver_dependency_probes() {
         block_successors: &Default::default(),
         local_first_write_order: &[0; 5],
         acyclic_entry_block: None,
+        entry_roots: None,
     };
-    let view = EdgeTransferView {
-        operations,
-        observations: true,
-    };
+    let view = EdgeTransferView { operations };
     let value_path = |parameter, fields: &[CallField]| EntryPort::Value {
         parameter,
         path: fields.into(),
@@ -963,14 +1076,204 @@ fn typed_scalar_matcher_expresses_all_seven_receiver_dependency_probes() {
         }
     }
 }
+#[test]
+fn typed_lane_matches_inlined_transfer_on_both_outcomes() {
+    use crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch;
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+        CapturedCallBatch, CapturedDestination, EdgeTransferView, OperationView,
+        facts::{Carrier, CarrierValue, ValueObservations},
+    };
+    use crate::compiler_frontend::hir::ids::LocalId;
+    use typed::{
+        CellPort, CellPost, FamilyPort, FamilyPost, ObjectRef, PortId, ScalarSource, ValueSource,
+    };
+
+    let (mut predecessor, [holder, receiver, other, _]) = parameter_allocations::<4>();
+    let old = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(receiver),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let captured = |alternative| CapturedValue {
+        alternatives: vec![alternative],
+        ..Default::default()
+    };
+    let old_cell = CellId::Projected(holder, FieldKey::Field(0));
+    let exact = |cell| AddressSet::from_cells([cell], Coverage::Complete).with_singleton_proof();
+    predecessor.publish_store(
+        &TypedStore::replace_cells(exact(old_cell), captured(old.clone())),
+        0,
+        None,
+    );
+    let keys = [FieldKey::Elem, FieldKey::MapKey];
+    for key in keys {
+        predecessor.publish_store(
+            &TypedStore::write_projected(
+                [holder],
+                key,
+                Coverage::Complete,
+                captured(old.clone()),
+                true,
+            ),
+            0,
+            None,
+        );
+    }
+
+    let local_ids = [LocalId(0), LocalId(1), LocalId(2), LocalId(3)];
+    let view = EdgeTransferView {
+        operations: OperationView {
+            local_ids: &local_ids,
+            local_indices: &Default::default(),
+            local_mutable: &[true; 4],
+            local_has_in_place_mutation_surface: &[false; 4],
+            block_successors: &Default::default(),
+            local_first_write_order: &[0; 4],
+            acyclic_entry_block: None,
+            entry_roots: None,
+        },
+    };
+    for candidates in [vec![holder], vec![holder, other]] {
+        let candidate_cell = |holder| CellId::Projected(holder, FieldKey::Field(0));
+        let singleton = candidates.len() == 1;
+        let addresses = if singleton {
+            exact(old_cell)
+        } else {
+            AddressSet::from_cells(
+                candidates.iter().copied().map(candidate_cell),
+                Coverage::Complete,
+            )
+        };
+        let mut allocation = typed_test_allocation(holder, Coverage::Complete);
+        allocation.value = CapturedValue::new(
+            candidates
+                .iter()
+                .map(|&id| StoredValue { id, writable: true })
+                .collect(),
+            Vec::new(),
+        );
+        let entries = [
+            allocation,
+            EntryCapture {
+                address: Some(addresses.clone()),
+                ..Default::default()
+            },
+            EntryCapture {
+                value: captured(old.clone()),
+                ..Default::default()
+            },
+        ];
+        for success in [false, true] {
+            let scalar = |source| typed_test_value(ValueSource::Scalar(source));
+            let mut post = typed::Post {
+                results: vec![(0, scalar(ScalarSource::EntryValue(PortId(2))))],
+                ..Default::default()
+            };
+            if success {
+                post.cells.push((
+                    CellPort::Terminal(PortId(1)),
+                    CellPost::Replace(vec![Some(scalar(ScalarSource::Independent))]),
+                ));
+                post.families
+                    .extend([CallField::Elem, CallField::MapKey].map(|selector| {
+                        (
+                            FamilyPort {
+                                receiver: ObjectRef::Entry(PortId(0)),
+                                selector,
+                            },
+                            FamilyPost::ReplaceAll(Vec::new()),
+                        )
+                    }));
+            }
+            let matched = typed_test_post(
+                &typed_test_input(&predecessor, &entries),
+                &typed_test_lane(vec![post]),
+            );
+            let mut typed = predecessor.clone();
+            let destination = typed.resolve_cells(3);
+            let actual = apply_captured_call_batch(
+                view,
+                CapturedCallBatch {
+                    post: matched,
+                    destinations: vec![CapturedDestination::Update {
+                        actor: 3,
+                        address: destination.clone(),
+                    }],
+                    member_reads: Default::default(),
+                    checkpoints: Vec::new(),
+                    detachment: None,
+                },
+                [],
+                1,
+                &mut typed,
+            )
+            .unwrap();
+
+            let mut inline = predecessor.clone();
+            let mut expected = ValueObservations::default();
+            if success {
+                let value = captured(ValueAlt::plain(ValueKind::Scalar));
+                let write = if singleton {
+                    TypedStore::replace_cells(addresses.clone(), value)
+                } else {
+                    TypedStore::write_cells(addresses.clone(), value)
+                };
+                let mut receipt = inline.publish_store(&write, 1, None);
+                receipt.append(inline.publish_store(
+                    &TypedStore::reset_families(
+                        candidates.clone(),
+                        Coverage::Complete,
+                        EntryFamilies::MapEntries,
+                    ),
+                    1,
+                    None,
+                ));
+                expected.publish(receipt);
+            }
+            expected.publish(
+                inline.publish_store(
+                    &TypedStore::receive_result(destination, captured(old.clone()), 3, false)
+                        .with_explicit_slot_payload()
+                        .with_slot_roots(RootSet::empty(4)),
+                    1,
+                    None,
+                ),
+            );
+            assert_eq!(actual, expected);
+            let result = CellId::Slot(WrapperId::current(3));
+            assert_eq!(typed.value_cell(result), [old.clone()]);
+            for cell in [
+                old_cell,
+                candidate_cell(other),
+                CellId::Projected(holder, keys[0]),
+                CellId::Projected(holder, keys[1]),
+            ] {
+                assert_eq!(typed.value_cell(cell), inline.value_cell(cell));
+                let carrier = Carrier::Cell(cell, CarrierValue::Scalar, old.deps.clone());
+                assert_eq!(
+                    actual.tail.definite_kills.contains(&carrier)
+                        || actual
+                            .splits
+                            .iter()
+                            .any(|(segment, _)| segment.definite_kills.contains(&carrier)),
+                    cell != candidate_cell(other) && success && singleton,
+                );
+            }
+        }
+    }
+}
 
 fn check_source(source: &str) -> Result<(), BorrowCheckError> {
-    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
-    let registry = default_external_package_registry(&mut strings);
-    let (module, types) =
-        lower_ast(ast, &mut strings, &mut paths, &registry).expect("fixture source should lower");
-    validate_hir_module(&module, &types, &registry).expect("fixture HIR should validate");
-    run_borrow_checker_with_types(&module, &types, &registry, &paths, &strings).map(|_| ())
+    let fixture = PreparedHirFixture::new(source);
+    validate_hir_module(
+        &fixture.hir,
+        &fixture.hir.type_environment,
+        &fixture.packages,
+    )
+    .expect("fixture HIR should validate");
+    run_prepared_borrow_checker(&fixture).map(|_| ())
 }
 
 fn parameter_allocations<const N: usize>() -> (BorrowState, [AllocId; N]) {
@@ -1363,6 +1666,21 @@ fn projected_replacement_inspects_only_the_addressed_group() {
     state.assert_allocation_incidence();
 }
 
+fn publish_projected_fixture(
+    state: &mut BorrowState,
+    holder: AllocId,
+    key: FieldKey,
+    values: &[StoredValue],
+) {
+    let addresses = AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete)
+        .with_singleton_proof();
+    state.publish_store(
+        &TypedStore::replace_cells(addresses, CapturedValue::new(values.to_vec(), Vec::new())),
+        UNKNOWN_ORDER_KEY,
+        None,
+    );
+}
+
 #[test]
 fn allocation_incidence_join_tracks_groups_missing_from_either_predecessor() {
     let (entry, [root, target, view]) = parameter_allocations::<3>();
@@ -1371,7 +1689,7 @@ fn allocation_incidence_join_tracks_groups_missing_from_either_predecessor() {
     let holder = entry.alloc_child(root, field);
     let lazy = entry.alloc_child(holder, empty);
     let mut left = entry.clone();
-    left.store_alloc_field_with_views(&[holder], empty, &[], &[], true, true);
+    publish_projected_fixture(&mut left, holder, empty, &[]);
     let mut right = entry;
     right.add_alloc_edge(
         holder,
@@ -1427,7 +1745,7 @@ fn indexed_reach_matches_full_scan_on_small_states_and_joins() {
                 } else {
                     &values[..]
                 };
-                state.store_alloc_field_with_views(&[holder], key, values, &[], true, true);
+                publish_projected_fixture(&mut state, holder, key, values);
             }
             state
         };
@@ -2455,6 +2773,30 @@ fn copied_nested_sharing_is_pairwise_not_transitive() {
 }
 
 #[test]
+fn view_rows_are_exclusive_only_within_one_recent_call_support() {
+    let mut state = BorrowState::new_uninitialized(1);
+    state.initialize_parameter(0);
+    let object = state.local_alloc_ids(0).0[0];
+    let first = state.call_row_view_id(1, false, 0, 0);
+    let other_row = state.call_row_view_id(1, false, 0, 1);
+    let independent = state.call_row_view_id(1, false, 1, 0);
+    for view in [first, other_row, independent] {
+        state.add_view_member(view, object);
+    }
+    let share = |state: &BorrowState, left, right| {
+        state.alloc_paths_may_share(&[object], &[left], &[object], &[right])
+    };
+    assert!(!share(&state, first, other_row));
+    assert!(share(&state, first, independent));
+    state.age_call_storage(1);
+    assert!(share(
+        &state,
+        state.aged_call_allocation(first, 1),
+        state.aged_call_allocation(other_row, 1),
+    ));
+}
+
+#[test]
 fn publisher_kills_only_exact_dependent_scalar_replacements() {
     let mut entry = BorrowState::new_uninitialized(2);
     entry.initialize_parameter(0);
@@ -2489,15 +2831,10 @@ fn publisher_kills_only_exact_dependent_scalar_replacements() {
         };
         let receipt = state.publish_store(&store, 0, None);
         if coverage == Coverage::Complete && replacement == Replacement::Must {
-            assert_eq!(receipt.replaced[0], Some((cell, vec![old.clone()])));
+            assert_eq!(receipt.definite_old, [(cell, vec![old.clone()])]);
             assert!(state.value_cell(cell).is_empty());
         } else {
-            assert!(
-                receipt
-                    .replaced
-                    .into_iter()
-                    .all(|replace| replace.is_none())
-            );
+            assert!(receipt.definite_old.is_empty());
             assert!(state.value_cell(cell).contains(&old));
         }
     }
@@ -2508,7 +2845,7 @@ fn publication_distinguishes_identical_old_and_new_carriers() {
     use crate::compiler_frontend::analysis::borrow_checker::state::PublicationCarriers;
     use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
         Carrier, CarrierValue, Demand, ObservationBoundary, ObservationCheckpoint,
-        ObservationSegment, ValueObservations,
+        ValueObservations,
     };
 
     let (mut state, [receiver, holder, copy_holder]) = parameter_allocations::<3>();
@@ -2555,9 +2892,7 @@ fn publication_distinguishes_identical_old_and_new_carriers() {
     observations.split(checkpoint(0));
     observations.publish(receipt);
     observations.split(checkpoint(1));
-    let mut later = ObservationSegment::default();
-    later.read([carrier(cell), carrier(detached)]);
-    observations.tail.then(later);
+    observations.tail.read([carrier(cell), carrier(detached)]);
 
     let mut demand = Demand::default();
     observations.backward(&mut demand, |checkpoint, demand| {
@@ -2659,18 +2994,13 @@ fn family_erase_receipt_distinguishes_exact_partial_and_multiple_receivers() {
     ] {
         let mut state = entry.clone();
         let receipt = state.publish_store(
-            &TypedStore::EraseFamily {
-                receivers,
-                coverage,
-                keys: EntryFamilies::MapEntries,
-            },
+            &TypedStore::reset_families(receivers, coverage, EntryFamilies::MapEntries),
             0,
             None,
         );
         let erased = receipt
-            .replaced
+            .definite_old
             .into_iter()
-            .flatten()
             .map(|(cell, values)| {
                 assert_eq!(values, payload.alternatives);
                 cell
@@ -2718,11 +3048,11 @@ fn proven_sole_remove_erases_member_and_keeps_detachment() {
     );
     let receipt = state.remove_alloc_element(&[holder], false, Some(2));
     assert_eq!(
-        receipt.replaced[0],
-        Some((
+        receipt.definite_old,
+        [(
             CellId::Projected(holder, FieldKey::Elem),
-            value.alternatives.clone()
-        ))
+            value.alternatives.clone(),
+        )]
     );
     assert!(state.detached_from(2, &[holder]));
     assert_eq!(
@@ -3046,9 +3376,7 @@ fn native_fresh_slot_excludes_actuals_but_can_share_with_another_native_slot() {
     use crate::compiler_frontend::hir::ids::HirNodeId;
     use crate::compiler_frontend::hir::places::HirPlace;
     use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-    use crate::compiler_frontend::public_call_summary::{
-        CallAllocationSource, CallOutputPath, CallResultPath, FunctionReturnAliasSummary,
-    };
+    use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
     use crate::compiler_frontend::tests::borrow_fixture_support::assert_invalid_mutable_access_reason;
     use crate::compiler_frontend::tests::hir_fixture_support::expression;
     use std::sync::Arc;
@@ -3153,18 +3481,34 @@ probe || -> String:\n\
             else {
                 panic!("the Moth forwarder should have a known success lane");
             };
-            let second_root = CallOutputPath::Result(CallResultPath {
-                slot: 1,
-                path: Vec::new(),
-            });
-            let sources: Vec<_> = facts
+            let mut sources = Vec::new();
+            facts
                 .success
-                .sources
-                .iter()
-                .filter(|row| row.output == second_root)
-                .map(|row| &row.source)
-                .collect();
-            assert_eq!(sources, [&CallAllocationSource::OpaqueFresh]);
+                .visit_compatible(
+                    |_| Ok::<_, std::convert::Infallible>(None),
+                    |_, product| {
+                        for post in product
+                            .components()
+                            .iter()
+                            .flat_map(|component| &component.alternatives)
+                        {
+                            sources.extend(post.results.iter().filter_map(|(slot, result)| {
+                                (*slot == 1).then(|| result.source.clone())
+                            }));
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            sources.sort_unstable();
+            sources.dedup();
+            assert!(matches!(
+                sources.as_slice(),
+                [typed::ValueSource::Allocation(typed::ObjectRef::Family(
+                    typed::StorageKind::Allocation,
+                    _
+                ))]
+            ));
         }
         let HirExpressionKind::Load(input) = &module.expressions.expression(actual).kind else {
             panic!("whole original actual must be a place");
@@ -3313,27 +3657,48 @@ probe || -> I32:\n\
 fn returned_optional_payload_conflicts_only_while_its_observer_is_live() {
     let prefix = "\
 Link = |items {I32}|\n\
-wrap_option |maybe {I32}?, retain Bool| -> Link:\n\
+take_payload |maybe {I32}?, retain Bool| -> {I32}:\n\
     if retain:\n\
         if maybe is |present|:\n\
-            return Link(present)\n\
+            return present\n\
         ;\n\
     ;\n\
-    return Link({2, 3})\n\
+    return {2, 3}\n\
 ;\n\
 probe |retain Bool| -> I32:\n\
     child ~= {1}\n\
     observer ~= Link(child)\n\
     source ~{I32}? = child\n\
-    result ~= wrap_option(source, retain)\n\
+    items ~= take_payload(source, retain)\n\
+    result ~= Link(items)\n\
     ~result.items.push(2)\n";
     let dead = format!("{prefix}return result.items.length()\n;");
+    // Raw transport preserves the actual's authority after the temporary binder ends.
     check_source(&dead).expect("the temporary payload binder does not restrict the mutable actual");
     let live = format!("{prefix}return result.items.length() * 10 + observer.items.length()\n;");
     check_rejection(
         &live,
         "result.items.push",
         InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+    let shared = r#"
+Link = |items {I32}|
+wrap |maybe {I32}?| -> Link:
+    if maybe is |present|:
+        return Link(present)
+    ;
+    return Link({2, 3})
+;
+child ~= {1}
+source ~{I32}? = child
+result ~= wrap(source)
+~result.items.push(2)
+"#;
+    // A newly installed edge through a shared formal retains its restriction.
+    check_rejection(
+        shared,
+        "result.items.push",
+        InvalidMutableAccessReason::ImmutablePlace,
     );
 }
 
@@ -3455,28 +3820,36 @@ probe |rows ~{Holder}| -> I32:\n\
     fill(~rows)\n\
     return rows.length()\n\
 ;";
-    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
-    let packages = default_external_package_registry(&mut strings);
-    let (module, types) = lower_ast(ast, &mut strings, &mut paths, &packages).unwrap();
-    let entry = paths
-        .try_intern_portable_path("@entry.moth", &mut strings)
-        .unwrap();
-    let name = paths
-        .try_intern_child(entry, strings.intern("probe"))
-        .unwrap();
+    let fixture = PreparedHirFixture::new(source);
+    let module = &fixture.hir;
+    let types = &module.type_environment;
+    let projection = fixture.type_projection();
     let probe = module
         .functions
         .iter()
-        .find(|function| module.side_table.function_name_path(function.id) == Some(name))
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| fixture.paths.component(path))
+                .is_some_and(|name| fixture.strings.resolve(name) == "probe")
+        })
         .expect("authored probe");
-    let mut checker = BorrowChecker::new(&module, &types, &packages, &paths, &strings);
+    let mut checker = BorrowChecker::new(
+        module,
+        types,
+        &fixture.packages,
+        &fixture.paths,
+        &fixture.strings,
+    )
+    .with_type_projection(&projection);
     checker
         .build_public_call_summaries()
         .expect("summarize the two pushes");
     let blocks = checker.collect_reachable_blocks(probe).unwrap();
     let layout = checker.build_function_layout(probe, &blocks).unwrap();
     let context = BorrowTransferContext {
-        external_package_registry: &packages,
+        external_package_registry: &fixture.packages,
         public_call_summaries: &checker.public_call_summaries,
         imported_call_summaries: &module.imported_call_summaries,
         module_private_call_summaries: &module.module_private_call_summaries,
@@ -3485,8 +3858,9 @@ probe |rows ~{Holder}| -> I32:\n\
         structs: &module.structs,
         choices: &module.choices,
         expressions: &module.expressions,
-        type_environment: &types,
-        diagnostics: BorrowDiagnostics::new(&module, &paths, &strings),
+        type_environment: types,
+        type_projection: fixture.type_projection(),
+        diagnostics: BorrowDiagnostics::new(module, &fixture.paths, &fixture.strings),
     };
     let mut state = BorrowState::new_uninitialized(layout.local_count());
     let rows = layout.index_of(probe.params[0]).unwrap();

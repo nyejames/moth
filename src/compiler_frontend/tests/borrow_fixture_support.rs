@@ -5,7 +5,8 @@
 //!      independent of borrow-checker internals.
 
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckError, BorrowCheckReport, check_borrows,
+    BorrowCheckError, BorrowCheckReport, check_borrows, check_borrows_with_projection_for_test,
+    summarize_call_allocations_with_projection,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
@@ -17,7 +18,33 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::hir_fixture_support::LoweredHirFixture;
+use crate::compiler_frontend::tests::hir_fixture_support::{LoweredHirFixture, PreparedHirFixture};
+
+pub(crate) fn run_prepared_borrow_checker(
+    fixture: &PreparedHirFixture,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    check_borrows_with_projection_for_test(
+        &fixture.hir,
+        &fixture.hir.type_environment,
+        &fixture.packages,
+        &fixture.paths,
+        &fixture.strings,
+        &fixture.type_projection(),
+    )
+}
+
+pub(crate) fn summarize_prepared_call_allocations(
+    fixture: &PreparedHirFixture,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    summarize_call_allocations_with_projection(
+        &fixture.hir,
+        &fixture.hir.type_environment,
+        &fixture.packages,
+        &fixture.paths,
+        &fixture.strings,
+        &fixture.type_projection(),
+    )
+}
 
 pub(crate) fn run_borrow_checker(
     fixture: &LoweredHirFixture,

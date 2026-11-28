@@ -192,11 +192,22 @@ fn typed_strong_write_kills_old_carrier_but_unresolved_suffix_preserves_it() {
     };
     predecessor.publish_store(&store(old.clone()), 0, None);
     let plain = ValueAlt::plain(ValueKind::Scalar);
-    for weak in [false, true] {
+    for (replace, unresolved) in [(true, false), (false, false), (true, true)] {
         let mut edge = predecessor.clone();
         let mut post = CapturedPost::default();
-        let edit = CapturedEdit::Cell(store(plain.clone()));
-        if weak {
+        let write = if replace {
+            store(plain.clone())
+        } else {
+            TypedStore::write_cells(
+                AddressSet::from_cells([cell], Coverage::Complete).with_singleton_proof(),
+                CapturedValue {
+                    alternatives: vec![plain.clone()],
+                    ..Default::default()
+                },
+            )
+        };
+        let edit = CapturedEdit::Cell(write);
+        if unresolved {
             post.uncertainty = Some(CapturedUncertainty {
                 edits: vec![edit],
                 ..Default::default()
@@ -204,7 +215,7 @@ fn typed_strong_write_kills_old_carrier_but_unresolved_suffix_preserves_it() {
         } else {
             post.edits.push(edit);
         }
-        apply_captured_call_batch(
+        let observations = apply_captured_call_batch(
             (&layout).into(),
             call_batch(post, Vec::new()),
             [],
@@ -213,7 +224,17 @@ fn typed_strong_write_kills_old_carrier_but_unresolved_suffix_preserves_it() {
         )
         .unwrap();
         assert!(edge.value_cell(cell).contains(&plain));
-        assert_eq!(edge.value_cell(cell).contains(&old), weak);
+        let killed = replace && !unresolved;
+        assert_eq!(edge.value_cell(cell).contains(&old), !killed);
+        let old_carrier = Carrier::Cell(cell, CarrierValue::Scalar, old.deps.clone());
+        assert_eq!(
+            observations.tail.definite_kills.contains(&old_carrier)
+                || observations
+                    .splits
+                    .iter()
+                    .any(|(segment, _)| segment.definite_kills.contains(&old_carrier)),
+            killed,
+        );
     }
 }
 
@@ -229,8 +250,6 @@ fn mixed_lane_unknown_starts_at_its_own_prefix() {
     let inside = FieldKey::Field(0);
     let outside = FieldKey::Field(1);
     let stored = |id| StoredValue { id, writable: true };
-    predecessor.store_alloc_field(&[holder], inside, &[stored(old)], true);
-    predecessor.store_alloc_field(&[holder], outside, &[stored(old)], true);
     let replace = |key, id| {
         CapturedEdit::Cell(TypedStore::replace_cells(
             AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete)
@@ -238,6 +257,12 @@ fn mixed_lane_unknown_starts_at_its_own_prefix() {
             CapturedValue::new(vec![stored(id)], Vec::new()),
         ))
     };
+    for key in [inside, outside] {
+        let CapturedEdit::Cell(store) = replace(key, old) else {
+            unreachable!()
+        };
+        predecessor.publish_store(&store, 0, None);
+    }
 
     for order in [[success, error], [error, success]] {
         for prefix in order {
@@ -265,6 +290,182 @@ fn mixed_lane_unknown_starts_at_its_own_prefix() {
             let values = edge.resolve_alloc_path(0, &[true; 5], [inside]).ids;
             assert_eq!(values.len(), 2);
             assert!(values.contains(&prefix) && values.contains(&suffix));
+        }
+    }
+}
+
+#[test]
+fn family_replacement_replays_clear_only_and_refill_in_both_lane_orders() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::SmallSet;
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+        EntryCapture, ExplicitMatchInput, match_typed_lane,
+    };
+    use crate::compiler_frontend::datatypes::ids::TypeId;
+    use crate::compiler_frontend::public_call_summary::{
+        CallField,
+        typed::{
+            Component, FamilyPort, FamilyPost, Lane, ObjectRef, Occurrence, PathAccess, PortId,
+            Post, Product, ScalarSource, SupportId, ValueRef, ValueSource,
+        },
+    };
+
+    let (layout, _) = invoke_fixture(4);
+    let mut predecessor = BorrowState::new_uninitialized(4);
+    for local in 0..4 {
+        predecessor.initialize_parameter(local);
+    }
+    let [holder, old_source, new_source, another] =
+        std::array::from_fn(|local| predecessor.local_alloc_ids(local).0[0]);
+    let alternative = |source| ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(source),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let old = alternative(old_source);
+    let new = alternative(new_source);
+    let capture = |value: ValueAlt| CapturedValue {
+        alternatives: vec![value],
+        ..Default::default()
+    };
+    let selectors = [
+        (CallField::Elem, FieldKey::Elem),
+        (CallField::MapKey, FieldKey::MapKey),
+    ];
+    for (_, key) in selectors {
+        for receiver in [holder, old_source] {
+            predecessor.publish_store(
+                &TypedStore::write_projected(
+                    [receiver],
+                    key,
+                    Coverage::Complete,
+                    capture(old.clone()),
+                    true,
+                ),
+                0,
+                None,
+            );
+        }
+    }
+    let value = ValueRef {
+        source: ValueSource::Scalar(ScalarSource::EntryValue(PortId(1))),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    };
+    let lanes = [false, true].map(|success| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    families: selectors
+                        .into_iter()
+                        .map(|(selector, _)| {
+                            (
+                                FamilyPort {
+                                    receiver: ObjectRef::Entry(PortId(0)),
+                                    selector,
+                                },
+                                FamilyPost::ReplaceAll(
+                                    success
+                                        .then(|| (value.clone(), Occurrence::AtMostOnce))
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                            )
+                        })
+                        .collect(),
+                    ..Default::default()
+                }],
+            }])
+            .unwrap(),
+        )
+    });
+    for (receivers, coverage, strong) in [
+        (vec![holder], Coverage::Complete, true),
+        (vec![holder], Coverage::Partial, false),
+        (vec![holder, another], Coverage::Complete, false),
+    ] {
+        let entries = [
+            EntryCapture {
+                ty: Some(TypeId(0)),
+                writable: Some(true),
+                value: CapturedValue::new(
+                    receivers
+                        .into_iter()
+                        .map(|id| StoredValue { id, writable: true })
+                        .collect(),
+                    Vec::new(),
+                ),
+                allocation_coverage: Some(coverage),
+                ..Default::default()
+            },
+            EntryCapture {
+                value: capture(new.clone()),
+                ..Default::default()
+            },
+        ];
+        let input = ExplicitMatchInput {
+            state: &predecessor,
+            entries: &entries,
+            retained: &[],
+            uncertainty: &[],
+        };
+        for extract in [[0, 1], [1, 0]] {
+            let [first, second] =
+                extract.map(|lane| (lane, match_typed_lane(&input, &lanes[lane]).unwrap()));
+            let mut batches = [first, second];
+            batches.sort_by_key(|(lane, _)| *lane);
+            for delivery in [[0, 1], [1, 0]] {
+                for lane in delivery {
+                    let mut replay = predecessor.clone();
+                    let observations = apply_captured_call_batch(
+                        (&layout).into(),
+                        CapturedCallBatch {
+                            post: batches[lane].1.clone(),
+                            destinations: Vec::new(),
+                            member_reads: Default::default(),
+                            checkpoints: Vec::new(),
+                            detachment: None,
+                        },
+                        [],
+                        1,
+                        &mut replay,
+                    )
+                    .unwrap();
+                    for (_, key) in selectors {
+                        let cell = CellId::Projected(holder, key);
+                        assert_eq!(replay.value_cell(cell).contains(&old), !strong);
+                        assert_eq!(replay.value_cell(cell).contains(&new), lane == 1);
+                        let carrier = Carrier::Cell(cell, CarrierValue::Scalar, old.deps.clone());
+                        assert_eq!(
+                            observations.tail.definite_kills.contains(&carrier)
+                                || observations
+                                    .splits
+                                    .iter()
+                                    .any(|(segment, _)| segment.definite_kills.contains(&carrier)),
+                            strong
+                        );
+                        let unrelated = CellId::Projected(old_source, key);
+                        assert_eq!(
+                            replay.value_cell(unrelated),
+                            predecessor.value_cell(unrelated)
+                        );
+                        let untouched =
+                            Carrier::Cell(unrelated, CarrierValue::Scalar, old.deps.clone());
+                        assert!(!observations.tail.definite_kills.contains(&untouched));
+                        assert!(
+                            observations
+                                .splits
+                                .iter()
+                                .all(|(segment, _)| !segment.definite_kills.contains(&untouched))
+                        );
+                    }
+                }
+            }
         }
     }
 }
@@ -370,8 +571,13 @@ fn typed_receive_uses_predecessor_address_and_follows_callee_writes() {
     };
     let stored = |id| StoredValue { id, writable: true };
     let capture = |id| CapturedValue::new(vec![stored(id)], Vec::new());
-    state.store_alloc_field(&[holder], first, &[stored(initial)], true);
-    state.store_alloc_field(&[holder], second, &[stored(initial)], true);
+    for key in [first, second] {
+        state.publish_store(
+            &TypedStore::replace_cells(address(key), capture(initial)),
+            0,
+            None,
+        );
+    }
     state.initialize_entry_binding(
         1,
         BindingSpec::Alias {
@@ -580,16 +786,16 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
                     writable: true,
                 },
             },
-            InvokeLayerOp::Remove {
-                holders: vec![previous_success],
-                map: false,
-                result: Some(LocalId(1)),
-            },
-            InvokeLayerOp::Remove {
-                holders: vec![holder],
-                map: false,
-                result: None,
-            },
+            InvokeLayerOp::Store(TypedStore::reset_families(
+                vec![previous_success],
+                Coverage::Partial,
+                EntryFamilies::Elements,
+            )),
+            InvokeLayerOp::Store(TypedStore::reset_families(
+                vec![holder],
+                Coverage::Complete,
+                EntryFamilies::Elements,
+            )),
         ],
         ..Default::default()
     };
@@ -678,12 +884,15 @@ fn invoke_success_rebases_captures_through_reused_outcomes() {
     assert!(observed_store.readonly);
     assert!(!state.alloc_group_is_explicit(previous_success, stored));
     assert!(!state.alloc_group_is_explicit(retired_error, error_only));
-    assert_eq!(
-        state
-            .resolve_alloc_path(0, &layout.local_mutable, [contributed])
-            .ids,
-        [retired_success],
-    );
+    let contributed_values = state
+        .resolve_alloc_path(0, &layout.local_mutable, [contributed])
+        .ids;
+    let lazy = state.alloc_child(holder, contributed);
+    // A weak contribution adds the rebased referent without overwriting the entry field.
+    assert_eq!(contributed_values.len(), 2);
+    assert!(contributed_values.contains(&retired_success));
+    assert!(contributed_values.contains(&lazy));
+    assert!(!contributed_values.contains(&previous_success));
     // Removing from the retired summary cannot prove it emptied every instance.
     assert_eq!(
         state
@@ -754,11 +963,11 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
 
     let lane = |coverage| InvokeLaneTransfer {
         results: vec![(LocalId(1), LocalState::slot(layout.local_count()))],
-        operations: vec![InvokeLayerOp::Store(TypedStore::EraseFamily {
-            receivers: vec![receiver],
+        operations: vec![InvokeLayerOp::Store(TypedStore::reset_families(
+            vec![receiver],
             coverage,
-            keys: EntryFamilies::MapEntries,
-        })],
+            EntryFamilies::MapEntries,
+        ))],
         ..Default::default()
     };
     let failure_lane = InvokeLaneTransfer {
@@ -794,8 +1003,7 @@ fn invoke_erase_clears_key_and_element_families_only_on_complete_success() {
 
 #[test]
 fn invoke_success_observes_entry_member_and_rebases_lookup_payload() {
-    let (mut layout, terminator) = invoke_fixture(3);
-    layout.lookup_observations = true;
+    let (layout, terminator) = invoke_fixture(3);
     let mut entry = BorrowState::new_uninitialized(layout.local_count());
     entry.initialize_parameter(0);
     entry.initialize_parameter(1);

@@ -36,9 +36,12 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirFallibleOperation, HirJumpArgument, HirTerminator, RuntimeFailureKind,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    Component, EntryPort, ExportPort, Lane, ObjectRef, PathAccess, PortId, Post, Product,
+    StorageKind, SupportId, TypedCallAllocationFacts, ValueRef, ValueSource,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallAllocationSource, CallLaneSummary, CallOutputPath, CallParameterPath,
-    CallPathSource, CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
     PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
     PublicCallTransferEffect,
 };
@@ -1419,6 +1422,46 @@ fn borrow_problem_hir_extractor_maps_oversized_index_to_dynamic_projection() {
     );
 }
 
+fn returning_post(post: Post) -> Lane {
+    Lane::Returning(
+        Product::new(vec![Component {
+            support: SupportId(0),
+            alternatives: vec![post],
+        }])
+        .unwrap(),
+    )
+}
+
+fn allocation_result(source: ObjectRef) -> (usize, ValueRef) {
+    (
+        0,
+        ValueRef {
+            source: ValueSource::Allocation(source),
+            access: PathAccess {
+                restriction: None,
+                derived_from: None,
+            },
+            dependencies: Vec::new(),
+        },
+    )
+}
+
+fn fresh_result(ty: CanonicalBuiltinType) -> Lane {
+    let result = ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }));
+    returning_post(Post {
+        results: vec![allocation_result(result.clone())],
+        retained: vec![(
+            result,
+            StorageKind::Allocation,
+            CanonicalTypeIdentity::Builtin(ty),
+        )],
+        ..Default::default()
+    })
+}
+
 #[test]
 fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
     let region = RegionId(0);
@@ -1500,22 +1543,17 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
                 mutation: PublicCallMutationEffect::Writes,
                 transfer_effect: PublicCallTransferEffect::MayConsume,
             }],
-            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-                success: CallLaneSummary {
-                    reachable: true,
-                    sources: vec![CallPathSource {
-                        output: CallOutputPath::Result(CallResultPath {
-                            slot: 0,
-                            path: vec![],
-                        }),
-                        source: CallAllocationSource::Parameter(CallParameterPath {
-                            index: 0,
-                            path: vec![],
-                        }),
-                    }],
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+                ports: vec![EntryPort::Value {
+                    parameter: 0,
+                    path: Box::new([]),
+                }],
+                support_count: 1,
+                success: returning_post(Post {
+                    results: vec![allocation_result(ObjectRef::Entry(PortId(0)))],
                     ..Default::default()
-                },
-                error: CallLaneSummary::default(),
+                }),
+                ..Default::default()
             })),
             escapes_builtin_failure: false,
             uses_fast_semantics: false,
@@ -1549,7 +1587,9 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
     else {
         unreachable!("the fixture supplies a known call contract");
     };
-    facts.success.sources[0].source = CallAllocationSource::Fresh;
+    facts.success = fresh_result(
+        crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType::String,
+    );
     let problem = from_hir(&module, &function, Some(&summaries), None, None)
         .expect("the supported fresh-root contract should extract");
     assert!(problem.origins().iter().any(|origin| matches!(
@@ -1993,6 +2033,210 @@ fn authored_call_store_reaches_only_the_normalized_failure_effect() {
 }
 
 #[test]
+fn boracle_refuses_family_only_store_on_selected_outcome() {
+    use crate::compiler_frontend::public_call_summary::{
+        CallField,
+        typed::{FamilyPort, FamilyPost, Occurrence, ScalarSource},
+    };
+    let region = RegionId(0);
+    let map = LocalId(0);
+    let error = LocalId(1);
+    let mut types = TypeEnvironment::new();
+    let map_ty = types.intern_map(builtin_type_ids::STRING, builtin_type_ids::BOOL);
+    let string = builtin_type_ids::STRING;
+    let mut expressions = HirExpressionStore::default();
+    let mut load = |local, ty| {
+        hir_expression(
+            &mut expressions,
+            HirExpressionKind::Load(HirPlace::local(local)),
+            ty,
+            ValueKind::Place,
+            region,
+        )
+    };
+    let receiver = load(map, map_ty);
+    let error_value = load(error, string);
+    let args = expressions.append_values(&[receiver], None).unwrap();
+    let no_results = expressions.append_values(&[], None).unwrap();
+    let target = FunctionId(9);
+    let root = HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![
+            HirLocal {
+                ty: map_ty,
+                ..hir_local(map, region)
+            },
+            HirLocal {
+                ty: string,
+                ..hir_local(error, region)
+            },
+        ],
+        statements: Vec::new(),
+        terminator: HirTerminator::Invoke {
+            id: HirNodeId(0),
+            span: None,
+            operation: HirFallibleOperation::Call {
+                target: CallTarget::Local(target),
+                args,
+            },
+            success: HirBlockId(1),
+            success_results: Vec::new(),
+            failure: HirBlockId(2),
+            error_result: error,
+        },
+    };
+    let exit = |id, terminator| HirBlock {
+        id: HirBlockId(id),
+        region,
+        locals: Vec::new(),
+        statements: Vec::new(),
+        terminator,
+    };
+    let success = exit(1, HirTerminator::Return(no_results));
+    let failure = exit(2, HirTerminator::ReturnError(error_value));
+    let mut function = function_for(root.id);
+    function.params = vec![map];
+    function.return_contract =
+        HirFunctionReturnContract::Returns(CallableReturnShape::from_slots([], Some(string)));
+
+    let member = ValueRef {
+        source: ValueSource::Scalar(ScalarSource::Independent),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    };
+    for update in [
+        FamilyPost::ReplaceAll(Vec::new()),
+        FamilyPost::Extend(vec![(member, Occurrence::AtMostOnce)]),
+    ] {
+        let summaries = rustc_hash::FxHashMap::from_iter([(
+            target,
+            PublicCallSummary {
+                parameters: vec![PublicCallParameterSummary {
+                    access: PublicCallParameterAccess::Mutable,
+                    mutation: PublicCallMutationEffect::Writes,
+                    transfer_effect: PublicCallTransferEffect::MayConsume,
+                }],
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(
+                    TypedCallAllocationFacts {
+                        ports: vec![EntryPort::Value {
+                            parameter: 0,
+                            path: Box::new([]),
+                        }],
+                        support_count: 1,
+                        success: returning_post(Post {
+                            families: vec![(
+                                FamilyPort {
+                                    receiver: ObjectRef::Entry(PortId(0)),
+                                    selector: CallField::Elem,
+                                },
+                                update,
+                            )],
+                            ..Default::default()
+                        }),
+                        error: fresh_result(CanonicalBuiltinType::String),
+                        ..Default::default()
+                    },
+                )),
+                escapes_builtin_failure: false,
+                uses_fast_semantics: false,
+                may_trap: false,
+                may_fail: true,
+            },
+        )]);
+        for exits in [
+            [success.clone(), failure.clone()],
+            [failure.clone(), success.clone()],
+        ] {
+            let module = module_with_blocks(
+                std::iter::once(root.clone()).chain(exits).collect(),
+                vec![HirRegion::lexical(region, None)],
+                expressions.clone(),
+            );
+            let problem =
+                from_hir(&module, &function, Some(&summaries), None, Some(&types)).unwrap();
+            let effects: Vec<_> = problem
+                .events()
+                .iter()
+                .filter_map(|event| match &event.kind {
+                    EventKind::CallEffect(effect) => Some((event, effect)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(effects.len(), 2);
+            for (event, effect) in effects {
+                let selected = problem.points()[event.point.index()].block;
+                assert!(
+                    problem.control_flow().edges.iter().any(|edge| edge.from
+                        == problem.control_flow().entry
+                        && edge.to == selected)
+                );
+                let call = &problem.calls()[effect.call.index()];
+                match effect.results.as_ref() {
+                    [] => assert!(call.opaque_stores),
+                    [result] => {
+                        assert!(!call.opaque_stores);
+                        assert!(matches!(
+                            &problem.origins()[result.origin.index()].kind,
+                            OriginKind::CallResult {
+                                provenance: CallResultProvenance::Fresh,
+                                ..
+                            }
+                        ));
+                    }
+                    _ => panic!("unexpected Invoke results"),
+                }
+                #[cfg(feature = "boracle")]
+                {
+                    use super::super::boracle::{
+                        OracleBounds, OracleLimitReason, OracleOutcome, execute_bounded,
+                    };
+                    // Isolate one existing edge without rebuilding its normalised events.
+                    let mut isolated = problem.clone();
+                    let flow = &mut isolated.control_flow;
+                    let entry = flow.entry;
+                    flow.edges = flow
+                        .edges
+                        .iter()
+                        .copied()
+                        .filter(|edge| edge.from != entry || edge.to == selected)
+                        .collect();
+                    let branch = flow.blocks[entry.index()].events.last().unwrap();
+                    isolated.events[branch.index()].kind = EventKind::Terminator {
+                        kind: TerminatorEventKind::Branch {
+                            targets: Box::new([selected]),
+                        },
+                    };
+                    let outcome = execute_bounded(&isolated, OracleBounds::default()).unwrap();
+                    match (call.opaque_stores, outcome) {
+                        (
+                            true,
+                            OracleOutcome::Inconclusive {
+                                reason: OracleLimitReason::OpaqueCallStores { call: refused },
+                                ..
+                            },
+                        ) => assert_eq!(refused, call.id),
+                        (
+                            false,
+                            OracleOutcome::CompleteSafe {
+                                executions: 1,
+                                trace,
+                            },
+                        ) => {
+                            assert!(trace.entries().iter().any(|row| row.event == event.id));
+                        }
+                        (_, outcome) => panic!("unexpected isolated outcome: {outcome:?}"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_channels() {
     let region = RegionId(0);
     let success_locals = [LocalId(0), LocalId(1)];
@@ -2075,22 +2319,13 @@ fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_cha
         FunctionId(9),
         PublicCallSummary {
             parameters: Vec::new(),
-            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-                success: CallLaneSummary {
-                    reachable: true,
-                    ..Default::default()
-                },
-                error: CallLaneSummary {
-                    reachable: true,
-                    sources: vec![CallPathSource {
-                        output: CallOutputPath::Result(CallResultPath {
-                            slot: 0,
-                            path: vec![],
-                        }),
-                        source: CallAllocationSource::Fresh,
-                    }],
-                    ..Default::default()
-                },
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+                support_count: 1,
+                success: Lane::Returning(Product::default()),
+                error: fresh_result(
+                    crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType::String,
+                ),
+                ..Default::default()
             })),
             escapes_builtin_failure: false,
             uses_fast_semantics: false,

@@ -1,59 +1,77 @@
 use super::{BorrowChecker, IndexCounts, SparseFunction, build_sparse_index_for_test};
 use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
-use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
+use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallAllocationSource, CallField, CallLaneSummary, CallOutputPath,
-    CallParameterPath, CallResultPath, CallSharing, CallSharingCondition,
-    FunctionReturnAliasSummary,
+use crate::compiler_frontend::public_call_summary::typed::{
+    CellPort, CellPost, EntryPort, ExportPort, FamilyPort, FamilyPost, Lane, ObjectRef, PortId,
+    Post, TypedCallAllocationFacts, ValueSource,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
+use crate::compiler_frontend::public_call_summary::{CallField, FunctionReturnAliasSummary};
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{LoweredHirFixture, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::{PreparedHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use rustc_hash::FxHashMap;
+use std::convert::Infallible;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 
-struct ResultFixture {
-    hir: LoweredHirFixture,
-    packages: Arc<ExternalPackageRegistry>,
-    paths: PathInternerFork,
-    strings: StringTable,
+#[test]
+fn entry_identity_presentations_respect_transitive_equality() {
+    use super::{allocation_classes, visit_entry_identities};
+    use crate::compiler_frontend::public_call_summary::typed::{IdentityKind, Predicate};
+
+    let [a, b, c] = [PortId(0), PortId(1), PortId(2)];
+    let equal = |left, right| Predicate::Equal(IdentityKind::Allocation, left, right);
+    let mut presentations = Vec::new();
+    visit_entry_identities(
+        &[equal(a, b), equal(a, c), equal(b, c)],
+        &mut Vec::new(),
+        &mut |literals, _| {
+            let classes = allocation_classes(literals);
+            let root = |port| classes.get(&port).copied().unwrap_or(port);
+            presentations.push([root(a), root(b), root(c)]);
+            Ok::<_, Infallible>(())
+        },
+    )
+    .unwrap();
+    presentations.sort_unstable();
+    assert_eq!(
+        presentations,
+        [[a, a, a], [a, a, c], [a, b, a], [a, b, b], [a, b, c]],
+    );
 }
+
+struct ResultFixture(PreparedHirFixture);
 
 impl ResultFixture {
     fn new(source: &str) -> Self {
-        let (ast, mut paths, mut strings) = parse_single_file_ast(source);
-        let packages = default_external_package_registry(&mut strings);
-        let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
-        Self {
-            hir,
-            packages,
-            paths,
-            strings,
-        }
+        Self(PreparedHirFixture::new(source))
     }
 
     fn checker(&self) -> BorrowChecker<'_> {
         BorrowChecker::new(
-            &self.hir,
-            &self.hir.type_environment,
-            &self.packages,
-            &self.paths,
-            &self.strings,
+            &self.0.hir,
+            &self.0.hir.type_environment,
+            &self.0.packages,
+            &self.0.paths,
+            &self.0.strings,
         )
+        .with_type_projection(&self.0.type_projection())
     }
 
     fn indexed(&self) -> (BorrowChecker<'_>, FxHashMap<FunctionId, SparseFunction>) {
         let mut checker = self.checker();
         let indexes = build_sparse_index_for_test(&mut checker).expect("sparse index");
         (checker, indexes)
+    }
+
+    fn with_results(&self, check: impl FnOnce(&dyn Fn(&str) -> FunctionId, &BorrowChecker<'_>)) {
+        let mut checker = self.checker();
+        checker.build_public_call_summaries().unwrap();
+        let by_name = |name: &str| named_function(&checker, name).id;
+        check(&by_name, &checker);
     }
 }
 
@@ -723,15 +741,11 @@ recur |take Bool, value I32| -> I32:
 }
 
 fn with_results(source: &str, check: impl FnOnce(&dyn Fn(&str) -> FunctionId, &BorrowChecker<'_>)) {
-    let fixture = ResultFixture::new(source);
-    let mut checker = fixture.checker();
-    checker.build_public_call_summaries().unwrap();
-    let by_name = |name: &str| named_function(&checker, name).id;
-    check(&by_name, &checker);
+    ResultFixture::new(source).with_results(check);
 }
 
 #[test]
-fn cold_reverse_call_graph_includes_statement_invoke_and_never_edges() {
+fn cold_dependency_index_includes_statement_invoke_and_never_edges() {
     with_results(
         r#"
 ordinary |value I32| -> I32:
@@ -756,7 +770,6 @@ forward |take Bool| -> !:
 ;
 "#,
         |function, checker| {
-            let (_, reverse) = checker.cold_return_alias_indices().unwrap();
             let caller = function("forward");
             let caller_position = checker
                 .module
@@ -764,8 +777,11 @@ forward |take Bool| -> !:
                 .iter()
                 .position(|function| function.id == caller)
                 .unwrap();
+            let indices = super::super::build_sparse(checker).unwrap();
+            let callees = &indices[&caller].callees;
+            assert_eq!(callees.len(), 3);
             for callee in ["ordinary", "fallible", "stop"] {
-                assert_eq!(reverse[&function(callee)], [caller_position], "{callee}");
+                assert!(callees.contains(&function(callee)), "{callee}");
             }
             let function = &checker.module.functions[caller_position];
             let blocks = checker.collect_reachable_blocks(function).unwrap();
@@ -780,7 +796,7 @@ forward |take Bool| -> !:
             });
             assert!(successors.is_empty());
             let snapshot = super::Snapshot::collect(checker, function).unwrap();
-            let cfg = super::SparseCfg::new(checker, &snapshot, &mut 0);
+            let cfg = super::SparseCfg::new(checker, &snapshot, |_| false, false, &mut 0);
             for call in &snapshot.calls {
                 let index = snapshot
                     .blocks
@@ -799,7 +815,7 @@ forward |take Bool| -> !:
     );
 }
 
-fn facts<'a>(checker: &'a BorrowChecker<'_>, function: FunctionId) -> &'a CallAllocationFacts {
+fn facts<'a>(checker: &'a BorrowChecker<'_>, function: FunctionId) -> &'a TypedCallAllocationFacts {
     let FunctionReturnAliasSummary::Known(facts) =
         &checker.public_call_summaries[&function].return_alias
     else {
@@ -808,29 +824,148 @@ fn facts<'a>(checker: &'a BorrowChecker<'_>, function: FunctionId) -> &'a CallAl
     facts
 }
 
-fn result(slot: usize, path: &[CallField]) -> CallOutputPath {
-    CallOutputPath::Result(CallResultPath {
-        slot,
-        path: path.to_vec(),
-    })
+fn for_each_post(lane: &Lane, mut visit: impl FnMut(&Post)) {
+    lane.visit_compatible(
+        |_| Ok::<_, Infallible>(None),
+        |_, product| {
+            for post in product
+                .components()
+                .iter()
+                .flat_map(|component| &component.alternatives)
+            {
+                visit(post);
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
 }
 
-fn param(index: usize, path: &[CallField]) -> CallParameterPath {
-    CallParameterPath {
-        index,
-        path: path.to_vec(),
+fn entry(
+    facts: &TypedCallAllocationFacts,
+    parameter: usize,
+    path: &[CallField],
+) -> Option<ObjectRef> {
+    facts
+        .ports
+        .iter()
+        .position(|port| {
+            matches!(port, EntryPort::Value { parameter: index, path: entry }
+            if *index == parameter && entry.as_ref() == path)
+        })
+        .map(|port| ObjectRef::Entry(PortId(port as u32)))
+}
+
+fn allocation(source: &ValueSource) -> Option<ObjectRef> {
+    match source {
+        ValueSource::Allocation(object) => Some(object.clone()),
+        ValueSource::Scalar(_) => None,
     }
 }
 
-fn has_source(
-    lane: &CallLaneSummary,
-    output: CallOutputPath,
-    source: CallAllocationSource,
-) -> bool {
-    lane.sources
+fn cell_objects(post: &Post, cell: &CellPort) -> Option<Vec<ObjectRef>> {
+    post.cells.iter().find_map(|(target, edit)| {
+        if target != cell {
+            return None;
+        }
+        let (CellPost::Replace(values) | CellPost::WeakJoin(values)) = edit;
+        Some(
+            values
+                .iter()
+                .flatten()
+                .filter_map(|value| allocation(&value.source))
+                .collect(),
+        )
+    })
+}
+
+fn result_objects(
+    facts: &TypedCallAllocationFacts,
+    post: &Post,
+    slot: usize,
+    path: &[CallField],
+) -> Vec<ObjectRef> {
+    let mut values: Vec<_> = post
+        .results
         .iter()
-        .chain(&lane.stores)
-        .any(|row| row.output == output && row.source == source)
+        .filter_map(|(index, value)| {
+            (*index == slot)
+                .then(|| allocation(&value.source))
+                .flatten()
+        })
+        .collect();
+    for &selector in path {
+        values = values
+            .into_iter()
+            .flat_map(|holder| {
+                cell_objects(post, &CellPort::Edge(holder.clone(), selector)).unwrap_or_else(|| {
+                    let ObjectRef::Entry(port) = holder else {
+                        return Vec::new();
+                    };
+                    let EntryPort::Value { parameter, path } = &facts.ports[port.0 as usize] else {
+                        return Vec::new();
+                    };
+                    let mut path = path.to_vec();
+                    path.push(selector);
+                    entry(facts, *parameter, &path).into_iter().collect()
+                })
+            })
+            .collect();
+    }
+    values
+}
+
+fn has_result_entry(
+    facts: &TypedCallAllocationFacts,
+    slot: usize,
+    path: &[CallField],
+    parameter: usize,
+    entry_path: &[CallField],
+) -> bool {
+    let Some(source) = entry(facts, parameter, entry_path) else {
+        return false;
+    };
+    let mut found = false;
+    for_each_post(&facts.success, |post| {
+        found |= result_objects(facts, post, slot, path).contains(&source);
+    });
+    found
+}
+
+fn has_fresh_result(facts: &TypedCallAllocationFacts, slot: usize, path: &[CallField]) -> bool {
+    let mut found = false;
+    for_each_post(&facts.success, |post| {
+        found |= result_objects(facts, post, slot, path)
+            .iter()
+            .any(|value| matches!(value, ObjectRef::Exact(_) | ObjectRef::Family(..)));
+    });
+    found
+}
+
+fn has_entry_cell_write(
+    facts: &TypedCallAllocationFacts,
+    target: (usize, &[CallField]),
+    source: Option<(usize, &[CallField])>,
+) -> bool {
+    let Some((&selector, holder_path)) = target.1.split_last() else {
+        return false;
+    };
+    let Some(holder) = entry(facts, target.0, holder_path) else {
+        return false;
+    };
+    let cell = CellPort::Edge(holder, selector);
+    let mut found = false;
+    for_each_post(&facts.success, |post| {
+        found |= cell_objects(post, &cell).is_some_and(|values| match source {
+            Some((parameter, path)) => {
+                entry(facts, parameter, path).is_some_and(|source| values.contains(&source))
+            }
+            None => values
+                .iter()
+                .any(|value| !matches!(value, ObjectRef::Entry(_))),
+        });
+    });
+    found
 }
 
 #[test]
@@ -878,60 +1013,37 @@ recursive |items {I32}| -> Link:
 "#,
         |function, checker| {
             let items = [CallField::Field(0)];
-            let lane = |name| &facts(checker, function(name)).success;
-            let parameter =
-                |index, path: &[CallField]| CallAllocationSource::Parameter(param(index, path));
-            assert!(has_source(
-                lane("wrap"),
-                result(0, &[]),
-                CallAllocationSource::Fresh
+            let facts_for = |name| facts(checker, function(name));
+            let wrap = facts_for("wrap");
+            assert!(has_fresh_result(wrap, 0, &[]), "wrap facts: {wrap:#?}");
+            assert!(has_result_entry(facts_for("wrap"), 0, &items, 0, &[]));
+            assert!(has_fresh_result(facts_for("wrap_copy"), 0, &items));
+            assert!(has_result_entry(
+                facts_for("unwrap_link"),
+                0,
+                &[],
+                0,
+                &items
             ));
-            assert!(has_source(
-                lane("wrap"),
-                result(0, &items),
-                parameter(0, &[])
+            assert!(has_result_entry(facts_for("unwrap_temp"), 0, &[], 0, &[]));
+            assert!(has_result_entry(facts_for("ordered"), 1, &[], 1, &[]));
+            assert!(has_fresh_result(facts_for("ordered"), 2, &[]));
+            assert!(has_fresh_result(facts_for("changed_field"), 0, &items));
+            assert!(!has_result_entry(
+                facts_for("changed_field"),
+                0,
+                &items,
+                0,
+                &[]
             ));
-            assert!(has_source(
-                lane("wrap_copy"),
-                result(0, &items),
-                CallAllocationSource::Fresh
+            assert!(has_result_entry(
+                facts_for("shared_view"),
+                0,
+                &items,
+                0,
+                &[]
             ));
-            assert!(has_source(
-                lane("unwrap_link"),
-                result(0, &[]),
-                parameter(0, &items)
-            ));
-            assert!(has_source(
-                lane("unwrap_temp"),
-                result(0, &[]),
-                parameter(0, &[])
-            ));
-            assert!(has_source(
-                lane("ordered"),
-                result(1, &[]),
-                parameter(1, &[])
-            ));
-            assert!(has_source(
-                lane("ordered"),
-                result(2, &[]),
-                CallAllocationSource::Fresh
-            ));
-            assert!(has_source(
-                lane("changed_field"),
-                result(0, &items),
-                CallAllocationSource::Fresh
-            ));
-            assert!(!has_source(
-                lane("changed_field"),
-                result(0, &items),
-                parameter(0, &[])
-            ));
-            assert!(has_source(
-                lane("shared_view"),
-                result(0, &items),
-                parameter(0, &[])
-            ));
-            assert!(!lane("recursive").reachable);
+            assert_eq!(facts_for("recursive").success, Lane::Bottom);
         },
     );
 }
@@ -963,42 +1075,38 @@ select |flag Bool, a {{I32}}, b {{I32}}| -> Pair:
 "#
             );
             with_results(&source, |function, checker| {
-                let left = result(0, &[CallField::Field(0)]);
-                let right = result(0, &[CallField::Field(1)]);
-                let select = &facts(checker, function("select")).success;
-                let forwarded = &facts(checker, function("forward")).success;
-                assert!(has_source(
-                    select,
-                    left.clone(),
-                    CallAllocationSource::Parameter(param(1, &[]))
-                ));
-                assert!(has_source(
-                    select,
-                    right.clone(),
-                    CallAllocationSource::Parameter(param(2, &[]))
-                ));
-                let relation = |condition| CallSharing {
-                    left: left.clone(),
-                    right: right.clone(),
-                    condition,
-                };
-                assert_eq!(
-                    select
-                        .sharing
-                        .contains(&relation(CallSharingCondition::Parameters(
-                            param(1, &[]),
-                            param(2, &[])
-                        ))),
-                    shares
+                let left = [CallField::Field(0)];
+                let right = [CallField::Field(1)];
+                let selected = facts(checker, function("select"));
+                assert!(
+                    has_result_entry(selected, 0, &left, 1, &[]),
+                    "missing left source: {selected:#?}"
                 );
-                assert_eq!(
-                    forwarded
-                        .sharing
-                        .contains(&relation(CallSharingCondition::Always)),
-                    shares
+                assert!(
+                    has_result_entry(selected, 0, &right, 2, &[]),
+                    "missing right source: {selected:#?}"
                 );
-                assert!(has_source(forwarded, left, CallAllocationSource::Fresh));
-                assert!(has_source(forwarded, right, CallAllocationSource::Fresh));
+                let (a, b) = (
+                    entry(selected, 1, &[]).unwrap(),
+                    entry(selected, 2, &[]).unwrap(),
+                );
+                let mut together = false;
+                for_each_post(&selected.success, |post| {
+                    together |= result_objects(selected, post, 0, &left).contains(&a)
+                        && result_objects(selected, post, 0, &right).contains(&b);
+                });
+                assert_eq!(together, shares, "selected facts: {selected:#?}");
+                let forwarded = facts(checker, function("forward"));
+                let mut shares_object = false;
+                for_each_post(&forwarded.success, |post| {
+                    let b = result_objects(forwarded, post, 0, &right);
+                    shares_object |= result_objects(forwarded, post, 0, &left)
+                        .iter()
+                        .any(|a| !matches!(a, ObjectRef::Family(..)) && b.contains(a));
+                });
+                assert_eq!(shares_object, shares, "forwarded facts: {forwarded:#?}");
+                assert!(has_fresh_result(forwarded, 0, &left));
+                assert!(has_fresh_result(forwarded, 0, &right));
             });
         }
     }
@@ -1022,27 +1130,9 @@ forward |outer Outer| -> Pair:
         |function, checker| {
             let a = &[CallField::Field(0), CallField::Field(0)];
             let b = &[CallField::Field(0), CallField::Field(1)];
-            let left = result(0, &[CallField::Field(0)]);
-            let right = result(0, &[CallField::Field(1)]);
-            let lane = &facts(checker, function("forward")).success;
-            assert!(has_source(
-                lane,
-                left.clone(),
-                CallAllocationSource::Parameter(param(0, a))
-            ));
-            assert!(has_source(
-                lane,
-                right.clone(),
-                CallAllocationSource::Parameter(param(0, b))
-            ));
-            assert_eq!(
-                lane.sharing,
-                [CallSharing {
-                    left,
-                    right,
-                    condition: CallSharingCondition::Parameters(param(0, a), param(0, b)),
-                }]
-            );
+            let forwarded = facts(checker, function("forward"));
+            assert!(has_result_entry(forwarded, 0, &[CallField::Field(0)], 0, a));
+            assert!(has_result_entry(forwarded, 0, &[CallField::Field(1)], 0, b));
         },
     );
 }
@@ -1066,41 +1156,21 @@ forward |flag Bool, items {I32}, others {I32}| -> Triple:
 ;
 "#,
         |function, checker| {
-            let left = result(0, &[CallField::Field(0)]);
-            let middle = result(0, &[CallField::Field(1)]);
-            let right = result(0, &[CallField::Field(2)]);
-            let selected = &facts(checker, function("select")).success;
-            assert_eq!(
-                selected.sharing,
-                [
-                    CallSharing {
-                        left: left.clone(),
-                        right: middle.clone(),
-                        condition: CallSharingCondition::Parameters(param(1, &[]), param(2, &[])),
-                    },
-                    CallSharing {
-                        left: middle.clone(),
-                        right: right.clone(),
-                        condition: CallSharingCondition::Parameters(param(3, &[]), param(4, &[])),
-                    },
-                ]
-            );
-            let forwarded = &facts(checker, function("forward")).success;
-            assert_eq!(
-                forwarded.sharing,
-                [
-                    CallSharing {
-                        left,
-                        right: middle.clone(),
-                        condition: CallSharingCondition::Always
-                    },
-                    CallSharing {
-                        left: middle,
-                        right,
-                        condition: CallSharingCondition::Always
-                    },
-                ]
-            );
+            let forwarded = facts(checker, function("forward"));
+            let mut pairs = [false; 3];
+            for_each_post(&forwarded.success, |post| {
+                let [left, middle, right] = [0, 1, 2]
+                    .map(|field| result_objects(forwarded, post, 0, &[CallField::Field(field)]));
+                for (index, (a, b)) in [(&left, &middle), (&middle, &right), (&left, &right)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    pairs[index] |= a
+                        .iter()
+                        .any(|a| !matches!(a, ObjectRef::Family(..)) && b.contains(a));
+                }
+            });
+            assert_eq!(pairs, [true, true, false]);
         },
     );
 }
@@ -1131,21 +1201,34 @@ caught |rows ~{{I32}}, child {I32}, ok Bool| -> I32:
 ;
 "#,
         |function, checker| {
-            let target = CallOutputPath::Store {
-                target: param(0, &[CallField::Elem]),
-                path: Vec::new(),
+            let transports = |facts: &TypedCallAllocationFacts, lane: &Lane| {
+                let family = FamilyPort {
+                    receiver: entry(facts, 0, &[]).unwrap(),
+                    selector: CallField::Elem,
+                };
+                let child = entry(facts, 1, &[]).unwrap();
+                let mut found = false;
+                for_each_post(lane, |post| {
+                    found |= post.families.iter().any(|(target, update)| {
+                        let (FamilyPost::Extend(values) | FamilyPost::ReplaceAll(values)) = update;
+                        *target == family
+                            && values.iter().any(|(value, _)| {
+                                value.source == ValueSource::Allocation(child.clone())
+                            })
+                    });
+                });
+                found
             };
-            let source = CallAllocationSource::Parameter(param(1, &[]));
             let failure = facts(checker, function("fail_after_write"));
-            assert!(failure.success.reachable && failure.error.reachable);
-            assert!(failure.success.stores.is_empty());
-            assert!(has_source(&failure.error, target.clone(), source.clone()));
+            assert!(failure.success.can_return() && failure.error.can_return());
+            assert!(!transports(failure, &failure.success));
+            assert!(transports(failure, &failure.error));
             let success = facts(checker, function("write_on_success"));
-            assert!(has_source(&success.success, target.clone(), source.clone()));
-            assert!(success.error.stores.is_empty());
+            assert!(transports(success, &success.success));
+            assert!(!transports(success, &success.error));
             let caught = facts(checker, function("caught"));
-            assert!(has_source(&caught.success, target, source));
-            assert!(!caught.error.reachable);
+            assert!(transports(caught, &caught.success));
+            assert_eq!(caught.error, Lane::Bottom);
         },
     );
 }
@@ -1153,7 +1236,8 @@ caught |rows ~{{I32}}, child {I32}, ok Bool| -> I32:
 #[test]
 fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinates() {
     use crate::compiler_frontend::analysis::borrow_checker::state::{
-        BorrowState, CapturedValue, Coverage, FieldKey, StoredValue, UNKNOWN_ORDER_KEY,
+        AddressSet, BorrowState, CapturedValue, CellId, Coverage, FieldKey, StoredValue,
+        TypedStore, UNKNOWN_ORDER_KEY,
     };
     use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
         EntryCapture, ExplicitMatchInput, match_typed_lane,
@@ -1166,6 +1250,7 @@ fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinate
         CanonicalBuiltinType, CanonicalTypeIdentity,
     };
     use crate::compiler_frontend::datatypes::ids::TypeId;
+    use crate::compiler_frontend::public_call_summary::CallResultPath;
     use crate::compiler_frontend::public_call_summary::typed::{
         CellPort, CellPost, Component, ExportPort, Lane, ObjectRef, PathAccess, PortId, Post,
         Product, StorageKind, SupportId, ValueRef, ValueSource,
@@ -1206,7 +1291,16 @@ fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinate
         (original, items_key, original_items),
         (replacement, items_key, original_items),
     ] {
-        state.store_alloc_field(&[holder], key, &[stored(value)], true);
+        let address = AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete)
+            .with_singleton_proof();
+        state.publish_store(
+            &TypedStore::replace_cells(
+                address,
+                CapturedValue::new(vec![stored(value)], Vec::new()),
+            ),
+            UNKNOWN_ORDER_KEY,
+            None,
+        );
     }
     let mut old_payload = state.resolve_place_path(0, &[true; 6], [option_key]);
     state.load_place_content(&mut old_payload, &[true; 6], false);
@@ -1299,12 +1393,10 @@ fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinate
         block_successors: &Default::default(),
         local_first_write_order: &[0; 6],
         acyclic_entry_block: None,
+        entry_roots: None,
     };
     apply_captured_call_batch(
-        EdgeTransferView {
-            operations,
-            observations: true,
-        },
+        EdgeTransferView { operations },
         CapturedCallBatch {
             post,
             destinations: vec![CapturedDestination::Define(4)],
@@ -1328,67 +1420,7 @@ fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinate
 }
 
 #[test]
-fn captured_option_payload_and_replacement_keep_distinct_legacy_export_coordinates() {
-    use super::Lane;
-    use super::graph::{Cell, Graph, Origin, Owner, Site, Spec};
-    use crate::compiler_frontend::datatypes::ids::TypeId;
-
-    let mut graph = Graph::default();
-    let payload = CallField::Payload {
-        variant: 1,
-        field: 0,
-    };
-    let field = CallField::Field(0);
-    let carrier = Cell::root(Owner::Local(0));
-    let previous_items = Cell::root(Owner::Local(1));
-    let new_items = Cell::root(Owner::Local(2));
-    let replacement = Cell::root(Owner::Local(3));
-    let parameter = |cell, ty, index, path: &[CallField]| {
-        Spec::born(cell, TypeId(ty), Origin::Parameter(param(index, path)))
-    };
-    graph.install(
-        vec![
-            parameter(carrier.clone(), 20, 0, &[]),
-            parameter(carrier.at(&[payload]), 21, 0, &[payload]),
-            parameter(carrier.at(&[payload, field]), 22, 0, &[payload, field]),
-            parameter(previous_items.clone(), 22, 1, &[]),
-            parameter(new_items.clone(), 22, 2, &[]),
-            Spec::born(
-                replacement.clone(),
-                TypeId(21),
-                Origin::Fresh(Site::Value(0), 0, Vec::new()),
-            ),
-        ],
-        &[],
-        None,
-    );
-    let original = graph.capture(&carrier.at(&[payload]));
-    assert!(graph.write(&carrier, payload, &replacement, false, |_| true));
-    assert!(graph.write(&original, field, &previous_items, false, |_| true));
-    assert!(graph.write(&replacement, field, &new_items, false, |_| true));
-    let mut lane = Lane::default();
-    lane.extend(&graph, &[replacement]);
-    let lane = lane.finish();
-    assert!(has_source(
-        &lane,
-        CallOutputPath::Store {
-            target: param(0, &[payload, field]),
-            path: Vec::new()
-        },
-        CallAllocationSource::Parameter(param(1, &[])),
-    ));
-    assert!(has_source(
-        &lane,
-        CallOutputPath::Store {
-            target: param(0, &[payload]),
-            path: vec![field]
-        },
-        CallAllocationSource::Parameter(param(2, &[])),
-    ));
-}
-
-#[test]
-fn fresh_value_shared_between_a_result_and_a_projected_store_has_an_explicit_pair() {
+fn a_result_and_projected_store_share_one_retained_object() {
     with_results(
         r#"
 Link = |items {I32}|
@@ -1406,27 +1438,21 @@ through_call |outer ~Outer, items {I32}| -> Link:
 "#,
         |function, checker| {
             let field = CallField::Field(0);
-            let store = CallOutputPath::Store {
-                target: param(0, &[field]),
-                path: Vec::new(),
-            };
-            let relative = CallOutputPath::Store {
-                target: param(0, &[field]),
-                path: vec![field],
-            };
             for name in ["replace", "through_call"] {
-                let lane = &facts(checker, function(name)).success;
-                assert!(has_source(lane, store.clone(), CallAllocationSource::Fresh));
-                assert!(has_source(
-                    lane,
-                    relative.clone(),
-                    CallAllocationSource::Parameter(param(1, &[]))
-                ));
-                assert!(lane.sharing.contains(&CallSharing {
-                    left: result(0, &[]),
-                    right: store.clone(),
-                    condition: CallSharingCondition::Always,
-                }));
+                let facts = facts(checker, function(name));
+                let store = CellPort::Edge(entry(facts, 0, &[]).unwrap(), field);
+                let nested = entry(facts, 1, &[]).unwrap();
+                let mut shared = false;
+                for_each_post(&facts.success, |post| {
+                    let stored = cell_objects(post, &store).unwrap_or_default();
+                    shared |= result_objects(facts, post, 0, &[]).iter().any(|result| {
+                        matches!(result, ObjectRef::Exact(_))
+                            && stored.contains(result)
+                            && cell_objects(post, &CellPort::Edge(result.clone(), field))
+                                .is_some_and(|values| values.contains(&nested))
+                    });
+                });
+                assert!(shared, "{name}");
             }
         },
     );
@@ -1454,17 +1480,12 @@ retained_holder |incoming {I32}| -> Link:
 ;
 "#,
         |function, checker| {
-            let items = result(0, &[CallField::Field(0)]);
-            let param = CallAllocationSource::Parameter(param(0, &[]));
-            let scratch = &facts(checker, function("unreturned_scratch")).success;
-            assert!(has_source(
-                scratch,
-                items.clone(),
-                CallAllocationSource::Fresh
-            ));
-            assert!(!has_source(scratch, items.clone(), param.clone()));
-            let retained = &facts(checker, function("retained_holder")).success;
-            assert!(has_source(retained, items, param));
+            let items = [CallField::Field(0)];
+            let scratch = facts(checker, function("unreturned_scratch"));
+            assert!(has_fresh_result(scratch, 0, &items));
+            assert!(!has_result_entry(scratch, 0, &items, 0, &[]));
+            let retained = facts(checker, function("retained_holder"));
+            assert!(has_result_entry(retained, 0, &items, 0, &[]));
         },
     );
 }
@@ -1477,29 +1498,26 @@ fn optional_wrap_keeps_only_the_proven_payload_provenance() {
     let fresh = include_str!(
         "../../../../../tests/cases/runtime_call_opaque_option_fresh_result/input/@entry.moth"
     );
-    let items = result(0, &[CallField::Field(0)]);
-    let payload = CallAllocationSource::Parameter(param(
-        0,
-        &[CallField::Payload {
-            variant: 1,
-            field: 0,
-        }],
-    ));
+    let items = [CallField::Field(0)];
+    let payload = [CallField::Payload {
+        variant: 1,
+        field: 0,
+    }];
     with_results(retained, |function, checker| {
-        let lane = &facts(checker, function("wrap_option")).success;
-        assert!(has_source(lane, items.clone(), payload.clone()));
-        assert!(has_source(lane, items.clone(), CallAllocationSource::Fresh));
+        let facts = facts(checker, function("wrap_option"));
+        assert!(has_result_entry(facts, 0, &items, 0, &payload));
+        assert!(has_fresh_result(facts, 0, &items));
     });
     with_results(fresh, |function, checker| {
-        let lane = &facts(checker, function("fresh_wrap_option")).success;
-        assert!(has_source(lane, items.clone(), CallAllocationSource::Fresh));
-        assert!(!has_source(lane, items, payload));
+        let facts = facts(checker, function("fresh_wrap_option"));
+        assert!(has_fresh_result(facts, 0, &items));
+        assert!(!has_result_entry(facts, 0, &items, 0, &payload));
     });
 }
 
 #[test]
 fn returned_option_payload_keeps_the_caller_argument_borrowed() {
-    with_results(
+    let fixture = ResultFixture::new(
         r#"
 Link = |items {I32}|
 
@@ -1522,52 +1540,47 @@ probe || -> I32:
 
 ~[:[probe()]]
 "#,
-        |function, checker| {
-            let unwrap_link = function("unwrap_link");
-            assert!(has_source(
-                &facts(checker, unwrap_link).success,
-                result(0, &[]),
-                CallAllocationSource::Parameter(param(
-                    0,
-                    &[CallField::Payload {
-                        variant: 1,
-                        field: 0
-                    },]
-                ))
-            ));
-
-            let argument = checker
-                .module
-                .blocks
-                .iter()
-                .flat_map(|block| &block.statements)
-                .find_map(|statement| match &statement.kind {
-                    HirStatementKind::Call {
-                        target: CallTarget::Local(id),
-                        args,
-                        ..
-                    } if *id == unwrap_link => Some(checker.module.expressions.values(*args)[0]),
-                    _ => None,
-                })
-                .expect("probe calls unwrap_link");
-            let report = run_borrow_checker_with_types(
-                checker.module,
-                checker.type_environment,
-                checker.external_package_registry,
-                checker.path_fork,
-                checker.string_table,
-            )
-            .expect("the caller can read the returned payload after the call");
-            assert_eq!(
-                report
-                    .analysis
-                    .value_fact(argument)
-                    .unwrap()
-                    .optional_transfer,
-                OptionalTransferStatus::Borrow
-            );
-        },
     );
+    fixture.with_results(|function, checker| {
+        let unwrap_link = function("unwrap_link");
+        assert!(has_result_entry(
+            facts(checker, unwrap_link),
+            0,
+            &[],
+            0,
+            &[CallField::Payload {
+                variant: 1,
+                field: 0
+            }],
+        ));
+
+        let argument = checker
+            .module
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match &statement.kind {
+                HirStatementKind::Call {
+                    target: CallTarget::Local(id),
+                    args,
+                    ..
+                } if *id == unwrap_link => Some(checker.module.expressions.values(*args)[0]),
+                _ => None,
+            })
+            .expect("probe calls unwrap_link");
+        let report = fixture
+            .checker()
+            .run(None)
+            .expect("the caller can read the returned payload after the call");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(argument)
+                .unwrap()
+                .optional_transfer,
+            OptionalTransferStatus::Borrow
+        );
+    });
 }
 
 // A recursive callee first publishes only its `none` exit. Its `Some(holder)` exit appears
@@ -1633,30 +1646,15 @@ fn a_write_through_a_holder_a_recursive_callee_resolves_later_converges_monotoni
     with_results(
         &recursive_module(&[RECURSIVE_PICK, WRITE_THROUGH_PICK]),
         |function, checker| {
-            let lane = &facts(checker, function("through")).success;
-            let items = CallOutputPath::Store {
-                target: param(0, &[CallField::Field(0)]),
-                path: Vec::new(),
-            };
-            assert!(has_source(
-                lane,
-                items.clone(),
-                CallAllocationSource::Parameter(param(2, &[]))
-            ));
-            assert!(!has_source(
-                lane,
-                items,
-                CallAllocationSource::Parameter(param(1, &[]))
-            ));
+            let facts = facts(checker, function("through"));
+            let items: (usize, &[CallField]) = (0, &[CallField::Field(0)]);
+            assert!(has_entry_cell_write(facts, items, Some((2, &[]))));
+            assert!(!has_entry_cell_write(facts, items, Some((1, &[]))));
             let payload = CallField::Payload {
                 variant: 1,
                 field: 0,
             };
-            assert!(has_source(
-                lane,
-                result(0, &[payload]),
-                CallAllocationSource::Parameter(param(0, &[]))
-            ));
+            assert!(has_result_entry(facts, 0, &[payload], 0, &[]));
         },
     );
 }
@@ -1694,17 +1692,13 @@ fn recursive_summaries_reach_the_same_fixed_point_across_definition_orders() {
     }
     let expected = expected.unwrap();
     let relay = match &expected[4].return_alias {
-        FunctionReturnAliasSummary::Known(facts) => &facts.success,
+        FunctionReturnAliasSummary::Known(facts) => facts,
         other => panic!("relay should publish a known summary, got {other:?}"),
     };
-    let items = CallOutputPath::Store {
-        target: param(0, &[CallField::Field(0)]),
-        path: Vec::new(),
-    };
-    assert!(has_source(
+    assert!(has_entry_cell_write(
         relay,
-        items,
-        CallAllocationSource::Parameter(param(1, &[]))
+        (0, &[CallField::Field(0)]),
+        Some((1, &[]))
     ));
 }
 
@@ -1735,14 +1729,40 @@ stash |rows ~{{{{I32}}}}, child {{I32}}, flag Bool| -> {holder}?:
             |function, checker| {
                 let lane = &facts(checker, function("stash")).success;
                 assert!(
-                    lane.reachable,
+                    lane.can_return(),
                     "{mutation}: the propagated `none` exit still succeeds"
                 );
-                assert!(
-                    lane.stores.is_empty(),
-                    "{mutation}: no store may come from the impossible path: {:?}",
-                    lane.stores
-                );
+                for_each_post(lane, |post| {
+                    let caller_owned = |object: &ObjectRef| {
+                        matches!(
+                            object,
+                            ObjectRef::Entry(_)
+                                | ObjectRef::Exact(ExportPort::Binding(_) | ExportPort::Cell(_))
+                        )
+                    };
+                    let caller_cell = |cell: &CellPort| match cell {
+                        CellPort::Terminal(_) => true,
+                        CellPort::Slot(object) | CellPort::Edge(object, _) => caller_owned(object),
+                    };
+                    assert!(
+                        !post.bindings.iter().any(|(object, _)| caller_owned(object))
+                            && !post.cells.iter().any(|(cell, _)| caller_cell(cell))
+                            && !post
+                                .families
+                                .iter()
+                                .any(|(port, _)| caller_owned(&port.receiver)),
+                        "{mutation}: the propagated exit must not change caller storage: {post:?}"
+                    );
+                    assert!(post.results.iter().any(|(slot, value)| {
+                        *slot == 0 && post.cells.iter().any(|(cell, edit)| {
+                            matches!((&value.source, cell),
+                                (ValueSource::Allocation(result),
+                                 CellPort::Edge(holder, CallField::Payload { variant: 1, field: 0 }))
+                                    if result == holder)
+                                && matches!(edit, CellPost::Replace(values) if matches!(values.as_slice(), [None]))
+                        })
+                    }), "{mutation}: the propagated result must be known absent: {post:?}");
+                });
             },
         );
     }
@@ -1774,17 +1794,11 @@ stash_after_self_update |box ~Box, incoming {I32}| -> {I32}:
 ;
 "#,
         |function, checker| {
-            let parameter =
-                |index, path: &[CallField]| CallAllocationSource::Parameter(param(index, path));
-            // A direct self-update keeps the plain slot, so the later place load still aliases.
             for name in ["stash", "stash_after_self_update"] {
-                let lane = &facts(checker, function(name)).success;
+                let facts = facts(checker, function(name));
+                assert!(has_result_entry(facts, 0, &[], 1, &[]), "{name}");
                 assert!(
-                    has_source(lane, result(0, &[]), parameter(1, &[])),
-                    "{name}"
-                );
-                assert!(
-                    !has_source(lane, result(0, &[]), parameter(0, &[CallField::Field(0)])),
+                    !has_result_entry(facts, 0, &[], 0, &[CallField::Field(0)]),
                     "{name}"
                 );
             }
@@ -1813,18 +1827,26 @@ stash |flag Bool, left ~Left, right ~Right| -> I32:
 ;
 "#,
         |function, checker| {
-            let lane = &facts(checker, function("stash")).success;
-            let store = |index, field| CallOutputPath::Store {
-                target: param(index, &[CallField::Field(field)]),
-                path: Vec::new(),
-            };
-            assert!(has_source(lane, store(1, 0), CallAllocationSource::Fresh));
-            assert!(has_source(lane, store(2, 1), CallAllocationSource::Fresh));
-            assert!(
-                lane.stores
-                    .iter()
-                    .all(|row| row.output != store(1, 1) && row.output != store(2, 0))
-            );
+            let facts = facts(checker, function("stash"));
+            assert!(has_entry_cell_write(
+                facts,
+                (1, &[CallField::Field(0)]),
+                None
+            ));
+            assert!(has_entry_cell_write(
+                facts,
+                (2, &[CallField::Field(1)]),
+                None
+            ));
+            for (parameter, ordinal) in [(1, 1), (2, 0)] {
+                let pad = CellPort::Edge(
+                    entry(facts, parameter, &[]).unwrap(),
+                    CallField::Field(ordinal),
+                );
+                for_each_post(&facts.success, |post| {
+                    assert!(post.cells.iter().all(|(target, _)| *target != pad));
+                });
+            }
         },
     );
 }
@@ -1881,17 +1903,8 @@ fn a_joined_slot_alternative_still_acquires_an_assigned_alias_in_every_order() {
     let FunctionReturnAliasSummary::Known(facts) = &expected.unwrap().return_alias else {
         panic!("stash should publish a known summary");
     };
-    let parameter = |index, path: &[CallField]| CallAllocationSource::Parameter(param(index, path));
-    assert!(has_source(
-        &facts.success,
-        result(0, &[]),
-        parameter(3, &[])
-    ));
-    assert!(has_source(
-        &facts.success,
-        result(0, &[]),
-        parameter(2, &[CallField::Field(0)])
-    ));
+    assert!(has_result_entry(facts, 0, &[], 3, &[]));
+    assert!(has_result_entry(facts, 0, &[], 2, &[CallField::Field(0)]));
 }
 
 #[test]
@@ -1921,12 +1934,12 @@ stash |flag Bool, box ~Box, incoming {I32}| -> {I32}:
 ;
 "#,
         |function, checker| {
-            let lane = &facts(checker, function("stash")).success;
-            assert!(lane.reachable);
-            assert!(has_source(
-                lane,
-                result(0, &[]),
-                CallAllocationSource::Parameter(param(2, &[]))
+            assert!(has_result_entry(
+                facts(checker, function("stash")),
+                0,
+                &[],
+                2,
+                &[]
             ));
         },
     );
@@ -1959,15 +1972,11 @@ fn a_resolved_bottom_alias_alternative_keeps_the_published_slot_store() {
     for order in [[pick, PENDING_ALIAS_STASH], [PENDING_ALIAS_STASH, pick]] {
         let source = format!("Holder = |items {{I32}}|\n\n{}", order.join("\n"));
         with_results(&source, |function, checker| {
-            let lane = &facts(checker, function("stash")).success;
-            let items = CallOutputPath::Store {
-                target: param(2, &[CallField::Field(0)]),
-                path: Vec::new(),
-            };
-            assert!(has_source(
-                lane,
-                items,
-                CallAllocationSource::Parameter(param(3, &[]))
+            let facts = facts(checker, function("stash"));
+            assert!(has_entry_cell_write(
+                facts,
+                (2, &[CallField::Field(0)]),
+                Some((3, &[]))
             ));
         });
     }
@@ -1998,13 +2007,237 @@ probe |incoming {I32}| -> {I32}:
 ;
 "#,
         |function, checker| {
-            // The catch exits return `incoming`, so `Fresh` can only come from the normal exit.
-            let lane = &facts(checker, function("probe")).success;
-            assert!(has_source(
-                lane,
-                result(0, &[]),
-                CallAllocationSource::Fresh
-            ));
+            // The catch exits return `incoming`, so a fresh object can only come from the normal exit.
+            assert!(has_fresh_result(facts(checker, function("probe")), 0, &[]));
         },
     );
+}
+
+#[test]
+fn pending_call_emits_no_continuation_until_contract_arrives() {
+    let fixture = ResultFixture::new(
+        r#"
+immediate_forward |value I32| -> I32:
+    seen = immediate(value)
+    return seen
+;
+
+invoke_forward |ok Bool, value I32| -> I32, Error!:
+    return fallible(ok, value)!
+;
+
+never_forward |dest ~I32, value ~I32| -> !:
+    stop(~dest, ~value)
+;
+
+immediate |value I32| -> I32:
+    return value
+;
+
+fallible |ok Bool, value I32| -> I32, Error!:
+    if ok:
+        return value
+    ;
+    return! Error("failure")
+;
+
+stop |dest ~I32, value ~I32| -> !:
+    ~dest = value
+    loop true:
+        io.line([:[dest]])
+    ;
+;
+"#,
+    );
+    let mut checker = fixture.checker();
+    checker.public_call_summaries =
+        BorrowChecker::seed_public_call_summaries(checker.module, &checker.diagnostics).unwrap();
+    for (forward, leaf, returns, fails, retained_value) in [
+        ("immediate_forward", "immediate", true, false, 0),
+        ("invoke_forward", "fallible", true, true, 1),
+        ("never_forward", "stop", false, false, 1),
+    ] {
+        let forward = named_function(&checker, forward);
+        let leaf = named_function(&checker, leaf);
+        let indices = super::super::build_sparse(&checker).unwrap();
+        let classify = |checker: &BorrowChecker<'_>, function: &HirFunction| {
+            let FunctionReturnAliasSummary::Known(facts) = checker
+                .classify_function_return_alias(function, &indices[&function.id])
+                .unwrap()
+            else {
+                panic!("extraction must produce a provisional transfer summary")
+            };
+            facts
+        };
+        let before = classify(&checker, forward);
+        assert_eq!(before.success, Lane::Bottom);
+        assert_eq!(before.error, Lane::Bottom);
+        assert!(before.may_retain.is_empty());
+        let leaf_id = leaf.id;
+        let leaf = classify(&checker, leaf);
+        checker
+            .public_call_summaries
+            .get_mut(&leaf_id)
+            .unwrap()
+            .return_alias = FunctionReturnAliasSummary::Known(leaf);
+        let after = classify(&checker, forward);
+        assert_eq!(after.success.can_return(), returns);
+        assert_eq!(after.error.can_return(), fails);
+        assert_eq!(after.success.result_extent(), usize::from(returns));
+        assert_eq!(after.error.result_extent(), usize::from(fails));
+        if returns {
+            use crate::compiler_frontend::public_call_summary::typed::ScalarSource;
+            // Returning a scalar retains its source on the selected lane, not on execution.
+            assert!(after.may_retain.is_empty());
+            let mut retained = false;
+            for_each_post(&after.success, |post| {
+                retained |= post.results.iter().any(|(slot, value)| {
+                    let ValueSource::Scalar(ScalarSource::EntryValue(port)) = value.source else {
+                        return false;
+                    };
+                    *slot == 0 && matches!(&after.ports[port.0 as usize],
+                        EntryPort::Value { parameter, path } if *parameter == retained_value && path.is_empty())
+                });
+            });
+            assert!(retained);
+        } else {
+            assert_eq!(after.may_retain, [retained_value]);
+        }
+    }
+}
+
+#[test]
+fn replacing_an_empty_caller_cell_keeps_member_success_reachable() {
+    let fixture = ResultFixture::new(
+        r#"
+Box = |items {I32}|
+
+seed |boxes ~{Box}|:
+    ~boxes = {Box({0})}
+;
+
+take || -> I32, Error!:
+    boxes ~{Box} = {}
+    seed(~boxes)
+    removed ~= ~boxes.remove(0) catch |err|:
+        return! err
+    ;
+    ~removed.items = {1}
+    return removed.items.length()
+;
+
+lookup || -> I32, Error!:
+    boxes ~{Box} = {}
+    seed(~boxes)
+    found = boxes.get(0)!
+    return found.items.length()
+;
+"#,
+    );
+    fixture.with_results(|function, checker| {
+        let seed = facts(checker, function("seed"));
+        let mut populated_replacement = false;
+        for_each_post(&seed.success, |post| {
+            for (port, edit) in &post.families {
+                if port.selector == CallField::Elem
+                    && matches!(edit, FamilyPost::ReplaceAll(members) if !members.is_empty())
+                    && post.cells.iter().any(|(cell, edit)| {
+                        matches!(cell, CellPort::Terminal(_))
+                            && matches!(edit, CellPost::Replace(values) if values.iter().flatten().any(|value| {
+                                value.source == ValueSource::Allocation(port.receiver.clone())
+                            }))
+                    })
+                {
+                    populated_replacement = true;
+                }
+            }
+        });
+        assert!(populated_replacement, "the replacement installs a populated graph on the caller's cell");
+        for callee in ["take", "lookup"] {
+            assert!(facts(checker, function(callee)).success.can_return(), "{callee}");
+        }
+    });
+}
+
+#[test]
+fn terminating_call_uses_executed_retention_without_a_lane() {
+    let leaf = r#"
+link_forever |dest ~I32, value ~I32| -> !:
+    ~dest = value
+    loop true:
+        io.line([:[dest]])
+    ;
+;
+"#;
+    let forward = r#"
+forward_forever |dest ~I32, value ~I32| -> !:
+    link_forever(~dest, ~value)
+;
+"#;
+    let outer = r#"
+outer || -> !:
+    dest ~= 1
+    value ~= 2
+    forward_forever(~dest, ~value)
+;
+"#;
+    for (order, source) in [
+        [outer, forward, leaf].concat(),
+        [leaf, forward, outer].concat(),
+        [outer, forward, &leaf.replace("~dest = value", "~dest = 0")].concat(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let retaining = order < 2;
+        let fixture = ResultFixture::new(&source);
+        fixture.with_results(|function, checker| {
+            for callee in ["link_forever", "forward_forever", "outer"] {
+                let facts = facts(checker, function(callee));
+                assert_eq!(facts.success, Lane::Bottom);
+                assert_eq!(facts.error, Lane::Bottom);
+                if callee != "outer" {
+                    assert_eq!(
+                        facts.may_retain,
+                        if retaining { &[1][..] } else { &[][..] },
+                        "{callee}"
+                    );
+                }
+            }
+            let outer = named_function(checker, "outer");
+            let blocks = checker.collect_reachable_blocks(outer).unwrap();
+            let args = blocks
+                .iter()
+                .find_map(|&id| {
+                    let block = checker.block_by_id_or_error(id, outer.id).unwrap();
+                    match &block.terminator {
+                        super::HirTerminator::NeverCall {
+                            target: CallTarget::Local(target),
+                            args,
+                            ..
+                        } if *target == function("forward_forever") => Some(*args),
+                        _ => None,
+                    }
+                })
+                .expect("the outer call is terminal, with no receiving locals");
+            let report = fixture
+                .checker()
+                .run(None)
+                .expect("independent arguments are legal on a terminating call");
+            let value = checker.module.expressions.values(args)[1];
+            assert_eq!(
+                report.analysis.value_fact(value).unwrap().optional_transfer,
+                if retaining {
+                    OptionalTransferStatus::Borrow
+                } else {
+                    OptionalTransferStatus::Transfer
+                },
+            );
+            assert_eq!(
+                report.analysis.public_call_summaries[&function("forward_forever")].parameters[0]
+                    .mutation,
+                crate::compiler_frontend::public_call_summary::PublicCallMutationEffect::Writes,
+            );
+        });
+    }
 }

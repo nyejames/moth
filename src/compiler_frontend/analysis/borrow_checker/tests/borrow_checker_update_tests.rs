@@ -2229,6 +2229,11 @@ fn transfer_isolated_statement(
         choices: &checker.module.choices,
         expressions: &checker.module.expressions,
         type_environment: checker.type_environment,
+        type_projection:
+            crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                checker.type_environment,
+                checker.external_package_registry,
+            ),
         diagnostics: BorrowDiagnostics::new(
             checker.module,
             checker.path_fork,

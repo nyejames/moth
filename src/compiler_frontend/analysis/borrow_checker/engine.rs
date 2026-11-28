@@ -9,19 +9,25 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AllocationRetirement, BorrowState, CapturedValue, CellId, FunctionLayout, LocalState, OrderKey,
-    RootSet, StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, WrapperId, remap_invoke_capture,
+    RootSet, StoreReceipt, TypedStore, UNKNOWN_ORDER_KEY, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     AccessFootprint, Carrier, Demand, ObservationBoundary, ObservationCheckpoint, PlaceUse,
     ValueObservations,
 };
+use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+    CapturedPosts, MatchedComponent, MatchedLane, MatchedStratum,
+};
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, CapturedCallBatch, CapturedDestination,
-    EdgeTransferView, InvokeLayerOp, InvokeTransfer, transfer_block,
+    EdgeTransferView, InvokeLayerOp, InvokeTransfer, OperationView, transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
     LocalMode, ValueBorrowFact,
+};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalTypeIdentity, CanonicalTypeProjectionContext, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticPlace, InvalidMutableAccessReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -39,9 +45,10 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 #[cfg(test)]
 use std::cell::RefCell;
-use std::collections::{BinaryHeap, VecDeque, hash_map::Entry};
+use std::collections::{BTreeSet, BinaryHeap, VecDeque, hash_map::Entry};
 use std::rc::Rc;
 
 #[cfg(test)]
@@ -55,12 +62,9 @@ struct ForwardEdgeSource<'a> {
     order: OrderKey,
 }
 
-#[allow(dead_code)]
-pub(super) struct CapturedReplayEdge<Outcomes> {
-    pub source: BlockId,
-    pub destination: BlockId,
-    pub order: OrderKey,
-    pub outcomes: Outcomes,
+pub(super) struct SparseEvaluation {
+    pub exits: FxHashMap<BlockId, FxHashSet<Rc<BorrowState>>>,
+    pub retained: BTreeSet<usize>,
 }
 
 #[derive(Default)]
@@ -190,6 +194,7 @@ impl FunctionObservations {
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
     pub(super) type_environment: &'a TypeEnvironment,
+    type_projection: CanonicalTypeProjectionContext<'a>,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) string_table: &'a StringTable,
     pub(super) path_fork: &'a PathInternerFork,
@@ -240,6 +245,11 @@ impl<'a> BorrowChecker<'a> {
         Self {
             module,
             type_environment,
+            type_projection:
+                crate::compiler_frontend::ast::generic_functions::registered_type_projection(
+                    type_environment,
+                    external_package_registry,
+                ),
             external_package_registry,
             string_table,
             path_fork,
@@ -251,6 +261,18 @@ impl<'a> BorrowChecker<'a> {
             #[cfg(test)]
             forward_probe: None,
         }
+    }
+
+    pub(super) fn with_type_projection(
+        mut self,
+        projection: &CanonicalTypeProjectionContext<'a>,
+    ) -> Self {
+        self.type_projection = *projection;
+        self
+    }
+
+    pub(super) fn project_type(&self, ty: TypeId) -> Option<CanonicalTypeIdentity> {
+        project_type_id_to_canonical_identity(ty, self.type_environment, &self.type_projection).ok()
     }
 
     pub(super) fn with_local_types(mut self) -> Self {
@@ -274,7 +296,7 @@ impl<'a> BorrowChecker<'a> {
         self
     }
 
-    fn transfer_context(&self) -> BorrowTransferContext<'_> {
+    pub(super) fn transfer_context(&self) -> BorrowTransferContext<'_> {
         BorrowTransferContext {
             external_package_registry: self.external_package_registry,
             public_call_summaries: &self.public_call_summaries,
@@ -286,6 +308,7 @@ impl<'a> BorrowChecker<'a> {
             choices: &self.module.choices,
             expressions: &self.module.expressions,
             type_environment: self.type_environment,
+            type_projection: self.type_projection,
             diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
         }
     }
@@ -338,11 +361,6 @@ impl<'a> BorrowChecker<'a> {
         let function = &self.module.functions[function_index];
         let reachable_blocks = self.collect_reachable_blocks(function)?;
         let layout = self.build_function_layout(function, &reachable_blocks)?;
-        #[cfg(feature = "benchmark_counters")]
-        add_frontend_counter(
-            FrontendCounter::BorrowValidationDenseLayoutSlots,
-            layout.local_count() * layout.block_local_max_use_order.len(),
-        );
         let visible_locals_by_block = &layout.visible_locals_by_block;
 
         let transfer_context = self.transfer_context();
@@ -451,12 +469,8 @@ impl<'a> BorrowChecker<'a> {
                     .insert(terminator_block, fact);
             }
             final_value_facts_by_block.insert(block_id, block_stats.value_facts);
-            let divergence_changed = layout.lookup_observations
-                && observations.record_block(
-                    block_id,
-                    block_stats.observations,
-                    block_stats.diverges,
-                );
+            let divergence_changed =
+                observations.record_block(block_id, block_stats.observations, block_stats.diverges);
             let invoke = block_stats.invoke;
             let previous_invoke = invoke_by_block.get(&block_id);
             let has_invoke_effects = !invoke.is_empty();
@@ -497,6 +511,20 @@ impl<'a> BorrowChecker<'a> {
                     return Ok::<(), BorrowCheckError>(());
                 }
                 if !worklist.ranks.contains_key(&successor) {
+                    return Ok::<(), BorrowCheckError>(());
+                }
+                if !super::transfer::access::option_edge_is_possible(
+                    OperationView::from_layout(&layout),
+                    &output_state,
+                    &self.module.expressions,
+                    &block.terminator,
+                    successor,
+                ) {
+                    observations.edges.remove(&edge);
+                    #[cfg(test)]
+                    if let Some(probe) = &self.forward_probe {
+                        probe.borrow_mut().edges.remove(&edge);
+                    }
                     return Ok::<(), BorrowCheckError>(());
                 }
 
@@ -859,36 +887,34 @@ impl<'a> BorrowChecker<'a> {
         total.conflicts_checked += block.conflicts_checked;
     }
 
-    /// A component which does not write at an edge shares its incoming facts at the successor.
-    #[allow(dead_code)] // Prepared for guarded extraction over a projected support.
-    pub(super) fn drive_sparse_support(
+    /// Keep alternatives of the fixed support separate until boundary export.
+    pub(super) fn evaluate_sparse_support(
         &self,
         function: &HirFunction,
-        entry: BorrowState,
-        support: &super::metadata::ProjectedSupport<'_>,
-    ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
-        self.drive_sparse_support_from(function, function.entry, entry, support)
-    }
-
-    fn drive_sparse_support_from(
-        &self,
-        function: &HirFunction,
-        start: BlockId,
         mut entry: BorrowState,
         support: &super::metadata::ProjectedSupport<'_>,
-    ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
+    ) -> Result<SparseEvaluation, BorrowCheckError> {
         use super::transfer::transfer_sparse_block;
 
         let context = self.transfer_context();
-        entry.use_indexed_recurring_blocks(support.recurring_blocks());
-        if let Some(mask) = support.visibility(start) {
+        let recurring = support.recurring_blocks();
+        let acyclic = recurring.is_empty();
+        entry.use_indexed_recurring_blocks(recurring);
+        if let Some(mask) = support.visibility(function.entry) {
             entry.kill_invisible(mask);
         }
-        let entry_block = support.continuation(start);
+        let entry_block = support.continuation(function.entry);
         let mut worklist = ForwardWorklist::with_ranks(entry_block, support.ranks());
-        let mut inputs = FxHashMap::default();
-        inputs.insert(entry_block, Rc::new(entry));
-        let mut exits = FxHashMap::default();
+        let entry = Rc::new(entry);
+        let mut inputs = FxHashMap::<_, (FxHashSet<_>, Vec<_>)>::default();
+        inputs.insert(
+            entry_block,
+            (FxHashSet::from_iter([Rc::clone(&entry)]), vec![entry]),
+        );
+        let mut result = SparseEvaluation {
+            exits: FxHashMap::default(),
+            retained: BTreeSet::new(),
+        };
         while let Some(block_id) = worklist.pop() {
             let block = self.block_by_id_or_error(block_id, function.id)?;
             if matches!(block.terminator, HirTerminator::Uninitialized) {
@@ -896,79 +922,74 @@ impl<'a> BorrowChecker<'a> {
                     .diagnostics
                     .internal_error("Missing terminator during sparse borrow transfer"));
             }
-            let view = support.block_view(block_id);
-            let source = ForwardEdgeSource {
-                function: function.id,
-                block,
-                view: EdgeTransferView {
-                    operations: view.operations,
-                    observations: false,
-                },
-                order: view.terminator_order,
-            };
-            let transfer_terminator = view.transfer_terminator;
-            let mut state = Rc::clone(&inputs[&block_id]);
-            let transfer = if view.statement_positions.is_empty() && !transfer_terminator {
-                BlockTransferStats::default()
+            let pending = if acyclic {
+                // Every predecessor has already run in topological order.
+                inputs.remove(&block_id).expect("queued sparse inputs").1
             } else {
-                transfer_sparse_block(&context, view, block, Rc::make_mut(&mut state))?
+                std::mem::take(&mut inputs.get_mut(&block_id).expect("queued sparse inputs").1)
             };
-            if transfer.diverges {
-                continue;
-            }
-            self.transfer_sparse_successors(
-                &source,
-                transfer_terminator.then_some(&transfer.invoke),
-                &state,
-                support,
-                |successor, incoming| {
-                    let changed = match inputs.entry(successor) {
-                        Entry::Occupied(mut entry) => {
-                            let existing = entry.get_mut();
-                            !Rc::ptr_eq(existing, &incoming)
-                                && existing.as_ref() != incoming.as_ref()
-                                && Rc::make_mut(existing).join_in_place(&incoming)
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(incoming);
-                            true
-                        }
-                    };
-                    if changed {
-                        worklist.push(successor);
+            for state in pending {
+                let view = support.block_view(block_id);
+                let source = ForwardEdgeSource {
+                    function: function.id,
+                    block,
+                    view: EdgeTransferView {
+                        operations: view.operations,
+                    },
+                    order: view.terminator_order,
+                };
+                let transfer_terminator =
+                    view.transfer_terminator || view.structural_terminator.is_some();
+                for (state, invoke) in
+                    transfer_sparse_block(&context, view, block, state, &mut result.retained)?
+                {
+                    self.transfer_sparse_successors(
+                        &source,
+                        transfer_terminator.then_some(&invoke),
+                        &state,
+                        support,
+                        |successor, incoming| {
+                            let (seen, pending) = inputs.entry(successor).or_default();
+                            if seen.insert(Rc::clone(&incoming)) {
+                                pending.push(incoming);
+                                worklist.push(successor);
+                            }
+                        },
+                    )?;
+                    if cfg!(test)
+                        || matches!(
+                            block.terminator,
+                            HirTerminator::Return(_) | HirTerminator::ReturnError(_)
+                        )
+                    {
+                        result.exits.entry(block_id).or_default().insert(state);
                     }
-                },
-            )?;
-            exits.insert(block_id, state);
+                }
+            }
         }
-        Ok(exits)
+        Ok(result)
     }
 
-    /// Resume the same sparse solve from one alternative's receiving state.
-    /// Callers supply its projected predecessor, never a dense join.
-    #[allow(dead_code)]
-    pub(super) fn replay_captured_sparse_support(
+    #[cfg(test)]
+    pub(super) fn drive_sparse_support(
         &self,
         function: &HirFunction,
-        edge: CapturedReplayEdge<impl IntoIterator<Item = usize>>,
-        mut entry: BorrowState,
+        entry: BorrowState,
         support: &super::metadata::ProjectedSupport<'_>,
-        batch: CapturedCallBatch,
-        mut rekey: impl FnMut(&BorrowState, AllocationRetirement),
     ) -> Result<FxHashMap<BlockId, Rc<BorrowState>>, BorrowCheckError> {
-        entry.use_indexed_recurring_blocks(support.recurring_blocks());
-        apply_captured_call_batch_rekey(
-            EdgeTransferView {
-                operations: support.block_view(edge.source).operations,
-                observations: false,
-            },
-            batch,
-            edge.outcomes,
-            edge.order,
-            &mut entry,
-            &mut rekey,
-        )?;
-        self.drive_sparse_support_from(function, edge.destination, entry, support)
+        Ok(self
+            .evaluate_sparse_support(function, entry, support)?
+            .exits
+            .into_iter()
+            .map(|(block, states)| {
+                let mut states = states.into_iter();
+                let mut joined = states.next().expect("exits are nonempty");
+                for incoming in states {
+                    Rc::make_mut(&mut joined).join_in_place(&incoming);
+                }
+                (block, joined)
+            })
+            .collect())
     }
 
     fn transfer_sparse_successors(
@@ -990,14 +1011,58 @@ impl<'a> BorrowChecker<'a> {
             if lane.is_some_and(|lane| lane.unreachable) {
                 return Ok(());
             }
-            let mut incoming = Rc::clone(state);
-            if jump_rebinds || lane.is_some() {
-                self.apply_forward_edge(source, successor, lane, Rc::make_mut(&mut incoming))?;
+            if !super::transfer::access::option_edge_is_possible(
+                source.view.operations,
+                state,
+                &self.module.expressions,
+                terminator,
+                successor,
+            ) {
+                return Ok(());
             }
-            if let Some(mask) = support.visibility(successor) {
-                Rc::make_mut(&mut incoming).kill_invisible(mask);
+            let mut deliver = |mut incoming: Rc<BorrowState>| {
+                let target = support.continuation(successor);
+                match (
+                    support.visibility(successor),
+                    support.replay_visibility(source.block.id, target),
+                ) {
+                    (Some(lexical), Some(mut replay)) => {
+                        replay.intersect_with(lexical);
+                        Rc::make_mut(&mut incoming).kill_invisible(&replay);
+                    }
+                    (Some(visible), None) => Rc::make_mut(&mut incoming).kill_invisible(visible),
+                    (None, Some(visible)) => Rc::make_mut(&mut incoming).kill_invisible(&visible),
+                    (None, None) => {}
+                }
+                deliver(target, incoming);
+            };
+            if let Some(batch) = lane.and_then(|lane| lane.typed.as_ref())
+                && let HirTerminator::Invoke {
+                    success_results,
+                    error_result,
+                    ..
+                } = terminator
+            {
+                let outcomes: Vec<_> = success_results
+                    .iter()
+                    .chain(std::iter::once(error_result))
+                    .filter_map(|&local| source.view.operations.index_of(local))
+                    .collect();
+                replay_captured_sparse_support(
+                    source.view,
+                    Cow::Borrowed(batch),
+                    &outcomes,
+                    source.order,
+                    Rc::clone(state),
+                    deliver,
+                )?;
+            } else {
+                let mut incoming = Rc::clone(state);
+                if jump_rebinds || lane.is_some() {
+                    self.apply_forward_edge(source, successor, lane, Rc::make_mut(&mut incoming))?;
+                }
+                deliver(incoming);
             }
-            deliver(support.continuation(successor), incoming);
             Ok(())
         })
     }
@@ -1017,6 +1082,25 @@ impl<'a> BorrowChecker<'a> {
         } = *source;
         let terminator = &block.terminator;
         if let Some(lane) = invoke {
+            if let Some(batch) = &lane.typed
+                && let HirTerminator::Invoke {
+                    success_results,
+                    error_result,
+                    ..
+                } = terminator
+            {
+                let outcomes = success_results
+                    .iter()
+                    .chain(std::iter::once(error_result))
+                    .filter_map(|&local| view.operations.index_of(local));
+                return Ok(apply_captured_call_batch(
+                    view,
+                    batch.clone(),
+                    outcomes,
+                    order,
+                    state,
+                )?);
+            }
             let operations = view.operations;
             let fresh = lane.operations.is_empty()
                 && !state.layer_is_empty()
@@ -1050,10 +1134,7 @@ impl<'a> BorrowChecker<'a> {
         successor_input: &mut BorrowState,
     ) -> Result<ValueObservations, BorrowCheckError> {
         let layout = view.operations;
-        let mut observations = ValueObservations {
-            enabled: view.observations,
-            ..Default::default()
-        };
+        let mut observations = ValueObservations::default();
         let HirTerminator::Jump { target, args } = terminator else {
             return Ok(observations);
         };
@@ -1074,7 +1155,7 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                if observations.enabled && successor_input.has_value_alternatives() {
+                if successor_input.has_dependency_carriers() {
                     let mut resolved =
                         successor_input.resolve_place_path(source_index, layout.local_mutable, []);
                     if layout.local_has_in_place_mutation_surface[source_index] {
@@ -1195,9 +1276,7 @@ impl<'a> BorrowChecker<'a> {
                 } else {
                     store
                 };
-                observations
-                    .tail
-                    .replace(successor_input.publish_store(&store, order, None));
+                observations.publish(successor_input.publish_store(&store, order, None));
             }
             if !detached.is_empty() {
                 successor_input.bind_detached_holders(destination_index, detached);
@@ -1318,13 +1397,96 @@ pub(super) fn reverse_postorder_ranks(
     ranks
 }
 
+/// Replay a matched outcome onto a support before another operation reads its effects.
+pub(super) fn replay_captured_sparse_support(
+    view: EdgeTransferView<'_>,
+    batch: Cow<'_, CapturedCallBatch<MatchedLane>>,
+    outcomes: &[usize],
+    order: OrderKey,
+    mut state: Rc<BorrowState>,
+    mut deliver: impl FnMut(Rc<BorrowState>),
+) -> Result<(), BorrowCheckError> {
+    if let [stratum] = batch.post.as_slice()
+        && stratum
+            .components
+            .iter()
+            .all(|component| component.alternatives.len() == 1)
+    {
+        apply_captured_call_batch(
+            view,
+            batch.into_owned(),
+            outcomes.iter().copied(),
+            order,
+            Rc::make_mut(&mut state),
+        )?;
+        deliver(state);
+        return Ok(());
+    }
+    for stratum in &batch.post {
+        let mut replay = |components| {
+            let mut branch = Rc::clone(&state);
+            apply_captured_call_batch(
+                view,
+                CapturedCallBatch {
+                    post: vec![MatchedStratum {
+                        #[cfg(test)]
+                        guard: stratum.guard.clone(),
+                        components,
+                    }],
+                    destinations: batch.destinations.clone(),
+                    member_reads: batch.member_reads.clone(),
+                    checkpoints: batch.checkpoints.clone(),
+                    detachment: batch.detachment.clone(),
+                },
+                outcomes.iter().copied(),
+                order,
+                Rc::make_mut(&mut branch),
+            )?;
+            deliver(branch);
+            Ok::<(), BorrowCheckError>(())
+        };
+        let mut varying = stratum
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| component.alternatives.len() > 1);
+        if let Some((index, component)) = varying.next()
+            && varying.next().is_none()
+        {
+            // A single relevant component retains its joint alternatives.
+            for post in &component.alternatives {
+                let components = stratum
+                    .components
+                    .iter()
+                    .enumerate()
+                    .map(|(at, component)| {
+                        if at == index {
+                            MatchedComponent {
+                                support: component.support,
+                                alternatives: vec![post.clone()],
+                            }
+                        } else {
+                            component.clone()
+                        }
+                    })
+                    .collect();
+                replay(components)?;
+            }
+        } else {
+            // The product certifies independence in this stratum. Apply it
+            // by component, without enumerating combinations of its choices.
+            replay(stratum.components.clone())?;
+        }
+    }
+    Ok(())
+}
+
 /// Apply the captures of one selected outcome and no effects from its sibling.
 /// Reads use entry coordinates; a receiving destination never supplies a
 /// source for another captured operation.
-#[allow(dead_code)]
 pub(super) fn apply_captured_call_batch(
     view: EdgeTransferView<'_>,
-    batch: CapturedCallBatch,
+    batch: CapturedCallBatch<impl CapturedPosts>,
     outcomes: impl IntoIterator<Item = usize>,
     order: OrderKey,
     state: &mut BorrowState,
@@ -1334,7 +1496,7 @@ pub(super) fn apply_captured_call_batch(
 
 fn apply_captured_call_batch_rekey(
     view: EdgeTransferView<'_>,
-    mut batch: CapturedCallBatch,
+    mut batch: CapturedCallBatch<impl CapturedPosts>,
     outcomes: impl IntoIterator<Item = usize>,
     order: OrderKey,
     state: &mut BorrowState,
@@ -1342,8 +1504,8 @@ fn apply_captured_call_batch_rekey(
 ) -> Result<ValueObservations, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     if batch
         .post
-        .results
-        .iter()
+        .posts()
+        .flat_map(|post| &post.results)
         .any(|result| result.slot >= batch.destinations.len())
     {
         return Err(
@@ -1353,10 +1515,7 @@ fn apply_captured_call_batch_rekey(
         );
     }
     let layout = view.operations;
-    let mut observations = ValueObservations {
-        enabled: view.observations,
-        ..Default::default()
-    };
+    let mut observations = ValueObservations::default();
     for checkpoint in std::mem::take(&mut batch.checkpoints) {
         observations.split(ObservationBoundary::Checkpoint(checkpoint));
     }
@@ -1379,7 +1538,7 @@ fn apply_captured_call_batch_rekey(
             continue;
         }
         let wrapper = WrapperId::current(index);
-        let retained = batch.post.names_wrapper(wrapper)
+        let retained = batch.post.posts().any(|post| post.names_wrapper(wrapper))
             || batch.destinations.iter().any(|destination| {
                 matches!(destination, CapturedDestination::Update { address, .. }
                     if address.cells().contains(&CellId::Slot(wrapper)))
@@ -1407,7 +1566,6 @@ fn apply_captured_call_batch_rekey(
         );
     }
 
-    batch.post.weaken_collisions(state);
     let (results, receipt) = batch.post.apply(state, order);
     observations.publish(receipt);
     let mut receiving = results.into_iter();
@@ -1422,6 +1580,7 @@ fn apply_captured_call_batch_rekey(
         };
         if !define
             && let Some(CellId::Slot(wrapper)) = address.definite()
+            && !wrapper.is_call_owned()
             && layout.local_has_in_place_mutation_surface[wrapper.local]
         {
             // Replacing an owned value retires its allocation, not the slot.
@@ -1456,7 +1615,7 @@ fn apply_captured_call_batch_rekey(
             }
         };
         let slot = match address.definite() {
-            Some(CellId::Slot(wrapper)) => wrapper.local,
+            Some(CellId::Slot(wrapper)) if !wrapper.is_call_owned() => wrapper.local,
             _ => actor,
         };
         let readonly = result.value.readonly();
@@ -1479,12 +1638,12 @@ fn apply_captured_call_batch_rekey(
                     .roots
                     .unwrap_or_else(|| RootSet::empty(layout.local_count())),
             );
-        observations.publish(state.publish_captured_store(&store, order));
+        observations.publish(state.publish_store(&store, order, None));
         state.mark_slot_derivation(slot, derivation);
     }
     if let Some(detachment) = batch.detachment {
         // Removal observes the newly installed receiver before detaching it.
-        observations.tail.replace(state.remove_alloc_element(
+        observations.publish(state.remove_alloc_element(
             &detachment.holders,
             detachment.map,
             detached_result,
@@ -1530,10 +1689,7 @@ fn apply_invoke_edge_transfer(
         return ValueObservations::default();
     };
     let layout = view.operations;
-    let mut observations = ValueObservations {
-        enabled: view.observations,
-        ..Default::default()
-    };
+    let mut observations = ValueObservations::default();
     for checkpoint in &lane.checkpoints {
         observations.split(ObservationBoundary::Checkpoint(checkpoint.clone()));
     }
@@ -1581,7 +1737,7 @@ fn apply_invoke_edge_transfer(
         local == *error_result || success_results.contains(&local)
     };
     for op in &lane.operations {
-        observations.tail.replace(op.apply_with_indices(
+        observations.publish(op.apply_with_indices(
             &|local| layout.index_of(local),
             edge_state,
             Some((order, &retires)),
@@ -1600,14 +1756,7 @@ impl InvokeLayerOp {
         match self {
             Self::Store(store) => store.captures_current(local, names),
             Self::Contribute { holder, value, .. } => names(*holder) || names(value.id),
-            Self::ConstructField { holder, value, .. } => {
-                names(*holder) || value.names_allocation(names)
-            }
-            Self::Remove { holders, .. } => holders.iter().copied().any(names),
             Self::Bind { value, .. } => value.names_allocation(names),
-            Self::ViewMember { view, id } => names(*view) || names(*id),
-            Self::ViewField { holder, view, .. } => names(*holder) || names(*view),
-            Self::ViewPair { left, right, .. } => names(*left) || names(*right),
         }
     }
 
@@ -1656,65 +1805,31 @@ impl InvokeLayerOp {
                     .map_or((UNKNOWN_ORDER_KEY, None), |(order, retires)| {
                         (order, Some(retires))
                     });
-                return state.publish_store(store, order, retires);
+                state.publish_store(store, order, retires)
             }
             Self::Contribute { holder, key, value } => {
                 let holder = remap_id(state, *holder);
                 let mut value = *value;
                 value.id = remap_id(state, value.id);
-                state.contribute_alloc_edge(holder, *key, value);
-            }
-            Self::ConstructField { holder, key, value } => {
-                let holder = remap_id(state, *holder);
-                if rebase.is_none() {
-                    state.record_constructed_value(holder, *key, value, false);
-                } else if value.alternatives.is_empty() {
-                    let values = remap_invoke_capture(&value.values, |mut value| {
-                        value.id = remap_id(state, value.id);
-                        value
-                    });
-                    let views = remap_invoke_capture(&value.views, |id| remap_id(state, id));
-                    state.record_constructed_field(holder, *key, &values, &views, false);
-                } else {
-                    let mut value = value.clone();
-                    value.remap_allocations(|id| remap_id(state, id));
-                    state.record_constructed_value(holder, *key, &value, false);
-                }
-            }
-            Self::Remove {
-                holders,
-                map,
-                result,
-            } => {
-                let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
-                return state.remove_alloc_element(&holders, *map, result.and_then(index_of));
+                let store = TypedStore::write_projected(
+                    [holder],
+                    *key,
+                    super::state::Coverage::Partial,
+                    CapturedValue::new(vec![value], Vec::new()),
+                    false,
+                );
+                state.publish_store(&store, UNKNOWN_ORDER_KEY, None)
             }
             Self::Bind { local, value } => {
                 let mut value = value.clone();
                 if rebase.is_some() {
                     value.remap_allocations(|id| remap_id(state, id));
                 }
-                return Self::publish_bound_value(index_of, state, *local, value);
-            }
-            Self::ViewMember { view, id } => {
-                state.add_view_member(remap_id(state, *view), remap_id(state, *id));
-            }
-            Self::ViewField { holder, key, view } => {
-                state.link_view(remap_id(state, *holder), *key, remap_id(state, *view));
-            }
-            Self::ViewPair {
-                left,
-                right,
-                may_share,
-            } => {
-                state.relate_views(remap_id(state, *left), remap_id(state, *right), *may_share);
+                Self::publish_bound_value(index_of, state, *local, value)
             }
         }
-        StoreReceipt::default()
     }
-}
 
-impl InvokeLayerOp {
     /// Carry owned captures across one result rebind before publishing any of their effects.
     pub(super) fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
         match self {
@@ -1723,28 +1838,7 @@ impl InvokeLayerOp {
                 retirement.remap_id(state, holder);
                 retirement.remap_value(state, value);
             }
-            Self::ConstructField { holder, value, .. } => {
-                retirement.remap_id(state, holder);
-                value.remap(state, retirement);
-            }
-            Self::Remove { holders, .. } => {
-                for holder in holders {
-                    retirement.remap_id(state, holder);
-                }
-            }
             Self::Bind { value, .. } => value.remap(state, retirement),
-            Self::ViewMember { view, id } => {
-                retirement.remap_id(state, view);
-                retirement.remap_id(state, id);
-            }
-            Self::ViewField { holder, view, .. } => {
-                retirement.remap_id(state, holder);
-                retirement.remap_id(state, view);
-            }
-            Self::ViewPair { left, right, .. } => {
-                retirement.remap_id(state, left);
-                retirement.remap_id(state, right);
-            }
         }
     }
 }

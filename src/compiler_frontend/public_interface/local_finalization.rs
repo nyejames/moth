@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
-    FunctionReturnAliasSummary, PublicCallSummary, validate_public_call_parameter_contract,
+    PublicCallSummary, validate_public_call_parameter_contract,
 };
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeId,
@@ -289,7 +289,7 @@ fn finalize_callable_summary(
     )
     .map_err(|error| invalid_summary(&error.message))?;
     // Closure input checks layout-dependent facts after direct declaration records are assembled.
-    if matches!(summary.return_alias, FunctionReturnAliasSummary::Pending) {
+    if summary.return_alias.facts().is_none() {
         return Err(invalid_summary(
             "completed callable still has pending facts",
         ));

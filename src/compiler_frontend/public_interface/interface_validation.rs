@@ -27,13 +27,10 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX;
-use crate::compiler_frontend::public_call_summary::typed::{
-    Layout, Shape, TypedCallAllocationFacts,
-};
+use crate::compiler_frontend::public_call_summary::typed::Layout;
 use crate::compiler_frontend::public_call_summary::{
-    CallEndpoint, CallField, CallParameterPath, CallPathType, PublicCallParameterAccess,
-    PublicCallSummary, validate_public_call_allocation_layout,
-    validate_public_call_parameter_contract,
+    CallEndpoint, CallField, CallPathType, PublicCallParameterAccess, PublicCallSummary,
+    allocation_error, validate_public_call_parameter_contract,
 };
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
@@ -892,12 +889,12 @@ struct CallSignature<'a> {
     returns: &'a PublicCallableReturnContract,
 }
 
-#[allow(dead_code)]
 struct TypedSignatureLayout<'a, 'decl, F> {
     signature: &'a CallSignature<'decl>,
     layouts: &'a CallPathLayouts<'decl>,
     builtin_error: bool,
     private_layout: F,
+    unavailable: &'a std::cell::Cell<bool>,
 }
 
 type StableChildren<'a> = &'a [(CallField, CanonicalTypeIdentity)];
@@ -942,7 +939,10 @@ where
         }
         match canonical_path_type(ty, &mut std::iter::once(&selector), self.layouts, None)? {
             CallPathType::Known(child) => self.stable(&child),
-            CallPathType::Unavailable => None,
+            CallPathType::Unavailable => {
+                self.unavailable.set(true);
+                None
+            }
         }
     }
 
@@ -1045,10 +1045,12 @@ fn typed_signature_resolves_a_private_field_only_with_its_stable_layout() {
     let layouts = CallPathLayouts::default();
     let ty = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
     let rows = [(CallField::Field(0), ty.clone())];
+    let unavailable = std::cell::Cell::new(false);
     let with_private = TypedSignatureLayout {
         signature: &signature,
         layouts: &layouts,
         builtin_error: false,
+        unavailable: &unavailable,
         private_layout: |identity: &CanonicalTypeIdentity| {
             (identity == &private).then_some(rows.as_slice())
         },
@@ -1057,6 +1059,7 @@ fn typed_signature_resolves_a_private_field_only_with_its_stable_layout() {
         signature: &signature,
         layouts: &layouts,
         builtin_error: false,
+        unavailable: &unavailable,
         private_layout: |_: &CanonicalTypeIdentity| None,
     };
     assert!(
@@ -1071,44 +1074,6 @@ fn typed_signature_resolves_a_private_field_only_with_its_stable_layout() {
 }
 
 impl CallSignature<'_> {
-    #[allow(dead_code)]
-    fn validate_typed_allocation<'decl>(
-        &'decl self,
-        layouts: &CallPathLayouts<'decl>,
-        facts: &TypedCallAllocationFacts,
-        shape: &Shape<'_>,
-        builtin_error: bool,
-        private_layout: impl Fn(&CanonicalTypeIdentity) -> Option<StableChildren<'decl>>,
-    ) -> Result<(), InfrastructureFailure> {
-        let (success_slots, error_slot) = match self.returns {
-            PublicCallableReturnContract::Never => (None, false),
-            PublicCallableReturnContract::Returns { success, error } => {
-                (Some(success.len()), error.is_some() || builtin_error)
-            }
-        };
-        if !shape
-            .parameters
-            .iter()
-            .copied()
-            .eq(self.parameters.iter().map(|slot| slot.access))
-            || shape.success_slots != success_slots
-            || shape.error_slot != error_slot
-        {
-            return Err(publication_error(
-                "typed call shape disagrees with its declaration".to_owned(),
-            ));
-        }
-        facts.validate_layout(
-            shape,
-            &TypedSignatureLayout {
-                signature: self,
-                layouts,
-                builtin_error,
-                private_layout,
-            },
-        )
-    }
-
     fn validate_summary(
         &self,
         layouts: &CallPathLayouts<'_>,
@@ -1119,68 +1084,36 @@ impl CallSignature<'_> {
             self.parameters.iter().map(|parameter| parameter.access),
             summary,
         )?;
-        let builtin_error = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+        let facts = summary
+            .return_alias
+            .facts()
+            .ok_or_else(|| allocation_error("completed callable still has pending facts"))?;
         let (success, error) = match self.returns {
-            PublicCallableReturnContract::Never => (None, None),
+            PublicCallableReturnContract::Never => (None, false),
             PublicCallableReturnContract::Returns { success, error } => (
-                Some(success.as_slice()),
-                error
-                    .as_ref()
-                    .or(summary.escapes_builtin_failure.then_some(&builtin_error)),
+                Some(success.len()),
+                error.is_some() || summary.escapes_builtin_failure,
             ),
         };
-        let parameter_type = |path: &CallParameterPath| {
-            self.parameters
-                .get(path.index)
-                .map(|slot| &slot.type_identity)
-        };
-        validate_public_call_allocation_layout(
-            summary,
-            success.map(|slots| slots.len()),
-            error.is_some(),
-            |path| {
-                signature_path_type(
-                    parameter_type(path)?,
-                    &mut path.path.iter(),
-                    layouts,
-                    allow_unavailable_layouts,
-                )
+        let access: Vec<_> = self.parameters.iter().map(|slot| slot.access).collect();
+        let shape = facts.shape(&access, success, error);
+        let unavailable = std::cell::Cell::new(false);
+        let result = facts.validate_layout(
+            &shape,
+            &TypedSignatureLayout {
+                signature: self,
+                layouts,
+                builtin_error: summary.escapes_builtin_failure,
+                private_layout: |_: &CanonicalTypeIdentity| None,
+                unavailable: &unavailable,
             },
-            |error_lane, path| {
-                let root = if error_lane {
-                    error?
-                } else {
-                    &success?.get(path.slot)?.type_identity
-                };
-                signature_path_type(
-                    root,
-                    &mut path.path.iter(),
-                    layouts,
-                    allow_unavailable_layouts,
-                )
-            },
-            |target, path| {
-                signature_path_type(
-                    parameter_type(target)?,
-                    &mut target.path.iter().chain(path),
-                    layouts,
-                    allow_unavailable_layouts,
-                )
-            },
-        )
+        );
+        if allow_unavailable_layouts && unavailable.get() {
+            Ok(())
+        } else {
+            result
+        }
     }
-}
-
-fn signature_path_type<'a, 'path>(
-    root: &'a CanonicalTypeIdentity,
-    path: &mut impl Iterator<Item = &'path CallField>,
-    layouts: &CallPathLayouts<'a>,
-    allow_unavailable_layouts: bool,
-) -> Option<CallPathType<Cow<'a, CanonicalTypeIdentity>>> {
-    canonical_path_type(root, path, layouts, None).filter(|path| match path {
-        CallPathType::Known(ty) => has_canonical_allocation_surface(ty),
-        CallPathType::Unavailable => allow_unavailable_layouts,
-    })
 }
 
 /// A generic instance's arguments were authored in the enclosing layout's parameter scope.

@@ -39,7 +39,8 @@ pub(crate) use materialisation::{
     ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     ModuleMaterialisationPreparationBuilder, ModuleMaterialisationPreparedBuilder,
     StableFunctionTarget, bootstrap_call_summary_from_signature,
-    materialise_imported_const_function,
+    materialise_imported_const_function, registered_type_projection,
+    with_registered_type_projection,
 };
 pub(crate) use receiver_method_instantiation::{
     GenericReceiverMethodInstantiationInput, GenericReceiverMethodReceiver,

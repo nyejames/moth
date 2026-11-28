@@ -1,6 +1,4 @@
-//! The summary evaluator keeps projected provenance and simultaneous sharing separate.
-//! A block has one joined input; loops join finite typed paths and site identities, rather
-//! than expanding the set of execution paths or comparing independently joined exits.
+//! Index demanded call-boundary supports and export their canonical transfer states.
 
 use super::super::{
     collect_statement_defined_locals, collect_statement_loaded_locals,
@@ -8,25 +6,32 @@ use super::super::{
 };
 use super::{BorrowCheckError, BorrowChecker};
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BindingSpec, BorrowState, OrderKey, RootSet, UNKNOWN_ORDER_KEY, cyclic_blocks,
+    AllocId, BindingSpec, BorrowState, CapturedValue, Coverage, OrderKey, RootSet, TypedStore,
+    UNKNOWN_ORDER_KEY, ValueAlt, ValueKind as PayloadKind, cyclic_blocks,
 };
-use crate::compiler_frontend::analysis::borrow_checker::transfer::call_member_result;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::{
     BorrowedCall, CallReturns,
+};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+    EntryCapture, boundary_child, capture_boundary_value, capture_local_value_port,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     OperationView, SparseBlockView,
 };
+use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+    call_member_result, call_member_writes,
+};
+use crate::compiler_frontend::analysis::borrow_checker::{state, transfer};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalReturnAlias};
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
-use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
-use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{
+    BlockId, FieldId, FunctionId, HirValueId, LocalId, RegionId,
+};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reachability::{statement_call_target, terminator_call_target};
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
@@ -36,12 +41,10 @@ use crate::compiler_frontend::instrumentation::frontend_counters::{
     FrontendCounter, add_frontend_counter,
 };
 use crate::compiler_frontend::public_call_summary::typed::{
-    EntryPort, IdentityKind, PortId, Predicate, ReachKind, Role, SupportId,
+    self, EntryPort, IdentityKind, PortId, Predicate, ReachKind, Role, SupportId,
 };
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallField, CallLaneSummary, CallOutputPath, CallParameterPath,
-    CallPathSource, CallResultPath, CallSharing, FunctionReturnAliasSummary,
-    PublicCallParameterAccess, PublicCallSummary,
+    CallField, CallParameterPath, CallResultPath, PublicCallParameterAccess,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::Entry;
@@ -49,186 +52,49 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
-#[path = "call.rs"]
-mod call;
-#[path = "graph.rs"]
-mod graph;
 #[cfg(test)]
 #[path = "result_paths_tests.rs"]
 mod result_paths_tests;
 
-use graph::{Cell, Graph, Origin, Owner, Path, Site, Spec};
-
-#[derive(Clone, Copy)]
-struct Local {
-    mutable: bool,
-    mutable_parameter: Option<usize>,
-    authored: bool,
-}
-
-pub(in crate::compiler_frontend::analysis::borrow_checker) struct IndexedFunction {
-    locals: FxHashMap<LocalId, Local>,
-    retirements: FxHashMap<BlockId, Vec<(usize, LocalId)>>,
-    pub callees: Vec<FunctionId>,
-    tracks_values: bool,
-}
-
-impl IndexedFunction {
-    pub(in crate::compiler_frontend::analysis::borrow_checker) fn new(
-        checker: &BorrowChecker<'_>,
-        function: &HirFunction,
-        collect_callees: bool,
-    ) -> Result<Self, BorrowCheckError> {
-        let mut locals = FxHashMap::default();
-        let mut callees = Vec::new();
-        let mut retirements = FxHashMap::<_, Vec<_>>::default();
-        let mut tracks_values = false;
-        if let Some(shape) = function.return_contract.ordinary() {
-            for ty in shape.success().iter().copied().chain(shape.error()) {
-                tracks_values |= is_heap(checker, ty)?;
-            }
-            let access = &checker.public_call_summaries[&function.id].parameters;
-            for (&local, parameter) in function.params.iter().zip(access) {
-                if !tracks_values && parameter.access == PublicCallParameterAccess::Mutable {
-                    tracks_values = is_heap(checker, checker.local_types[&local])?;
-                }
-            }
-        }
-        if !tracks_values && !collect_callees {
-            return Ok(Self {
-                locals,
-                retirements,
-                callees,
-                tracks_values,
-            });
-        }
-        let expressions = &checker.module.expressions;
-        let mut uses = FxHashMap::<LocalId, LocalUses>::default();
-        for block in checker.collect_reachable_blocks(function)? {
-            let block = checker.block_by_id_or_error(block, function.id)?;
-            if tracks_values {
-                locals.extend(block.locals.iter().map(|local| {
-                    let authored = checker
-                        .module
-                        .side_table
-                        .local_origin_kind(local.id)
-                        .is_none_or(|origin| origin == HirLocalOriginKind::User);
-                    (
-                        local.id,
-                        Local {
-                            mutable: local.mutable,
-                            mutable_parameter: None,
-                            authored,
-                        },
-                    )
-                }));
-            }
-            for (index, statement) in block.statements.iter().enumerate() {
-                if collect_callees
-                    && let Some(CallTarget::Local(callee)) = statement_call_target(&statement.kind)
-                {
-                    callees.push(*callee);
-                }
-                if !tracks_values {
-                    continue;
-                }
-                collect_statement_loaded_locals(expressions, statement, &mut |local| {
-                    LocalUses::record(&mut uses, local, block.id, index);
-                });
-                collect_statement_defined_locals(statement, &mut |local| {
-                    uses.entry(local).or_insert(LocalUses {
-                        defining_block: Some(block.id),
-                        last: index,
-                    });
-                });
-                collect_statement_written_locals(statement, &mut |local| {
-                    LocalUses::record(&mut uses, local, block.id, index);
-                });
-            }
-            if tracks_values {
-                let mut use_in_terminator = |local| {
-                    LocalUses::record(&mut uses, local, block.id, block.statements.len());
-                };
-                // Plumbing is not a user read, but the extractor still needs to capture it.
-                if let HirTerminator::Jump { args, .. } = &block.terminator {
-                    for arg in args {
-                        use_in_terminator(arg.source);
-                        use_in_terminator(arg.destination);
-                    }
-                } else {
-                    collect_terminator_loaded_locals(
-                        expressions,
-                        &block.terminator,
-                        &mut use_in_terminator,
-                    );
-                }
-            }
-            if collect_callees
-                && let Some(CallTarget::Local(callee)) = terminator_call_target(&block.terminator)
-            {
-                callees.push(*callee);
-            }
-        }
-        if tracks_values {
-            for (index, parameter) in function.params.iter().enumerate() {
-                let local = locals.get_mut(parameter).ok_or_else(|| {
-                    checker
-                        .diagnostics
-                        .internal_error("Missing summary parameter local")
-                })?;
-                local.mutable_parameter = local.mutable.then_some(index);
-            }
-        }
-        for (local, uses) in uses {
-            if let Some(block) = uses.defining_block {
-                retirements
-                    .entry(block)
-                    .or_default()
-                    .push((uses.last, local));
-            }
-        }
-        for events in retirements.values_mut() {
-            events.sort_unstable_by_key(|&(index, local)| (index, local.0));
-        }
-        callees.sort_unstable_by_key(|callee| callee.0);
-        callees.dedup();
-        Ok(Self {
-            locals,
-            retirements,
-            callees,
-            tracks_values,
-        })
-    }
-}
-
 /// A HIR revision owns these coordinates. Published contracts use the typed
 /// ports, not the local, operation or block IDs of the producer.
-#[allow(dead_code)] // Queried directly until semantic transfer uses the sparse view.
-pub(super) struct SparseFunction {
+pub(in crate::compiler_frontend::analysis::borrow_checker) struct SparseFunction {
     pub(super) ports: Vec<EntryPort>,
     pub(super) port_supports: Vec<SupportId>,
+    pub(super) support_count: usize,
+    pub callees: Vec<FunctionId>,
+    result_supports: BTreeMap<(bool, usize), SupportId>,
+    ports_by_support: Vec<Vec<PortId>>,
     pub(super) guards: Vec<Predicate>,
     pub(super) compatibility: Vec<CompatibilityConstraint>,
     #[cfg(test)]
     pub(super) operations: BTreeMap<IndexedSite, Box<[SupportId]>>,
     operations_by_support: BTreeMap<(SupportId, BlockId), Box<[usize]>>,
+    call_components: BTreeMap<(SupportId, BlockId), BTreeMap<usize, Vec<SupportId>>>,
+    #[cfg(test)]
     pub(super) conditional_supports: BTreeSet<SupportId>,
+    #[cfg(test)]
     pub(super) conditional_arm_count: usize,
     pub(super) counts: IndexCounts,
     transfer: Rc<SparseTransferIndex>,
     envelope: BTreeMap<(usize, Box<[CallField]>, DemandKind), SupportId>,
     result_sources: BTreeMap<(bool, usize), ResultSources>,
+    total: bool,
 }
 
 /// Transfer coordinates are unchanged when a callee's structural envelope widens.
 struct SparseTransferIndex {
     local_ids: Vec<LocalId>,
     local_indices: FxHashMap<LocalId, usize>,
+    parameters: FxHashMap<LocalId, usize>,
     mutable: Vec<bool>,
     heap: Vec<bool>,
     first_write: Vec<i32>,
+    last_match_read: Vec<usize>,
     successors: FxHashMap<BlockId, Vec<BlockId>>,
     predecessors: FxHashMap<BlockId, Vec<BlockId>>,
+    local_regions: Vec<RegionId>,
+    exits_by_region: FxHashMap<RegionId, Vec<BlockId>>,
     recurring: Rc<FxHashSet<BlockId>>,
     ranks: Rc<FxHashMap<BlockId, usize>>,
     postdom_jumps: Vec<FxHashMap<BlockId, BlockId>>,
@@ -241,6 +107,8 @@ struct SparseBlockOrders {
     statements: Box<[i32]>,
     operands: Box<[Box<[usize]>]>,
     terminator: i32,
+    structural_calls: Box<[(usize, usize)]>,
+    structural_terminator: Option<usize>,
 }
 
 impl SparseTransferIndex {
@@ -260,14 +128,25 @@ impl SparseTransferIndex {
                 .enumerate()
                 .map(|(i, local)| (local.id, i))
                 .collect(),
+            parameters: snapshot
+                .function
+                .params
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(index, local)| (local, index))
+                .collect(),
             mutable: locals.iter().map(|local| local.mutable).collect(),
             heap: locals
                 .iter()
                 .map(|local| is_heap(checker, local.ty))
                 .collect::<Result<_, _>>()?,
             first_write: vec![UNKNOWN_ORDER_KEY; locals.len()],
+            last_match_read: vec![usize::MAX; locals.len()],
             successors: FxHashMap::default(),
             predecessors: FxHashMap::default(),
+            local_regions: locals.iter().map(|local| local.region).collect(),
+            exits_by_region: FxHashMap::default(),
             recurring: Rc::default(),
             acyclic_entry: Some(snapshot.function.entry),
             blocks: FxHashMap::default(),
@@ -288,12 +167,17 @@ impl SparseTransferIndex {
                 }
             };
             let mut operands = Vec::with_capacity(block.statements.len() + 1);
+            let mut structural_calls = Vec::new();
             let statements = block
                 .statements
                 .iter()
                 .enumerate()
                 .map(|(position, statement)| {
                     let at = first_order + position as OrderKey;
+                    if let HirStatementKind::Call { args, .. } = &statement.kind {
+                        structural_calls
+                            .push((position, checker.module.expressions.values(*args).len()));
+                    }
                     collect_statement_written_locals(statement, &mut |local| {
                         first_write(local, at)
                     });
@@ -346,6 +230,19 @@ impl SparseTransferIndex {
             for_each_terminator_target(&block.terminator, |next| successors.push(next));
             for &next in successors.iter() {
                 result.predecessors.entry(next).or_default().push(block.id);
+                let target_region = checker.module.blocks[checker.block_index_by_id[&next]].region;
+                let mut source_region = block.region;
+                while !checker.is_region_ancestor_of(source_region, target_region, next)? {
+                    result
+                        .exits_by_region
+                        .entry(source_region)
+                        .or_default()
+                        .push(next);
+                    let Some(parent) = checker.region_parent_by_id[&source_region] else {
+                        break;
+                    };
+                    source_region = parent;
+                }
             }
             if successors.contains(&snapshot.function.entry) {
                 result.acyclic_entry = None;
@@ -356,8 +253,21 @@ impl SparseTransferIndex {
                     statements,
                     operands: operands.into_boxed_slice(),
                     terminator: order,
+                    structural_calls: structural_calls.into_boxed_slice(),
+                    structural_terminator: match &block.terminator {
+                        HirTerminator::NeverCall { args, .. }
+                        | HirTerminator::Invoke {
+                            operation: HirFallibleOperation::Call { args, .. },
+                            ..
+                        } => Some(checker.module.expressions.values(*args).len()),
+                        _ => None,
+                    },
                 },
             );
+        }
+        for exits in result.exits_by_region.values_mut() {
+            exits.sort_unstable_by_key(|block| block.0);
+            exits.dedup();
         }
         result.ranks = Rc::new(
             crate::compiler_frontend::analysis::borrow_checker::engine::reverse_postorder_ranks(
@@ -366,11 +276,23 @@ impl SparseTransferIndex {
             ),
         );
         for block in blocks() {
-            if matches!(block.terminator, HirTerminator::Uninitialized) {
+            let orders = &result.blocks[&block.id];
+            if let HirTerminator::Match { .. } = block.terminator
+                && let Some(&rank) = result.ranks.get(&block.id)
+            {
+                for &local in orders.operands.last().expect("terminator operands") {
+                    let last = &mut result.last_match_read[local];
+                    *last = (*last).min(rank);
+                }
+            }
+            if matches!(block.terminator, HirTerminator::Uninitialized)
+                || !orders.structural_calls.is_empty()
+                || orders.structural_terminator.is_some()
+            {
                 result.structural_barriers.insert(result.ranks[&block.id]);
             }
         }
-        let cfg = SparseCfg::new(checker, snapshot, &mut 0);
+        let cfg = SparseCfg::new(checker, snapshot, |_| false, false, &mut 0);
         result.recurring = Rc::new(cyclic_blocks(&result.successors));
         if result.recurring.is_empty() {
             let parents = cfg.postdominators(&mut 0);
@@ -398,12 +320,14 @@ impl SparseTransferIndex {
     }
 }
 
-#[allow(dead_code)] // Prepared for support-local execution after typed publication is enabled.
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct ProjectedSupport<'a> {
     function: &'a SparseFunction,
     support: SupportId,
     barriers: BTreeSet<usize>,
     visibility: FxHashMap<BlockId, RootSet>,
+    last_use: Vec<usize>,
+    replay_retirements: Vec<usize>,
+    entry_roots: Option<RootSet>,
     #[cfg(test)]
     compress: bool,
     local_ids: Vec<LocalId>,
@@ -413,8 +337,1338 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct ProjectedSuppo
     first_write: Vec<i32>,
 }
 
-#[allow(dead_code)] // Prepared for guarded extraction.
+struct SupportSeed<'a> {
+    projected: ProjectedSupport<'a>,
+    entry: BorrowState,
+    entries: Vec<(PortId, EntryCapture)>,
+}
+
+#[derive(Clone, Copy)]
+enum LoanValue {
+    Result(usize),
+    Cell(usize, usize),
+    Family(usize, usize),
+}
+
+#[derive(Clone)]
+struct BoundaryExport<'a, 'hir> {
+    uncovered: BTreeSet<typed::OutputPort>,
+    checker: &'a BorrowChecker<'hir>,
+    transfer: &'a transfer::BorrowTransferContext<'hir>,
+    state: &'a BorrowState,
+    acyclic: bool,
+    entries: &'a [(PortId, EntryCapture)],
+    entry_ports: &'a [EntryPort],
+    entry_allocations: &'a FxHashMap<AllocId, PortId>,
+    retained: FxHashMap<AllocId, typed::ObjectRef>,
+    loans: Vec<(LoanValue, state::DependencySet)>,
+    post: typed::Post,
+}
+
+impl BoundaryExport<'_, '_> {
+    fn result(&mut self, slot: usize, ty: TypeId, value: &ValueAlt) {
+        let location = typed::ExportPort::Result(CallResultPath {
+            slot,
+            path: Vec::new(),
+        });
+        if let Some(descriptor) = self.value(value, ty, Some(location)) {
+            if !value.deps.is_empty() {
+                self.loans.push((
+                    LoanValue::Result(self.post.results.len()),
+                    value.deps.clone(),
+                ));
+            }
+            self.post.results.push((slot, descriptor));
+        } else {
+            self.uncovered.insert(typed::OutputPort::Result(slot));
+        }
+    }
+
+    fn bound(
+        &self,
+        region: ReachKind,
+        root_types: impl IntoIterator<Item = (PortId, TypeId)>,
+        target: TypeId,
+    ) -> Option<typed::ReachBound> {
+        let identity = self.checker.project_type(target)?;
+        let env = self.checker.type_environment;
+        let mut roots = Vec::new();
+        let mut seen = FxHashSet::default();
+        let mut pending = Vec::new();
+        for (root, ty) in root_types {
+            seen.clear();
+            pending.push(ty);
+            while let Some(ty) = pending.pop() {
+                if ty == target {
+                    roots.push(root);
+                    pending.clear();
+                    break;
+                }
+                if region != ReachKind::Cell && seen.insert(ty) {
+                    let _: Result<(), std::convert::Infallible> =
+                        CallField::for_each_child(ty, env, |_, child| {
+                            pending.push(child);
+                            Ok(())
+                        });
+                }
+            }
+        }
+        roots.sort_unstable();
+        roots.dedup();
+        (!roots.is_empty()).then_some(typed::ReachBound {
+            roots,
+            region,
+            types: vec![identity],
+        })
+    }
+
+    fn value_bound(&self, ty: TypeId) -> Option<typed::ReachBound> {
+        self.bound(
+            ReachKind::EntryStructure,
+            self.entries
+                .iter()
+                .filter_map(|(port, entry)| Some((*port, entry.ty?))),
+            ty,
+        )
+    }
+
+    fn value(
+        &mut self,
+        value: &ValueAlt,
+        ty: TypeId,
+        exact: Option<typed::ExportPort>,
+    ) -> Option<typed::ValueRef> {
+        use typed::{
+            ObjectRef, PathAccess, Permission, ScalarSource, ScalarSourceBound, ValueSource,
+        };
+        // Native operation edges can use an allocation-shaped carrier for a
+        // scalar member. Its endpoint determines the exported storage kind.
+        let scalar_endpoint = is_heap(self.checker, ty).is_ok_and(|heap| !heap);
+        let (source, restriction) = match value.kind {
+            PayloadKind::Unknown if !scalar_endpoint => return None,
+            kind if scalar_endpoint => {
+                if kind == PayloadKind::Absent {
+                    return None;
+                }
+                let mut scalar_sources: Vec<_> = value
+                    .deps
+                    .iter()
+                    .flat_map(|dep| dep.entries.as_slice())
+                    .filter_map(|&id| self.state.entry_scalar_source(id).map(PortId))
+                    .collect();
+                if let PayloadKind::Allocation(value) = kind
+                    && let Some(port) = self.state.entry_scalar_source(value.id)
+                {
+                    scalar_sources.push(PortId(port));
+                }
+                // A computed scalar of another type is not the predecessor's
+                // stored value, even if an operation used it as a contributor.
+                scalar_sources.retain(|port| {
+                    self.entries
+                        .iter()
+                        .any(|(id, entry)| id == port && entry.ty == Some(ty))
+                });
+                scalar_sources.sort_unstable();
+                scalar_sources.dedup();
+                let scalar = match scalar_sources.as_slice() {
+                    [] if kind != PayloadKind::Unknown => ScalarSource::Independent,
+                    [] => ScalarSource::Unresolved(ScalarSourceBound::Reach(self.value_bound(ty)?)),
+                    [port] if kind != PayloadKind::Unknown => ScalarSource::EntryValue(*port),
+                    _ => ScalarSource::Unresolved(ScalarSourceBound::Values(scalar_sources)),
+                };
+                (ValueSource::Scalar(scalar), None)
+            }
+            PayloadKind::Allocation(value) => {
+                let raw_result =
+                    matches!(&exact, Some(typed::ExportPort::Result(path)) if path.path.is_empty());
+                let object = if let Some(&entry) = self.entry_allocations.get(&value.id) {
+                    ObjectRef::Entry(entry)
+                } else {
+                    self.allocation(value.id, ty, exact)?
+                };
+                // A callee-local name is not an immutable caller binding.
+                // Raw transport keeps the actual's permission, but a new
+                // edge through a shared formal keeps its own restriction.
+                let restricted =
+                    matches!(&object, ObjectRef::Entry(_)) && !raw_result && !value.writable;
+                (
+                    ValueSource::Allocation(object),
+                    restricted.then_some(Permission::ReadOnly),
+                )
+            }
+            PayloadKind::Absent | PayloadKind::Scalar | PayloadKind::Unknown => return None,
+        };
+        Some(typed::ValueRef {
+            source,
+            access: PathAccess {
+                restriction,
+                derived_from: None,
+            },
+            dependencies: Vec::new(),
+        })
+    }
+
+    fn receiver_loans(&self, loans: &state::DependencySet) -> Vec<typed::ReceiverDependency> {
+        use typed::ObjectRef;
+        let mut dependencies = Vec::new();
+        for dep in loans {
+            let mut receivers = Vec::new();
+            for &id in dep.entries.as_slice() {
+                if self.state.entry_scalar_source(id).is_some() {
+                    continue;
+                }
+                if let Some(&port) = self.entry_allocations.get(&id) {
+                    receivers.push(ObjectRef::Entry(port));
+                } else if let Some(receiver) = self.retained.get(&id) {
+                    receivers.push(receiver.clone());
+                } else if let Some(ty) = self.entries.iter().find_map(|(_, entry)| {
+                    entry
+                        .value
+                        .values
+                        .iter()
+                        .any(|value| {
+                            self.state
+                                .alloc_paths_may_share(&[value.id], &[], &[id], &[])
+                        })
+                        .then_some(entry.ty)
+                        .flatten()
+                }) && let Some(bound) = self.value_bound(ty)
+                {
+                    dependencies.push(typed::ReceiverDependency::Unresolved(bound));
+                }
+            }
+            receivers.sort_unstable();
+            receivers.dedup();
+            if !receivers.is_empty() {
+                dependencies.push(typed::ReceiverDependency::Known(receivers));
+            }
+        }
+        dependencies.sort_unstable();
+        dependencies.dedup();
+        dependencies
+    }
+
+    fn allocation(
+        &mut self,
+        id: AllocId,
+        ty: TypeId,
+        exact: Option<typed::ExportPort>,
+    ) -> Option<typed::ObjectRef> {
+        use typed::{CellPort, FamilyPort, ObjectRef, StorageKind};
+        if let Some(object) = self.retained.get(&id) {
+            return Some(object.clone());
+        }
+        let identity = self.checker.project_type(ty)?;
+        let kind = StorageKind::Allocation;
+        let object = exact
+            .filter(|_| self.state.alloc_exact_at_boundary(id, self.acyclic))
+            .map_or_else(
+                || ObjectRef::Family(kind, identity.clone()),
+                ObjectRef::Exact,
+            );
+        self.retained.insert(id, object.clone());
+        self.post.retained.push((object.clone(), kind, identity));
+        let mut children = Vec::new();
+        let _: Result<(), std::convert::Infallible> =
+            CallField::for_each_child(ty, self.checker.type_environment, |selector, child| {
+                if let Ok((key, _)) = boundary_child(self.transfer, ty, selector) {
+                    children.push((selector, key, child));
+                }
+                Ok(())
+            });
+        let state = self.state;
+        for (selector, key, child) in children {
+            let cell = state::CellId::Projected(id, key);
+            let values = state.value_cell(cell);
+            let group = state.retained_edge_group(id, key);
+            if selector.is_collapsed() {
+                let family = FamilyPort {
+                    receiver: object.clone(),
+                    selector,
+                };
+                let mut members = Vec::new();
+                let mut loans = Vec::new();
+                for (value, once) in state.retained_family_values(id, key) {
+                    if let Some(descriptor) = self.value(&value, child, None) {
+                        if !value.deps.is_empty() {
+                            loans.push((members.len(), value.deps.clone()));
+                        }
+                        let occurrence = if once {
+                            typed::Occurrence::AtMostOnce
+                        } else {
+                            typed::Occurrence::MaybeMany
+                        };
+                        members.push((descriptor, occurrence));
+                    } else {
+                        self.uncovered
+                            .insert(typed::OutputPort::Family(family.clone()));
+                    }
+                }
+                self.record_family_loans(loans);
+                if matches!(object, ObjectRef::Family(..)) {
+                    if !members.is_empty() {
+                        self.post
+                            .families
+                            .push((family, typed::FamilyPost::Extend(members)));
+                    }
+                } else if !group.is_empty() || !values.is_empty() || state.family_was_reset(id, key)
+                {
+                    self.post
+                        .families
+                        .push((family, typed::FamilyPost::ReplaceAll(members)));
+                }
+            } else {
+                let target = CellPort::Edge(object.clone(), selector);
+                let mut fallback;
+                let write_values = if values.is_empty() {
+                    fallback = group
+                        .iter()
+                        .map(|edge| edge.value_alternative())
+                        .collect::<Vec<_>>();
+                    if fallback.is_empty()
+                        && is_heap(self.checker, child).is_ok_and(|heap| heap)
+                        && let Some(id) = state.retained_lazy_child(id, key)
+                    {
+                        fallback.push(ValueAlt::plain(PayloadKind::Allocation(
+                            state::StoredValue { id, writable: true },
+                        )));
+                    }
+                    fallback.as_slice()
+                } else {
+                    values
+                };
+                if !write_values.is_empty() {
+                    let projected = extend_export(&object, selector);
+                    let mut captured = Vec::with_capacity(write_values.len());
+                    let mut loans = Vec::new();
+                    for value in write_values {
+                        let output = self.value(value, child, projected.clone());
+                        if output.is_none() && value.kind != PayloadKind::Absent {
+                            self.uncovered
+                                .insert(typed::OutputPort::Cell(target.clone()));
+                        } else {
+                            if output.is_some() && !value.deps.is_empty() {
+                                loans.push((captured.len(), value.deps.clone()));
+                            }
+                            captured.push(output);
+                        }
+                    }
+                    if !captured.is_empty() {
+                        let post = if matches!(object, ObjectRef::Family(..)) {
+                            typed::CellPost::WeakJoin(captured)
+                        } else {
+                            typed::CellPost::Replace(captured)
+                        };
+                        self.record_cell_loans(loans);
+                        self.post.cells.push((target, post));
+                    }
+                }
+            }
+        }
+        Some(object)
+    }
+
+    fn export_entry_family(
+        &mut self,
+        entry_state: &BorrowState,
+        entry: &EntryCapture,
+        holder: PortId,
+        selector: CallField,
+        field: state::FieldKey,
+        ty: TypeId,
+    ) {
+        use typed::{FamilyPort, FamilyPost, ObjectRef, Occurrence, OutputPort};
+        let state = self.state;
+        let target = FamilyPort {
+            receiver: ObjectRef::Entry(holder),
+            selector,
+        };
+        let mut members = Vec::new();
+        let mut loans = Vec::new();
+        let mut replace = entry.value.values.len() == 1;
+        for value in &entry.value.values {
+            if !value.writable {
+                replace = false;
+                continue;
+            }
+            let reset = state.family_was_reset(value.id, field);
+            replace &= reset;
+            let previous = if reset {
+                FxHashSet::default()
+            } else {
+                entry_state
+                    .retained_family_values(value.id, field)
+                    .collect()
+            };
+            for member in state.retained_family_values(value.id, field) {
+                if previous.contains(&member) {
+                    continue;
+                }
+                let (alt, once) = member;
+                if let Some(descriptor) = self.value(&alt, ty, None) {
+                    if !alt.deps.is_empty() {
+                        loans.push((members.len(), alt.deps.clone()));
+                    }
+                    members.push((
+                        descriptor,
+                        if once {
+                            Occurrence::AtMostOnce
+                        } else {
+                            Occurrence::MaybeMany
+                        },
+                    ));
+                } else {
+                    self.uncovered.insert(OutputPort::Family(target.clone()));
+                }
+            }
+        }
+        self.record_family_loans(loans);
+        if replace {
+            self.post
+                .families
+                .push((target, FamilyPost::ReplaceAll(members)));
+        } else if !members.is_empty() {
+            self.post
+                .families
+                .push((target, FamilyPost::Extend(members)));
+        }
+    }
+
+    fn record_cell_loans(&mut self, loans: Vec<(usize, state::DependencySet)>) {
+        let cell = self.post.cells.len();
+        self.loans.extend(
+            loans
+                .into_iter()
+                .map(|(value, deps)| (LoanValue::Cell(cell, value), deps)),
+        );
+    }
+
+    fn record_family_loans(&mut self, loans: Vec<(usize, state::DependencySet)>) {
+        let family = self.post.families.len();
+        self.loans.extend(
+            loans
+                .into_iter()
+                .map(|(member, deps)| (LoanValue::Family(family, member), deps)),
+        );
+    }
+
+    fn finish(mut self) -> typed::Post {
+        // A scalar can precede the output that gives its receiver a name.
+        // Resolve loans against the complete exported graph before sorting rows.
+        for (at, loans) in std::mem::take(&mut self.loans) {
+            let dependencies = self.receiver_loans(&loans);
+            let value = match at {
+                LoanValue::Result(index) => &mut self.post.results[index].1,
+                LoanValue::Cell(row, index) => {
+                    let (typed::CellPost::Replace(values) | typed::CellPost::WeakJoin(values)) =
+                        &mut self.post.cells[row].1;
+                    values[index].as_mut().expect("loans name a present value")
+                }
+                LoanValue::Family(row, index) => {
+                    let (typed::FamilyPost::ReplaceAll(members)
+                    | typed::FamilyPost::Extend(members)) = &mut self.post.families[row].1;
+                    &mut members[index].0
+                }
+            };
+            value.dependencies = dependencies;
+        }
+        self.post.retained.sort_unstable();
+        self.post.retained.dedup();
+        self.post
+            .bindings
+            .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        self.post
+            .cells
+            .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        self.post
+            .cells
+            .dedup_by(|(target, edit), (previous_target, previous)| {
+                if target != previous_target {
+                    return false;
+                }
+                let (typed::CellPost::Replace(incoming) | typed::CellPost::WeakJoin(incoming)) =
+                    edit;
+                let (typed::CellPost::Replace(values) | typed::CellPost::WeakJoin(values)) =
+                    previous;
+                values.append(incoming);
+                true
+            });
+        for (_, edit) in &mut self.post.cells {
+            let (typed::CellPost::Replace(values) | typed::CellPost::WeakJoin(values)) = edit;
+            values.sort_unstable();
+            values.dedup();
+        }
+        self.post
+            .families
+            .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        self.post.families.dedup_by(|(target, edit), (previous_target, previous)| {
+            if target != previous_target {
+                return false;
+            }
+            let (typed::FamilyPost::ReplaceAll(incoming) | typed::FamilyPost::Extend(incoming)) = edit;
+            let (typed::FamilyPost::ReplaceAll(members) | typed::FamilyPost::Extend(members)) = previous;
+            members.append(incoming);
+            true
+        });
+        for (_, edit) in &mut self.post.families {
+            let (typed::FamilyPost::ReplaceAll(values) | typed::FamilyPost::Extend(values)) = edit;
+            values.sort_unstable();
+            values.dedup_by(|(member, _), (previous, previous_occurrence)| {
+                if member != previous {
+                    return false;
+                }
+                // Distinct live insertions can quotient to the same member.
+                *previous_occurrence = typed::Occurrence::MaybeMany;
+                true
+            });
+        }
+        self.post.results.sort_unstable_by_key(|(slot, _)| *slot);
+        if !self.uncovered.is_empty() {
+            let reach = if self.uncovered.len() == 1
+                && let Some(typed::OutputPort::Cell(typed::CellPort::Terminal(port))) =
+                    self.uncovered.first()
+                && let Some(EntryPort::Terminal(parameter)) = self.entry_ports.get(port.0 as usize)
+                && let Some(ty) = self.entries.iter().find_map(|(port, entry)| {
+                    match self.entry_ports.get(port.0 as usize)? {
+                        EntryPort::Value {
+                            parameter: source,
+                            path,
+                        } if source == parameter && path.is_empty() => entry.ty,
+                        _ => None,
+                    }
+                }) {
+                self.bound(ReachKind::Cell, [(*port, ty)], ty)
+            } else {
+                None
+            };
+            self.post.coverage = typed::Coverage::Unresolved(if let Some(reach) = reach {
+                typed::Footprint::WritableReach(reach)
+            } else {
+                typed::Footprint::Locations(self.uncovered.into_iter().collect())
+            });
+        }
+        self.post
+    }
+}
+
+fn extend_export(object: &typed::ObjectRef, selector: CallField) -> Option<typed::ExportPort> {
+    let typed::ObjectRef::Exact(export) = object else {
+        return None;
+    };
+    let mut export = export.clone();
+    match &mut export {
+        typed::ExportPort::Cell(path) => path.path.push(selector),
+        typed::ExportPort::Result(path) => path.path.push(selector),
+        _ => return None,
+    }
+    Some(export)
+}
+
+fn boundary_value_alternatives(captured: CapturedValue, scalar: bool) -> Vec<ValueAlt> {
+    if !captured.alternatives.is_empty() {
+        captured.alternatives
+    } else if scalar {
+        vec![ValueAlt::plain(PayloadKind::Scalar)]
+    } else {
+        captured
+            .values
+            .into_iter()
+            .map(|value| ValueAlt::plain(PayloadKind::Allocation(value)))
+            .collect()
+    }
+}
+
+fn boundary_cell_alternatives(
+    state: &BorrowState,
+    cell: state::CellId,
+    scalar: bool,
+) -> Vec<ValueAlt> {
+    use state::CellId;
+    let explicit = state.value_cell(cell);
+    if !explicit.is_empty() {
+        return explicit.to_vec();
+    }
+    match cell {
+        CellId::Slot(wrapper) => {
+            if let Some(values) = state.retained_slot_payload(wrapper) {
+                return values.map(ValueAlt::plain).collect();
+            }
+        }
+        CellId::Projected(holder, selector) => {
+            if let Some(edges) = state
+                .retained_edge_groups(holder)
+                .find(|edges| edges[0].key == selector)
+            {
+                return edges.iter().map(|edge| edge.value_alternative()).collect();
+            }
+        }
+    }
+    if scalar {
+        vec![ValueAlt::plain(PayloadKind::Scalar)]
+    } else {
+        Vec::new()
+    }
+}
+
+fn visit_entry_roles<E>(
+    remaining: &[(PortId, usize)],
+    roles: &mut Vec<(PortId, usize, Role)>,
+    visit: &mut impl FnMut(&[(PortId, usize, Role)]) -> Result<(), E>,
+) -> Result<(), E> {
+    let Some((&(port, parameter), remaining)) = remaining.split_first() else {
+        return visit(roles);
+    };
+    for role in [Role::Slot, Role::WholeAlias, Role::ProjectedAlias] {
+        roles.push((port, parameter, role));
+        visit_entry_roles(remaining, roles, visit)?;
+        roles.pop();
+    }
+    Ok(())
+}
+
+fn visit_entry_identities<E>(
+    remaining: &[Predicate],
+    literals: &mut Vec<typed::Literal>,
+    visit: &mut impl FnMut(&[typed::Literal], typed::Guard) -> Result<(), E>,
+) -> Result<(), E> {
+    let Some((&predicate, remaining)) = remaining.split_first() else {
+        return match typed::Guard::new(literals.iter().copied()) {
+            Some(guard) => visit(literals, guard),
+            None => Ok(()),
+        };
+    };
+    if typed::Guard::implied_by(literals, predicate).is_some() {
+        return visit_entry_identities(remaining, literals, visit);
+    }
+    for truth in [false, true] {
+        literals.push((predicate, truth));
+        visit_entry_identities(remaining, literals, visit)?;
+        literals.pop();
+    }
+    Ok(())
+}
+
+fn allocation_classes(presentation: &[typed::Literal]) -> BTreeMap<PortId, PortId> {
+    fn root(classes: &BTreeMap<PortId, PortId>, mut port: PortId) -> PortId {
+        while let Some(&parent) = classes.get(&port) {
+            if parent == port {
+                break;
+            }
+            port = parent;
+        }
+        port
+    }
+    let mut classes = BTreeMap::new();
+    for &(predicate, truth) in presentation {
+        if let (Predicate::Equal(IdentityKind::Allocation, left, right), true) = (predicate, truth)
+        {
+            let left = root(&classes, left);
+            let right = root(&classes, right);
+            let leader = left.min(right);
+            classes.insert(leader, leader);
+            classes.insert(left.max(right), leader);
+        }
+    }
+    classes
+        .keys()
+        .map(|&port| (port, root(&classes, port)))
+        .collect()
+}
+
 impl SparseFunction {
+    pub(super) fn evaluate_canonical(
+        &self,
+        checker: &BorrowChecker<'_>,
+        function: &HirFunction,
+    ) -> Result<typed::TypedCallAllocationFacts, BorrowCheckError> {
+        let context = checker.transfer_context();
+        let mut lanes = [Vec::new(), Vec::new()];
+        let mut may_retain = BTreeSet::new();
+        let mut roles = Vec::new();
+        let mut roles_by_support = vec![Vec::new(); self.support_count];
+        let mut equalities_by_support = vec![Vec::new(); self.support_count];
+        let mut tested_wrappers = BTreeSet::new();
+        for &predicate in &self.guards {
+            match predicate {
+                Predicate::Role(port, _) => {
+                    tested_wrappers.insert(port);
+                }
+                Predicate::Equal(IdentityKind::Allocation, left, right) => {
+                    let support = self.port_supports[left.0 as usize];
+                    debug_assert_eq!(support, self.port_supports[right.0 as usize]);
+                    equalities_by_support[support.0 as usize].push(predicate);
+                }
+                _ => {}
+            }
+        }
+        for constraint in &self.compatibility {
+            if let CompatibilityConstraint::Equality(IdentityKind::Wrapper, group) = constraint {
+                tested_wrappers.extend(group.iter().copied());
+            }
+        }
+        for port in tested_wrappers {
+            let EntryPort::Wrapper(parameter) = self.ports[port.0 as usize] else {
+                continue;
+            };
+            roles_by_support[self.port_supports[port.0 as usize].0 as usize]
+                .push((port, parameter));
+        }
+        let mut demanded = vec![false; self.support_count];
+        for (id, ports) in self.ports_by_support.iter().enumerate() {
+            demanded[id] = !ports.is_empty();
+        }
+        for &support in self.result_supports.values() {
+            demanded[support.0 as usize] = true;
+        }
+        let prune =
+            demanded.contains(&false) && self.has_structural_call_reach(checker, function)?;
+        let supports = if prune && !demanded.contains(&true) {
+            // No boundary observation remains. One empty projection records
+            // lane reach without replaying any of the discarded local state.
+            self.support_count..self.support_count + 1
+        } else {
+            0..self.support_count.max(1)
+        };
+        for id in supports {
+            if prune && demanded.get(id) == Some(&false) {
+                continue;
+            }
+            let support = SupportId(id as u32);
+            let wrappers = roles_by_support.get(id).map_or(&[][..], Vec::as_slice);
+            let identities = equalities_by_support.get(id).map_or(&[][..], Vec::as_slice);
+            let mut support_lanes = [typed::Lane::Bottom, typed::Lane::Bottom];
+            visit_entry_roles(wrappers, &mut roles, &mut |roles| {
+                let mut literals = roles
+                    .iter()
+                    .map(|&(port, _, role)| (Predicate::Role(port, role), true))
+                    .collect();
+                visit_entry_identities(identities, &mut literals, &mut |presentation, guard| {
+                    let SupportSeed {
+                        projected,
+                        entry,
+                        entries,
+                    } = self.seed_support(checker, function, support, roles, presentation)?;
+                    let mut entry_allocations = FxHashMap::default();
+                    for (port, entry) in &entries {
+                        for value in &entry.value.values {
+                            entry_allocations.entry(value.id).or_insert(*port);
+                        }
+                    }
+                    let evaluated =
+                        checker.evaluate_sparse_support(function, entry.clone(), &projected)?;
+                    may_retain.extend(evaluated.retained.into_iter().filter_map(|index| {
+                        self.transfer
+                            .parameters
+                            .get(&projected.local_ids[index])
+                            .copied()
+                    }));
+                    let mut alternatives = [Vec::new(), Vec::new()];
+                    for (block, exit) in evaluated.exits.into_iter().flat_map(|(block, states)| {
+                        states.into_iter().map(move |state| (block, state))
+                    }) {
+                        let terminator =
+                            &checker.block_by_id_or_error(block, function.id)?.terminator;
+                        let (error, values) = match terminator {
+                            HirTerminator::Return(values) => {
+                                (false, checker.module.expressions.values(*values))
+                            }
+                            HirTerminator::ReturnError(value) => {
+                                (true, std::slice::from_ref(value))
+                            }
+                            _ => continue,
+                        };
+                        let mut state =
+                            Rc::try_unwrap(exit).unwrap_or_else(|state| state.as_ref().clone());
+                        let view = projected.block_view(block).operations;
+                        let mut result = Vec::new();
+                        for (slot, &value) in values.iter().enumerate() {
+                            if self.result_supports.get(&(error, slot)) == Some(&support) {
+                                result.push((
+                                    slot,
+                                    checker.module.expressions.expression(value).ty,
+                                    capture_boundary_value(
+                                        &context, view, block, &mut state, value,
+                                    )?,
+                                ));
+                            }
+                        }
+                        let mut export = BoundaryExport {
+                            checker,
+                            transfer: &context,
+                            state: &state,
+                            acyclic: self.transfer.recurring.is_empty(),
+                            entries: &entries,
+                            entry_ports: &self.ports,
+                            entry_allocations: &entry_allocations,
+                            retained: FxHashMap::default(),
+                            loans: Vec::new(),
+                            uncovered: BTreeSet::new(),
+                            post: typed::Post::default(),
+                        };
+                        let mut choice = None;
+                        for (slot, ty, captured) in result {
+                            let values =
+                                boundary_value_alternatives(captured, !is_heap(checker, ty)?);
+                            match values.as_slice() {
+                                [value] => export.result(slot, ty, value),
+                                [_, _, ..] if choice.is_none() => choice = Some((slot, ty, values)),
+                                _ => {
+                                    // This state has no evidence relating two
+                                    // independently joined result cells.
+                                    export.uncovered.insert(typed::OutputPort::Result(slot));
+                                }
+                            }
+                        }
+                        let selected = &mut alternatives[usize::from(error)];
+                        if let Some((slot, ty, values)) = choice {
+                            for value in values {
+                                let mut row = export.clone();
+                                row.result(slot, ty, &value);
+                                self.export_entry_cells(
+                                    function, &projected, &entry, &entries, &mut row,
+                                )?;
+                                selected.push(row.finish());
+                            }
+                        } else {
+                            self.export_entry_cells(
+                                function,
+                                &projected,
+                                &entry,
+                                &entries,
+                                &mut export,
+                            )?;
+                            selected.push(export.finish());
+                        }
+                    }
+                    for (lane, alternatives) in support_lanes.iter_mut().zip(alternatives) {
+                        if !alternatives.is_empty() {
+                            let product = typed::Product::new(vec![typed::Component {
+                                support,
+                                alternatives,
+                            }])
+                            .expect("one projected support");
+                            *lane = lane.union(&typed::Lane::guarded(guard.clone(), product));
+                        }
+                    }
+                    Ok::<(), BorrowCheckError>(())
+                })
+            })?;
+            for (lane, projected) in lanes.iter_mut().zip(support_lanes) {
+                lane.push(projected);
+            }
+        }
+        let [success, error] = lanes.map(typed::Lane::compose_supports);
+        Ok(typed::TypedCallAllocationFacts {
+            ports: self.ports.clone(),
+            support_count: self.support_count,
+            success,
+            error,
+            may_retain: may_retain.into_iter().collect(),
+        })
+    }
+    fn has_structural_call_reach(
+        &self,
+        checker: &BorrowChecker<'_>,
+        function: &HirFunction,
+    ) -> Result<bool, BorrowCheckError> {
+        let signatures = checker.call_signatures();
+        let structural = |target, argc, both_lanes: bool| -> Result<_, BorrowCheckError> {
+            Ok(
+                match signatures
+                    .resolve(target, argc, &checker.diagnostics)?
+                    .returns()
+                {
+                    CallReturns::Summary(summary) => summary.facts().is_none_or(|facts| {
+                        facts.success.structural_reach().is_some()
+                            && (!both_lanes || facts.error.structural_reach().is_some())
+                    }),
+                    _ => true,
+                },
+            )
+        };
+        for (&id, orders) in &self.transfer.blocks {
+            let block = checker.block_by_id_or_error(id, function.id)?;
+            for &(position, argc) in &orders.structural_calls {
+                let HirStatementKind::Call { target, .. } = &block.statements[position].kind else {
+                    unreachable!("indexed statement call");
+                };
+                if !structural(target, argc, false)? {
+                    return Ok(false);
+                }
+            }
+            if let Some(argc) = orders.structural_terminator
+                && let HirTerminator::Invoke {
+                    operation: HirFallibleOperation::Call { target, .. },
+                    ..
+                } = &block.terminator
+                && !structural(target, argc, true)?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn export_entry_binding(
+        &self,
+        parameter: usize,
+        port: PortId,
+        function: &HirFunction,
+        support: &ProjectedSupport<'_>,
+        entry: &BorrowState,
+        export: &mut BoundaryExport<'_, '_>,
+    ) {
+        use state::{BindingTarget, CellId, WrapperId};
+        use typed::{
+            BindingPost, CellPort, Derivation, ObjectRef, OutputPort, PathAccess, Permission,
+            RetainedRoute,
+        };
+        let index = support.local_indices[&function.params[parameter]];
+        if !support.mutable[index] {
+            return;
+        }
+        let wrapper = WrapperId::current(index);
+        let before = entry.boundary_binding(wrapper);
+        let after = export.state.boundary_binding(wrapper);
+        if before.alternatives == after.alternatives && before.routes == after.routes {
+            return;
+        }
+        let owner = ObjectRef::Entry(port);
+        let source_wrapper = |wrapper| {
+            let direct = function
+                .params
+                .iter()
+                .enumerate()
+                .find_map(|(parameter, local)| {
+                    support
+                        .local_indices
+                        .get(local)
+                        .is_some_and(|&i| WrapperId::current(i) == wrapper)
+                        .then_some(parameter)
+                });
+            let mut source = direct.map(EntryPort::Wrapper);
+            if source.is_none() {
+                source = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find_map(|(parameter, local)| {
+                        let index = *support.local_indices.get(local)?;
+                        entry
+                            .boundary_binding(WrapperId::current(index))
+                            .alternatives
+                            .iter()
+                            .any(|alt| alt.target == BindingTarget::Link(wrapper))
+                            .then_some(EntryPort::Immediate(parameter))
+                    });
+            }
+            self.ports
+                .iter()
+                .position(|p| Some(p) == source.as_ref())
+                .map(|i| PortId(i as u32))
+        };
+        let edge = |export: &BoundaryExport<'_, '_>, holder, key| {
+            let source = *export.entry_allocations.get(&holder)?;
+            let EntryPort::Value { parameter, path } = self.ports.get(source.0 as usize)? else {
+                return None;
+            };
+            let mut ty = export.checker.local_types[&function.params[*parameter]];
+            for &selector in path {
+                ty = selector.type_child(ty, export.checker.type_environment)?;
+            }
+            let mut field = None;
+            let _: Result<(), std::convert::Infallible> =
+                CallField::for_each_child(ty, export.checker.type_environment, |selector, _| {
+                    if boundary_child(export.transfer, ty, selector).is_ok_and(|(k, _)| k == key)
+                        && !selector.is_collapsed()
+                    {
+                        field = Some(selector);
+                    }
+                    Ok(())
+                });
+            Some(CellPort::Edge(ObjectRef::Entry(source), field?))
+        };
+        let edit = (|| {
+            let [after] = after.alternatives else {
+                return None;
+            };
+            let route = RetainedRoute {
+                access: PathAccess {
+                    restriction: Some(if after.writable {
+                        Permission::Writable
+                    } else {
+                        Permission::ReadOnly
+                    }),
+                    derived_from: after
+                        .origin
+                        .and_then(|origin| source_wrapper(origin.wrapper))
+                        .map(Derivation::Entry),
+                },
+                dependencies: Vec::new(),
+            };
+            Some(match after.target {
+                BindingTarget::OwnSlot => BindingPost::OwnSlot,
+                BindingTarget::Link(source) => {
+                    let mut route = route;
+                    let source = if let Some(port) = source_wrapper(source) {
+                        ObjectRef::Entry(port)
+                    } else {
+                        let [binding] = export.state.boundary_binding(source).alternatives else {
+                            return None;
+                        };
+                        if binding.target != BindingTarget::OwnSlot {
+                            return None;
+                        }
+                        let ty = export.checker.local_types[&function.params[parameter]];
+                        let identity = export.checker.project_type(ty)?;
+                        let export_port = if source.is_singleton()
+                            && source == WrapperId::current(source.local)
+                        {
+                            typed::ExportPort::Binding(parameter)
+                        } else {
+                            typed::ExportPort::PrivateTerminal(parameter)
+                        };
+                        let source_ref = ObjectRef::Exact(export_port);
+                        let values = boundary_cell_alternatives(
+                            export.state,
+                            CellId::Slot(source),
+                            !is_heap(export.checker, ty).ok()?,
+                        );
+                        let mut contents = Vec::new();
+                        let mut loans = Vec::new();
+                        for value in &values {
+                            if let Some(descriptor) = export.value(value, ty, None) {
+                                if !value.deps.is_empty() {
+                                    loans.push((contents.len(), value.deps.clone()));
+                                }
+                                contents.push(Some(descriptor));
+                            } else if value.kind != PayloadKind::Absent {
+                                return None;
+                            }
+                        }
+                        export.post.retained.push((
+                            source_ref.clone(),
+                            typed::StorageKind::Wrapper,
+                            identity,
+                        ));
+                        export
+                            .post
+                            .bindings
+                            .push((source_ref.clone(), BindingPost::OwnSlot));
+                        if !contents.is_empty() {
+                            export.record_cell_loans(loans);
+                            export.post.cells.push((
+                                CellPort::Slot(source_ref.clone()),
+                                typed::CellPost::Replace(contents),
+                            ));
+                        }
+                        route.access.derived_from = Some(Derivation::Retained(source_ref.clone()));
+                        source_ref
+                    };
+                    BindingPost::Link(source, route)
+                }
+                BindingTarget::Projected(holder, key) => {
+                    let cell = edge(export, holder, key).or_else(|| {
+                        function
+                            .params
+                            .iter()
+                            .enumerate()
+                            .find_map(|(parameter, local)| {
+                                let index = *support.local_indices.get(local)?;
+                                entry
+                                    .resolve_cells(index)
+                                    .cells()
+                                    .contains(&CellId::Projected(holder, key))
+                                    .then_some(())?;
+                                self.ports
+                                    .iter()
+                                    .position(|port| *port == EntryPort::Terminal(parameter))
+                                    .map(|port| CellPort::Terminal(PortId(port as u32)))
+                            })
+                    })?;
+                    BindingPost::Projected(cell, route)
+                }
+            })
+        })();
+        if let Some(edit) = edit {
+            export.post.bindings.push((owner, edit));
+        } else {
+            export.uncovered.insert(OutputPort::Binding(owner));
+        }
+    }
+
+    fn export_entry_cells(
+        &self,
+        function: &HirFunction,
+        support: &ProjectedSupport<'_>,
+        entry_state: &BorrowState,
+        entries: &[(PortId, EntryCapture)],
+        export: &mut BoundaryExport<'_, '_>,
+    ) -> Result<(), BorrowCheckError> {
+        use state::CellId;
+        use typed::{CellPort, ExportPort, ObjectRef, OutputPort};
+        let ports = self
+            .ports_by_support
+            .get(support.support.0 as usize)
+            .map_or(&[][..], Vec::as_slice);
+        let mut emitted = BTreeSet::new();
+        for &port in ports {
+            let (ty, target, cells, path) = match self.ports[port.0 as usize] {
+                EntryPort::Wrapper(parameter) => {
+                    self.export_entry_binding(
+                        parameter,
+                        port,
+                        function,
+                        support,
+                        entry_state,
+                        export,
+                    );
+                    continue;
+                }
+                EntryPort::Terminal(parameter) => {
+                    let local = function.params[parameter];
+                    let index = support.local_indices[&local];
+                    if !support.mutable[index] {
+                        continue;
+                    }
+                    (
+                        export.checker.local_types[&local],
+                        CellPort::Terminal(port),
+                        entry_state.resolve_cells(index).cells().to_vec(),
+                        Some(ExportPort::Cell(CallParameterPath {
+                            index: parameter,
+                            path: Vec::new(),
+                        })),
+                    )
+                }
+                EntryPort::Edge(holder, selector) => {
+                    let Some(entry) = entries
+                        .binary_search_by_key(&holder, |(port, _)| *port)
+                        .ok()
+                        .map(|i| &entries[i].1)
+                    else {
+                        continue;
+                    };
+                    if entry.writable == Some(false) || entry.value.values.is_empty() {
+                        continue;
+                    }
+                    let (field, ty) = boundary_child(export.transfer, entry.ty.unwrap(), selector)?;
+                    if selector.is_collapsed() {
+                        if let [member] = entry.value.values.as_slice()
+                            && !emitted.insert(CellId::Projected(member.id, field))
+                        {
+                            continue;
+                        }
+                        export.export_entry_family(entry_state, entry, holder, selector, field, ty);
+                        continue;
+                    }
+                    let cells = entry
+                        .value
+                        .values
+                        .iter()
+                        .map(|value| CellId::Projected(value.id, field))
+                        .collect();
+                    let path = match &self.ports[holder.0 as usize] {
+                        EntryPort::Value { parameter, path } => {
+                            Some(ExportPort::Cell(CallParameterPath {
+                                index: *parameter,
+                                path: path.iter().copied().chain([selector]).collect(),
+                            }))
+                        }
+                        _ => None,
+                    };
+                    (
+                        ty,
+                        CellPort::Edge(ObjectRef::Entry(holder), selector),
+                        cells,
+                        path,
+                    )
+                }
+                _ => continue,
+            };
+            let scalar = !is_heap(export.checker, ty)?;
+            let mut changed = false;
+            let mut output = Vec::new();
+            for &cell in &cells {
+                let previous = boundary_cell_alternatives(entry_state, cell, scalar);
+                let next = boundary_cell_alternatives(export.state, cell, scalar);
+                changed |= next != previous;
+                output.extend(next);
+            }
+            if !changed {
+                continue;
+            }
+            if let [cell] = cells.as_slice()
+                && !emitted.insert(*cell)
+            {
+                continue;
+            }
+            let mut values = Vec::with_capacity(output.len());
+            let mut loans = Vec::new();
+            for value in &output {
+                let descriptor = export.value(value, ty, path.clone());
+                if descriptor.is_none() && value.kind != PayloadKind::Absent {
+                    export.uncovered.insert(OutputPort::Cell(target.clone()));
+                } else {
+                    if descriptor.is_some() && !value.deps.is_empty() {
+                        loans.push((values.len(), value.deps.clone()));
+                    }
+                    values.push(descriptor);
+                }
+            }
+            if !values.is_empty() {
+                let edit = if cells.len() == 1 {
+                    typed::CellPost::Replace(values)
+                } else {
+                    typed::CellPost::WeakJoin(values)
+                };
+                export.record_cell_loans(loans);
+                export.post.cells.push((target, edit));
+            }
+        }
+        Ok(())
+    }
+
+    fn seed_support(
+        &self,
+        checker: &BorrowChecker<'_>,
+        function: &HirFunction,
+        support: SupportId,
+        roles: &[(PortId, usize, Role)],
+        presentation: &[typed::Literal],
+    ) -> Result<SupportSeed<'_>, BorrowCheckError> {
+        let ports = self
+            .ports_by_support
+            .get(support.0 as usize)
+            .map_or(&[][..], Vec::as_slice);
+        let anchors = ports
+            .iter()
+            .map(|&port| function.params[port.parameter(&self.ports)]);
+        let mut projected = self.project_support(support, anchors, []);
+        let mut alias_anchors = Vec::new();
+        for &(_, parameter, role) in roles {
+            if role == Role::Slot {
+                continue;
+            }
+            let local = function.params[parameter];
+            let index = projected.local_indices[&local];
+            let anchor = projected.local_ids.len();
+            projected.local_ids.push(local);
+            projected.mutable.push(projected.mutable[index]);
+            projected.heap.push(projected.heap[index]);
+            projected.first_write.push(UNKNOWN_ORDER_KEY);
+            alias_anchors.push((index, state::WrapperId::current(anchor), role));
+        }
+        let mut entry_roots = RootSet::empty(projected.local_ids.len());
+        for (index, local) in projected.local_ids.iter().enumerate() {
+            if self.transfer.parameters.contains_key(local) {
+                entry_roots.insert(index);
+            }
+        }
+        projected.entry_roots = Some(entry_roots);
+        projected.add_lexical_visibility(checker)?;
+        projected.add_replay_lifetimes(function);
+        let mut state = projected.seed_entry(function.params.iter().copied().filter_map(|local| {
+            projected
+                .local_indices
+                .contains_key(&local)
+                .then_some((local, BindingSpec::Slot))
+        }));
+        for (index, anchor, role) in alias_anchors {
+            use state::{AddressSet, CellId, FieldKey, WrapperId};
+            state.initialize_entry_binding(anchor.local, BindingSpec::Slot);
+            let writable = projected.mutable[index];
+            let spec = match role {
+                Role::WholeAlias => BindingSpec::Link {
+                    source: anchor,
+                    writable,
+                },
+                Role::ProjectedAlias => {
+                    let holder = state.local_alloc_ids(anchor.local).0[0];
+                    let key = FieldKey::Field(0);
+                    let addresses = AddressSet::from_cells(
+                        [CellId::Projected(holder, key)],
+                        Coverage::Complete,
+                    );
+                    BindingSpec::Projected {
+                        addresses,
+                        origin: WrapperId::current(index),
+                        owner: Some(anchor),
+                        writable,
+                        isolated: false,
+                        route_roots: RootSet::empty(projected.local_ids.len()),
+                    }
+                }
+                Role::Slot => unreachable!("slot does not need a private entry anchor"),
+            };
+            state.initialize_entry_binding(index, spec);
+        }
+        state.track_family_resets();
+        let context = checker.transfer_context();
+        let capture = |state: &BorrowState, parameter: usize, path: &[CallField]| {
+            let local = function.params[parameter];
+            capture_local_value_port(
+                state,
+                &projected.mutable,
+                (projected.local_indices[&local], checker.local_types[&local]),
+                path,
+                |ty, selector| boundary_child(&context, ty, selector).ok(),
+                |ty| {
+                    classify_hir_type(ty, checker.type_environment)
+                        .is_ok_and(|shape| shape.has_in_place_mutation_surface())
+                },
+            )
+        };
+        let classes = allocation_classes(presentation);
+        let mut equal_values = classes
+            .into_iter()
+            .map(|(port, leader)| {
+                let EntryPort::Value { parameter, path } = &self.ports[port.0 as usize] else {
+                    unreachable!("allocation identity requires entry values");
+                };
+                (path.as_ref(), *parameter, leader)
+            })
+            .collect::<Vec<_>>();
+        equal_values
+            .sort_unstable_by_key(|(path, parameter, leader)| (path.len(), *parameter, *leader));
+        for (path, parameter, leader) in equal_values {
+            let entry = capture(&state, parameter, path)?;
+            let address = entry
+                .address
+                .expect("an entry value has its predecessor storage");
+            let value = CapturedValue::fresh(state.entry_allocation_id(leader.0));
+            state.publish_store(
+                &TypedStore::replace_cells(address, value).with_explicit_slot_payload(),
+                UNKNOWN_ORDER_KEY,
+                None,
+            );
+        }
+        for &port in ports {
+            let EntryPort::Value { parameter, path } = &self.ports[port.0 as usize] else {
+                continue;
+            };
+            let entry = capture(&state, *parameter, path)?;
+            if entry.allocation_coverage.is_some() {
+                continue;
+            }
+            let address = entry
+                .address
+                .expect("local path resolves storage before its value");
+            state.initialize_entry_scalar(&address, port.0);
+        }
+        let mut entries = Vec::with_capacity(ports.len());
+        for &port in ports {
+            if let EntryPort::Value { parameter, path } = &self.ports[port.0 as usize] {
+                entries.push((port, capture(&state, *parameter, path)?));
+            }
+        }
+        Ok(SupportSeed {
+            projected,
+            entry: state,
+            entries,
+        })
+    }
+
     fn project_support(
         &self,
         support: SupportId,
@@ -423,21 +1677,21 @@ impl SparseFunction {
     ) -> ProjectedSupport<'_> {
         let coordinates = &self.transfer;
         let mut barriers = coordinates.structural_barriers.clone();
-        let mut locals: BTreeSet<_> = anchors
+        let mut locals: BTreeMap<_, _> = anchors
             .into_iter()
-            .map(|local| coordinates.local_indices[&local])
+            .map(|local| (coordinates.local_indices[&local], 0))
             .collect();
         for (&(_, block), positions) in self
             .operations_by_support
             .range((support, BlockId(u32::MIN))..=(support, BlockId(u32::MAX)))
         {
-            barriers.insert(coordinates.ranks[&block]);
+            let rank = coordinates.ranks[&block];
+            barriers.insert(rank);
             for &position in positions.iter() {
-                locals.extend(
-                    coordinates.blocks[&block].operands[position]
-                        .iter()
-                        .copied(),
-                );
+                for &local in &coordinates.blocks[&block].operands[position] {
+                    let last = locals.entry(local).or_insert(rank);
+                    *last = (*last).min(rank);
+                }
             }
         }
         let mut projected = ProjectedSupport {
@@ -445,6 +1699,9 @@ impl SparseFunction {
             support,
             barriers,
             visibility: FxHashMap::default(),
+            last_use: Vec::with_capacity(locals.len()),
+            replay_retirements: Vec::new(),
+            entry_roots: None,
             #[cfg(test)]
             compress: true,
             local_ids: Vec::with_capacity(locals.len()),
@@ -454,7 +1711,7 @@ impl SparseFunction {
             first_write: Vec::with_capacity(locals.len()),
         };
         projected.local_indices.reserve(locals.len());
-        for i in locals {
+        for (i, last) in locals {
             let local = coordinates.local_ids[i];
             projected
                 .local_indices
@@ -463,6 +1720,11 @@ impl SparseFunction {
             projected.mutable.push(coordinates.mutable[i]);
             projected.heap.push(coordinates.heap[i]);
             projected.first_write.push(coordinates.first_write[i]);
+            // Edge feasibility may inspect an already tracked scrutinee even
+            // when this support does not transfer the match itself.
+            projected
+                .last_use
+                .push(last.min(coordinates.last_match_read[i]));
         }
         for (target, mask) in visibility {
             assert_eq!(mask.bit_len(), coordinates.local_ids.len());
@@ -489,8 +1751,86 @@ impl SparseFunction {
     }
 }
 
-#[allow(dead_code)] // Prepared for guarded extraction.
 impl ProjectedSupport<'_> {
+    fn add_lexical_visibility(
+        &mut self,
+        checker: &BorrowChecker<'_>,
+    ) -> Result<(), BorrowCheckError> {
+        let coordinates = &self.function.transfer;
+        let exits: FxHashSet<_> = self
+            .local_ids
+            .iter()
+            .flat_map(|local| {
+                coordinates
+                    .exits_by_region
+                    .get(&coordinates.local_regions[coordinates.local_indices[local]])
+                    .into_iter()
+                    .flatten()
+                    .copied()
+            })
+            .collect();
+        for target in exits {
+            let target_region = checker.module.blocks[checker.block_index_by_id[&target]].region;
+            let mut visible = RootSet::empty(self.local_ids.len());
+            for (index, local) in self.local_ids.iter().enumerate() {
+                let region = coordinates.local_regions[coordinates.local_indices[local]];
+                if checker.is_region_ancestor_of(region, target_region, target)? {
+                    visible.insert(index);
+                }
+            }
+            // Compression must not skip a scope exit and revive an old local
+            // when a later edge enters the region again.
+            self.visibility.insert(target, visible);
+            self.barriers.insert(coordinates.ranks[&target]);
+            if let Some(predecessors) = coordinates.predecessors.get(&target) {
+                self.barriers
+                    .extend(predecessors.iter().map(|block| coordinates.ranks[block]));
+            }
+        }
+        Ok(())
+    }
+    fn add_replay_lifetimes(&mut self, function: &HirFunction) {
+        // Acyclic RPO ranks decrease on every traversed edge. After the last
+        // selected operation using a local, its storage can remain reachable
+        // through other live names but its spelling cannot be observed again.
+        if !self.function.transfer.recurring.is_empty() {
+            return;
+        }
+        self.last_use.resize(self.local_ids.len(), 0);
+        for formal in &function.params {
+            if let Some(&local) = self.local_indices.get(formal) {
+                self.last_use[local] = 0;
+            }
+        }
+        self.replay_retirements
+            .extend(self.last_use.iter().copied().filter(|&rank| rank > 0));
+        self.replay_retirements.sort_unstable();
+        self.replay_retirements.dedup();
+    }
+
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn replay_visibility(
+        &self,
+        source: BlockId,
+        target: BlockId,
+    ) -> Option<RootSet> {
+        let ranks = &self.function.transfer.ranks;
+        let rank = ranks[&target];
+        let index = self
+            .replay_retirements
+            .partition_point(|&last| last <= rank);
+        let last = *self.replay_retirements.get(index)?;
+        if last > ranks[&source] {
+            return None;
+        }
+        let mut visible = RootSet::empty(self.local_ids.len());
+        for (local, &last) in self.last_use.iter().enumerate() {
+            if last <= rank {
+                visible.insert(local);
+            }
+        }
+        Some(visible)
+    }
+
     pub(in crate::compiler_frontend::analysis::borrow_checker) fn continuation(
         &self,
         mut block: BlockId,
@@ -561,6 +1901,7 @@ impl ProjectedSupport<'_> {
                 block_successors: &coordinates.successors,
                 local_first_write_order: &self.first_write,
                 acyclic_entry_block: coordinates.acyclic_entry,
+                entry_roots: self.entry_roots.as_ref(),
             },
             statement_orders: &orders.statements,
             statement_positions: if transfer_terminator {
@@ -570,6 +1911,9 @@ impl ProjectedSupport<'_> {
             },
             terminator_order: orders.terminator,
             transfer_terminator,
+            structural_calls: &orders.structural_calls,
+            structural_terminator: orders.structural_terminator,
+            call_components: self.function.call_components.get(&(self.support, block)),
         }
     }
 
@@ -617,6 +1961,56 @@ impl ResultSources {
                 sources.iter().map(move |source| (source, output, input))
             })
     }
+
+    fn from_settled_call(
+        summary: &crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary,
+        slot: Option<usize>,
+    ) -> Self {
+        use typed::{ObjectRef, ScalarSource, ScalarSourceBound, ValueSource};
+        let mut sources = Self::default();
+        let Some(facts) = summary.facts() else {
+            return sources;
+        };
+        let (error, slot) = outcome_slot(slot);
+        let _: Result<(), std::convert::Infallible> = facts.lane(error).visit_compatible(
+            |_| Ok(None),
+            |_, product| {
+                for post in product
+                    .components()
+                    .iter()
+                    .flat_map(|component| &component.alternatives)
+                {
+                    for (_, result) in post.results.iter().filter(|(output, _)| *output == slot) {
+                        let mut retain =
+                            |port: PortId| {
+                                if let EntryPort::Value { parameter, path } =
+                                    &facts.ports[port.0 as usize]
+                                {
+                                    sources.0.entry(Box::default()).or_default().insert(
+                                        ResultSource {
+                                            parameter: *parameter,
+                                            input: path.clone(),
+                                        },
+                                    );
+                                }
+                            };
+                        match &result.source {
+                            ValueSource::Allocation(ObjectRef::Entry(port))
+                            | ValueSource::Scalar(ScalarSource::EntryValue(port)) => retain(*port),
+                            ValueSource::Scalar(ScalarSource::Unresolved(
+                                ScalarSourceBound::Values(ports),
+                            )) => {
+                                ports.iter().copied().for_each(retain);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(())
+            },
+        );
+        sources
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -626,7 +2020,6 @@ enum ResultDemand {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[allow(dead_code)] // Matching consumes these compact constraints after indexing.
 pub(super) enum CompatibilityConstraint {
     Equality(IdentityKind, Vec<PortId>),
     Reach(Vec<PortId>),
@@ -1066,6 +2459,8 @@ struct DemandBuilder<'a, 'module> {
     counts: IndexCounts,
     supports: Supports,
     sites: BTreeMap<IndexedSite, Vec<usize>>,
+    call_components: Vec<(IndexedSite, SupportId, usize)>,
+    result_nodes: BTreeMap<(bool, usize), usize>,
     local_nodes: FxHashMap<(IndexedPlace, DemandKind), usize>,
     ports: Vec<EntryPort>,
     port_index: FxHashMap<EntryPort, PortId>,
@@ -1114,6 +2509,8 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             },
             supports: Supports::default(),
             sites: BTreeMap::new(),
+            call_components: Vec::new(),
+            result_nodes: BTreeMap::new(),
             local_nodes: FxHashMap::default(),
             ports: Vec::new(),
             port_index: FxHashMap::default(),
@@ -1324,6 +2721,12 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                 },
                 Some(node),
             );
+            if path.is_empty()
+                && let Some(&wrapper) = self.port_index.get(&EntryPort::Wrapper(param))
+            {
+                self.demanded_roles
+                    .insert(Predicate::DerivedFrom(port, wrapper));
+            }
             if matches!(kind, DemandKind::Reach(_))
                 && classify_hir_type(ty, self.checker.type_environment)
                     .is_ok_and(|shape| shape.has_in_place_mutation_surface())
@@ -1387,6 +2790,16 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                 self.supports.couple(node, effect);
                             }
                         }
+                        if let CallTarget::Local(target) = call.target
+                            && let Some(&callee_support) = self
+                                .callees
+                                .get(target)
+                                .and_then(|callee| callee.result_supports.get(&outcome_slot(slot)))
+                        {
+                            let site = self.site(call.site);
+                            self.couple(node, site);
+                            self.call_components.push((call.site, callee_support, node));
+                        }
                         if slot == Some(0)
                             && let Some(receiver) = call_member_result(call.target)
                         {
@@ -1411,7 +2824,7 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                     }
                                 }
                             }
-                            CallReturns::Summary(_) => {
+                            CallReturns::Summary(summary) => {
                                 if let CallTarget::Local(target) = call.target {
                                     for &actual in call.args {
                                         self.demand_value(
@@ -1420,9 +2833,6 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                             DemandKind::Reach(reach),
                                             node,
                                         );
-                                    }
-                                    if place.path.is_empty() {
-                                        continue;
                                     }
                                     if let Some(sources) =
                                         self.callees.get(target).and_then(|callee| {
@@ -1452,6 +2862,21 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                     for &actual in call.args {
                                         self.demand_opaque_result(
                                             actual, &place, kind, reach, node,
+                                        );
+                                    }
+                                    let sources = ResultSources::from_settled_call(summary, slot);
+                                    for (source, _, tail) in sources.select(&place.path) {
+                                        if kind.writes()
+                                            && !matches!(kind, DemandKind::Reach(_))
+                                            && tail.is_empty()
+                                        {
+                                            continue;
+                                        }
+                                        self.demand_value_path(
+                                            call.args[source.parameter],
+                                            join_selectors(&source.input, tail),
+                                            kind,
+                                            node,
                                         );
                                     }
                                 }
@@ -1526,6 +2951,10 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             HirExpressionKind::Load(place) => {
                 let place = self.place_path(*place, tail);
                 self.demand_place(place, kind, node);
+            }
+            HirExpressionKind::Copy(place) => {
+                let source = self.place_path(*place, tail);
+                self.demand_place(source, DemandKind::Value, node);
             }
             HirExpressionKind::VariantPayloadGet {
                 source,
@@ -1649,6 +3078,10 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                     ReachKind::Referent
                 };
                 self.observe(Observation::Member(receiver, DemandKind::Reach(kind)), node);
+                if op.requires_mutable_receiver() {
+                    self.demand_value(receiver, &[CallField::Elem], DemandKind::Cell, node);
+                    self.demand_value(receiver, &[CallField::MapKey], DemandKind::Cell, node);
+                }
                 if op == HirMapOp::Set {
                     for &argument in args {
                         self.observe(Observation::Value(argument), node);
@@ -1657,13 +3090,12 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             }
         }
 
-        let mut result_nodes = BTreeMap::new();
         for &(site, error, slot, value) in &self.snapshot.returns {
             let node = self.site(site);
-            if let Some(&previous) = result_nodes.get(&(error, slot)) {
+            if let Some(&previous) = self.result_nodes.get(&(error, slot)) {
                 self.couple(previous, node);
             } else {
-                result_nodes.insert((error, slot), node);
+                self.result_nodes.insert((error, slot), node);
             }
             self.observe(Observation::Value(value), node);
         }
@@ -1694,7 +3126,11 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                 .diagnostics
                                 .internal_error("Sparse call argument is missing"));
                         };
-                        let node = *nodes.entry(support).or_insert_with(|| self.site(call.site));
+                        let node = *nodes.entry(support).or_insert_with(|| {
+                            let node = self.site(call.site);
+                            self.call_components.push((call.site, support, node));
+                            node
+                        });
                         self.demand_value(actual, path, *kind, node);
                     }
                 }
@@ -1705,9 +3141,18 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             let is_mutable = |index| contract.is_mutable(index);
             if (0..call.args.len()).any(is_mutable) {
                 let node = self.site(call.site);
+                let member_writes = call_member_writes(call.target);
+                let source_summary = matches!(contract.returns(), CallReturns::Summary(_));
+                if let Some(&receiver) = call.args.first() {
+                    for &field in member_writes {
+                        self.demand_value(receiver, &[field], DemandKind::Cell, node);
+                    }
+                }
                 for (index, &actual) in call.args.iter().enumerate() {
                     if is_mutable(index) {
-                        self.demand_value(actual, &[], DemandKind::Retarget, node);
+                        if member_writes.is_empty() {
+                            self.demand_value(actual, &[], DemandKind::Retarget, node);
+                        }
                         if is_heap(self.checker, expressions.expression(actual).ty)? {
                             self.demand_value(
                                 actual,
@@ -1715,6 +3160,13 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                 DemandKind::Reach(ReachKind::EntryStructure),
                                 node,
                             );
+                            if source_summary {
+                                self.demand_non_local_cells(
+                                    actual,
+                                    expressions.expression(actual).ty,
+                                    node,
+                                );
+                            }
                         }
                     }
                     self.demand_value(actual, &[], DemandKind::Value, node);
@@ -1722,6 +3174,26 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             }
         }
         Ok(())
+    }
+
+    fn demand_non_local_cells(&mut self, actual: HirValueId, ty: TypeId, node: usize) {
+        // A generated callee may settle after this support is built. Use its
+        // signature's writable selectors, not the first delivered set of edits.
+        let env = self.checker.type_environment;
+        let mut pending = vec![(ty, Vec::new())];
+        while let Some((ty, path)) = pending.pop() {
+            let _: Result<(), std::convert::Infallible> =
+                CallField::for_each_child(ty, env, |field, child| {
+                    let mut child_path = path.clone();
+                    child_path.push(field);
+                    self.demand_value(actual, &child_path, DemandKind::Cell, node);
+                    if !field.is_collapsed() {
+                        // A family owns everything below its collapsed selector.
+                        pending.push((child, child_path));
+                    }
+                    Ok(())
+                });
+        }
     }
 
     fn observe(&mut self, observation: Observation, node: usize) {
@@ -1989,6 +3461,21 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                                                 join_selectors(&output, output_tail),
                                             ));
                                         }
+                                    } else if let CallReturns::Summary(summary) =
+                                        self.call_contracts[position].returns()
+                                    {
+                                        for (source, output_tail, input_tail) in
+                                            ResultSources::from_settled_call(summary, slot)
+                                                .select(&place.path)
+                                        {
+                                            work.push((
+                                                ResultDemand::Value(
+                                                    call.args[source.parameter],
+                                                    join_selectors(&source.input, input_tail),
+                                                ),
+                                                join_selectors(&output, output_tail),
+                                            ));
+                                        }
                                     }
                                     continue;
                                 }
@@ -2096,7 +3583,7 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
     fn seal(mut self, transfer: Rc<SparseTransferIndex>) -> SparseFunction {
         let result_sources = self.collect_result_sources();
         self.drain_demands();
-        let (conditional, conditional_arm_count) = self.connect_control();
+        let (_conditional, _conditional_arm_count) = self.connect_control();
         self.drain_demands();
         self.connect_local_accesses();
         let (guards, compatibility) = self.connect_compatibility();
@@ -2112,7 +3599,7 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             .into_iter()
             .map(|(key, node)| (key, support_of(node)))
             .collect();
-        let port_supports = self
+        let port_supports: Vec<_> = self
             .port_nodes
             .iter()
             .copied()
@@ -2134,11 +3621,80 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             #[cfg(test)]
             operations.insert(site, supports.into_boxed_slice());
         }
-        let conditional_supports = conditional.into_iter().map(&mut support_of).collect();
+        let conditional_supports = _conditional.into_iter().map(&mut support_of);
+        #[cfg(test)]
+        let conditional_supports = conditional_supports.collect();
+        #[cfg(not(test))]
+        conditional_supports.for_each(drop);
+        let result_supports = self
+            .result_nodes
+            .into_iter()
+            .map(|(slot, node)| (slot, support_of(node)))
+            .collect();
+        let mut call_components = BTreeMap::<_, BTreeMap<usize, Vec<SupportId>>>::new();
+        for ((block, position), callee, node) in self.call_components {
+            call_components
+                .entry((support_of(node), BlockId(block)))
+                .or_default()
+                .entry(position)
+                .or_default()
+                .push(callee);
+        }
+        for components in call_components.values_mut().flat_map(BTreeMap::values_mut) {
+            components.sort_unstable();
+            components.dedup();
+        }
+        let support_count = support_indices.len();
+        let mut ports_by_support = vec![Vec::new(); support_count];
+        for (port, &support) in port_supports.iter().enumerate() {
+            ports_by_support[support.0 as usize].push(PortId(port as u32));
+        }
+        // An observed edge needs its holder in the predecessor even when two
+        // independent supports only share a read of that holder.
+        for (port, &support) in self.ports.iter().zip(&port_supports) {
+            if let EntryPort::Edge(holder, _) = *port {
+                ports_by_support[support.0 as usize].push(holder);
+            }
+        }
+        for ports in &mut ports_by_support {
+            ports.sort_unstable();
+            ports.dedup();
+        }
+        let mut callees: Vec<_> = self
+            .snapshot
+            .calls
+            .iter()
+            .filter_map(|call| match call.target {
+                CallTarget::Local(function) => Some(*function),
+                _ => None,
+            })
+            .collect();
+        callees.sort_unstable_by_key(|function| function.0);
+        callees.dedup();
 
+        let total = transfer.recurring.is_empty()
+            && self.snapshot.blocks.iter().all(|block| {
+                !transfer.successors[block].is_empty()
+                    || matches!(
+                        self.checker.module.blocks[self.checker.block_index_by_id[block]]
+                            .terminator,
+                        HirTerminator::Return(_) | HirTerminator::ReturnError(_)
+                    )
+            })
+            && self.snapshot.calls.iter().all(|call| match call.target {
+                CallTarget::External(_) => true,
+                CallTarget::Local(callee) => {
+                    self.callees.get(callee).is_some_and(|callee| callee.total)
+                }
+                _ => false,
+            });
         SparseFunction {
             ports: self.ports,
             port_supports,
+            support_count,
+            callees,
+            result_supports,
+            ports_by_support,
             guards,
             compatibility,
             #[cfg(test)]
@@ -2147,17 +3703,33 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                 .into_iter()
                 .map(|(key, positions)| (key, positions.into_boxed_slice()))
                 .collect(),
+            call_components,
+            #[cfg(test)]
             conditional_supports,
-            conditional_arm_count,
+            #[cfg(test)]
+            conditional_arm_count: _conditional_arm_count,
             counts: self.counts,
             transfer,
             envelope,
             result_sources,
+            total,
         }
     }
 
     fn connect_control(&mut self) -> (Vec<usize>, usize) {
-        let cfg = SparseCfg::new(self.checker, self.snapshot, &mut self.counts.reverse_visits);
+        let cfg = SparseCfg::new(
+            self.checker,
+            self.snapshot,
+            |target| match target {
+                CallTarget::External(_) => true,
+                CallTarget::Local(callee) => {
+                    self.callees.get(callee).is_some_and(|callee| callee.total)
+                }
+                _ => false,
+            },
+            true,
+            &mut self.counts.reverse_visits,
+        );
         if cfg.may_recur(&mut self.counts.reverse_visits) {
             // Iterations can share a trip count or skip a reconvergence.
             // Couple their state until there is a local recurrence proof.
@@ -2185,25 +3757,12 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
             }
             let join = joins[branch];
             let block = self.snapshot.blocks[branch];
-            let term =
-                &self.checker.module.blocks[self.checker.block_index_by_id[&block]].terminator;
-            let independent_condition = match term {
-                HirTerminator::If { condition, .. } => {
-                    let expression = self.checker.module.expressions.expression(*condition);
-                    matches!(expression.kind, HirExpressionKind::Load(place)
-                    if place.projections.is_empty()
-                        && self.parameter_indices.get(&place.root).is_some_and(|&index| {
-                            self.checker.public_call_summaries[&self.snapshot.function.id]
-                                .parameters[index].access == PublicCallParameterAccess::Shared
-                        }))
-                }
-                _ => false,
-            };
+            let branch_block = &self.checker.module.blocks[self.checker.block_index_by_id[&block]];
+            let term = &branch_block.terminator;
             affected.clear();
             let stamp = branch + 1;
-            if join == cfg.exit || !independent_condition {
-                // An early stop or an unmodelled choice can couple effects
-                // on both sides of this region, even across its CFG join.
+            if join == cfg.exit {
+                // No reconvergence is proved for the continuing alternatives.
                 if let Some(first) = joined_to_exit {
                     affected.push(first);
                 } else {
@@ -2211,6 +3770,9 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                     joined_to_exit = affected.first().copied();
                 }
             } else {
+                if let Some(nodes) = self.sites.get(&(block.0, branch_block.statements.len())) {
+                    affected.extend(nodes);
+                }
                 work.extend_from_slice(successors);
                 while let Some(next) = work.pop() {
                     self.counts.reverse_visits += 1;
@@ -2246,6 +3808,23 @@ impl<'a, 'module> DemandBuilder<'a, 'module> {
                         self.couple(previous, first);
                     }
                 }
+            } else {
+                let mut operands = Vec::new();
+                collect_terminator_loaded_locals(
+                    &self.checker.module.expressions,
+                    term,
+                    &mut |local| operands.push(local),
+                );
+                for local in operands {
+                    self.demand_place(
+                        IndexedPlace {
+                            local,
+                            path: Box::default(),
+                        },
+                        DemandKind::Value,
+                        first,
+                    );
+                }
             }
         }
         (conditional, arms)
@@ -2268,7 +3847,13 @@ struct SparseCfg {
 }
 
 impl SparseCfg {
-    fn new(checker: &BorrowChecker<'_>, snapshot: &Snapshot<'_>, visits: &mut usize) -> Self {
+    fn new(
+        checker: &BorrowChecker<'_>,
+        snapshot: &Snapshot<'_>,
+        call_total: impl Fn(&CallTarget) -> bool,
+        continuing_only: bool,
+        visits: &mut usize,
+    ) -> Self {
         let blocks = &snapshot.blocks;
         let indices: FxHashMap<_, _> = blocks.iter().enumerate().map(|(i, &id)| (id, i)).collect();
         let exit = blocks.len();
@@ -2277,20 +3862,53 @@ impl SparseCfg {
         let mut unproved_continuation = vec![false; exit + 1];
         for call in &snapshot.calls {
             *visits += 1;
-            if matches!(
-                call.continuation,
-                CallContinuation::Statement | CallContinuation::Invoke
-            ) {
+            if !call_total(call.target)
+                && matches!(
+                    call.continuation,
+                    CallContinuation::Statement | CallContinuation::Invoke
+                )
+            {
                 // The HIR continuation is executable only if the call returns.
                 // Keep the stop edge structural, independent of delivered summaries.
                 unproved_continuation[indices[&BlockId(call.site.0)]] = true;
             }
         }
+        let mut returning = Vec::new();
         for (i, &id) in blocks.iter().enumerate() {
             let block = &checker.module.blocks[checker.block_index_by_id[&id]];
             for_each_terminator_target(&block.terminator, |target| {
                 successors[i].push(indices[&target])
             });
+            if continuing_only {
+                if matches!(
+                    block.terminator,
+                    HirTerminator::Return(_) | HirTerminator::ReturnError(_)
+                ) {
+                    returning.push(i);
+                }
+                for &target in &successors[i] {
+                    predecessors[target].push(i);
+                }
+            }
+        }
+        if continuing_only {
+            // An aborting arm has executed effects but cannot choose the output
+            // of a sibling continuation. Only the support partition erases it.
+            let mut reaches_return = vec![false; exit];
+            while let Some(block) = returning.pop() {
+                *visits += 1;
+                if !std::mem::replace(&mut reaches_return[block], true) {
+                    returning.extend_from_slice(&predecessors[block]);
+                }
+            }
+            for (i, targets) in successors[..exit].iter_mut().enumerate() {
+                if reaches_return[i] {
+                    targets.retain(|&target| reaches_return[target]);
+                }
+            }
+            predecessors.iter_mut().for_each(Vec::clear);
+        }
+        for i in 0..exit {
             if successors[i].is_empty() || unproved_continuation[i] {
                 successors[i].push(exit);
             }
@@ -2401,8 +4019,7 @@ impl SparseCfg {
     }
 }
 
-impl IndexedFunction {
-    #[allow(dead_code)] // Sparse extraction supplies this view without constructing dense validation layout.
+impl SparseFunction {
     pub(super) fn build_sparse(
         checker: &BorrowChecker<'_>,
     ) -> Result<FxHashMap<FunctionId, SparseFunction>, BorrowCheckError> {
@@ -2486,7 +4103,9 @@ impl IndexedFunction {
                 index.counts += snapshot.counts;
             }
             if previous.is_none_or(|old| {
-                old.envelope != index.envelope || old.result_sources != index.result_sources
+                old.envelope != index.envelope
+                    || old.result_sources != index.result_sources
+                    || old.total != index.total
             }) && let Some(callers) = callers.get(&snapshot.function.id)
             {
                 for &caller in callers {
@@ -2507,806 +4126,7 @@ fn build_sparse_index_for_test(
 ) -> Result<FxHashMap<FunctionId, SparseFunction>, BorrowCheckError> {
     checker.public_call_summaries =
         BorrowChecker::seed_public_call_summaries(checker.module, &checker.diagnostics)?;
-    IndexedFunction::build_sparse(checker)
-}
-
-// Only retire named bindings proven dead without a CFG liveness walk. Every reference must
-// follow a definition in the same block, so a backedge also redefines before the next use.
-struct LocalUses {
-    defining_block: Option<BlockId>,
-    last: usize,
-}
-
-impl LocalUses {
-    fn record(uses: &mut FxHashMap<LocalId, Self>, local: LocalId, block: BlockId, index: usize) {
-        let uses = uses.entry(local).or_insert(Self {
-            defining_block: None,
-            last: index,
-        });
-        if uses.defining_block == Some(block) {
-            uses.last = index;
-        } else {
-            uses.defining_block = None;
-        }
-    }
-}
-
-pub(super) struct FunctionEvidence<'a, 'module> {
-    pub(super) checker: &'a BorrowChecker<'module>,
-    pub(super) function: &'a HirFunction,
-    pub(super) index: &'a IndexedFunction,
-}
-
-impl FunctionEvidence<'_, '_> {
-    pub(super) fn evaluate(&self) -> Result<CallAllocationFacts, BorrowCheckError> {
-        if self.function.return_contract.is_never() {
-            return Ok(CallAllocationFacts::default());
-        }
-        let entry = self.function.entry;
-        let mut initial = Graph::default();
-        let mut rows = Vec::new();
-        if self.index.tracks_values {
-            for (index, &local) in self.function.params.iter().enumerate() {
-                self.typed_paths(self.ty(local), |path, ty| {
-                    let parameter = CallParameterPath {
-                        index,
-                        path: path.to_vec(),
-                    };
-                    rows.push(Spec::born(
-                        Self::local(local).at(path),
-                        ty,
-                        Origin::Parameter(parameter),
-                    ));
-                })?;
-            }
-        }
-        initial.install(rows, &[], None);
-        let mut inputs = FxHashMap::default();
-        inputs.insert(entry, initial);
-        let mut queue = VecDeque::from([entry]);
-        let mut queued = rustc_hash::FxHashSet::default();
-        queued.insert(entry);
-        let mut success = Lane::default();
-        let mut error = Lane::default();
-        'worklist: while let Some(block_id) = queue.pop_front() {
-            queued.remove(&block_id);
-            let block = self
-                .checker
-                .block_by_id_or_error(block_id, self.function.id)?;
-            let mut state = inputs[&block_id].clone();
-            let mut retiring = self
-                .index
-                .retirements
-                .get(&block_id)
-                .into_iter()
-                .flatten()
-                .peekable();
-            let mut protected = Vec::new();
-            for (index, statement) in block.statements.iter().enumerate() {
-                if !self.statement(
-                    &mut state,
-                    Site::Operation(block_id.0, index),
-                    &statement.kind,
-                )? {
-                    continue 'worklist;
-                }
-                state.retire_temporaries();
-                while let Some(&(_, local)) = retiring.next_if(|&&(last, _)| last == index) {
-                    if !state.retire_local(local.0) {
-                        protected.push(local.0);
-                    }
-                }
-                protected.retain(|&local| !state.retire_local(local));
-            }
-            let mut edge = |target, mut state: Graph| {
-                state.retire_temporaries();
-                use std::collections::hash_map::Entry;
-                let changed = match inputs.entry(target) {
-                    Entry::Occupied(mut input) => input.get_mut().join(state),
-                    Entry::Vacant(input) => {
-                        input.insert(state);
-                        true
-                    }
-                };
-                if changed && queued.insert(target) {
-                    queue.push_back(target);
-                }
-            };
-            match &block.terminator {
-                HirTerminator::Return(values) => {
-                    let values = self.checker.module.expressions.values(*values);
-                    let results = values
-                        .iter()
-                        .map(|&value| self.value(&mut state, value))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    success.extend(&state, &results);
-                }
-                HirTerminator::ReturnError(value) => {
-                    let result = self.value(&mut state, *value)?;
-                    error.extend(&state, &[result]);
-                }
-                HirTerminator::Jump { target, args } => {
-                    let mut rows = Vec::new();
-                    let mut clear = Vec::with_capacity(args.len());
-                    for arg in args {
-                        let destination = Self::local(arg.destination);
-                        state.snapshot(&destination, &Self::local(arg.source), &mut rows);
-                        clear.push(destination);
-                        state.aliases.remove(&arg.destination.0);
-                    }
-                    state.install(rows, &clear, None);
-                    edge(*target, state);
-                }
-                HirTerminator::Invoke {
-                    operation,
-                    success,
-                    success_results,
-                    failure,
-                    error_result,
-                    ..
-                } => {
-                    let site = Site::Operation(block_id.0, block.statements.len());
-                    let mut normal = state.clone();
-                    // Evaluate operands against the same predecessor. Retire the unselected
-                    // slots after capture; selected definitions replace their own prior bindings.
-                    if self.invoke(&mut normal, site, operation, false, success_results)? {
-                        self.kill_local(&mut normal, *error_result);
-                        edge(*success, normal);
-                    }
-                    if self.invoke(
-                        &mut state,
-                        site,
-                        operation,
-                        true,
-                        std::slice::from_ref(error_result),
-                    )? {
-                        for &local in success_results {
-                            self.kill_local(&mut state, local);
-                        }
-                        edge(*failure, state);
-                    }
-                }
-                HirTerminator::Break { target } | HirTerminator::Continue { target } => {
-                    edge(*target, state)
-                }
-                terminator => {
-                    for_each_terminator_target(terminator, |target| edge(target, state.clone()))
-                }
-            }
-        }
-        let mut success = success.finish();
-        let mut error = error.finish();
-        let needs_success = !success.reachable;
-        let needs_error = !error.reachable
-            && self
-                .function
-                .return_contract
-                .ordinary()
-                .is_some_and(|shape| shape.is_fallible());
-        if needs_success || needs_error {
-            let (may_succeed, may_fail) = self.structural_returns(needs_success, needs_error)?;
-            success.structural_only = needs_success && may_succeed;
-            error.structural_only = needs_error && may_fail;
-        }
-        Ok(CallAllocationFacts { success, error })
-    }
-
-    /// Find permitted exits without treating absent allocation evidence as a control-flow
-    /// predicate. Only needed for lanes the graph transfer did not reach. Calls use the same
-    /// least fixed point, but read the structural return bit rather than the graph bottom.
-    fn structural_returns(
-        &self,
-        needs_success: bool,
-        needs_error: bool,
-    ) -> Result<(bool, bool), BorrowCheckError> {
-        let can_return = |target: &CallTarget, error: bool| match target {
-            CallTarget::External(_) => true,
-            _ => matches!(
-                self.call_summary(target).map(|summary| &summary.return_alias),
-                Some(FunctionReturnAliasSummary::Known(facts))
-                    if (if error { &facts.error } else { &facts.success }).can_return()
-            ),
-        };
-        let entry = self.function.entry;
-        let mut seen = rustc_hash::FxHashSet::default();
-        seen.insert(entry);
-        let mut worklist = vec![entry];
-        let (mut success, mut error) = (false, false);
-        while let Some(id) = worklist.pop() {
-            let block = self.checker.block_by_id_or_error(id, self.function.id)?;
-            if block.statements.iter().any(|statement| {
-                matches!(&statement.kind, HirStatementKind::Call { target, .. } if !can_return(target, false))
-            }) {
-                continue;
-            }
-            let mut push = |id| {
-                if seen.insert(id) {
-                    worklist.push(id);
-                }
-            };
-            match &block.terminator {
-                HirTerminator::Return(_) => success = true,
-                HirTerminator::ReturnError(_) => error = true,
-                HirTerminator::Invoke {
-                    operation: HirFallibleOperation::Call { target, .. },
-                    success,
-                    failure,
-                    ..
-                } => {
-                    if can_return(target, false) {
-                        push(*success);
-                    }
-                    if can_return(target, true) {
-                        push(*failure);
-                    }
-                }
-                terminator => for_each_terminator_target(terminator, push),
-            }
-            if (success || !needs_success) && (error || !needs_error) {
-                break;
-            }
-        }
-        Ok((success, error))
-    }
-
-    fn statement(
-        &self,
-        state: &mut Graph,
-        site: Site,
-        statement: &HirStatementKind,
-    ) -> Result<bool, BorrowCheckError> {
-        if !self.index.tracks_values {
-            return match statement {
-                HirStatementKind::Call {
-                    target,
-                    args,
-                    results,
-                } => self.call(state, site, target, *args, false, results),
-                _ => Ok(true),
-            };
-        }
-        match statement {
-            HirStatementKind::Write { target, value } => match target {
-                HirWriteTarget::DefineLocal(local) => {
-                    let alias = self.acquired_alias(*local, *value)?;
-                    let captured = self.value(state, *value)?;
-                    self.define(state, *local, &captured, alias.map(|alias| (site, alias)));
-                }
-                HirWriteTarget::AssignPlace(place) => {
-                    // A direct self-update adds no alias and keeps the binding role, as in live
-                    // transfer.
-                    if target.is_direct_self_update_of(
-                        self.checker.module.expressions.expression(*value),
-                    ) {
-                        return Ok(true);
-                    }
-                    let target = self.place(place)?;
-                    let alias = if target.path.is_empty() {
-                        self.acquired_alias(place.root, *value)?
-                    } else {
-                        None
-                    };
-                    let value = self.value(state, *value)?;
-                    let Some(alias) = alias else {
-                        return Ok(self.assign(state, &target, &value, false));
-                    };
-                    // The plain-slot alternative acquires the place as its alias, as at a
-                    // definition; each existing alias alternative is written through instead.
-                    let Some(alternatives) = state.aliases.get(&place.root.0) else {
-                        self.define(state, place.root, &value, Some((site, alias)));
-                        return Ok(true);
-                    };
-                    if !alternatives.contains(&target) {
-                        return Ok(self.assign(state, &target, &value, false));
-                    }
-                    let mut aliased = state.clone();
-                    if let Some(alternatives) = aliased.aliases.get_mut(&place.root.0) {
-                        alternatives.remove(&target);
-                    }
-                    // The alternatives are joined possibilities: one whose holder no allocation
-                    // reaches yet adds nothing, and widening that resolves it only adds facts.
-                    let aliased = self
-                        .assign(&mut aliased, &target, &value, false)
-                        .then_some(aliased);
-                    self.define(state, place.root, &value, Some((site, alias)));
-                    if let Some(aliased) = aliased {
-                        state.join(aliased);
-                    }
-                }
-            },
-            HirStatementKind::Call {
-                target,
-                args,
-                results,
-            } => {
-                return self.call(state, site, target, *args, false, results);
-            }
-            HirStatementKind::MapOp {
-                op,
-                receiver,
-                args,
-                result,
-            } => {
-                return self.map(state, site, *op, *receiver, *args, result.as_slice());
-            }
-            HirStatementKind::FormatFloat { result, .. } => {
-                let value = self.fresh_operation(state, site, 0, self.ty(result.local()))?;
-                return Ok(self.bind(state, *result, &value));
-            }
-            HirStatementKind::PushRuntimeFragment { vec_local, value } => {
-                let value = self.value(state, *value)?;
-                return Ok(self.store(
-                    state,
-                    &Self::local(*vec_local),
-                    CallField::Elem,
-                    &value,
-                    true,
-                ));
-            }
-            HirStatementKind::NumericOp { .. }
-            | HirStatementKind::FastStoreConversion { .. }
-            | HirStatementKind::LoopStepFailure { .. }
-            | HirStatementKind::RangeCandidate { .. }
-            | HirStatementKind::ValidateFloat { .. }
-            | HirStatementKind::Expr(_) => {}
-        }
-        Ok(true)
-    }
-
-    fn invoke(
-        &self,
-        state: &mut Graph,
-        site: Site,
-        op: &HirFallibleOperation,
-        error: bool,
-        locals: &[LocalId],
-    ) -> Result<bool, BorrowCheckError> {
-        if !self.index.tracks_values {
-            return match op {
-                HirFallibleOperation::Call { target, args } => {
-                    self.call(state, site, target, *args, error, &[])
-                }
-                _ => Ok(true),
-            };
-        }
-        let destinations = locals
-            .iter()
-            .copied()
-            .map(HirLocalDestination::Define)
-            .collect::<Vec<_>>();
-        match op {
-            HirFallibleOperation::Call { target, args } => {
-                self.call(state, site, target, *args, error, &destinations)
-            }
-            HirFallibleOperation::MapOp { op, receiver, args } if !error => {
-                self.map(state, site, *op, *receiver, *args, &destinations)
-            }
-            _ => {
-                let mut reached = true;
-                for (slot, &destination) in destinations.iter().enumerate() {
-                    let ty = self.ty(destination.local());
-                    let value = if error {
-                        self.fresh_builtin_error(state, site, slot, ty)?
-                    } else {
-                        self.fresh_operation(state, site, slot, ty)?
-                    };
-                    reached &= self.bind(state, destination, &value);
-                }
-                Ok(reached)
-            }
-        }
-    }
-
-    fn value(&self, state: &mut Graph, value: HirValueId) -> Result<Cell, BorrowCheckError> {
-        let expressions = &self.checker.module.expressions;
-        let expression = expressions.expression(value);
-        if !self.heap(expression.ty)? {
-            return Ok(state.temporary());
-        }
-        let site = Site::Value(value.0);
-        match &expression.kind {
-            HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
-                let source = self.place(place)?;
-                Ok(state.capture(&source))
-            }
-            HirExpressionKind::VariantPayloadGet {
-                source,
-                variant_index,
-                field_index,
-                ..
-            } => {
-                let source = self.value(state, *source)?;
-                Ok(source.at(&[payload(*variant_index, *field_index)]))
-            }
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                let children = expressions
-                    .struct_fields(*fields)
-                    .iter()
-                    .map(|&(field, child)| Ok((self.field(expression.ty, field)?, child)));
-                self.construct(state, value, expression.ty, children)
-            }
-            HirExpressionKind::VariantConstruct {
-                variant_index,
-                fields,
-                ..
-            }
-            | HirExpressionKind::RouteConstruct {
-                variant_index,
-                fields,
-                ..
-            } => self.construct(
-                state,
-                value,
-                expression.ty,
-                expressions
-                    .variant_fields(*fields)
-                    .iter()
-                    .enumerate()
-                    .map(|(index, field)| Ok((payload(*variant_index, index), field.value))),
-            ),
-            HirExpressionKind::Collection(values) => self.construct(
-                state,
-                value,
-                expression.ty,
-                expressions
-                    .values(*values)
-                    .iter()
-                    .map(|&child| Ok((CallField::Elem, child))),
-            ),
-            HirExpressionKind::MapLiteral(entries) => self.construct(
-                state,
-                value,
-                expression.ty,
-                expressions.map_entries(*entries).iter().flat_map(|entry| {
-                    [
-                        Ok((CallField::MapKey, entry.key)),
-                        Ok((CallField::Elem, entry.value)),
-                    ]
-                }),
-            ),
-            HirExpressionKind::Copy(place) => {
-                let source = self.place(place)?;
-                let target = state.temporary();
-                let mut rows = Vec::new();
-                state.snapshot(&target, &source, &mut rows);
-                for row in &mut rows {
-                    let detached = Spec::born(
-                        row.cell.clone(),
-                        row.node.ty,
-                        Origin::Fresh(site, 0, row.cell.path.clone()),
-                    );
-                    row.node = detached.node;
-                    row.births = detached.births;
-                    row.detached = true;
-                }
-                state.install(rows, &[], None);
-                Ok(target)
-            }
-            HirExpressionKind::Load(_) => self.opaque_value(state, site, 0, expression.ty),
-            _ => self.fresh_operation(state, site, 0, expression.ty),
-        }
-    }
-
-    fn construct(
-        &self,
-        state: &mut Graph,
-        value: HirValueId,
-        ty: TypeId,
-        children: impl Iterator<Item = Result<(CallField, HirValueId), BorrowCheckError>>,
-    ) -> Result<Cell, BorrowCheckError> {
-        let result = state.temporary();
-        let mut rows = vec![Spec::born(
-            result.clone(),
-            ty,
-            Origin::Fresh(Site::Value(value.0), 0, Vec::new()),
-        )];
-        for child in children {
-            let (field, value) = child?;
-            if !self.heap(self.checker.module.expressions.expression(value).ty)? {
-                continue;
-            }
-            let value = self.value(state, value)?;
-            state.snapshot(&result.at(&[field]), &value, &mut rows);
-        }
-        state.install(rows, &[], None);
-        Ok(result)
-    }
-
-    fn fresh_operation(
-        &self,
-        state: &mut Graph,
-        site: Site,
-        slot: usize,
-        ty: TypeId,
-    ) -> Result<Cell, BorrowCheckError> {
-        let result = state.temporary();
-        if self.heap(ty)? {
-            state.install(
-                vec![Spec::born(
-                    result.clone(),
-                    ty,
-                    Origin::Fresh(site, slot, Vec::new()),
-                )],
-                &[],
-                None,
-            );
-        }
-        Ok(result)
-    }
-
-    /// Compiler-produced builtin errors initialise their message as well as the record.
-    fn fresh_builtin_error(
-        &self,
-        state: &mut Graph,
-        site: Site,
-        slot: usize,
-        ty: TypeId,
-    ) -> Result<Cell, BorrowCheckError> {
-        let result = state.temporary();
-        let mut rows = Vec::new();
-        self.typed_paths(ty, |path, ty| {
-            rows.push(Spec::born(
-                result.at(path),
-                ty,
-                Origin::Fresh(site, slot, path.to_vec()),
-            ));
-        })?;
-        state.install(rows, &[], None);
-        Ok(result)
-    }
-
-    fn opaque_value(
-        &self,
-        state: &mut Graph,
-        site: Site,
-        _slot: usize,
-        ty: TypeId,
-    ) -> Result<Cell, BorrowCheckError> {
-        let result = state.temporary();
-        let mut specs = Vec::new();
-        self.typed_paths(ty, |path, ty| {
-            specs.push(Spec::born(
-                result.at(path),
-                ty,
-                Origin::Opaque(site, ty, None),
-            ))
-        })?;
-        state.install(specs, &[], None);
-        Ok(result)
-    }
-
-    /// The place a mutable authored local starts aliasing when it receives a place load.
-    fn acquired_alias(
-        &self,
-        local: LocalId,
-        value: HirValueId,
-    ) -> Result<Option<Cell>, BorrowCheckError> {
-        let binding = self.index.locals[&local];
-        let expression = self.checker.module.expressions.expression(value);
-        if binding.mutable
-            && binding.authored
-            && expression.value_kind == ValueKind::Place
-            && let HirExpressionKind::Load(place) = &expression.kind
-        {
-            return Ok(Some(self.place(place)?));
-        }
-        Ok(None)
-    }
-
-    /// Bind a definite new value to the local's slot. A place load also makes the local that
-    /// place's alias; a projected one captures its holder under the acquisition site.
-    fn define(&self, state: &mut Graph, local: LocalId, value: &Cell, alias: Option<(Site, Cell)>) {
-        let holder = alias.as_ref().and_then(|(_, alias)| {
-            let (_, prefix) = alias.path.split_last()?;
-            let holder = Cell::root(alias.owner.clone()).at(prefix);
-            // A place that runs through the dying slot is captured before the slot is cleared.
-            let through_slot = alias.owner == Owner::Local(local.0);
-            Some(if through_slot {
-                state.capture(&holder)
-            } else {
-                holder
-            })
-        });
-        self.kill_local(state, local);
-        self.rebind(state, Self::local(local), value, false);
-        let Some((site, alias)) = alias else { return };
-        let targets = match holder {
-            Some(holder) => {
-                let owner = Cell::root(Owner::Alias(local.0, site));
-                self.rebind(state, owner.clone(), &holder, false);
-                BTreeSet::from([owner.at(&alias.path[alias.path.len() - 1..])])
-            }
-            None => state
-                .aliases
-                .get(&place_local(&alias))
-                .cloned()
-                .unwrap_or_else(|| BTreeSet::from([alias])),
-        };
-        state.aliases.insert(local.0, targets);
-    }
-
-    /// Returns `false` when an update reaches a definite holder that no allocation reaches yet.
-    #[must_use]
-    fn bind(&self, state: &mut Graph, destination: HirLocalDestination, value: &Cell) -> bool {
-        let local = destination.local();
-        if matches!(destination, HirLocalDestination::Update(_)) {
-            return self.assign(state, &Self::local(local), value, false);
-        }
-        self.define(state, local, value, None);
-        true
-    }
-
-    fn kill_local(&self, state: &mut Graph, local: LocalId) {
-        state.aliases.remove(&local.0);
-        state.clear_local(local.0);
-    }
-
-    fn rebind(&self, state: &mut Graph, target: Cell, value: &Cell, weak: bool) {
-        let mut rows = Vec::new();
-        state.snapshot(&target, value, &mut rows);
-        let clear = if weak {
-            &[]
-        } else {
-            std::slice::from_ref(&target)
-        };
-        state.install(rows, clear, None);
-    }
-
-    /// Write every destination of one assignment. Returns `false` when a definite destination's
-    /// holder is still bottom: that path stays incomplete until a widening input resolves the
-    /// holder, instead of dropping a write that the resolved state would make strong.
-    #[must_use]
-    fn assign(&self, state: &mut Graph, target: &Cell, value: &Cell, weak: bool) -> bool {
-        let mut seen = BTreeSet::new();
-        let mut pending = vec![(target.clone(), weak)];
-        let mut reached = true;
-        while let Some((target, weak)) = pending.pop() {
-            if !seen.insert(target.clone()) {
-                continue;
-            }
-            if let Some((&key, prefix)) = target.path.split_last() {
-                // An ambiguous alias target is only a may-destination: a bottom alternative adds
-                // nothing, and another alternative carries the write.
-                reached &= self.store(
-                    state,
-                    &Cell::root(target.owner.clone()).at(prefix),
-                    key,
-                    value,
-                    weak,
-                ) || weak;
-            } else {
-                let local = place_local(&target);
-                let aliases = state.aliases.get(&local);
-                let weak = weak || aliases.is_some_and(|aliases| aliases.len() != 1);
-                if let Some(aliases) = aliases {
-                    pending.extend(aliases.iter().cloned().map(|alias| (alias, weak)));
-                }
-                if let Some(index) = self.index.locals[&LocalId(local)].mutable_parameter {
-                    let output = Cell::root(Owner::Store(CallParameterPath {
-                        index,
-                        path: Vec::new(),
-                    }));
-                    self.rebind(state, output, value, weak);
-                }
-                self.rebind(state, target, value, weak);
-            }
-        }
-        reached
-    }
-
-    /// Returns `false` when the holder is bottom. `weak` only stops the write replacing existing
-    /// contents; whether a bottom holder may be skipped is the caller's decision, because a
-    /// definite operation on a weakly updated element path still needs its receiver to exist.
-    #[must_use]
-    fn store(
-        &self,
-        state: &mut Graph,
-        holder: &Cell,
-        key: CallField,
-        value: &Cell,
-        weak: bool,
-    ) -> bool {
-        let allowed = |index: usize| self.index.locals[&self.function.params[index]].mutable;
-        state.write(holder, key, value, weak, allowed)
-    }
-
-    fn place(&self, place: &HirPlace) -> Result<Cell, BorrowCheckError> {
-        let mut cell = Self::local(place.root);
-        let mut ty = self.ty(place.root);
-        for projection in self
-            .checker
-            .module
-            .expressions
-            .projections(place.projections)
-        {
-            let field = match projection {
-                HirProjection::Field(field) => self.field(ty, *field)?,
-                HirProjection::Index(_) => CallField::Elem,
-            };
-            ty = self.checker.call_child_type(ty, field).ok_or_else(|| {
-                self.checker
-                    .diagnostics
-                    .internal_error("Invalid projection in allocation summary")
-            })?;
-            cell.path.push(field);
-        }
-        Ok(cell)
-    }
-
-    fn field(&self, ty: TypeId, field: FieldId) -> Result<CallField, BorrowCheckError> {
-        self.checker
-            .module
-            .structs
-            .iter()
-            .find(|layout| layout.frontend_type_id == ty)
-            .and_then(|layout| {
-                layout
-                    .fields
-                    .iter()
-                    .position(|candidate| candidate.id == field)
-            })
-            .map(|ordinal| CallField::Field(ordinal as u32))
-            .ok_or_else(|| {
-                self.checker
-                    .diagnostics
-                    .internal_error("Missing field ordinal in allocation summary")
-            })
-    }
-
-    fn heap(&self, ty: TypeId) -> Result<bool, BorrowCheckError> {
-        is_heap(self.checker, ty)
-    }
-
-    fn ty(&self, local: LocalId) -> TypeId {
-        self.checker.local_types[&local]
-    }
-
-    fn local(local: LocalId) -> Cell {
-        Cell::root(Owner::Local(local.0))
-    }
-
-    fn typed_paths(
-        &self,
-        ty: TypeId,
-        mut visit: impl FnMut(&[CallField], TypeId),
-    ) -> Result<(), BorrowCheckError> {
-        fn walk(
-            context: &FunctionEvidence<'_, '_>,
-            ty: TypeId,
-            path: &mut Path,
-            stack: &mut Vec<TypeId>,
-            visit: &mut impl FnMut(&[CallField], TypeId),
-        ) -> Result<(), BorrowCheckError> {
-            if !context.heap(ty)? {
-                return Ok(());
-            }
-            if stack.contains(&ty) {
-                return Err(context
-                    .checker
-                    .diagnostics
-                    .internal_error("Recursive runtime layout reached allocation summary"));
-            }
-            visit(path, ty);
-            stack.push(ty);
-            CallField::for_each_child::<BorrowCheckError>(
-                ty,
-                context.checker.type_environment,
-                |field, child| {
-                    path.push(field);
-                    walk(context, child, path, stack, visit)?;
-                    path.pop();
-                    Ok(())
-                },
-            )?;
-            stack.pop();
-            Ok(())
-        }
-        walk(self, ty, &mut Vec::new(), &mut Vec::new(), &mut visit)
-    }
-
-    fn call_summary(&self, target: &CallTarget) -> Option<&PublicCallSummary> {
-        self.checker.call_signatures().summary(target)
-    }
+    SparseFunction::build_sparse(checker)
 }
 
 fn is_heap(checker: &BorrowChecker<'_>, ty: TypeId) -> Result<bool, BorrowCheckError> {
@@ -3320,84 +4140,45 @@ fn payload(variant: usize, field: usize) -> CallField {
     }
 }
 
-fn place_local(cell: &Cell) -> u32 {
-    match cell.owner {
-        Owner::Local(local) => local,
-        _ => unreachable!("a HIR place must have a local root"),
-    }
-}
+#[test]
+fn result_without_registered_nominal_identity_keeps_its_opaque_footprint() {
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
-#[derive(Default)]
-struct Lane {
-    reachable: bool,
-    sources: BTreeSet<CallPathSource>,
-    stores: BTreeSet<CallPathSource>,
-    sharing: BTreeSet<CallSharing>,
-}
-
-impl Lane {
-    fn extend(&mut self, state: &Graph, results: &[Cell]) {
-        self.reachable = true;
-        let mut endpoints = BTreeMap::<&Cell, Vec<CallOutputPath>>::new();
-        for (cell, node) in &state.nodes {
-            let mut outputs = Vec::new();
-            for (slot, result) in results.iter().enumerate() {
-                if let Some(path) = cell.below(result) {
-                    let output = CallOutputPath::Result(CallResultPath {
-                        slot,
-                        path: path.to_vec(),
-                    });
-                    self.sources
-                        .extend(node.sources.iter().cloned().map(|origin| CallPathSource {
-                            output: output.clone(),
-                            source: origin.into_source(),
-                        }));
-                    outputs.push(output);
-                }
-            }
-            if let Owner::Store(target) = &cell.owner {
-                let output = CallOutputPath::Store {
-                    target: target.clone(),
-                    path: cell.path.clone(),
-                };
-                self.stores
-                    .extend(node.sources.iter().cloned().map(|origin| CallPathSource {
-                        output: output.clone(),
-                        source: origin.into_source(),
-                    }));
-                outputs.push(output);
-            }
-            if !outputs.is_empty() {
-                endpoints.insert(cell, outputs);
-            }
-        }
-        for ((left, right), conditions) in &state.pairs {
-            let (Some(left), Some(right)) = (endpoints.get(left), endpoints.get(right)) else {
-                continue;
-            };
-            for a in left {
-                for b in right {
-                    let (left, right) = if a <= b { (a, b) } else { (b, a) };
-                    if left != right {
-                        self.sharing
-                            .extend(conditions.iter().cloned().map(|condition| CallSharing {
-                                left: left.clone(),
-                                right: right.clone(),
-                                condition,
-                            }));
-                    }
-                }
-            }
-        }
-    }
-
-    fn finish(self) -> CallLaneSummary {
-        CallLaneSummary {
-            reachable: self.reachable,
-            structural_only: false,
-            sources: self.sources.into_iter().collect(),
-            stores: self.stores.into_iter().collect(),
-            sharing: self.sharing.into_iter().collect(),
-        }
-    }
+    let (ast, mut paths, mut strings) = parse_single_file_ast(
+        "Link = |items {I32}|\nwrap |items {I32}| -> Link:\n    return Link(items)\n;\n",
+    );
+    let packages = default_external_package_registry(&mut strings);
+    let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
+    let mut checker = BorrowChecker::new(&hir, &hir.type_environment, &packages, &paths, &strings);
+    let wrap = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .resolve_function_name(function.id, &paths, &strings)
+                == Some("wrap")
+        })
+        .unwrap();
+    let result = wrap.return_contract.ordinary().unwrap().success()[0];
+    assert!(checker.project_type(result).is_none());
+    checker.build_public_call_summaries().unwrap();
+    let facts = checker.public_call_summaries[&wrap.id]
+        .return_alias
+        .facts()
+        .unwrap();
+    let typed::Lane::Returning(product) = &facts.success else {
+        panic!(
+            "the unresolved result must not erase its continuation: {:?}",
+            facts.success
+        );
+    };
+    assert!(product.components().iter().flat_map(|component| &component.alternatives).any(|post| {
+        matches!(&post.coverage, typed::Coverage::Unresolved(typed::Footprint::Locations(locations))
+            if locations.as_slice() == [typed::OutputPort::Result(0)])
+    }));
+    assert!(facts.ports.iter().any(|port| {
+        matches!(port, EntryPort::Value { parameter: 0, path } if path.is_empty())
+    }));
 }

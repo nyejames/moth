@@ -24,8 +24,11 @@ use crate::compiler_frontend::module_compilation::generated::artefacts::{
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedRequestFacts;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
+    FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -126,12 +129,9 @@ pub(crate) fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
 pub(crate) fn summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-            success: CallLaneSummary {
-                reachable: true,
-                ..Default::default()
-            },
-            error: CallLaneSummary::default(),
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
         })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,

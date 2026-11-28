@@ -14,6 +14,7 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
     ValueKind as PayloadKind,
 };
 use crate::compiler_frontend::hir::expression_store::HirProjection;
+use crate::compiler_frontend::hir::expressions::{HirVariantCarrier, OPTION_SOME_VARIANT_INDEX};
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 
 pub(super) fn projection_key(projection: &HirProjection) -> FieldKey {
@@ -58,7 +59,7 @@ pub(super) fn resolve_place(
 pub(super) use crate::compiler_frontend::analysis::borrow_checker::state::CapturedValue;
 
 impl CapturedValue {
-    fn fresh(id: AllocId) -> Self {
+    pub(in crate::compiler_frontend::analysis::borrow_checker) fn fresh(id: AllocId) -> Self {
         Self::new(vec![StoredValue { id, writable: true }], Vec::new())
     }
 }
@@ -227,6 +228,29 @@ fn construction_children(
     }
 }
 
+/// Follow values carried by the expression, not operands consumed to compute it.
+pub(super) fn visit_retained_locals(
+    expressions: &HirExpressionStore,
+    value: HirValueId,
+    visit: &mut impl FnMut(crate::compiler_frontend::hir::ids::LocalId),
+) {
+    let expression = expressions.expression(value);
+    match &expression.kind {
+        HirExpressionKind::Load(place) if expression.value_kind != ValueKind::Const => {
+            visit(place.root);
+        }
+        HirExpressionKind::VariantPayloadGet { source, .. } => {
+            visit_retained_locals(expressions, *source, visit);
+        }
+        kind if kind.is_aggregate_construction() => {
+            for (_, child) in construction_children(expressions, value) {
+                visit_retained_locals(expressions, child, visit);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn payload_key(variant: usize, field: usize) -> FieldKey {
     FieldKey::Payload {
         variant: variant as u32,
@@ -239,6 +263,57 @@ fn is_collection_like(kind: &HirExpressionKind) -> bool {
         kind,
         HirExpressionKind::Collection(_) | HirExpressionKind::MapLiteral(_)
     )
+}
+
+fn is_option_none(kind: &HirExpressionKind) -> bool {
+    matches!(kind, HirExpressionKind::VariantConstruct {
+        carrier: HirVariantCarrier::Option, variant_index, ..
+    } if *variant_index != OPTION_SOME_VARIANT_INDEX)
+}
+
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn option_edge_is_possible(
+    view: OperationView<'_>,
+    state: &BorrowState,
+    expressions: &HirExpressionStore,
+    term: &HirTerminator,
+    successor: BlockId,
+) -> bool {
+    let HirTerminator::Match { scrutinee, arms } = term else {
+        return true;
+    };
+    if arms.iter().any(|arm| {
+        arm.body == successor
+            && !matches!(
+                arm.pattern,
+                HirPattern::OptionPresent
+                    | HirPattern::OptionValue { .. }
+                    | HirPattern::OptionRelational { .. }
+            )
+    }) {
+        return true;
+    }
+    let expression = expressions.expression(*scrutinee);
+    if is_option_none(&expression.kind) {
+        return false;
+    }
+    let HirExpressionKind::Load(place) = &expression.kind else {
+        return true;
+    };
+    let Some(content) = resolve_place_allocs(view, state, expressions, place) else {
+        return true;
+    };
+    let key = payload_key(OPTION_SOME_VARIANT_INDEX, 0);
+    // An omitted projection is lazy, not absent. Cut the edge only when
+    // every possible occurrence explicitly lacks the payload.
+    content.holder_coverage() != Coverage::Complete
+        || content.ids.is_empty()
+        || content.ids.iter().any(|&holder| {
+            let observed = state.value_cell(CellId::Projected(holder, key));
+            observed.is_empty()
+                || observed
+                    .iter()
+                    .any(|value| value.kind != PayloadKind::Absent)
+        })
 }
 
 /// Whether `expression_id` may contribute stored relationships to its containing graph.
@@ -254,6 +329,7 @@ fn needs_allocation_facts(
         HirExpressionKind::VariantPayloadGet { source, .. } => Ok((state.has_value_alternatives()
             || is_heap_value(context, expression_id)?)
             && needs_allocation_facts(context, state, *source)?),
+        kind if is_option_none(kind) => Ok(true),
         kind if kind.is_aggregate_construction() => {
             for (_, child) in construction_children(context.expressions, expression_id) {
                 if needs_allocation_facts(context, state, child)? {
@@ -272,6 +348,7 @@ pub(super) struct LayerValueContext<'a, 'module> {
     pub context: &'a BorrowTransferContext<'module>,
     pub view: OperationView<'a>,
     pub block_id: BlockId,
+    pub materialise_contents: bool,
 }
 
 /// Allocations `expression_id` contributes when stored into a holder field.
@@ -318,7 +395,9 @@ pub(super) fn stored_values(
                 true,
             ))
         }
-        HirExpressionKind::Copy(place) if heap && state.has_alloc_edges() => {
+        HirExpressionKind::Copy(place)
+            if heap && (state.has_alloc_edges() || values.materialise_contents) =>
+        {
             let Some(source) = resolve_place_allocs(values.view, state, context.expressions, place)
             else {
                 return Ok(CapturedValue::default());
@@ -340,7 +419,7 @@ pub(super) fn stored_values(
                 values.block_id,
                 values.view.block_successors,
             );
-            capture_construction(values, state, expression_id)?.apply(state, site);
+            let _ = capture_construction(values, state, expression_id)?.apply(state, site);
             Ok(CapturedValue::fresh(site))
         }
         _ if heap && explicit_fresh => Ok(CapturedValue::fresh(state.site_id(
@@ -405,6 +484,7 @@ pub(super) struct Construction(Vec<ConstructionEdge>);
 enum ConstructionEdge {
     Nested(FieldKey, Construction),
     Stored(FieldKey, CapturedValue),
+    Absent(FieldKey),
 }
 
 impl Construction {
@@ -412,6 +492,7 @@ impl Construction {
         self.0.iter().any(|edge| match edge {
             ConstructionEdge::Nested(_, nested) => nested.names_allocation(names),
             ConstructionEdge::Stored(_, value) => value.names_allocation(names),
+            ConstructionEdge::Absent(_) => false,
         })
     }
 
@@ -420,22 +501,37 @@ impl Construction {
             match edge {
                 ConstructionEdge::Nested(_, nested) => nested.remap(state, retirement),
                 ConstructionEdge::Stored(_, value) => value.remap(state, retirement),
+                ConstructionEdge::Absent(_) => {}
             }
         }
     }
 
-    fn apply(&self, state: &mut BorrowState, holder: AllocId) {
+    fn apply(&self, state: &mut BorrowState, holder: AllocId) -> StoreReceipt {
+        let mut receipt = StoreReceipt::default();
         for edge in &self.0 {
             match edge {
                 ConstructionEdge::Nested(key, nested) => {
                     let child = state.alloc_child(holder, *key);
-                    nested.apply(state, child);
+                    receipt.append(nested.apply(state, child));
                 }
                 ConstructionEdge::Stored(key, captured) => {
-                    state.record_constructed_value(holder, *key, captured, true);
+                    receipt.append(state.record_constructed_value(holder, *key, captured, true));
+                }
+                ConstructionEdge::Absent(key @ (FieldKey::Elem | FieldKey::MapKey)) => {
+                    receipt.append(state.publish_family_members(
+                        &[holder],
+                        Coverage::Complete,
+                        *key,
+                        Replacement::Must,
+                        &[],
+                    ));
+                }
+                ConstructionEdge::Absent(key) => {
+                    receipt.append(state.record_constructed_absence(holder, *key));
                 }
             }
         }
+        receipt
     }
 }
 
@@ -446,13 +542,39 @@ fn capture_construction(
 ) -> Result<Construction, BorrowCheckError> {
     let context = values.context;
     let mut captured = Construction::default();
-    if !needs_allocation_facts(context, state, expression_id)? {
+    let kind = &context.expressions.expression(expression_id).kind;
+    if is_option_none(kind) {
+        return Ok(Construction(vec![ConstructionEdge::Absent(payload_key(
+            OPTION_SOME_VARIANT_INDEX,
+            0,
+        ))]));
+    }
+    if !values.materialise_contents && !needs_allocation_facts(context, state, expression_id)? {
         return Ok(captured);
     }
     // Once a collection lists references, list fresh elements too so removal can count them.
-    let list_elements = is_collection_like(&context.expressions.expression(expression_id).kind);
+    let list_elements = is_collection_like(kind);
     let track_scalars = list_elements && state.has_value_alternatives();
-    for (key, child) in construction_children(context.expressions, expression_id) {
+    let children = construction_children(context.expressions, expression_id);
+    if values.materialise_contents && list_elements && children.is_empty() {
+        captured.0.push(ConstructionEdge::Absent(FieldKey::Elem));
+        if matches!(kind, HirExpressionKind::MapLiteral(_)) {
+            captured.0.push(ConstructionEdge::Absent(FieldKey::MapKey));
+        }
+    }
+    for (key, child) in children {
+        if values.materialise_contents {
+            let mut value = stored_values(values, state, child, true)?;
+            if value.alternatives.is_empty() && !is_heap_value(context, child)? {
+                value
+                    .alternatives
+                    .push(ValueAlt::plain(PayloadKind::Scalar));
+            }
+            if !value.is_empty() {
+                captured.0.push(ConstructionEdge::Stored(key, value));
+            }
+            continue;
+        }
         let child_kind = &context.expressions.expression(child).kind;
         if child_kind.is_aggregate_construction() && !list_elements {
             let nested = capture_construction(values, state, child)?;
@@ -468,7 +590,7 @@ fn capture_construction(
             }
         }
     }
-    if track_scalars {
+    if track_scalars && !values.materialise_contents {
         let is_dependent = |key| {
             captured.0.iter().any(|edge| {
                 matches!(edge, ConstructionEdge::Stored(field, value)
@@ -548,11 +670,11 @@ pub(super) fn publish_slot_capture(
     if let Some(observer) = observer {
         store = store.with_actor_observation(observer);
     }
-    let receipt = state.publish_store(&store, order, None);
+    let mut receipt = state.publish_store(&store, order, None);
     if !capture.construction.0.is_empty() {
         let (holders, _) = state.local_alloc_ids(local);
         for holder in holders {
-            capture.construction.apply(state, holder);
+            receipt.append(capture.construction.apply(state, holder));
         }
     }
     capture.detachments.apply(state, local);
@@ -603,10 +725,21 @@ pub(super) fn capture_slot_value(
     values: &LayerValueContext<'_, '_>,
     state: &mut BorrowState,
     value: HirValueId,
+    replacing: bool,
 ) -> Result<SlotCapture, BorrowCheckError> {
     let expression = values.context.expressions.expression(value);
     let mut capture = SlotCapture::default();
     match &expression.kind {
+        kind if kind.is_aggregate_construction()
+            && replacing
+            && values.materialise_contents
+            && is_heap_value(values.context, value)? =>
+        {
+            // A reused slot root cannot distinguish the old graph from its
+            // replacement when the callee exports a write through that slot.
+            capture.value = stored_values(values, state, value, true)?;
+            capture.explicit_payload = true;
+        }
         kind if kind.is_aggregate_construction() => {
             capture.construction = capture_construction(values, state, value)?;
         }
@@ -618,10 +751,14 @@ pub(super) fn capture_slot_value(
             }
             capture.detachments = CapturedDetachments::from_load(values, state, value);
         }
-        HirExpressionKind::Copy(_) | HirExpressionKind::VariantPayloadGet { .. }
-            if !state.layer_is_empty() =>
+        HirExpressionKind::VariantPayloadGet { .. }
+            if !state.layer_is_empty()
+                || values.materialise_contents && is_heap_value(values.context, value)? =>
         {
             capture.value = stored_values(values, state, value, false)?;
+        }
+        HirExpressionKind::Copy(_) if !state.layer_is_empty() || values.materialise_contents => {
+            capture.value = stored_values(values, state, value, values.materialise_contents)?;
         }
         _ => {}
     }

@@ -12,9 +12,9 @@
 use super::{
     AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, BoundaryBinding,
     CapturedRoutes, CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, FamilyMember,
-    Init, LocalState, OWN_SLOT, OrderKey, Origin, PublicationCarriers, Replacement, RootSet,
-    SmallSet, StoreReceipt, TypedStore, TypedWrite, ValueAlt, ValueAlternatives, ValueKind,
-    WrapperAge, WrapperId, remap_invoke_capture, remap_value_alternatives,
+    FamilyUpdate, Init, LocalState, OWN_SLOT, OrderKey, Origin, PublicationCarriers, Replacement,
+    RootSet, SmallSet, StoreReceipt, TypedStore, TypedWrite, ValueAlt, ValueAlternatives,
+    ValueKind, WrapperAge, WrapperId, remap_invoke_capture, remap_value_alternatives,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::BlockId;
@@ -25,6 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
 use std::ops::{ControlFlow, RangeInclusive};
 use std::rc::Rc;
 
@@ -62,10 +63,23 @@ enum AllocBase {
     Site(u32),
     /// A proven fresh allocation in a specific call result construction.
     Call(OrderKey, bool, u32),
+    CallRecent(OrderKey, bool, u32),
+    CallPrior(OrderKey, bool, u32),
+    /// An invocation-owned wrapper key, in a separate namespace from allocations.
+    CallWrapper(OrderKey, bool, u32),
+    CallWrapperRecent(OrderKey, bool, u32),
+    CallWrapperPrior(OrderKey, bool, u32),
     /// Any unproven allocation of the given semantic type returned by one call.
     OpaqueCall(OrderKey, bool, u32, u32),
     /// A correlated value occurrence. It is not an allocation in the reachability graph.
     CallView(OrderKey, bool, u32),
+    /// A view of an exact result in one jointly selected returning alternative.
+    CallRowView(OrderKey, bool, u32, u32),
+    CallPriorRowView(OrderKey, bool, u32, u32),
+    /// A symbolic scalar input used only while extracting a function's effects.
+    EntryScalar(u32),
+    /// A shared allocation in one guarded predecessor presentation.
+    EntryAllocation(u32),
     /// A binding's previous allocation, renamed when the binding was rebound at an order key.
     Old(u32, OrderKey),
     /// A binding's allocation after the binding left lexical scope.
@@ -98,6 +112,9 @@ pub(in super::super) struct AllocTable {
     infos: Vec<AllocInfo>,
     index: FxHashMap<AllocKey, AllocId>,
     cyclic_blocks: Option<RecurringBlocks>,
+    call_exports: BTreeMap<crate::compiler_frontend::public_call_summary::typed::ObjectRef, u32>,
+    call_view_rows: BTreeMap<crate::compiler_frontend::public_call_summary::typed::Post, u32>,
+    recent_call_bases: FxHashMap<OrderKey, Vec<AllocBase>>,
 }
 
 #[derive(Debug)]
@@ -124,6 +141,14 @@ impl AllocTable {
 
     fn base_id(&mut self, base: AllocBase, singular: bool) -> AllocId {
         self.intern(AllocKey::Base(base), base, singular)
+    }
+
+    fn recent_call_id(&mut self, order: OrderKey, base: AllocBase, singular: bool) -> AllocId {
+        if let Some(&id) = self.index.get(&AllocKey::Base(base)) {
+            return id;
+        }
+        self.recent_call_bases.entry(order).or_default().push(base);
+        self.base_id(base, singular)
     }
 
     fn root(&mut self, local: usize) -> AllocId {
@@ -187,7 +212,7 @@ impl AllocTable {
 }
 
 /// One explicit holder edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(in super::super) struct Edge {
     holder: AllocId,
     pub key: FieldKey,
@@ -273,7 +298,7 @@ fn value_allocations(value: &ValueAlt) -> impl Iterator<Item = AllocId> + '_ {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Observation {
     local: usize,
     values: Vec<StoredValue>,
@@ -560,7 +585,11 @@ impl EdgeRows {
         for mut edge in moved {
             edge.holder = rename(edge.holder, table);
             edge.held = rename(edge.held, table);
-            edge.single &= edge.held == AllocId::EMPTY || table.singular(edge.held);
+            edge.single &= if matches!(edge.key, FieldKey::Elem | FieldKey::MapKey) {
+                table.singular(edge.holder)
+            } else {
+                edge.held == AllocId::EMPTY || table.singular(edge.held)
+            };
             self.insert(table, edge, true);
         }
     }
@@ -980,6 +1009,14 @@ fn slot_group<T>(
 
 type BoundRow = (WrapperId, AllocId, bool);
 
+#[derive(Clone, Copy)]
+enum CellPublication {
+    Construct,
+    Join,
+    Append,
+    Replace,
+}
+
 /// Explicit heap and slot contents, plus the sparse wrapper relation.
 #[derive(Debug, Clone)]
 pub(in super::super) struct AllocationLayer {
@@ -990,6 +1027,8 @@ pub(in super::super) struct AllocationLayer {
     bound_by_base: BTreeSet<(AllocBase, WrapperId)>,
     /// Exceptional contents, by cell; dependency-free allocation edges stay compact.
     contents: BTreeMap<CellId, ValueAlternatives>,
+    dependency_cells: usize,
+    family_resets: Option<BTreeSet<(AllocId, FieldKey)>>,
     cells_by_base: FxHashMap<AllocBase, BTreeSet<CellId>>,
     wrappers: Vec<BindingRow>,
     wrapper_users: BTreeSet<(WrapperId, WrapperId)>,
@@ -1011,6 +1050,7 @@ impl PartialEq for AllocationLayer {
         self.edges.groups == other.edges.groups
             && self.bound == other.bound
             && self.contents == other.contents
+            && self.family_resets == other.family_resets
             && self.wrappers == other.wrappers
             && self.observations == other.observations
             && self.detached == other.detached
@@ -1020,6 +1060,24 @@ impl PartialEq for AllocationLayer {
 
 impl Eq for AllocationLayer {}
 
+impl Hash for AllocationLayer {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        // These are the semantic rows in equality; reverse indices and the
+        // shared interner can change without changing a replay state.
+        self.edges.groups.hash(hasher);
+        self.bound.hash(hasher);
+        self.contents.hash(hasher);
+        self.family_resets.hash(hasher);
+        self.wrappers.hash(hasher);
+        self.observations.hash(hasher);
+        self.detached.hash(hasher);
+        self.sharing.members.hash(hasher);
+        self.sharing.projections.hash(hasher);
+        self.sharing.bindings.hash(hasher);
+        self.sharing.pairs.rows.hash(hasher);
+    }
+}
+
 impl AllocationLayer {
     pub(super) fn new() -> Self {
         Self {
@@ -1028,6 +1086,8 @@ impl AllocationLayer {
             bound: BTreeMap::new(),
             bound_by_base: BTreeSet::new(),
             contents: BTreeMap::new(),
+            dependency_cells: 0,
+            family_resets: None,
             cells_by_base: FxHashMap::default(),
             wrappers: Vec::new(),
             wrapper_users: BTreeSet::new(),
@@ -1048,6 +1108,7 @@ impl AllocationLayer {
         self.edges.is_empty()
             && self.bound.is_empty()
             && self.contents.is_empty()
+            && self.family_resets.as_ref().is_none_or(BTreeSet::is_empty)
             && self.wrappers.is_empty()
             && self.observations.is_empty()
             && self.detached.is_empty()
@@ -1098,7 +1159,7 @@ impl AllocationLayer {
         row: &BindingRow,
         insert: bool,
     ) {
-        if !row.routes.is_empty() {
+        if row.routes.iter().any(|(_, deps)| !deps.is_empty()) {
             if insert {
                 *route_rows += 1;
             } else {
@@ -1122,6 +1183,11 @@ impl AllocationLayer {
                 if let Some(owner) = origin.owner {
                     record(owner);
                 }
+            }
+        }
+        for (cell, _) in &row.routes {
+            if let CellId::Slot(wrapper) = cell {
+                record(*wrapper);
             }
         }
     }
@@ -1187,6 +1253,10 @@ impl AllocationLayer {
         }
     }
 
+    fn carries_dependencies(values: &[ValueAlt]) -> bool {
+        values.iter().any(|value| !value.deps.is_empty())
+    }
+
     fn contents(&self, cell: CellId) -> &[ValueAlt] {
         increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
         self.contents.get(&cell).map_or(&[], Vec::as_slice)
@@ -1195,6 +1265,7 @@ impl AllocationLayer {
     fn take_contents(&mut self, cell: CellId) -> Option<(CellId, ValueAlternatives)> {
         increment_frontend_counter(FrontendCounter::BorrowRetirementCellRows);
         let row = self.contents.remove_entry(&cell)?;
+        self.dependency_cells -= usize::from(Self::carries_dependencies(&row.1));
         Self::edit_cell_incidence(
             &self.table.borrow(),
             &mut self.cells_by_base,
@@ -1233,17 +1304,21 @@ impl AllocationLayer {
     fn replace_contents(&mut self, contents: BTreeMap<CellId, ValueAlternatives>) {
         let table = self.table.borrow();
         self.cells_by_base.clear();
+        self.dependency_cells = 0;
         for (&cell, values) in &contents {
             Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, values, true);
+            self.dependency_cells += usize::from(Self::carries_dependencies(values));
         }
         self.contents = contents;
     }
 
     fn retain_contents(&mut self, keep: impl Fn(CellId, &AllocTable) -> bool) {
         let table = self.table.borrow();
+        let dependency_cells = &mut self.dependency_cells;
         self.contents.retain(|&cell, values| {
             let keeps = keep(cell, &table);
             if !keeps {
+                *dependency_cells -= usize::from(Self::carries_dependencies(values));
                 Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, values, false);
             }
             keeps
@@ -1255,6 +1330,7 @@ impl AllocationLayer {
         alternatives.dedup();
         self.take_contents(cell);
         if !alternatives.is_empty() {
+            self.dependency_cells += usize::from(Self::carries_dependencies(&alternatives));
             Self::edit_cell_incidence(
                 &self.table.borrow(),
                 &mut self.cells_by_base,
@@ -1331,9 +1407,19 @@ impl AllocationLayer {
         }
     }
 
-    fn views_may_share(&self, left: AllocId, right: AllocId) -> bool {
+    fn views_may_share(&self, table: &AllocTable, left: AllocId, right: AllocId) -> bool {
         if left == right {
             return true;
+        }
+        // Different alternatives of one support are different worlds of the
+        // same call. Prior occurrences may have come from different executions.
+        if let (AllocBase::CallRowView(a, _, sa, _), AllocBase::CallRowView(b, _, sb, _)) =
+            (table.base(left), table.base(right))
+            && a == b
+            && sa == sb
+            && table.base(left) != table.base(right)
+        {
+            return false;
         }
         if let Some(share) = self.sharing.possible_pair(left, right) {
             return share;
@@ -1773,6 +1859,14 @@ impl AllocationLayer {
             views: vec![view],
             children: Vec::new(),
         }];
+        let exact = table.singular(root);
+        let mut copied_exact = FxHashMap::default();
+        if exact
+            && let [source] = routes[0].ids.as_slice()
+            && table.singular(*source)
+        {
+            copied_exact.insert(*source, 0_usize);
+        }
         let mut index = 0;
         while index < routes.len() {
             let route = &routes[index];
@@ -1818,11 +1912,43 @@ impl AllocationLayer {
                 }
                 ids.sort_unstable();
                 ids.dedup();
-                let child = if ids.is_empty() {
+                let identical = match ids.as_slice() {
+                    [source] if exact && table.singular(*source) => Some(*source),
+                    _ => None,
+                };
+                let existing = identical.and_then(|source| {
+                    copied_exact.get(&source).copied().filter(|&offset| {
+                        let earlier = &routes[offset].views;
+                        let left = if views.is_empty() {
+                            std::slice::from_ref(&source)
+                        } else {
+                            &views
+                        };
+                        let right = if earlier.is_empty() {
+                            std::slice::from_ref(&source)
+                        } else {
+                            earlier
+                        };
+                        left.iter().all(|&left| {
+                            right.iter().all(|&right| {
+                                left == right
+                                    || matches!(table.base(left), AllocBase::CallRowView(..))
+                                        && table.base(left) == table.base(right)
+                                        && self.sharing.possible_pair(left, right).is_none()
+                            })
+                        })
+                    })
+                });
+                let child = if let Some(offset) = existing {
+                    Some(offset)
+                } else if ids.is_empty() {
                     None
                 } else {
                     let node = table.child(route.copy, key);
                     let offset = routes.len();
+                    if let Some(id) = identical {
+                        copied_exact.entry(id).or_insert(offset);
+                    }
                     routes.push(Route {
                         copy: node,
                         ids,
@@ -1873,10 +1999,11 @@ impl AllocationLayer {
             let (a, b) = (&routes[left], &routes[right]);
             let left_views = if a.views.is_empty() { &a.ids } else { &a.views };
             let right_views = if b.views.is_empty() { &b.ids } else { &b.views };
-            if !left_views
-                .iter()
-                .any(|&a| right_views.iter().any(|&b| self.views_may_share(a, b)))
-            {
+            if !left_views.iter().any(|&a| {
+                right_views
+                    .iter()
+                    .any(|&b| self.views_may_share(table, a, b))
+            }) {
                 continue;
             }
             let (a, b) = ordered_pair(a.copy, b.copy);
@@ -1991,6 +2118,20 @@ impl AllocationLayer {
         replacement: impl Fn(AllocBase) -> Option<AllocBase>,
     ) {
         let mut table = self.table.borrow_mut();
+        if let Some(resets) = &mut self.family_resets {
+            // Ageing can merge with a prior occurrence that did not execute the reset.
+            if let Some(base) = only {
+                if let Some(groups) = self.edges.by_base.get(&base) {
+                    for &(holder, key) in groups {
+                        if table.base(holder) == base && replacement(base).is_some() {
+                            resets.remove(&(holder, key));
+                        }
+                    }
+                }
+            } else {
+                resets.retain(|&(holder, _)| replacement(table.base(holder)).is_none());
+            }
+        }
         let detached = if let Some(base) = only {
             self.detached_by_base
                 .range((base, 0, AllocId::MIN)..=(base, u32::MAX, AllocId::MAX))
@@ -2106,6 +2247,7 @@ impl AllocationLayer {
         let mut pending = Vec::with_capacity(cells.len());
         for cell in cells {
             if let Some(values) = self.contents.remove(&cell) {
+                self.dependency_cells -= usize::from(Self::carries_dependencies(&values));
                 Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, &values, false);
                 pending.push((cell, values));
             }
@@ -2116,9 +2258,14 @@ impl AllocationLayer {
             Self::edit_cell_incidence(&table, &mut self.cells_by_base, cell, &alternatives, true);
             match self.contents.entry(cell) {
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    self.dependency_cells += usize::from(
+                        Self::carries_dependencies(&alternatives)
+                            && !Self::carries_dependencies(entry.get()),
+                    );
                     merge_alternatives(entry.get_mut(), alternatives);
                 }
                 std::collections::btree_map::Entry::Vacant(entry) => {
+                    self.dependency_cells += usize::from(Self::carries_dependencies(&alternatives));
                     entry.insert(alternatives);
                 }
             }
@@ -2390,7 +2537,7 @@ impl PlaceResolution {
             .projected_origins
             .as_slice()
             .iter()
-            .filter(|origin| origin.wrapper.local == actor);
+            .filter(|origin| !origin.wrapper.is_call_owned() && origin.wrapper.local == actor);
         Some(matches.next()?.isolated && matches.all(|origin| origin.isolated))
     }
 }
@@ -2457,7 +2604,6 @@ impl BorrowState {
         }
     }
 
-    #[allow(dead_code)] // Boundary export also visits wrappers no longer named by a local.
     pub(in super::super) fn boundary_binding(&self, wrapper: WrapperId) -> BoundaryBinding<'_> {
         let row = self.binding_row(wrapper);
         let init = self.current_wrapper_init(wrapper);
@@ -2561,6 +2707,12 @@ impl BorrowState {
 
     pub(super) fn remove_current_row(&mut self, local: usize) {
         let wrapper = WrapperId::current(local);
+        self.remove_wrapper_row(wrapper);
+        self.layer.set_observation(local, None);
+        self.layer.take_contents(CellId::Slot(wrapper));
+    }
+
+    fn remove_wrapper_row(&mut self, wrapper: WrapperId) {
         if let Ok(index) = self
             .layer
             .wrappers
@@ -2581,8 +2733,6 @@ impl BorrowState {
                 false,
             );
         }
-        self.layer.set_observation(local, None);
-        self.layer.take_contents(CellId::Slot(wrapper));
     }
 
     fn row_from_spec(&self, local: usize, spec: BindingSpec) -> Option<BindingRow> {
@@ -2651,13 +2801,20 @@ impl BorrowState {
         })
     }
 
-    pub(super) fn install_binding_spec(&mut self, local: usize, spec: BindingSpec) {
+    pub(super) fn install_binding_spec(&mut self, local: usize, spec: BindingSpec) -> StoreReceipt {
+        let mut receipt = StoreReceipt::default();
         if let Some(row) = self.row_from_spec(local, spec) {
+            receipt.record_routes(
+                row.wrapper,
+                self.retained_value_routes(row.wrapper),
+                &row.routes,
+                true,
+            );
             self.put_binding_row(row);
         }
+        receipt
     }
 
-    #[allow(dead_code)]
     pub(in super::super) fn publish_captured_binding(
         &mut self,
         wrapper: WrapperId,
@@ -2669,7 +2826,8 @@ impl BorrowState {
     ) -> PublicationCarriers {
         let mut receipt = PublicationCarriers::default();
         let cell = CellId::Slot(wrapper);
-        let exact = replace == Replacement::Must && wrapper.age == WrapperAge::Current;
+        let exact = replace == Replacement::Must && wrapper.is_singleton();
+        receipt.record_routes(wrapper, self.retained_value_routes(wrapper), &routes, exact);
         let mut row = BindingRow {
             wrapper,
             alts,
@@ -2695,6 +2853,10 @@ impl BorrowState {
             receipt.record(cell, self.layer.contents(cell), cell, &[], true);
             self.clear_slot_payload(wrapper);
         }
+        if wrapper.is_call_owned() && row.has_slot() {
+            row.slot_roots
+                .get_or_insert_with(|| RootSet::empty(self.locals.len()));
+        }
         self.invalidate_observations(&[cell], coverage);
         if wrapper.age == WrapperAge::Current && wrapper.local < self.locals.len() {
             let mut roots = row.route_roots.clone();
@@ -2708,6 +2870,40 @@ impl BorrowState {
         receipt
     }
 
+    /// Rebuild the must derivation through actual wrappers after the whole prefix
+    /// is installed. A source may itself have been rebound by that same prefix.
+    pub(in super::super) fn refresh_captured_link_derivation(&mut self, target: WrapperId) {
+        if target.age != WrapperAge::Current {
+            return;
+        }
+        let mut roots = RootSet::empty(self.locals.len());
+        if self.resolve_cells(target.local).coverage == Coverage::Complete {
+            let mut next = target;
+            while let Some(row) = self.binding_row(next) {
+                let [
+                    BindingAlt {
+                        target: BindingTarget::Link(source),
+                        ..
+                    },
+                ] = row.alts.as_slice()
+                else {
+                    break;
+                };
+                if row.coverage != Coverage::Complete
+                    || source.age != WrapperAge::Current
+                    || *source == target
+                    || roots.contains(source.local)
+                    || !self.binding(source.local).is_alias_only()
+                {
+                    break;
+                }
+                roots.insert(source.local);
+                next = *source;
+            }
+        }
+        self.set_local_derivation(target.local, roots);
+    }
+
     pub(in super::super) fn transition_slot_to_alias(
         &mut self,
         local: usize,
@@ -2715,11 +2911,18 @@ impl BorrowState {
         roots: RootSet,
         derivation: RootSet,
         preserve_slot: bool,
-    ) {
+    ) -> StoreReceipt {
+        let mut receipt = StoreReceipt::default();
         let Some(mut row) = self.row_from_spec(local, spec) else {
-            return;
+            return receipt;
         };
         let wrapper = row.wrapper;
+        receipt.record_routes(
+            wrapper,
+            self.retained_value_routes(wrapper),
+            &row.routes,
+            false,
+        );
         self.invalidate_observations(&[CellId::Slot(wrapper)], Coverage::Complete);
         if let Some(old) = self.binding_row(wrapper) {
             row.union_row_alts(old);
@@ -2749,10 +2952,13 @@ impl BorrowState {
                     .copied()
                     .filter(|alt| alt.target != BindingTarget::OwnSlot),
             );
+            let cell = CellId::Slot(wrapper);
+            receipt.record(cell, self.layer.contents(cell), cell, &[], true);
             self.clear_slot_payload(wrapper);
             self.set_local_value_roots(local, roots);
         }
         self.put_binding_row(row);
+        receipt
     }
 
     pub(in super::super) fn mark_slot_derivation(&mut self, local: usize, mut roots: RootSet) {
@@ -2782,7 +2988,15 @@ impl BorrowState {
         local_mutable: &[bool],
     ) -> ResolvedCells {
         let readonly = |wrapper: WrapperId| {
-            (local_mutable.get(wrapper.local) == Some(&false)).then_some(wrapper.local)
+            (!wrapper.is_call_owned() && local_mutable.get(wrapper.local) == Some(&false))
+                .then_some(wrapper.local)
+        };
+        let permission_origin = |owner: WrapperId| {
+            if owner.is_call_owned() {
+                wrapper.local
+            } else {
+                owner.local
+            }
         };
         let Some(row) = self.binding_row(wrapper) else {
             return self.implicit_slot(wrapper, aliases_only, readonly(wrapper));
@@ -2802,7 +3016,7 @@ impl BorrowState {
                             frame
                                 .result
                                 .readonly_source
-                                .get_or_insert(frame.wrapper.local);
+                                .get_or_insert(permission_origin(frame.wrapper));
                         }
                         if let Some(suffix) = completed.get(&source) {
                             frame.result.include(suffix);
@@ -2832,7 +3046,7 @@ impl BorrowState {
                             frame
                                 .result
                                 .readonly_source
-                                .get_or_insert(frame.wrapper.local);
+                                .get_or_insert(permission_origin(frame.wrapper));
                         }
                         CellId::Projected(holder, key)
                     }
@@ -2890,7 +3104,7 @@ impl BorrowState {
             projected_origins: SmallSet::Empty,
             readonly_source,
             cyclic: false,
-            prior: wrapper.age == WrapperAge::Prior,
+            prior: !wrapper.is_singleton(),
         }
     }
 
@@ -2920,7 +3134,7 @@ impl BorrowState {
                 projected_origins: SmallSet::Empty,
                 readonly_source,
                 cyclic: false,
-                prior: wrapper.age == WrapperAge::Prior,
+                prior: !wrapper.is_singleton(),
             },
             aliases_only,
         }
@@ -2949,7 +3163,7 @@ impl BorrowState {
                     {
                         let table = self.layer.table.borrow();
                         matches!(table.base(holder), AllocBase::Old(site, _) | AllocBase::Departed(site)
-                            if site as usize == origin.wrapper.local)
+                            if !origin.wrapper.is_call_owned() && site as usize == origin.wrapper.local)
                     } else {
                         false
                     }
@@ -2984,7 +3198,7 @@ impl BorrowState {
     fn slot_roots(&self, wrapper: WrapperId) -> &RootSet {
         self.binding_row(wrapper)
             .and_then(|row| row.slot_roots.as_ref())
-            .unwrap_or(&self.locals[wrapper.local].value_roots)
+            .unwrap_or_else(|| &self.locals[wrapper.local].value_roots)
     }
 
     pub(in super::super) fn layer_is_empty(&self) -> bool {
@@ -3017,6 +3231,20 @@ impl BorrowState {
         self.stable_site_id(AllocBase::Site(site), block, successors)
     }
 
+    pub(in super::super) fn call_export_coordinate(
+        &self,
+        object: &crate::compiler_frontend::public_call_summary::typed::ObjectRef,
+    ) -> u32 {
+        let mut table = self.layer.table.borrow_mut();
+        if let Some(&coordinate) = table.call_exports.get(object) {
+            return coordinate;
+        }
+        let next =
+            u32::try_from(table.call_exports.len()).expect("call export coordinate capacity");
+        table.call_exports.insert(object.clone(), next);
+        next
+    }
+
     pub(in super::super) fn call_site_id(
         &self,
         order: OrderKey,
@@ -3026,11 +3254,121 @@ impl BorrowState {
         block: BlockId,
         successors: &FxHashMap<BlockId, Vec<BlockId>>,
     ) -> AllocId {
-        let base = AllocBase::Call(order, error, node);
+        let mut table = self.layer.table.borrow_mut();
         if summarized {
-            self.layer.table.borrow_mut().base_id(base, false)
+            table.base_id(AllocBase::Call(order, error, node), false)
+        } else if table.block_may_repeat(block, successors) {
+            table.recent_call_id(order, AllocBase::CallRecent(order, error, node), true)
         } else {
-            self.stable_site_id(base, block, successors)
+            table.base_id(AllocBase::Call(order, error, node), true)
+        }
+    }
+
+    pub(in super::super) fn has_recent_call_storage(&self, order: OrderKey) -> bool {
+        self.layer
+            .table
+            .borrow()
+            .recent_call_bases
+            .contains_key(&order)
+    }
+
+    pub(in super::super) fn age_call_storage(&mut self, order: OrderKey) {
+        let count = self.layer.table.borrow().recent_call_bases[&order].len();
+        for index in 0..count {
+            let base = self.layer.table.borrow().recent_call_bases[&order][index];
+            let prior = prior_call_base(base, order).expect("indexed recent call base");
+            if matches!(base, AllocBase::CallWrapperRecent(..)) {
+                let (recent, prior) = {
+                    let mut table = self.layer.table.borrow_mut();
+                    (table.base_id(base, true), table.base_id(prior, false))
+                };
+                self.age_call_wrapper(
+                    WrapperId {
+                        local: recent.0 as usize,
+                        age: WrapperAge::CallExact,
+                    },
+                    WrapperId {
+                        local: prior.0 as usize,
+                        age: WrapperAge::CallFamily,
+                    },
+                );
+            } else {
+                self.layer
+                    .rename_bases(Some(base), |candidate| (candidate == base).then_some(prior));
+            }
+        }
+    }
+
+    pub(in super::super) fn aged_call_allocation(&self, id: AllocId, order: OrderKey) -> AllocId {
+        if id == AllocId::EMPTY {
+            return id;
+        }
+        let mut table = self.layer.table.borrow_mut();
+        prior_call_base(table.base(id), order).map_or(id, |prior| table.rebase(id, prior, false))
+    }
+
+    pub(in super::super) fn aged_call_wrapper(
+        &self,
+        wrapper: WrapperId,
+        order: OrderKey,
+    ) -> WrapperId {
+        if wrapper.age != WrapperAge::CallExact {
+            return wrapper;
+        }
+        let mut table = self.layer.table.borrow_mut();
+        let base = table.base(AllocId(wrapper.local as u32));
+        if let Some(prior @ AllocBase::CallWrapperPrior(..)) = prior_call_base(base, order) {
+            WrapperId {
+                local: table.base_id(prior, false).0 as usize,
+                age: WrapperAge::CallFamily,
+            }
+        } else {
+            wrapper
+        }
+    }
+
+    fn age_call_wrapper(&mut self, recent: WrapperId, prior: WrapperId) {
+        if self.binding_row(recent).is_none() {
+            return;
+        }
+        self.materialize_wrapper_prior(recent, prior, Init::Yes);
+        self.remap_wrapper_uses(
+            [recent],
+            |wrapper| if wrapper == recent { prior } else { wrapper },
+        );
+        self.remove_wrapper_row(recent);
+        self.clear_slot_payload(recent);
+        self.refresh_linked_observations(prior);
+    }
+
+    pub(in super::super) fn call_wrapper_id(
+        &self,
+        order: OrderKey,
+        error: bool,
+        node: u32,
+        summarized: bool,
+        block: BlockId,
+        successors: &FxHashMap<BlockId, Vec<BlockId>>,
+    ) -> WrapperId {
+        let mut table = self.layer.table.borrow_mut();
+        let id = if summarized {
+            table.base_id(AllocBase::CallWrapper(order, error, node), false)
+        } else if table.block_may_repeat(block, successors) {
+            table.recent_call_id(
+                order,
+                AllocBase::CallWrapperRecent(order, error, node),
+                true,
+            )
+        } else {
+            table.base_id(AllocBase::CallWrapper(order, error, node), true)
+        };
+        WrapperId {
+            local: id.0 as usize,
+            age: if summarized {
+                WrapperAge::CallFamily
+            } else {
+                WrapperAge::CallExact
+            },
         }
     }
 
@@ -3047,6 +3385,51 @@ impl BorrowState {
             .base_id(AllocBase::OpaqueCall(order, error, scope, ty), false)
     }
 
+    pub(in super::super) fn entry_allocation_id(&self, source: u32) -> AllocId {
+        self.layer
+            .table
+            .borrow_mut()
+            .base_id(AllocBase::EntryAllocation(source), true)
+    }
+
+    fn entry_scalar_id(&self, source: u32) -> AllocId {
+        self.layer
+            .table
+            .borrow_mut()
+            .base_id(AllocBase::EntryScalar(source), false)
+    }
+
+    pub(in super::super) fn initialize_entry_scalar(
+        &mut self,
+        addresses: &AddressSet,
+        source: u32,
+    ) {
+        let value = ValueAlt {
+            kind: ValueKind::Scalar,
+            deps: vec![super::ReceiverDependency {
+                entries: SmallSet::One(self.entry_scalar_id(source)),
+                coverage: Coverage::Complete,
+            }],
+        };
+        // A predecessor family is not a weak store. No independent value
+        // was inserted merely because its member lacks singleton identity.
+        for &cell in addresses.cells() {
+            let mut alternatives = self.layer.contents(cell).to_vec();
+            merge_alternatives(&mut alternatives, std::iter::once(value.clone()));
+            self.layer.set_contents(cell, alternatives);
+        }
+    }
+
+    pub(in super::super) fn entry_scalar_source(&self, id: AllocId) -> Option<u32> {
+        if id == AllocId::EMPTY {
+            return None;
+        }
+        match self.layer.table.borrow().base(id) {
+            AllocBase::EntryScalar(source) => Some(source),
+            _ => None,
+        }
+    }
+
     pub(in super::super) fn call_view_id(
         &self,
         order: OrderKey,
@@ -3059,6 +3442,33 @@ impl BorrowState {
             .base_id(AllocBase::CallView(order, error, node), false)
     }
 
+    pub(in super::super) fn call_view_row(
+        &self,
+        post: &crate::compiler_frontend::public_call_summary::typed::Post,
+    ) -> u32 {
+        let mut table = self.layer.table.borrow_mut();
+        if let Some(&row) = table.call_view_rows.get(post) {
+            return row;
+        }
+        let row = u32::try_from(table.call_view_rows.len()).expect("call alternative capacity");
+        table.call_view_rows.insert(post.clone(), row);
+        row
+    }
+
+    pub(in super::super) fn call_row_view_id(
+        &self,
+        order: OrderKey,
+        error: bool,
+        support: u32,
+        row: u32,
+    ) -> AllocId {
+        self.layer.table.borrow_mut().recent_call_id(
+            order,
+            AllocBase::CallRowView(order, error, support, row),
+            false,
+        )
+    }
+
     pub(in super::super) fn add_view_member(&mut self, view: AllocId, id: AllocId) {
         self.layer.sharing.edit_row(
             &self.layer.table.borrow(),
@@ -3068,6 +3478,7 @@ impl BorrowState {
         );
     }
 
+    #[cfg(test)]
     pub(in super::super) fn relate_views(&mut self, a: AllocId, b: AllocId, may_share: bool) {
         let (a, b) = ordered_pair(a, b);
         self.layer.sharing.edit_row(
@@ -3117,8 +3528,12 @@ impl BorrowState {
         } else {
             right_views
         };
-        left.iter()
-            .any(|&a| right.iter().any(|&b| self.layer.views_may_share(a, b)))
+        let table = self.layer.table.borrow();
+        left.iter().any(|&a| {
+            right
+                .iter()
+                .any(|&b| self.layer.views_may_share(&table, a, b))
+        })
     }
 
     pub(in super::super) fn visit_sharing_incidence(
@@ -3697,6 +4112,25 @@ impl BorrowState {
         self.layer.table.borrow().singular(id)
     }
 
+    pub(in super::super) fn alloc_exact_at_boundary(&self, mut id: AllocId, acyclic: bool) -> bool {
+        let table = self.layer.table.borrow();
+        if table.singular(id) {
+            return true;
+        }
+        if !acyclic || !matches!(table.base(id), AllocBase::Departed(_) | AllocBase::Old(..)) {
+            return false;
+        }
+        // A lexical retirement can only have one occurrence in an acyclic
+        // invocation. It does not make collapsed children into singletons.
+        while let Some((parent, key)) = table.parent(id) {
+            if matches!(key, FieldKey::Elem | FieldKey::MapKey) {
+                return false;
+            }
+            id = parent;
+        }
+        true
+    }
+
     /// The local that supplied this allocation, even after its binding was retired.
     pub(in super::super) fn alloc_origin_local(&self, id: AllocId) -> Option<usize> {
         base_local(self.layer.table.borrow().base(id))
@@ -3719,17 +4153,15 @@ impl BorrowState {
 
     fn slot_values(&self, slot: WrapperId) -> impl Iterator<Item = StoredValue> + '_ {
         let bound = self.layer.bound_of(slot);
-        let roots = self.slot_roots(slot);
-        let implicit = (bound.is_empty() && roots.is_empty()).then_some(slot.local);
+        let roots = (!slot.is_call_owned() && bound.is_empty()).then(|| self.slot_roots(slot));
+        let implicit = roots.is_some_and(RootSet::is_empty).then_some(slot.local);
         let override_values = bound.iter().filter_map(|&(_, id, readonly)| {
             (id != AllocId::EMPTY).then_some(StoredValue {
                 id,
                 writable: !readonly,
             })
         });
-        let lazy_values = bound
-            .is_empty()
-            .then_some(roots)
+        let lazy_values = roots
             .into_iter()
             .flat_map(RootSet::iter_ones)
             .chain(implicit)
@@ -3850,7 +4282,7 @@ impl BorrowState {
                         ids,
                         views: self.layer.sharing.bindings(slot).collect(),
                         layer_only: !self.layer.bound_of(slot).is_empty()
-                            || slot.age == WrapperAge::Prior,
+                            || slot.age != WrapperAge::Current,
                         readonly,
                         readonly_source: None,
                         coverage: Coverage::Complete,
@@ -4327,6 +4759,10 @@ impl BorrowState {
         !self.layer.contents.is_empty() || self.layer.route_rows != 0
     }
 
+    pub(in super::super) fn has_dependency_carriers(&self) -> bool {
+        self.layer.dependency_cells != 0 || self.layer.route_rows != 0
+    }
+
     fn clear_slot_payload(&mut self, slot: WrapperId) {
         self.clear_slot_allocation(slot);
         if !self.layer.contents.is_empty() {
@@ -4554,7 +4990,14 @@ impl BorrowState {
     }
 
     fn materialize_prior(&mut self, current: WrapperId) {
-        let prior = current.retired(|_| true);
+        self.materialize_wrapper_prior(
+            current,
+            current.retired(|_| true),
+            self.locals[current.local].init,
+        );
+    }
+
+    fn materialize_wrapper_prior(&mut self, current: WrapperId, prior: WrapperId, init: Init) {
         let mut row = self
             .binding_row(current)
             .cloned()
@@ -4567,7 +5010,7 @@ impl BorrowState {
                 routes: Vec::new(),
             });
         row.wrapper = prior;
-        if self.locals[current.local].init == Init::Maybe {
+        if init == Init::Maybe {
             row.coverage = Coverage::Partial;
         }
         if row.has_slot() {
@@ -4661,9 +5104,19 @@ impl BorrowState {
         locals: impl IntoIterator<Item = usize>,
         retires: impl Fn(usize) -> bool,
     ) {
-        let users: BTreeSet<_> = locals
+        self.remap_wrapper_uses(locals.into_iter().map(WrapperId::current), |wrapper| {
+            wrapper.retired(&retires)
+        });
+    }
+
+    fn remap_wrapper_uses(
+        &mut self,
+        wrappers: impl IntoIterator<Item = WrapperId>,
+        remap: impl Fn(WrapperId) -> WrapperId,
+    ) {
+        let users: BTreeSet<_> = wrappers
             .into_iter()
-            .flat_map(|local| self.layer.wrapper_users(WrapperId::current(local)))
+            .flat_map(|wrapper| self.layer.wrapper_users(wrapper))
             .collect();
         let layer = &mut self.layer;
         for user in users {
@@ -4682,12 +5135,12 @@ impl BorrowState {
             );
             row.alts.remap(|alt| {
                 let target = match alt.target {
-                    BindingTarget::Link(source) => BindingTarget::Link(source.retired(&retires)),
+                    BindingTarget::Link(source) => BindingTarget::Link(remap(source)),
                     target => target,
                 };
                 let origin = alt.origin.map(|origin| Origin {
-                    wrapper: origin.wrapper.retired(&retires),
-                    owner: origin.owner.map(|owner| owner.retired(&retires)),
+                    wrapper: remap(origin.wrapper),
+                    owner: origin.owner.map(&remap),
                     isolated: origin.isolated,
                 });
                 BindingAlt {
@@ -4696,6 +5149,11 @@ impl BorrowState {
                     ..alt
                 }
             });
+            for (cell, _) in &mut row.routes {
+                *cell = cell.remap(&remap, |allocation| allocation);
+            }
+            row.routes.sort_unstable();
+            row.routes.dedup();
             AllocationLayer::edit_wrapper_incidence(
                 &mut layer.wrapper_users,
                 &mut layer.route_rows,
@@ -4854,20 +5312,6 @@ impl BorrowState {
         }
     }
 
-    /// Store `values` into `key` of every holder.
-    ///
-    /// WHAT: a strong store replaces the group; a weak store adds to it, keeping the lazy child
-    ///       when the group had no explicit edge.
-    pub(in super::super) fn store_alloc_field(
-        &mut self,
-        holders: &[AllocId],
-        key: FieldKey,
-        values: &[StoredValue],
-        strong: bool,
-    ) {
-        self.store_alloc_field_with_views(holders, key, values, &[], strong, true);
-    }
-
     pub(in super::super) fn store_alloc_field_with_views(
         &mut self,
         holders: &[AllocId],
@@ -4887,7 +5331,12 @@ impl BorrowState {
         for &holder in holders {
             self.prepare_edge_group(holder, key, strong, true);
             for value in values {
-                let single = distinct_occurrence && self.alloc_singular(value.id);
+                let single = distinct_occurrence
+                    && if matches!(key, FieldKey::Elem | FieldKey::MapKey) {
+                        holders == [holder] && self.alloc_singular(holder)
+                    } else {
+                        self.alloc_singular(value.id)
+                    };
                 self.layer.insert_edge(
                     Edge {
                         holder,
@@ -4939,7 +5388,17 @@ impl BorrowState {
         }
     }
 
-    #[allow(dead_code)] // Prepared publisher for typed final-member postconditions.
+    pub(in super::super) fn track_family_resets(&mut self) {
+        self.layer.family_resets.get_or_insert_default();
+    }
+
+    pub(in super::super) fn family_was_reset(&self, holder: AllocId, key: FieldKey) -> bool {
+        self.layer
+            .family_resets
+            .as_ref()
+            .is_some_and(|resets| resets.contains(&(holder, key)))
+    }
+
     pub(in super::super) fn publish_family_members(
         &mut self,
         receivers: &[AllocId],
@@ -4953,92 +5412,100 @@ impl BorrowState {
         let definite_receiver = coverage == Coverage::Complete
             && matches!(receivers, [receiver] if self.alloc_singular(*receiver));
         let exact = replace == Replacement::Must && definite_receiver;
+        if exact && let Some(resets) = &mut self.layer.family_resets {
+            resets.insert((receivers[0], key));
+        }
         if members.is_empty() && replace == Replacement::May {
             return receipt;
         }
-        let cells: Vec<_> = receivers
-            .iter()
-            .map(|&receiver| CellId::Projected(receiver, key))
-            .collect();
-        self.invalidate_observations(&cells, coverage);
-        if members.is_empty() && !exact {
-            // A non-definite replacement can clear any candidate. Keep possible
-            // old members and add the empty outcome alongside them.
-            for cell in cells {
-                let CellId::Projected(holder, key) = cell else {
-                    unreachable!()
+        if !self.layer.observations.is_empty() {
+            let cells: Vec<_> = receivers
+                .iter()
+                .map(|&receiver| CellId::Projected(receiver, key))
+                .collect();
+            self.invalidate_observations(&cells, coverage);
+        }
+        if receivers.is_empty() {
+            return receipt;
+        }
+        let scalar = [ValueAlt::plain(ValueKind::Scalar)];
+        let (mut batch_values, mut batch_views, mut batch_alternatives);
+        let (values, views, alternatives): (&[_], &[_], &[_]) = match members {
+            [] => (&[], &[], &[]),
+            [member] => {
+                let value = &member.value;
+                let alternatives = if value.values.is_empty() && value.alternatives.is_empty() {
+                    &scalar[..]
+                } else {
+                    &value.alternatives
                 };
+                (&value.values, &value.views, alternatives)
+            }
+            _ => {
+                batch_values = Vec::new();
+                batch_views = Vec::new();
+                batch_alternatives = Vec::new();
+                let has_views = members.iter().any(|member| !member.value.views.is_empty());
+                let explicit = members.iter().any(|member| {
+                    !member.value.alternatives.is_empty() || member.value.values.is_empty()
+                });
+                for member in members {
+                    let value = &member.value;
+                    batch_values.extend_from_slice(&value.values);
+                    if has_views && value.views.is_empty() {
+                        // An explicit view group masks the ordinary edge fallback.
+                        batch_views.extend(value.values.iter().map(|value| value.id));
+                    } else {
+                        batch_views.extend_from_slice(&value.views);
+                    }
+                    if explicit && value.alternatives.is_empty() {
+                        if value.values.is_empty() {
+                            batch_alternatives.extend_from_slice(&scalar);
+                        } else {
+                            batch_alternatives.extend(
+                                value
+                                    .values
+                                    .iter()
+                                    .copied()
+                                    .map(|value| ValueAlt::plain(ValueKind::Allocation(value))),
+                            );
+                        }
+                    } else {
+                        batch_alternatives.extend_from_slice(&value.alternatives);
+                    }
+                }
+                (&batch_values, &batch_views, &batch_alternatives)
+            }
+        };
+        // A conditional empty reset retains possible old members alongside absence.
+        let possibly_absent =
+            members.is_empty() || alternatives.iter().any(|alt| alt.kind == ValueKind::Absent);
+        let must_add_member = definite_receiver && !possibly_absent;
+        let publication = if exact {
+            CellPublication::Replace
+        } else if must_add_member {
+            CellPublication::Append
+        } else {
+            CellPublication::Join
+        };
+        for &holder in receivers {
+            let cell = CellId::Projected(holder, key);
+            if !exact && members.is_empty() {
+                // The edge sentinel is enough unless there is an explicit payload row.
                 if !self.layer.contents(cell).is_empty() {
                     self.publish_cell_contents(
                         cell,
                         &[],
                         &[ValueAlt::plain(ValueKind::Absent)],
-                        false,
-                        false,
+                        publication,
+                        None,
                     );
                 }
-                self.prepare_edge_group(holder, key, false, false);
-                self.layer.add_edge(Edge {
-                    holder,
-                    key,
-                    held: AllocId::EMPTY,
-                    writable: true,
-                    single: false,
-                });
+                continue;
             }
-            return receipt;
+            self.publish_cell_contents(cell, values, alternatives, publication, Some(&mut receipt));
         }
-        let mut values = Vec::new();
-        let mut views = Vec::new();
-        let mut alternatives = Vec::new();
-        let has_views = members.iter().any(|member| !member.value.views.is_empty());
-        let explicit = members
-            .iter()
-            .any(|member| !member.value.alternatives.is_empty() || member.value.values.is_empty());
-        for member in members {
-            values.extend_from_slice(&member.value.values);
-            if has_views && member.value.views.is_empty() {
-                // An explicit view group masks the ordinary edge fallback, so it must
-                // also contain a representative for each plain member.
-                views.extend(member.value.values.iter().map(|value| value.id));
-            } else {
-                views.extend_from_slice(&member.value.views);
-            }
-            if explicit && member.value.alternatives.is_empty() {
-                if member.value.values.is_empty() {
-                    alternatives.push(ValueAlt::plain(ValueKind::Scalar));
-                } else {
-                    alternatives.extend(
-                        member
-                            .value
-                            .values
-                            .iter()
-                            .copied()
-                            .map(|value| ValueAlt::plain(ValueKind::Allocation(value))),
-                    );
-                }
-            } else {
-                alternatives.extend(member.value.alternatives.iter().cloned());
-            }
-        }
-        let possibly_absent = alternatives.iter().any(|alt| alt.kind == ValueKind::Absent);
-        let must_add_member = definite_receiver && !members.is_empty() && !possibly_absent;
-        for cell in cells {
-            receipt.record(cell, self.layer.contents(cell), cell, &alternatives, exact);
-            self.publish_cell_contents(cell, &values, &alternatives, exact, false);
-            if must_add_member
-                && self
-                    .layer
-                    .contents(cell)
-                    .iter()
-                    .any(|alt| alt.kind == ValueKind::Absent)
-                && let Some((cell, mut retained)) = self.layer.take_contents(cell)
-            {
-                retained.retain(|alt| alt.kind != ValueKind::Absent);
-                self.layer.set_contents(cell, retained);
-            }
-        }
-        self.store_view_projections(receivers, key, &values, &views, exact);
+        self.store_view_projections(receivers, key, values, views, exact);
         if !values.is_empty() {
             self.invalidate_detachments();
         }
@@ -5052,9 +5519,7 @@ impl BorrowState {
                             key,
                             held: value.id,
                             writable: value.writable,
-                            single: definite_receiver
-                                && member.at_most_once
-                                && self.alloc_singular(value.id),
+                            single: definite_receiver && member.at_most_once,
                         },
                         true,
                     );
@@ -5066,7 +5531,7 @@ impl BorrowState {
                     key,
                     held: AllocId::EMPTY,
                     writable: true,
-                    single: true,
+                    single: definite_receiver,
                 });
             }
         }
@@ -5144,6 +5609,7 @@ impl BorrowState {
     }
 
     /// Publish a summarized relationship, not a count of concrete insertions.
+    #[cfg(test)]
     pub(in super::super) fn contribute_alloc_edge(
         &mut self,
         holder: AllocId,
@@ -5155,6 +5621,7 @@ impl BorrowState {
 
     /// Every concrete child of a tracked field also needs an occurrence. Keep ordinary
     /// children before or after the first tracked child under the same collapsed selector.
+    #[cfg(test)]
     pub(in super::super) fn record_constructed_field(
         &mut self,
         holder: AllocId,
@@ -5174,13 +5641,14 @@ impl BorrowState {
         views: &[AllocId],
         alternatives: &[ValueAlt],
         distinct_occurrence: bool,
-    ) {
+    ) -> StoreReceipt {
+        let mut receipt = StoreReceipt::default();
         self.publish_cell_contents(
             CellId::Projected(holder, key),
             values,
             alternatives,
-            false,
-            true,
+            CellPublication::Construct,
+            Some(&mut receipt),
         );
         let tracked = self.layer.sharing.projections(holder, key).next().is_some();
         if !tracked && !views.is_empty() {
@@ -5207,6 +5675,7 @@ impl BorrowState {
         for &value in values {
             self.insert_alloc_edge(holder, key, value, distinct_occurrence);
         }
+        receipt
     }
 
     pub(in super::super) fn record_constructed_value(
@@ -5215,7 +5684,7 @@ impl BorrowState {
         key: FieldKey,
         value: &CapturedValue,
         distinct_occurrence: bool,
-    ) {
+    ) -> StoreReceipt {
         self.record_constructed_contents(
             holder,
             key,
@@ -5223,7 +5692,22 @@ impl BorrowState {
             &value.views,
             &value.alternatives,
             distinct_occurrence,
-        );
+        )
+    }
+
+    pub(in super::super) fn record_constructed_absence(
+        &mut self,
+        holder: AllocId,
+        key: FieldKey,
+    ) -> StoreReceipt {
+        self.record_constructed_contents(
+            holder,
+            key,
+            &[],
+            &[],
+            &[ValueAlt::plain(ValueKind::Absent)],
+            true,
+        )
     }
 
     fn insert_alloc_edge(
@@ -5235,7 +5719,11 @@ impl BorrowState {
     ) {
         let table = self.layer.table.borrow();
         let fresh = table.singular(holder);
-        let single = table.singular(value.id);
+        let single = if matches!(key, FieldKey::Elem | FieldKey::MapKey) {
+            fresh
+        } else {
+            table.singular(value.id)
+        };
         drop(table);
         // A fresh graph cannot add reachability to either side of an established
         // detachment. A construction site in a loop may already have live instances.
@@ -5344,6 +5832,18 @@ impl BorrowState {
                 .is_empty()
     }
 
+    pub(in super::super) fn alloc_group_is_empty(&self, holder: AllocId, key: FieldKey) -> bool {
+        let values = self.value_cell(CellId::Projected(holder, key));
+        let edges = self.layer.edges.group(holder, key);
+        let no_members = edges.iter().all(|edge| edge.held == AllocId::EMPTY);
+        no_members
+            && if values.is_empty() {
+                !edges.is_empty()
+            } else {
+                values.iter().all(|value| value.kind == ValueKind::Absent)
+            }
+    }
+
     pub(in super::super) fn value_cells(&self) -> impl Iterator<Item = (CellId, &[ValueAlt])> + '_ {
         self.layer
             .contents
@@ -5357,7 +5857,6 @@ impl BorrowState {
 
     /// Preserve explicit absence even when the same slot may hold an allocation,
     /// without resolving an implicit root in the interner.
-    #[allow(dead_code)]
     pub(in super::super) fn retained_slot_payload(
         &self,
         slot: WrapperId,
@@ -5370,9 +5869,43 @@ impl BorrowState {
         })
     }
 
+    pub(in super::super) fn retained_edge_group(&self, holder: AllocId, key: FieldKey) -> &[Edge] {
+        self.layer.edges.group(holder, key)
+    }
+
+    pub(in super::super) fn retained_family_values(
+        &self,
+        holder: AllocId,
+        key: FieldKey,
+    ) -> impl Iterator<Item = (Cow<'_, ValueAlt>, bool)> {
+        let edges = self.retained_edge_group(holder, key);
+        let values = self.value_cell(CellId::Projected(holder, key));
+        // The keyed payload carries scalar dependencies; counted edges add
+        // membership evidence when the member itself has an allocation.
+        values
+            .iter()
+            .map(move |value| {
+                let once = if let ValueKind::Allocation(member) = value.kind {
+                    edges
+                        .binary_search_by_key(&member.id, |edge| edge.held)
+                        .ok()
+                        .is_some_and(|index| edges[index].single)
+                } else {
+                    false
+                };
+                (Cow::Borrowed(value), once)
+            })
+            .chain(
+                edges
+                    .iter()
+                    .filter(move |_| values.is_empty())
+                    .map(|edge| (Cow::Owned(edge.value_alternative()), edge.single)),
+            )
+            .filter(|(value, _)| value.kind != ValueKind::Absent)
+    }
+
     /// Raw explicit edge groups preserve the distinction between an absent
     /// group and the empty sentinel. They never intern a lazy child.
-    #[allow(dead_code)] // The boundary quotient walks just the reached holders.
     pub(in super::super) fn retained_edge_groups(
         &self,
         holder: AllocId,
@@ -5380,32 +5913,29 @@ impl BorrowState {
         self.layer.edges.holder_groups(holder)
     }
 
-    /// The exceptional rows include dependency-carrying scalars without an
-    /// allocation edge. Export needs both projections of the same cell.
-    #[allow(dead_code)]
-    pub(in super::super) fn retained_projected_values(
+    /// A lazy field is visible at the boundary only when it leads to retained facts.
+    pub(in super::super) fn retained_lazy_child(
         &self,
         holder: AllocId,
-    ) -> impl Iterator<Item = (FieldKey, &[ValueAlt])> {
-        self.layer
-            .contents
-            .range(
-                CellId::Projected(holder, FieldKey::Field(0))
-                    ..=CellId::Projected(holder, FieldKey::MapKey),
-            )
-            .filter_map(|(cell, values)| match cell {
-                CellId::Projected(_, key) => Some((*key, values.as_slice())),
-                CellId::Slot(_) => None,
-            })
-    }
-
-    #[allow(dead_code)]
-    pub(in super::super) fn retained_projection_views(
-        &self,
-        view: AllocId,
-        selector: FieldKey,
-    ) -> impl Iterator<Item = AllocId> + '_ {
-        self.layer.sharing.projections(view, selector)
+        key: FieldKey,
+    ) -> Option<AllocId> {
+        let child = *self
+            .layer
+            .table
+            .borrow()
+            .index
+            .get(&AllocKey::Child(holder, key))?;
+        (self.layer.edges.has_outgoing(child)
+            || self
+                .layer
+                .contents
+                .range(
+                    CellId::Projected(child, FieldKey::Field(0))
+                        ..=CellId::Projected(child, FieldKey::MapKey),
+                )
+                .next()
+                .is_some())
+        .then_some(child)
     }
 
     pub(in super::super) fn retained_value_routes(
@@ -5463,56 +5993,48 @@ impl BorrowState {
         order: OrderKey,
         retires: Option<&dyn Fn(usize) -> bool>,
     ) -> StoreReceipt {
-        let remap = |state: &Self, id| {
-            retires.map_or(id, |retire| state.remap_retired_alloc_id(id, order, retire))
-        };
         match operation {
-            TypedStore::EraseFamily {
+            TypedStore::Family {
                 receivers,
                 coverage,
-                keys,
+                update,
             } => {
-                if let [receiver] = receivers.as_slice()
-                    && *coverage == Coverage::Complete
-                {
-                    let receiver = remap(self, *receiver);
-                    if self.alloc_singular(receiver) {
-                        return self.erase_alloc_family(receiver, *keys);
+                let remap = |state: &Self, id| {
+                    retires.map_or(id, |retire| state.remap_retired_alloc_id(id, order, retire))
+                };
+                let mut receivers =
+                    remap_invoke_capture(receivers.as_slice(), |id| remap(self, id));
+                if let Cow::Owned(receivers) = &mut receivers {
+                    receivers.sort_unstable();
+                    receivers.dedup();
+                }
+                match update {
+                    FamilyUpdate::Reset(keys) => {
+                        self.reset_family_members(&receivers, *coverage, *keys)
+                    }
+                    FamilyUpdate::Extend(key, member) => {
+                        let mut rebased;
+                        let member = if retires.is_some()
+                            && member.value.names_allocation(&|id| remap(self, id) != id)
+                        {
+                            rebased = member.clone();
+                            rebased.value.remap_allocations(|id| remap(self, id));
+                            &rebased
+                        } else {
+                            member
+                        };
+                        self.publish_family_members(
+                            &receivers,
+                            *coverage,
+                            *key,
+                            Replacement::May,
+                            std::slice::from_ref(member),
+                        )
                     }
                 }
-                // A conditional erase keeps old members in the may graph, but does not
-                // preserve a must observation of a member that may have been removed.
-                if !self.layer.observations.is_empty() {
-                    let cells: Vec<_> = receivers
-                        .iter()
-                        .flat_map(|&receiver| {
-                            let holder = remap(self, receiver);
-                            [
-                                CellId::Projected(holder, FieldKey::Elem),
-                                CellId::Projected(holder, FieldKey::MapKey),
-                            ]
-                        })
-                        .collect();
-                    self.invalidate_observations(&cells, *coverage);
-                }
-                StoreReceipt::default()
             }
-            TypedStore::Write(write) => self.publish_write(write, order, retires, None),
+            TypedStore::Write(write) => self.publish_write(write, order, retires),
         }
-    }
-
-    #[allow(dead_code)]
-    pub(in super::super) fn publish_captured_store(
-        &mut self,
-        operation: &TypedStore,
-        order: OrderKey,
-    ) -> PublicationCarriers {
-        let mut carriers = PublicationCarriers::default();
-        let TypedStore::Write(write) = operation else {
-            unreachable!("whole-family effects are published with their final members");
-        };
-        self.publish_write(write, order, None, Some(&mut carriers));
-        carriers
     }
 
     fn publish_write(
@@ -5520,7 +6042,6 @@ impl BorrowState {
         write: &TypedWrite,
         order: OrderKey,
         retires: Option<&dyn Fn(usize) -> bool>,
-        mut carriers: Option<&mut PublicationCarriers>,
     ) -> StoreReceipt {
         let TypedWrite {
             addresses,
@@ -5551,7 +6072,7 @@ impl BorrowState {
             && addresses.definite().is_some()
         {
             match *cell {
-                CellId::Slot(wrapper) if wrapper.age == WrapperAge::Current => Some(*cell),
+                CellId::Slot(wrapper) if wrapper.is_singleton() => Some(*cell),
                 CellId::Projected(holder, key) if self.projected_cell_is_exact(holder, key) => {
                     Some(*cell)
                 }
@@ -5571,31 +6092,22 @@ impl BorrowState {
             remap_value_alternatives(&mut rebased, remap);
             alternatives = Cow::Owned(rebased);
         }
-        let replaced = if !alternatives.is_empty() || !self.layer.contents.is_empty() {
-            let replaced = definite.and_then(|cell| self.layer.take_contents(cell));
+        let mut receipt = StoreReceipt::default();
+        if !alternatives.is_empty() || !self.layer.contents.is_empty() {
             for &cell in cells.as_ref() {
-                if let Some(carriers) = carriers.as_deref_mut() {
-                    let old = if definite == Some(cell) {
-                        replaced
-                            .as_ref()
-                            .map_or(&[][..], |(_, values)| values.as_slice())
-                    } else {
-                        self.layer.contents(cell)
-                    };
-                    carriers.record(cell, old, cell, &alternatives, definite == Some(cell));
-                }
                 self.publish_cell_contents(
                     cell,
                     &values,
                     &alternatives,
-                    definite == Some(cell),
-                    false,
+                    if definite == Some(cell) {
+                        CellPublication::Replace
+                    } else {
+                        CellPublication::Join
+                    },
+                    Some(&mut receipt),
                 );
             }
-            replaced
-        } else {
-            None
-        };
+        }
         self.invalidate_observations(&cells, addresses.coverage);
 
         let readonly = observer.is_some_and(|(_, readonly)| readonly);
@@ -5679,9 +6191,7 @@ impl BorrowState {
                 self.record_observation(entry);
             }
         }
-        StoreReceipt {
-            replaced: [replaced, None],
-        }
+        receipt
     }
 
     fn publish_cell_contents(
@@ -5689,10 +6199,24 @@ impl BorrowState {
         cell: CellId,
         values: &[StoredValue],
         incoming: &[ValueAlt],
-        exact: bool,
-        constructing: bool,
+        publication: CellPublication,
+        receipt: Option<&mut StoreReceipt>,
     ) {
         let old = self.layer.contents(cell);
+        let exact = matches!(publication, CellPublication::Replace);
+        let append = matches!(publication, CellPublication::Append);
+        if let Some(receipt) = receipt {
+            receipt.record(cell, old, cell, incoming, exact);
+            if append {
+                for value in old.iter().filter(|value| value.kind == ValueKind::Absent) {
+                    receipt.record(cell, std::slice::from_ref(value), cell, &[], true);
+                }
+            }
+        }
+        add_frontend_counter(
+            FrontendCounter::BorrowPublisherGroupRowsInspected,
+            old.len() + incoming.len(),
+        );
         if incoming.is_empty() && (old.is_empty() || exact) {
             if !old.is_empty() {
                 self.layer.set_contents(cell, Vec::new());
@@ -5704,8 +6228,15 @@ impl BorrowState {
         } else if !old.is_empty() {
             old.to_vec()
         } else {
-            self.implicit_cell_alternatives(cell, incoming, constructing)
+            self.implicit_cell_alternatives(
+                cell,
+                incoming,
+                matches!(publication, CellPublication::Construct),
+            )
         };
+        if append {
+            alternatives.retain(|value| value.kind != ValueKind::Absent);
+        }
         if incoming.is_empty() {
             merge_alternatives(
                 &mut alternatives,
@@ -5714,6 +6245,10 @@ impl BorrowState {
         } else {
             merge_alternatives(&mut alternatives, incoming.iter().cloned());
         }
+        add_frontend_counter(
+            FrontendCounter::BorrowPublisherGroupRowsMoved,
+            alternatives.len(),
+        );
         self.layer.set_contents(cell, alternatives);
     }
 
@@ -5946,28 +6481,23 @@ impl BorrowState {
         }
     }
 
-    fn erase_alloc_family(&mut self, holder: AllocId, keys: EntryFamilies) -> StoreReceipt {
-        self.invalidate_observations(
-            &[
-                CellId::Projected(holder, FieldKey::Elem),
-                CellId::Projected(holder, FieldKey::MapKey),
-            ],
-            Coverage::Complete,
-        );
-        self.store_alloc_field(&[holder], FieldKey::Elem, &[], true);
-        let element = self
-            .layer
-            .take_contents(CellId::Projected(holder, FieldKey::Elem));
-        let key = if matches!(keys, EntryFamilies::MapEntries) {
-            self.store_alloc_field(&[holder], FieldKey::MapKey, &[], true);
-            self.layer
-                .take_contents(CellId::Projected(holder, FieldKey::MapKey))
-        } else {
-            None
-        };
-        StoreReceipt {
-            replaced: [element, key],
+    fn reset_family_members(
+        &mut self,
+        receivers: &[AllocId],
+        coverage: Coverage,
+        keys: EntryFamilies,
+    ) -> StoreReceipt {
+        let mut receipt = StoreReceipt::default();
+        for &key in keys.selectors() {
+            receipt.append(self.publish_family_members(
+                receivers,
+                coverage,
+                key,
+                Replacement::Must,
+                &[],
+            ));
         }
+        receipt
     }
 
     /// Remove an element or map entry after a successful removal.
@@ -5991,8 +6521,9 @@ impl BorrowState {
             && self.alloc_singular(*holder)
         {
             let holder = *holder;
-            let receipt = self.erase_alloc_family(
-                holder,
+            let receipt = self.reset_family_members(
+                &[holder],
+                Coverage::Complete,
                 if map {
                     EntryFamilies::MapEntries
                 } else {
@@ -6097,7 +6628,12 @@ impl BorrowState {
 
     /// Join sparse facts from the pre-join inputs, then publish the merged local facts.
     pub(in super::super) fn join_in_place(&mut self, other: &Self) -> bool {
-        let changed = self.join_layer(other);
+        let mut changed = self.join_layer(other);
+        if let Some(resets) = &mut self.layer.family_resets {
+            let old_len = resets.len();
+            resets.retain(|&(holder, key)| other.family_was_reset(holder, key));
+            changed |= resets.len() != old_len;
+        }
         let wrappers = self.merged_wrappers(other);
         let locals_changed = self.join_local_facts(other);
         let routing_changed = locals_changed || wrappers.is_some();
@@ -6316,7 +6852,7 @@ impl BorrowState {
                 row.union_alts(&[OWN_SLOT]);
             }
             if row.has_slot()
-                && (wrapper.age == WrapperAge::Prior
+                && (wrapper.age != WrapperAge::Current
                     || row.alts.as_slice().len() > 1
                     || row.coverage == Coverage::Partial)
             {
@@ -6329,7 +6865,7 @@ impl BorrowState {
                     .expect("owned slot has an incoming occurrence")
                     .clone();
                 if let Some(incoming) = inputs.next() {
-                    if roots.is_empty() != incoming.is_empty() {
+                    if !wrapper.is_call_owned() && roots.is_empty() != incoming.is_empty() {
                         roots.insert(wrapper.local);
                     }
                     roots.union_with(incoming);
@@ -6371,7 +6907,7 @@ impl BorrowState {
                 let group = sharing.projections.entry((holder, key)).or_default();
                 group.extend(children);
                 if opposite.projections(holder, key).next().is_some()
-                    || (matches!(table.base(holder), AllocBase::CallView(..))
+                    || (is_call_view_base(table.base(holder))
                         && opposite.members(holder).next().is_none())
                 {
                     continue;
@@ -6384,13 +6920,12 @@ impl BorrowState {
             }
             for &(a, b, shares) in source.pairs.iter() {
                 let could_exist = |view| {
-                    !matches!(table.base(view), AllocBase::CallView(..))
-                        || opposite.members(view).next().is_some()
+                    !is_call_view_base(table.base(view)) || opposite.members(view).next().is_some()
                 };
                 let possible = shares
                     || (could_exist(a)
                         && could_exist(b)
-                        && opposite_state.layer.views_may_share(a, b));
+                        && opposite_state.layer.views_may_share(&table, a, b));
                 sharing.pairs.union(a, b, possible);
             }
         }
@@ -6539,7 +7074,9 @@ impl BorrowState {
         let reached = self.reachable_wrappers(&live_name);
         let keep = |wrapper: WrapperId| match wrapper.age {
             WrapperAge::Current => live_name(wrapper.local),
-            WrapperAge::Prior => reached.contains(&wrapper),
+            WrapperAge::Prior | WrapperAge::CallExact | WrapperAge::CallFamily => {
+                reached.contains(&wrapper)
+            }
         };
         self.layer.retain_wrappers(keep);
         self.layer.retain_bound(keep);
@@ -6556,7 +7093,7 @@ impl BorrowState {
         self.layer
             .wrappers
             .iter()
-            .any(|row| row.wrapper.age == WrapperAge::Prior)
+            .any(|row| row.wrapper.age != WrapperAge::Current)
     }
 
     pub(in super::super) fn prune_retired_wrappers(&mut self) {
@@ -6678,6 +7215,28 @@ fn departed_base(base: AllocBase, visible: &RootSet) -> Option<AllocBase> {
     }
 }
 
+fn prior_call_base(base: AllocBase, order: OrderKey) -> Option<AllocBase> {
+    match base {
+        AllocBase::CallRecent(site, error, node) if site == order => {
+            Some(AllocBase::CallPrior(site, error, node))
+        }
+        AllocBase::CallWrapperRecent(site, error, node) if site == order => {
+            Some(AllocBase::CallWrapperPrior(site, error, node))
+        }
+        AllocBase::CallRowView(site, error, support, row) if site == order => {
+            Some(AllocBase::CallPriorRowView(site, error, support, row))
+        }
+        _ => None,
+    }
+}
+
+fn is_call_view_base(base: AllocBase) -> bool {
+    matches!(
+        base,
+        AllocBase::CallView(..) | AllocBase::CallRowView(..) | AllocBase::CallPriorRowView(..)
+    )
+}
+
 fn base_local(base: AllocBase) -> Option<usize> {
     match base {
         AllocBase::Root(local) | AllocBase::Old(local, _) | AllocBase::Departed(local) => {
@@ -6685,8 +7244,17 @@ fn base_local(base: AllocBase) -> Option<usize> {
         }
         AllocBase::Site(_)
         | AllocBase::Call(..)
+        | AllocBase::CallRecent(..)
+        | AllocBase::CallPrior(..)
+        | AllocBase::CallWrapper(..)
+        | AllocBase::CallWrapperRecent(..)
+        | AllocBase::CallWrapperPrior(..)
         | AllocBase::OpaqueCall(..)
-        | AllocBase::CallView(..) => None,
+        | AllocBase::CallView(..)
+        | AllocBase::CallRowView(..)
+        | AllocBase::CallPriorRowView(..)
+        | AllocBase::EntryScalar(_)
+        | AllocBase::EntryAllocation(_) => None,
     }
 }
 
@@ -6762,6 +7330,78 @@ pub(in super::super) fn cyclic_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recurring_call_retains_prior_wrapper_and_allocation_separately() {
+        let block = BlockId(0);
+        let successors = [(block, vec![BlockId(1)]), (BlockId(1), vec![block])]
+            .into_iter()
+            .collect();
+        let order = 3;
+        let mut state = BorrowState::new_uninitialized(1);
+        let recent = state.call_site_id(order, false, 0, false, block, &successors);
+        let wrapper = state.call_wrapper_id(order, false, 1, false, block, &successors);
+        assert!(state.alloc_singular(recent));
+        assert!(wrapper.is_singleton());
+        state.publish_captured_binding(
+            wrapper,
+            SmallSet::One(OWN_SLOT),
+            Coverage::Complete,
+            Vec::new(),
+            Replacement::Must,
+            None,
+        );
+        let cell = CellId::Slot(wrapper);
+        state.publish_store(
+            &TypedStore::replace_cells(
+                AddressSet::from_cells([cell], Coverage::Complete).with_singleton_proof(),
+                CapturedValue::fresh(recent),
+            )
+            .with_explicit_slot_payload(),
+            order,
+            None,
+        );
+        state.initialize_entry_binding(
+            0,
+            BindingSpec::Link {
+                source: wrapper,
+                writable: true,
+            },
+        );
+
+        state.age_call_storage(order);
+        let prior = state.aged_call_allocation(recent, order);
+        let prior_wrapper = state.aged_call_wrapper(wrapper, order);
+        assert_ne!(prior, recent);
+        assert_ne!(prior_wrapper, wrapper);
+        assert!(!state.alloc_singular(prior));
+        assert!(!prior_wrapper.is_singleton());
+        assert_eq!(
+            state.resolve_cells(0).cells(),
+            &[CellId::Slot(prior_wrapper)]
+        );
+        assert_eq!(
+            state
+                .slot_values(prior_wrapper)
+                .map(|value| value.id)
+                .collect::<Vec<_>>(),
+            [prior]
+        );
+        assert!(!state.owns_slot(wrapper));
+        assert_eq!(
+            state.call_site_id(order, false, 0, false, block, &successors),
+            recent
+        );
+        assert_eq!(
+            state.call_wrapper_id(order, false, 1, false, block, &successors),
+            wrapper
+        );
+        state.age_call_storage(order);
+        assert_eq!(
+            state.resolve_cells(0).cells(),
+            &[CellId::Slot(prior_wrapper)]
+        );
+    }
 
     #[test]
     fn join_interns_missing_children_in_predecessor_order_for_readonly_attribution() {

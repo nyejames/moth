@@ -44,15 +44,16 @@ mod terminator;
 mod tests;
 
 use conflicts::{check_access, footprint, probe_mutable_access};
+pub(in super::super) use layer::option_edge_is_possible;
 use layer::{
     CapturedDetachments, LayerValueContext, capture_projected_binding, capture_slot_value,
     check_cell_permission, check_place_replacement, check_shared_place_access, resolve_place,
     stored_values,
 };
 use move_decision::{MoveDecision, classify_move_decision};
-pub(in super::super) use statement::call_member_result;
 pub(super) use statement::transfer_statement;
 pub(super) use statement::{CallTransferContext, transfer_statement_operation};
+pub(in super::super) use statement::{call_member_result, call_member_writes};
 pub(super) use terminator::transfer_terminator;
 pub(super) use terminator::transfer_terminator_operation;
 
@@ -292,6 +293,7 @@ fn transfer_assign_target(
         context: transfer,
         view: OperationView::from_layout(layout),
         block_id: context.block_id,
+        materialise_contents: false,
     };
     let plan = plan_assignment(&values, context.state, target, value, is_definition, local)?;
     check_assignment(context, target, value, &plan)?;
@@ -476,7 +478,7 @@ fn check_assignment(
                 Some(resolved),
                 STORE_ACCESS,
             )?;
-        } else if acquisition.projected && check.stats.observations.enabled {
+        } else if acquisition.projected && check.state.has_dependency_carriers() {
             check.stats.observations.tail.observe(
                 check.state,
                 &footprint(resolved, PlaceUse::Acquire),
@@ -517,7 +519,7 @@ fn publish_assignment(
         if has_layer || !stored.is_empty() {
             let receipt =
                 state.publish_store(&TypedStore::replace_cells(addresses, stored), order, None);
-            observations.tail.replace(receipt);
+            observations.publish(receipt);
         }
         return Ok(());
     }
@@ -567,7 +569,7 @@ fn publish_assignment(
     if is_definition {
         let defines_slot = binding.is_none();
         let mut slot = if defines_slot {
-            capture_slot_value(values, state, value)?
+            capture_slot_value(values, state, value, false)?
         } else {
             Default::default()
         };
@@ -634,9 +636,10 @@ fn publish_assignment(
                 derivation,
             );
             let receipt = layer::publish_slot_capture(state, local, None, slot, rhs_roots, order);
-            observations.tail.replace(receipt);
+            observations.publish(receipt);
         } else {
-            state.set_binding(local, binding, rhs_roots, derivation);
+            let receipt = state.set_binding(local, binding, rhs_roots, derivation);
+            observations.publish(receipt);
             detachments.apply(state, local);
         }
         // Retiring an alias can leave a prior wrapper without any remaining routes.
@@ -681,14 +684,17 @@ fn publish_assignment(
                 order,
                 None,
             );
-            observations.tail.replace(receipt);
+            observations.publish(receipt);
         }
-        let before = observations.before_rekey(state);
-        state.transition_slot_to_alias(local, binding, rhs_roots, derivation, preserve_slot);
-        observations.after_rekey(before, state, |slot| slot, |id| id);
+        let receipt =
+            state.transition_slot_to_alias(local, binding, rhs_roots, derivation, preserve_slot);
+        observations.publish(receipt);
         detachments.apply(state, local);
-    } else if !preserve_slot && let Some(CellId::Slot(wrapper)) = addresses.definite() {
-        let mut captured = capture_slot_value(values, state, value)?;
+    } else if !preserve_slot
+        && let Some(CellId::Slot(wrapper)) = addresses.definite()
+        && wrapper.age == WrapperAge::Current
+    {
+        let mut captured = capture_slot_value(values, state, value, true)?;
         if captured.has_facts() || !state.layer_is_empty() {
             let before = observations.before_rekey(state);
             let retirement = state.retire_slot_value(wrapper.local, order);
@@ -704,7 +710,7 @@ fn publish_assignment(
             rhs_roots,
             order,
         );
-        observations.tail.replace(receipt);
+        observations.publish(receipt);
     } else if !preserve_slot || mode.contains(LocalMode::ALIAS) {
         let stored = stored_values(values, state, value, true)?;
         let mut store = if preserve_slot {
@@ -723,7 +729,7 @@ fn publish_assignment(
             state.mark_slot_derivation(local, derivation);
         }
         let receipt = state.publish_store(&store, order, None);
-        observations.tail.replace(receipt);
+        observations.publish(receipt);
     }
     Ok(())
 }

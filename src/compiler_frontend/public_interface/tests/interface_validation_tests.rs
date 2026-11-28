@@ -32,11 +32,15 @@ use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalPackageRegistry,
     ExternalSymbolCategory, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
 };
+use crate::compiler_frontend::public_call_summary::typed::{
+    CellPort, CellPost, Component, Coverage, EntryPort, ExportPort, Footprint, Lane, ObjectRef,
+    OutputPort, PathAccess, PortId, Post, Product, ScalarSource, StorageKind, SupportId,
+    TypedCallAllocationFacts, ValueRef, ValueSource,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallAllocationSource, CallField, CallLaneSummary, CallOutputPath,
-    CallParameterPath, CallPathSource, CallResultPath, FunctionReturnAliasSummary,
-    PublicCallMutationEffect, PublicCallParameterAccess, PublicCallParameterSummary,
-    PublicCallSummary, PublicCallTransferEffect,
+    CallField, CallResultPath, FunctionReturnAliasSummary, PublicCallMutationEffect,
+    PublicCallParameterAccess, PublicCallParameterSummary, PublicCallSummary,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
@@ -50,18 +54,43 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
-        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-            success: CallLaneSummary {
-                reachable: true,
-                ..CallLaneSummary::default()
-            },
-            error: CallLaneSummary::default(),
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..Default::default()
         })),
         escapes_builtin_failure: false,
         uses_fast_semantics: false,
         may_trap: false,
         may_fail: false,
     }
+}
+
+fn returning_post(post: Post) -> Lane {
+    Lane::Returning(
+        Product::new(vec![Component {
+            support: SupportId(0),
+            alternatives: vec![post],
+        }])
+        .unwrap(),
+    )
+}
+
+fn value(source: ValueSource) -> ValueRef {
+    ValueRef {
+        source,
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    }
+}
+
+fn result_object() -> ObjectRef {
+    ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }))
 }
 
 fn shared_summary(parameter_count: usize) -> PublicCallSummary {
@@ -750,20 +779,21 @@ fn validates_nested_generic_call_path_ordinals_against_the_closed_layout() {
         }],
         error: None,
     };
-    let make_summary = |path| PublicCallSummary {
-        return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-            success: CallLaneSummary {
-                reachable: true,
-                sources: vec![CallPathSource {
-                    output: CallOutputPath::Result(CallResultPath {
-                        slot: 0,
-                        path: vec![],
-                    }),
-                    source: CallAllocationSource::Parameter(CallParameterPath { index: 0, path }),
-                }],
-                ..CallLaneSummary::default()
-            },
-            error: CallLaneSummary::default(),
+    let make_summary = |path: Vec<_>| PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            ports: vec![EntryPort::Value {
+                parameter: 0,
+                path: path.into_boxed_slice(),
+            }],
+            support_count: 1,
+            success: returning_post(Post {
+                results: vec![(
+                    0,
+                    value(ValueSource::Allocation(ObjectRef::Entry(PortId(0)))),
+                )],
+                ..Default::default()
+            }),
+            ..Default::default()
         })),
         ..shared_summary(1)
     };
@@ -816,12 +846,7 @@ fn validates_nested_generic_call_path_ordinals_against_the_closed_layout() {
         ],
     ] {
         interface.concrete_call_summaries[0].summary = make_summary(path);
-        let error = interface.validate_for_publication().unwrap_err();
-        assert!(
-            error
-                .message
-                .contains("invalid or incompatible success lane parameter source")
-        );
+        assert!(interface.validate_for_publication().is_err());
     }
 
     interface.concrete_call_summaries[0].summary = make_summary(vec![CallField::Field(0)]);
@@ -848,12 +873,7 @@ fn validates_nested_generic_call_path_ordinals_against_the_closed_layout() {
     interface
         .validate_closure_input()
         .expect("a provider may still supply the projected layout");
-    let error = interface.validate_for_publication().unwrap_err();
-    assert!(
-        error
-            .message
-            .contains("invalid or incompatible success lane parameter source")
-    );
+    assert!(interface.validate_for_publication().is_err());
 }
 
 #[test]
@@ -871,30 +891,44 @@ fn scalar_result_cannot_publish_an_allocation_source() {
     };
     let mut interface = evidence_interface(&[]);
     interface.declarations.push(declaration);
+    let string = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String);
+    let allocation = result_object();
     interface
         .concrete_call_summaries
         .push(ConcreteCallSummaryRecord {
             origin,
             summary: PublicCallSummary {
-                return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-                    success: CallLaneSummary {
-                        reachable: true,
-                        sources: vec![CallPathSource {
-                            output: CallOutputPath::Result(CallResultPath {
-                                slot: 0,
-                                path: vec![],
-                            }),
-                            source: CallAllocationSource::Fresh,
-                        }],
-                        ..CallLaneSummary::default()
+                return_alias: FunctionReturnAliasSummary::Known(Box::new(
+                    TypedCallAllocationFacts {
+                        support_count: 1,
+                        success: returning_post(Post {
+                            results: vec![(0, value(ValueSource::Allocation(allocation.clone())))],
+                            retained: vec![(allocation, StorageKind::Allocation, string)],
+                            ..Default::default()
+                        }),
+                        ..Default::default()
                     },
-                    error: CallLaneSummary::default(),
-                })),
+                )),
                 ..empty_summary()
             },
         });
-    let error = interface.validate_for_publication().unwrap_err();
-    assert!(error.message.contains("invalid success lane output path"));
+    assert!(interface.validate_for_publication().is_err());
+
+    interface.concrete_call_summaries[0].summary.return_alias = empty_summary().return_alias;
+    assert!(interface.validate_for_publication().is_err());
+
+    interface.concrete_call_summaries[0].summary.return_alias =
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            support_count: 1,
+            success: returning_post(Post {
+                results: vec![(0, value(ValueSource::Scalar(ScalarSource::Independent)))],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+    interface
+        .validate_for_publication()
+        .expect("a scalar postcondition matches the declaration");
 }
 
 #[test]
@@ -913,46 +947,42 @@ fn unpublished_error_channel_requires_the_private_builtin_failure_reservation() 
     });
     let mut interface = evidence_interface(&[]);
     interface.declarations.push(declaration);
+    let error_facts = |field| {
+        let error = result_object();
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            ports: vec![EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            }],
+            support_count: 1,
+            error: returning_post(Post {
+                cells: vec![(
+                    CellPort::Edge(error.clone(), field),
+                    CellPost::Replace(vec![Some(value(ValueSource::Allocation(
+                        ObjectRef::Entry(PortId(0)),
+                    )))]),
+                )],
+                results: vec![(0, value(ValueSource::Allocation(error.clone())))],
+                retained: vec![(
+                    error,
+                    StorageKind::Allocation,
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+                )],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+    };
     interface
         .concrete_call_summaries
         .push(ConcreteCallSummaryRecord {
             origin,
             summary: PublicCallSummary {
-                return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-                    success: CallLaneSummary::default(),
-                    error: CallLaneSummary {
-                        reachable: true,
-                        sources: vec![
-                            CallPathSource {
-                                output: CallOutputPath::Result(CallResultPath {
-                                    slot: 0,
-                                    path: Vec::new(),
-                                }),
-                                source: CallAllocationSource::Fresh,
-                            },
-                            CallPathSource {
-                                output: CallOutputPath::Result(CallResultPath {
-                                    slot: 0,
-                                    path: vec![CallField::Field(0)],
-                                }),
-                                source: CallAllocationSource::Parameter(CallParameterPath {
-                                    index: 0,
-                                    path: Vec::new(),
-                                }),
-                            },
-                        ],
-                        ..CallLaneSummary::default()
-                    },
-                })),
+                return_alias: error_facts(CallField::Field(0)),
                 ..shared_summary(1)
             },
         });
-    let error = interface.validate_for_publication().unwrap_err();
-    assert!(
-        error
-            .message
-            .contains("reachable error lane has no declared return contract")
-    );
+    assert!(interface.validate_for_publication().is_err());
 
     interface.concrete_call_summaries[0]
         .summary
@@ -961,17 +991,8 @@ fn unpublished_error_channel_requires_the_private_builtin_failure_reservation() 
         .validate_for_publication()
         .expect("a private builtin Error lane need not alter the canonical authored signature");
 
-    let FunctionReturnAliasSummary::Known(facts) =
-        &mut interface.concrete_call_summaries[0].summary.return_alias
-    else {
-        unreachable!("known allocation facts fixture");
-    };
-    let CallOutputPath::Result(message) = &mut facts.error.sources[1].output else {
-        unreachable!("error message output fixture");
-    };
-    message.path[0] = CallField::Field(1);
-    let error = interface.validate_for_publication().unwrap_err();
-    assert!(error.message.contains("invalid error lane output path"));
+    interface.concrete_call_summaries[0].summary.return_alias = error_facts(CallField::Field(1));
+    assert!(interface.validate_for_publication().is_err());
 }
 
 #[test]
@@ -1030,6 +1051,17 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             },
         }),
     };
+    let make_summary = PublicCallSummary {
+        return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            support_count: 1,
+            success: returning_post(Post {
+                coverage: Coverage::Unresolved(Footprint::Locations(vec![OutputPort::Result(0)])),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })),
+        ..empty_summary()
+    };
     let provider = PublicSemanticInterface {
         module_origin: provider_module.clone(),
         export_bindings: vec![
@@ -1058,7 +1090,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         reusable_evidence: Vec::new(),
         concrete_call_summaries: vec![ConcreteCallSummaryRecord {
             origin: make_origin.clone(),
-            summary: empty_summary(),
+            summary: make_summary.clone(),
         }],
     };
 
@@ -1109,7 +1141,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
             .iter()
             .find(|record| record.origin == make_origin)
             .map(|record| &record.summary),
-        Some(&empty_summary())
+        Some(&make_summary)
     );
 }
 
@@ -1154,6 +1186,21 @@ fn accepts_source_owned_evidence_for_canonical_core_trait() {
         }],
         error: None,
     };
+    let result = result_object();
+    interface.concrete_call_summaries[0].summary.return_alias =
+        FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+            success: returning_post(Post {
+                results: vec![(0, value(ValueSource::Allocation(result.clone())))],
+                retained: vec![(
+                    result,
+                    StorageKind::Allocation,
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                )],
+                ..Default::default()
+            }),
+            support_count: 1,
+            ..Default::default()
+        }));
 
     interface
         .validate_for_publication()

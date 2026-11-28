@@ -834,7 +834,7 @@ pub(super) fn check_access(
     policy: MutableAccessPolicy,
 ) -> Result<(), BorrowCheckError> {
     validate_access(check, &access, source, policy)?;
-    if check.stats.observations.enabled {
+    if check.state.has_dependency_carriers() {
         let terminal = matches!(
             access.usage,
             PlaceUse::Read | PlaceUse::ReadEntries | PlaceUse::WriteEntries
@@ -884,6 +884,9 @@ pub(super) fn record_call_observations(
     user_call: bool,
     defer_writes: bool,
 ) -> Vec<ObservationCheckpoint> {
+    if !state.has_dependency_carriers() {
+        return Vec::new();
+    }
     let mut deferred = Vec::new();
     for reservation in tracker.reservations() {
         let terminal = !writable(&reservation.footprint)
@@ -932,7 +935,7 @@ fn mutation_checkpoint(
     order: i32,
     pending: Option<&StatementAccessTracker>,
 ) -> Option<ObservationCheckpoint> {
-    if !state.has_value_alternatives()
+    if !state.has_dependency_carriers()
         || !matches!(
             access.usage,
             PlaceUse::WriteEntries | PlaceUse::Mutate { deep: true }
@@ -1127,11 +1130,10 @@ fn validate_access(
             && let Some(actor) = actor
             && source.is_some_and(|source| {
                 source.route.projected
-                    || source
-                        .address
-                        .cells()
-                        .iter()
-                        .any(|cell| matches!(cell, CellId::Slot(slot) if slot.local == actor))
+                    || source.address.cells().iter().any(|cell| {
+                        matches!(cell, CellId::Slot(slot)
+                            if !slot.is_call_owned() && slot.local == actor)
+                    })
             }) {
             resolved
                 .projected_holder_route(actor)

@@ -39,6 +39,7 @@ pub(crate) use const_materialisation::reuse_probe;
 pub(crate) use const_materialisation::{
     ConstFunctionMaterialisationTarget, materialise_imported_const_function,
 };
+pub(crate) use nominal_blueprints::{registered_type_projection, with_registered_type_projection};
 pub(crate) use preparation_freeze::{
     ModuleMaterialisationCapture, ModuleMaterialisationEnvironmentInput,
     ModuleMaterialisationPreparation, ModuleMaterialisationPreparationBuilder,

@@ -41,6 +41,65 @@ fn resultless_call_with_opaque_stores_is_not_safe_evidence() {
     ));
 }
 
+#[test]
+fn family_only_call_reports_opaque_call_stores_on_selected_outcome() {
+    let call = CallId::new(0);
+    for outcomes in [[true, false], [false, true]] {
+        for success in outcomes {
+            let mut fixture = Fixture::new(2);
+            let map = fixture.place(0, []);
+            let error = fixture.place(1, []);
+            fixture.fresh(map);
+            fixture.parts.calls.push(Call {
+                id: call,
+                label: "map-edit".to_owned(),
+                opaque_stores: success,
+            });
+            let (_, argument) = fixture.call_argument_at(call, 0, map, AccessKind::Exclusive);
+            if success {
+                fixture.event(EventKind::CallEffect(CallEffect {
+                    call,
+                    arguments: Box::new([argument]),
+                    results: Box::new([]),
+                }));
+                assert!(matches!(
+                    run(fixture.finish()),
+                    OracleOutcome::Inconclusive {
+                        reason: OracleLimitReason::OpaqueCallStores { call: refused }, ..
+                    } if refused == call
+                ));
+            } else {
+                fixture.call_effect_result(
+                    call,
+                    vec![argument],
+                    error,
+                    CallResultProvenance::Fresh,
+                );
+                let map_read = fixture.access_event(map, UseKind::Read, false);
+                let error_read = fixture.access_event(error, UseKind::Read, false);
+                let OracleOutcome::CompleteSafe {
+                    executions: 1,
+                    trace,
+                } = run(fixture.finish())
+                else {
+                    panic!("the unmodified error lane must execute and install its fresh result");
+                };
+                let node = |event| {
+                    trace
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.event == event)
+                        .and_then(|entry| entry.access.as_ref())
+                        .unwrap()
+                        .target
+                        .node
+                };
+                assert_ne!(node(map_read), node(error_read));
+            }
+        }
+    }
+}
+
 fn resultless_opaque_store_problem() -> BorrowProblem {
     let mut fixture = Fixture::new(1);
     let rows = fixture.place(0, []);

@@ -9,11 +9,10 @@ use super::diagnostics::BorrowDiagnostics;
 use super::engine::BorrowChecker;
 use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
-use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
@@ -26,6 +25,8 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::{for_each_terminator_target, terminator_targets};
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
@@ -38,7 +39,7 @@ use std::collections::VecDeque;
 mod return_alias;
 pub(super) use return_alias::ProjectedSupport;
 
-type ReturnAliasIndices = Vec<Option<return_alias::IndexedFunction>>;
+type ReturnAliasIndices = FxHashMap<FunctionId, return_alias::SparseFunction>;
 type ReturnAliasCallers = FxHashMap<FunctionId, Vec<usize>>;
 
 /// Per-block read liveness and direct-assignment facts for one function.
@@ -186,27 +187,18 @@ impl<'a> BorrowChecker<'a> {
         self.public_call_summaries =
             Self::seed_public_call_summaries(self.module, &self.diagnostics)?;
 
-        let (indices, callers) = self.cold_return_alias_indices()?;
+        let indices = return_alias::build_sparse(self)?;
+        let mut callers = ReturnAliasCallers::default();
+        for (position, function) in self.module.functions.iter().enumerate() {
+            for &callee in &indices[&function.id].callees {
+                callers.entry(callee).or_default().push(position);
+            }
+        }
         self.stabilize_return_alias_summaries(
-            indices,
+            &indices,
             &callers,
             (0..self.module.functions.len()).collect(),
         )
-    }
-
-    fn cold_return_alias_indices(
-        &self,
-    ) -> Result<(ReturnAliasIndices, ReturnAliasCallers), BorrowCheckError> {
-        let mut indices = Vec::with_capacity(self.module.functions.len());
-        let mut callers = ReturnAliasCallers::default();
-        for (position, function) in self.module.functions.iter().enumerate() {
-            let index = return_alias::IndexedFunction::new(self, function, true)?;
-            for &callee in &index.callees {
-                callers.entry(callee).or_default().push(position);
-            }
-            indices.push(Some(index));
-        }
-        Ok((indices, callers))
     }
 
     pub(super) fn refresh_return_alias_summaries(
@@ -225,7 +217,7 @@ impl<'a> BorrowChecker<'a> {
         for (caller, callee) in link_facts.local_call_edges() {
             callers.entry(callee).or_default().push(positions[&caller]);
         }
-        let queue = self
+        let queue: VecDeque<_> = self
             .module
             .functions
             .iter()
@@ -237,17 +229,20 @@ impl<'a> BorrowChecker<'a> {
                     .then_some(position)
             })
             .collect();
-        let indices = (0..positions.len()).map(|_| None).collect();
-        self.stabilize_return_alias_summaries(indices, &callers, queue)
+        if queue.is_empty() {
+            return Ok(());
+        }
+        let indices = return_alias::build_sparse(self)?;
+        self.stabilize_return_alias_summaries(&indices, &callers, queue)
     }
 
     fn stabilize_return_alias_summaries(
         &mut self,
-        mut indices: ReturnAliasIndices,
+        indices: &ReturnAliasIndices,
         callers: &ReturnAliasCallers,
         mut queue: VecDeque<usize>,
     ) -> Result<(), BorrowCheckError> {
-        let mut queued = vec![false; indices.len()];
+        let mut queued = vec![false; self.module.functions.len()];
         for &position in &queue {
             queued[position] = true;
         }
@@ -255,18 +250,13 @@ impl<'a> BorrowChecker<'a> {
             queued[position] = false;
             let function = &self.module.functions[position];
             let previous = &self.public_call_summaries[&function.id];
-            let index = match &mut indices[position] {
-                Some(index) => index,
-                entry @ None => {
-                    entry.insert(return_alias::IndexedFunction::new(self, function, false)?)
-                }
-            };
-            let return_alias = self.classify_function_return_alias(function, index)?;
+            let return_alias =
+                self.classify_function_return_alias(function, &indices[&function.id])?;
             if previous.return_alias == return_alias {
                 continue;
             }
-            // Known with both lanes unreachable transfers exactly like Pending at a call, so
-            // callers have nothing new to see even though the summary itself is published.
+            // Settling an empty body need not revisit callers if its executed effects and
+            // both continuation lanes still transfer exactly as before.
             let notify = !previous
                 .return_alias
                 .same_allocation_transfer_as(&return_alias);
@@ -626,27 +616,19 @@ impl<'a> BorrowChecker<'a> {
         let mut block_local_max_use_order = FxHashMap::default();
         let mut block_liveness = FxHashMap::default();
         let mut entry_has_predecessor = false;
-        let mut lookup_observations = false;
-        let collection_get = |target: &CallTarget| {
-            matches!(target, CallTarget::External(id)
-                if matches!(CollectionBuiltinOp::from_external_function_id(*id), Some(CollectionBuiltinOp::Get)))
-        };
         let mut next_order_key = 0i32;
 
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             let mut max_use_order = vec![-1; local_ids.len()];
+            #[cfg(feature = "benchmark_counters")]
+            add_frontend_counter(
+                FrontendCounter::BorrowValidationDenseLayoutSlots,
+                max_use_order.len(),
+            );
             let mut liveness = BlockLiveness::new(local_ids.len());
 
             for statement in &block.statements {
-                lookup_observations = lookup_observations
-                    || match &statement.kind {
-                        HirStatementKind::Call { target, .. } => collection_get(target),
-                        HirStatementKind::MapOp {
-                            op: HirMapOp::Get, ..
-                        } => true,
-                        _ => false,
-                    };
                 // WHAT: assign a deterministic ordinal key for this statement.
                 // WHY: same-line source locations are not sufficient for precise move decisions.
                 let order_key = next_order_key;
@@ -704,17 +686,6 @@ impl<'a> BorrowChecker<'a> {
             let terminator_order = next_order_key;
             next_order_key += 1;
             terminator_order_by_block.insert(*block_id, terminator_order);
-            lookup_observations = lookup_observations
-                || match &block.terminator {
-                    HirTerminator::Invoke { operation, .. } => match operation {
-                        HirFallibleOperation::Call { target, .. } => collection_get(target),
-                        HirFallibleOperation::MapOp {
-                            op: HirMapOp::Get, ..
-                        } => true,
-                        _ => false,
-                    },
-                    _ => false,
-                };
 
             collect_terminator_loaded_locals(
                 &self.module.expressions,
@@ -823,7 +794,6 @@ impl<'a> BorrowChecker<'a> {
             may_assign_from_block,
         });
         layout.acyclic_entry_block = (!entry_has_predecessor).then_some(function.entry);
-        layout.lookup_observations = lookup_observations;
         Ok(layout)
     }
 
@@ -938,7 +908,7 @@ impl<'a> BorrowChecker<'a> {
         Ok(masks)
     }
 
-    fn is_region_ancestor_of(
+    pub(super) fn is_region_ancestor_of(
         &self,
         ancestor: crate::compiler_frontend::hir::ids::RegionId,
         mut region: crate::compiler_frontend::hir::ids::RegionId,

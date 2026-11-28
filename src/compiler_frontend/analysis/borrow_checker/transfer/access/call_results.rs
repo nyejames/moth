@@ -10,12 +10,14 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, AllocationRetirement, BindingAlt, BindingTarget, BorrowState, CellId,
     Coverage, DependencySet, FamilyMember, FieldKey, OrderKey, Origin, PlaceResolution,
     PublicationCarriers, ReceiverDependency, Replacement, ResolvedPlace, RootSet, SmallSet,
-    StoredValue, TypedStore, ValueAlt, ValueAlternatives, ValueKind as PayloadKind, WrapperAge,
-    WrapperId,
+    StoredValue, TypedStore, ValueAlt, ValueKind as PayloadKind, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BorrowTransferContext, InvokeLane, InvokeLayerOp,
+};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalTypeIdentity, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -23,18 +25,35 @@ use crate::compiler_frontend::external_packages::{ExternalReturnAlias, ExternalR
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::statements::HirLocalDestination;
-use crate::compiler_frontend::public_call_summary::{
-    CallAllocationSource, CallField, CallFieldHir, CallLaneSummary, CallOutputPath, CallPathSource,
-    CallSharingCondition, FunctionReturnAliasSummary,
-};
+use crate::compiler_frontend::public_call_summary::{CallField, CallFieldHir};
 use crate::compiler_frontend::public_call_summary::{allocation_error, typed};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
+
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn capture_boundary_value(
+    context: &BorrowTransferContext<'_>,
+    view: super::super::super::OperationView<'_>,
+    block: crate::compiler_frontend::hir::ids::BlockId,
+    state: &mut BorrowState,
+    value: crate::compiler_frontend::hir::ids::HirValueId,
+) -> Result<CapturedValue, BorrowCheckError> {
+    stored_values(
+        &LayerValueContext {
+            context,
+            view,
+            block_id: block,
+            materialise_contents: true,
+        },
+        state,
+        value,
+        true,
+    )
+}
 
 /// Canonical predecessor observations. A wrapper, its terminal cell and its
 /// value are independent observations, even when they share one local spelling.
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct EntryCapture {
     pub wrappers: SmallSet<WrapperId>,
     pub wrapper_coverage: Option<Coverage>,
@@ -44,6 +63,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct EntryCapture {
     pub value: CapturedValue,
     pub allocation_coverage: Option<Coverage>,
     pub derivation: Option<WrapperId>,
+    pub derivation_roots: Option<RootSet>,
     pub origin: Option<Origin>,
     pub roots: Option<RootSet>,
     pub ty: Option<TypeId>,
@@ -51,7 +71,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct EntryCapture {
 
 /// Resolve declared selectors from the actual's captured local, not from a
 /// receiving name or an ordinal in the caller's local layout.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) fn capture_local_value_ports(
     state: &BorrowState,
     mutable: &[bool],
@@ -68,42 +88,227 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn capture_local_valu
                     "value port capture requires a declared value path",
                 ));
             };
-            let &(local, mut ty) = required(actuals.get(*parameter))?;
-            let mut selectors = Vec::with_capacity(path.len());
-            for &selector in path {
-                let (key, child) = required(field(ty, selector))?;
-                selectors.push(key);
-                ty = child;
-            }
-            let mut place = state.resolve_place_path(local, mutable, selectors);
-            let heap = allocation(ty);
-            state.load_place_content(&mut place, mutable, !heap);
-            let writable = place.permission.wrapper_readonly_source.is_none()
-                && !place.permission.holder_readonly;
-            let origin = place.captured_origin();
-            let content = required(place.content)?;
-            let coverage = content.holder_coverage();
-            let value = if heap {
-                capture_graph_values(content)
-            } else {
-                CapturedValue {
-                    alternatives: content.alternatives,
-                    ..Default::default()
-                }
-            };
-            Ok(EntryCapture {
-                ty: Some(ty),
-                address: Some(place.address),
-                value,
-                allocation_coverage: heap.then_some(coverage),
-                origin,
-                writable: Some(writable),
-                ..Default::default()
-            })
+            capture_local_value_port(
+                state,
+                mutable,
+                *required(actuals.get(*parameter))?,
+                path,
+                &field,
+                &allocation,
+            )
         })
         .collect()
 }
 
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn capture_local_value_port(
+    state: &BorrowState,
+    mutable: &[bool],
+    (local, mut ty): (usize, TypeId),
+    path: &[CallField],
+    field: impl Fn(TypeId, CallField) -> Option<(FieldKey, TypeId)>,
+    allocation: impl Fn(TypeId) -> bool,
+) -> Result<EntryCapture, InfrastructureFailure> {
+    let mut selectors = Vec::with_capacity(path.len());
+    for &selector in path {
+        let (key, child) = required(field(ty, selector))?;
+        selectors.push(key);
+        ty = child;
+    }
+    let mut place = state.resolve_place_path(local, mutable, selectors);
+    let heap = allocation(ty);
+    state.load_place_content(&mut place, mutable, !heap);
+    let writable =
+        place.permission.wrapper_readonly_source.is_none() && !place.permission.holder_readonly;
+    let origin = place.captured_origin();
+    let content = required(place.content)?;
+    let coverage = content.holder_coverage();
+    let value = if heap {
+        capture_graph_values(content)
+    } else {
+        CapturedValue {
+            alternatives: content.alternatives,
+            ..Default::default()
+        }
+    };
+    Ok(EntryCapture {
+        ty: Some(ty),
+        address: Some(place.address),
+        value,
+        allocation_coverage: heap.then_some(coverage),
+        origin,
+        derivation_roots: Some(state.derived_roots_from_source(local)),
+        writable: Some(writable),
+        ..Default::default()
+    })
+}
+
+pub(super) fn capture_typed_actuals(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    ports: &[typed::EntryPort],
+) -> Result<Vec<EntryCapture>, BorrowCheckError> {
+    use typed::EntryPort;
+    let mut captured = vec![EntryCapture::default(); ports.len()];
+    for (at, port) in ports.iter().enumerate() {
+        let (parameter, selectors) = match port {
+            EntryPort::Wrapper(index)
+            | EntryPort::Immediate(index)
+            | EntryPort::Terminal(index) => (*index, &[][..]),
+            EntryPort::Value { parameter, path } => (*parameter, path.as_ref()),
+            EntryPort::Edge(..) => continue,
+        };
+        let ty = actuals.ty(input, parameter)?;
+        let derivation_roots = matches!(port, EntryPort::Value { .. }).then(|| {
+            super::alias_derivation_roots_from_expression(
+                input.view,
+                input.state,
+                input.context.expressions,
+                actuals.arguments()[parameter].argument,
+            )
+        });
+        let mut entry = {
+            let actual = actuals.root_entry(input, parameter)?;
+            let place = actual.place.as_ref().filter(|_| !actual.is_copy);
+            let mut capture = EntryCapture {
+                ty: Some(ty),
+                value: actual.value.as_ref().unwrap().clone(),
+                derivation_roots,
+                ..Default::default()
+            };
+            if let Some(place) = place {
+                capture.address = Some(place.address.clone());
+                capture.origin = place.captured_origin();
+                capture.derivation = capture
+                    .origin
+                    .map(|origin| origin.wrapper)
+                    .or_else(|| place.projection_owner());
+                capture.writable = Some(
+                    place.permission.wrapper_readonly_source.is_none()
+                        && !place.permission.holder_readonly,
+                );
+                if !place.route.projected {
+                    let wrapper = WrapperId::current(place.route.local);
+                    if !matches!(port, EntryPort::Immediate(_)) {
+                        capture.wrappers = SmallSet::One(wrapper);
+                        capture.wrapper_coverage = Some(Coverage::Complete);
+                    }
+                    let binding = input.state.boundary_binding(wrapper);
+                    let classify_role = |alt: &BindingAlt| match alt.target {
+                        BindingTarget::OwnSlot => typed::Role::Slot,
+                        BindingTarget::Link(_) => typed::Role::WholeAlias,
+                        BindingTarget::Projected(..) => typed::Role::ProjectedAlias,
+                    };
+                    if binding.coverage == Coverage::Complete {
+                        capture.role =
+                            binding
+                                .alternatives
+                                .first()
+                                .map(classify_role)
+                                .filter(|role| {
+                                    binding
+                                        .alternatives
+                                        .iter()
+                                        .all(|alt| classify_role(alt) == *role)
+                                });
+                    }
+                    if matches!(port, EntryPort::Immediate(_)) {
+                        capture.wrappers =
+                            SmallSet::from_iter(binding.alternatives.iter().filter_map(|alt| {
+                                match alt.target {
+                                    BindingTarget::OwnSlot => Some(wrapper),
+                                    BindingTarget::Link(immediate) => Some(immediate),
+                                    BindingTarget::Projected(..) => None,
+                                }
+                            }));
+                        capture.wrapper_coverage = Some(binding.coverage);
+                    }
+                } else {
+                    capture.role = Some(typed::Role::ProjectedAlias);
+                }
+            } else {
+                capture.role = Some(typed::Role::Slot);
+            }
+            if heap_type(input.context, ty)? {
+                capture.allocation_coverage =
+                    Some(place.and_then(|place| place.content.as_ref()).map_or_else(
+                        || ResolvedPlace::from_capture(&capture.value).holder_coverage(),
+                        ResolvedPlace::holder_coverage,
+                    ));
+            }
+            capture
+        };
+        if matches!(port, EntryPort::Terminal(_)) && entry.address.is_none() {
+            // An evaluated rvalue has no caller-visible terminal to replace.
+            entry.address = Some(AddressSet::from_cells([], Coverage::Complete));
+        }
+        for &selector in selectors {
+            entry = capture_entry_edge(
+                input.context,
+                input.state,
+                input.view.local_mutable,
+                &entry,
+                selector,
+            )?;
+        }
+        captured[at] = entry;
+    }
+    for (at, port) in ports.iter().enumerate() {
+        if let EntryPort::Edge(holder, selector) = port {
+            captured[at] = capture_entry_edge(
+                input.context,
+                input.state,
+                input.view.local_mutable,
+                &captured[holder.0 as usize],
+                *selector,
+            )?;
+        }
+    }
+    Ok(captured)
+}
+
+fn capture_entry_edge(
+    context: &BorrowTransferContext<'_>,
+    state: &BorrowState,
+    mutable: &[bool],
+    entry: &EntryCapture,
+    selector: CallField,
+) -> Result<EntryCapture, BorrowCheckError> {
+    let (key, ty) = boundary_child(context, required(entry.ty)?, selector)?;
+    let mut graph = ResolvedPlace::from_capture(&entry.value);
+    if let Some(coverage) = entry.allocation_coverage {
+        graph.coverage = coverage;
+    }
+    let mut address = AddressSet::from_cells(
+        graph
+            .ids
+            .iter()
+            .chain(&graph.views)
+            .map(|&id| CellId::Projected(id, key)),
+        graph.holder_coverage(),
+    );
+    if matches!(address.cells(), [CellId::Projected(holder, _)] if state.alloc_singular(*holder)) {
+        address = address.with_singleton_proof();
+    }
+    let allocation = heap_type(context, ty)?;
+    let (value, coverage) = if allocation {
+        step_graph(state, mutable, &mut graph, key);
+        let coverage = graph.holder_coverage();
+        (capture_graph_values(graph), Some(coverage))
+    } else {
+        (state.capture_scalar_projection(&graph, key), None)
+    };
+    Ok(EntryCapture {
+        address: Some(address),
+        value,
+        ty: Some(ty),
+        allocation_coverage: coverage,
+        writable: entry.writable,
+        origin: entry.origin,
+        derivation: entry.derivation,
+        derivation_roots: entry.derivation_roots.clone(),
+        ..Default::default()
+    })
+}
 impl Default for EntryCapture {
     fn default() -> Self {
         Self {
@@ -115,6 +320,7 @@ impl Default for EntryCapture {
             value: CapturedValue::default(),
             allocation_coverage: None,
             derivation: None,
+            derivation_roots: None,
             origin: None,
             roots: None,
             ty: None,
@@ -122,7 +328,235 @@ impl Default for EntryCapture {
     }
 }
 
-#[allow(dead_code)]
+struct CallerMatch<'a, 'hir> {
+    state: &'a BorrowState,
+    context: &'a BorrowTransferContext<'hir>,
+    actuals: &'a [EntryCapture],
+    retained: BTreeMap<typed::ObjectRef, EntryCapture>,
+    result_types: &'a [TypeId],
+    reach: Rc<ReachLayout>,
+}
+
+impl MatchInput for CallerMatch<'_, '_> {
+    fn state(&self) -> &BorrowState {
+        self.state
+    }
+
+    fn entry(&self, port: typed::PortId) -> Option<&EntryCapture> {
+        self.actuals.get(port.0 as usize)
+    }
+
+    fn retained(&self, object: &typed::ObjectRef) -> Option<&EntryCapture> {
+        self.retained.get(object)
+    }
+
+    fn field(&self, holder: TypeId, selector: CallField) -> Option<FieldKey> {
+        boundary_child(self.context, holder, selector)
+            .ok()
+            .map(|(key, _)| key)
+    }
+
+    fn entry_count(&self) -> usize {
+        self.actuals.len()
+    }
+
+    fn reach_layout(&self) -> Option<&Rc<ReachLayout>> {
+        Some(&self.reach)
+    }
+
+    fn field_value_type(&self, holder: TypeId, selector: CallField) -> Option<TypeId> {
+        boundary_child(self.context, holder, selector)
+            .ok()
+            .map(|(_, ty)| ty)
+    }
+
+    fn result_type(&self, slot: usize) -> Option<TypeId> {
+        self.result_types.get(slot).copied()
+    }
+}
+
+pub(super) fn match_call_actuals(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    entries: &[EntryCapture],
+    parameters: &[TypeId],
+    result_types: &[TypeId],
+    lane: &typed::Lane,
+    error: bool,
+) -> Result<MatchedLane, BorrowCheckError> {
+    let projected = input
+        .call_components
+        .map(|supports| lane.project_supports(supports));
+    let lane = projected.as_ref().unwrap_or(lane);
+    let context = input.context;
+    let types = context.type_environment;
+    let mut reachable: Vec<_> = entries.iter().filter_map(|entry| entry.ty).collect();
+    reachable.extend_from_slice(parameters);
+    reachable.extend_from_slice(result_types);
+    let mut layout = ReachLayout {
+        types: FxHashMap::default(),
+        local_mutable: input.view.local_mutable.to_vec(),
+        error,
+        scope: 1,
+    };
+    while let Some(ty) = reachable.pop() {
+        if layout.types.contains_key(&ty) {
+            continue;
+        }
+        let allocation = heap_type(context, ty)?;
+        let mut children = Vec::new();
+        if allocation {
+            CallField::for_each_child(ty, types, |selector, child| {
+                let (key, _) = boundary_child(context, ty, selector)?;
+                children.push((key, child));
+                reachable.push(child);
+                Ok::<(), BorrowCheckError>(())
+            })?;
+        }
+        let identity =
+            project_type_id_to_canonical_identity(ty, types, &context.type_projection).ok();
+        layout.types.insert(
+            ty,
+            ReachType {
+                identity,
+                allocation,
+                children,
+            },
+        );
+    }
+    let mut retained = BTreeMap::new();
+    lane.visit_compatible(
+        |_| Ok::<_, BorrowCheckError>(None),
+        |_, product| {
+            for post in product
+                .components()
+                .iter()
+                .flat_map(|component| &component.alternatives)
+            {
+                for (object, kind, identity) in &post.retained {
+                    retained.entry(object.clone()).or_insert_with(|| {
+                        (
+                            *kind,
+                            retained_type(
+                                context,
+                                parameters,
+                                result_types,
+                                object,
+                                identity,
+                                &layout,
+                            ),
+                        )
+                    });
+                }
+            }
+            Ok(())
+        },
+    )?;
+    let retained = retained
+        .into_iter()
+        .filter_map(|(object, (kind, ty))| {
+            let ty = ty?;
+            let summarized = matches!(object, typed::ObjectRef::Family(..));
+            let node = input.state.call_export_coordinate(&object);
+            let capture = match kind {
+                typed::StorageKind::Allocation => {
+                    let id = input.state.call_site_id(
+                        input.current_order,
+                        error,
+                        node,
+                        summarized,
+                        input.block_id,
+                        input.view.block_successors,
+                    );
+                    EntryCapture {
+                        value: CapturedValue::new(
+                            vec![StoredValue { id, writable: true }],
+                            Vec::new(),
+                        ),
+                        allocation_coverage: Some(Coverage::Complete),
+                        writable: Some(true),
+                        ty: Some(ty),
+                        ..Default::default()
+                    }
+                }
+                typed::StorageKind::Wrapper => {
+                    let id = input.state.call_wrapper_id(
+                        input.current_order,
+                        error,
+                        node,
+                        summarized,
+                        input.block_id,
+                        input.view.block_successors,
+                    );
+                    EntryCapture {
+                        wrappers: SmallSet::One(id),
+                        wrapper_coverage: Some(Coverage::Complete),
+                        address: Some(AddressSet::from_cells(
+                            [CellId::Slot(id)],
+                            Coverage::Complete,
+                        )),
+                        origin: Some(Origin {
+                            wrapper: id,
+                            owner: None,
+                            isolated: false,
+                        }),
+                        writable: Some(true),
+                        ty: Some(ty),
+                        ..Default::default()
+                    }
+                }
+            };
+            Some((object, capture))
+        })
+        .collect();
+    Ok(match_typed_lane(
+        &CallerMatch {
+            state: input.state,
+            context,
+            actuals: entries,
+            retained,
+            result_types,
+            reach: Rc::new(layout),
+        },
+        lane,
+    )?)
+}
+
+fn retained_type(
+    context: &BorrowTransferContext<'_>,
+    parameters: &[TypeId],
+    results: &[TypeId],
+    object: &typed::ObjectRef,
+    identity: &CanonicalTypeIdentity,
+    layout: &ReachLayout,
+) -> Option<TypeId> {
+    use typed::{ExportPort, ObjectRef};
+    let endpoint = match object {
+        ObjectRef::Exact(ExportPort::Result(path)) => results
+            .get(path.slot)
+            .copied()
+            .map(|root| (root, path.path.as_slice())),
+        ObjectRef::Exact(ExportPort::Cell(path)) => parameters
+            .get(path.index)
+            .copied()
+            .map(|root| (root, path.path.as_slice())),
+        ObjectRef::Exact(ExportPort::Binding(index) | ExportPort::PrivateTerminal(index)) => {
+            parameters.get(*index).copied().map(|root| (root, &[][..]))
+        }
+        _ => None,
+    };
+    if let Some((mut ty, path)) = endpoint {
+        for &selector in path {
+            ty = selector.type_child(ty, context.type_environment)?;
+        }
+        Some(ty)
+    } else {
+        layout
+            .types
+            .iter()
+            .find_map(|(&ty, shape)| (shape.identity.as_ref() == Some(identity)).then_some(ty))
+    }
+}
+
 pub(in crate::compiler_frontend::analysis::borrow_checker) trait MatchInput {
     fn state(&self) -> &BorrowState;
     fn entry(&self, port: typed::PortId) -> Option<&EntryCapture>;
@@ -194,8 +628,7 @@ impl MatchInput for ExplicitMatchInput<'_> {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedBinding {
     pub target: WrapperId,
     pub update: BindingEdit,
@@ -203,8 +636,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedBindin
     pub roots: Option<RootSet>,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) enum BindingEdit {
     Slot,
     Link {
@@ -221,8 +653,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) enum BindingEdit {
     },
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) enum CapturedEdit {
     Cell(TypedStore),
     Family {
@@ -234,8 +665,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) enum CapturedEdit {
     },
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedUncertainty {
     pub bindings: Vec<CapturedBinding>,
     pub edits: Vec<CapturedEdit>,
@@ -243,16 +673,14 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedUncert
     pub reach: Option<CapturedReach>,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct ReachType {
-    pub identity: crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity,
+    pub identity: Option<crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity>,
     pub allocation: bool,
     pub children: Vec<(FieldKey, TypeId)>,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct ReachLayout {
     pub types: FxHashMap<TypeId, ReachType>,
     pub local_mutable: Vec<bool>,
@@ -260,8 +688,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct ReachLayout {
     pub scope: u32,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedReach {
     bound: typed::ReachBound,
     layout: Rc<ReachLayout>,
@@ -271,8 +698,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedReach 
     results: Vec<(usize, TypeId)>,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedResult {
     pub slot: usize,
     pub value: CapturedValue,
@@ -280,60 +706,224 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedResult
     pub derivation: Option<CapturedDerivation>,
 }
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) enum CapturedDerivation {
     Wrapper(WrapperId),
     Roots(RootSet),
 }
 
-#[allow(dead_code)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct CapturedPost {
     pub bindings: Vec<CapturedBinding>,
     pub edits: Vec<CapturedEdit>,
     pub results: Vec<CapturedResult>,
     pub uncertainty: Option<CapturedUncertainty>,
+    pub result_views: Option<CorrelatedResultViews>,
 }
 
-/// Keep independent supports separate; callers need not enumerate their product.
-#[allow(dead_code)]
-pub(in crate::compiler_frontend::analysis::borrow_checker) type MatchedLane = Vec<MatchedStratum>;
-
-#[allow(dead_code)]
-pub(in crate::compiler_frontend::analysis::borrow_checker) struct MatchedStratum {
-    pub guard: Vec<typed::Literal>,
-    pub restrictions: FxHashMap<typed::PortId, EntryCapture>,
-    pub components: Vec<MatchedComponent>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::compiler_frontend::analysis::borrow_checker) struct CorrelatedResultViews {
+    layout: Rc<ReachLayout>,
+    row: u32,
+    support: typed::SupportId,
+    results: Vec<(usize, TypeId)>,
 }
 
-impl EntryCapture {
-    pub fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
-        self.wrappers = SmallSet::from_iter(
-            self.wrappers
-                .as_slice()
-                .iter()
-                .copied()
-                .map(|wrapper| retirement.remap_wrapper(wrapper)),
-        );
-        if let Some(address) = &mut self.address {
-            address.remap_allocations(state, retirement);
+impl CorrelatedResultViews {
+    fn install(self, state: &mut BorrowState, order: OrderKey, results: &mut [CapturedResult]) {
+        let root = state.call_row_view_id(order, self.layout.error, self.support.0, self.row);
+        let mut pending = Vec::new();
+        let mut seen = FxHashSet::default();
+        for (slot, ty) in self.results {
+            let Some(result) = results.iter_mut().find(|result| result.slot == slot) else {
+                continue;
+            };
+            let view = state.alloc_child(root, FieldKey::Field(slot as u32));
+            for value in &result.value.values {
+                state.add_view_member(view, value.id);
+            }
+            pending.push((ty, view, result.value.values.clone()));
+            result.value.views.push(view);
         }
-        self.value.remap(state, retirement);
-        self.derivation = self
-            .derivation
-            .filter(|&wrapper| retirement.remap_wrapper(wrapper) == wrapper);
-        remap_origin(&mut self.origin, retirement);
+        while let Some((ty, view, values)) = pending.pop() {
+            for &(key, child) in &self.layout.types[&ty].children {
+                if !self.layout.types[&child].allocation {
+                    continue;
+                }
+                let mut child_graph = ResolvedPlace::from_values(&values, Vec::new());
+                step_graph(state, &self.layout.local_mutable, &mut child_graph, key);
+                if !child_graph.views.is_empty() {
+                    for child_view in child_graph.views {
+                        state.link_view(view, key, child_view);
+                    }
+                    continue;
+                }
+                // An omitted field still denotes the lazy child of this row,
+                // not a field installed by another alternative after the join.
+                let next_view = state.alloc_child(view, key);
+                state.link_view(view, key, next_view);
+                let mut children = Vec::new();
+                for id in child_graph.ids {
+                    state.add_view_member(next_view, id);
+                    let explicit = self.layout.types[&child]
+                        .children
+                        .iter()
+                        .any(|&(field, _)| {
+                            state.has_captured_projection(id, field)
+                                || state.retained_lazy_child(id, field).is_some()
+                        });
+                    if explicit && seen.insert((child, id)) {
+                        children.push(StoredValue {
+                            id,
+                            writable: !child_graph.readonly,
+                        });
+                    }
+                }
+                if !children.is_empty() {
+                    pending.push((child, next_view, children));
+                }
+            }
+        }
     }
 }
 
-#[allow(dead_code)]
+/// Keep independent supports separate; callers need not enumerate their product.
+pub(in crate::compiler_frontend::analysis::borrow_checker) type MatchedLane = Vec<MatchedStratum>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::compiler_frontend::analysis::borrow_checker) struct MatchedStratum {
+    #[cfg(test)]
+    pub guard: Vec<typed::Literal>,
+    pub components: Vec<MatchedComponent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) struct MatchedComponent {
     pub support: typed::SupportId,
     pub alternatives: Vec<CapturedPost>,
 }
 
-#[allow(dead_code)]
+pub(in crate::compiler_frontend::analysis::borrow_checker) trait CapturedPosts:
+    Sized
+{
+    fn posts(&self) -> impl Iterator<Item = &CapturedPost>;
+    fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement);
+    fn apply(
+        self,
+        state: &mut BorrowState,
+        order: OrderKey,
+    ) -> (Vec<CapturedResult>, PublicationCarriers);
+}
+
+impl CapturedPosts for CapturedPost {
+    fn posts(&self) -> impl Iterator<Item = &CapturedPost> {
+        std::iter::once(self)
+    }
+
+    fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        CapturedPost::remap(self, state, retirement);
+    }
+
+    fn apply(
+        mut self,
+        state: &mut BorrowState,
+        order: OrderKey,
+    ) -> (Vec<CapturedResult>, PublicationCarriers) {
+        self.weaken_collisions(state);
+        CapturedPost::apply(self, state, order)
+    }
+}
+
+impl CapturedPosts for MatchedLane {
+    fn posts(&self) -> impl Iterator<Item = &CapturedPost> {
+        self.iter()
+            .flat_map(|stratum| &stratum.components)
+            .flat_map(|component| &component.alternatives)
+    }
+
+    fn remap(&mut self, state: &BorrowState, retirement: AllocationRetirement) {
+        for stratum in self {
+            for post in stratum
+                .components
+                .iter_mut()
+                .flat_map(|component| &mut component.alternatives)
+            {
+                post.remap(state, retirement);
+            }
+        }
+    }
+
+    fn apply(
+        self,
+        state: &mut BorrowState,
+        order: OrderKey,
+    ) -> (Vec<CapturedResult>, PublicationCarriers) {
+        join_captured_alternatives(state, self, |mut stratum, state| {
+            weaken_product_collisions(state, &mut stratum.components);
+            let mut results = BTreeMap::new();
+            let mut receipt = PublicationCarriers::default();
+            // The caller joins only alternatives of one support at a time.
+            // Applying these disjoint edits does not require their product.
+            for component in stratum.components {
+                let (component_results, changes) =
+                    join_captured_alternatives(state, component.alternatives, |post, state| {
+                        post.apply(state, order)
+                    });
+                for result in component_results {
+                    results.insert(result.slot, result);
+                }
+                receipt.append(changes);
+            }
+            (results.into_values().collect(), receipt)
+        })
+    }
+}
+
+fn join_captured_alternatives<T>(
+    state: &mut BorrowState,
+    alternatives: Vec<T>,
+    mut apply: impl FnMut(T, &mut BorrowState) -> (Vec<CapturedResult>, PublicationCarriers),
+) -> (Vec<CapturedResult>, PublicationCarriers) {
+    let mut alternatives = alternatives.into_iter();
+    let Some(first) = alternatives.next() else {
+        return (Vec::new(), PublicationCarriers::default());
+    };
+    if alternatives.len() == 0 {
+        return apply(first, state);
+    }
+    let base = state.clone();
+    let (mut results, mut receipt) = apply(first, state);
+    for alternative in alternatives {
+        let mut branch = base.clone();
+        let (incoming, changes) = apply(alternative, &mut branch);
+        state.join_in_place(&branch);
+        receipt.intersect(&changes);
+        for source in incoming {
+            match results.binary_search_by_key(&source.slot, |result| result.slot) {
+                Ok(index) => {
+                    let target = &mut results[index];
+                    merge_capture(&mut target.value, source.value);
+                    union_optional_roots(&mut target.roots, source.roots);
+                    if !same_derivation(target.derivation.as_ref(), source.derivation.as_ref()) {
+                        target.derivation = None;
+                    }
+                }
+                Err(index) => results.insert(index, source),
+            }
+        }
+    }
+    (results, receipt)
+}
+
+fn same_derivation(left: Option<&CapturedDerivation>, right: Option<&CapturedDerivation>) -> bool {
+    match (left, right) {
+        (Some(CapturedDerivation::Wrapper(a)), Some(CapturedDerivation::Wrapper(b))) => a == b,
+        (Some(CapturedDerivation::Roots(a)), Some(CapturedDerivation::Roots(b))) => a == b,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 pub(in crate::compiler_frontend::analysis::borrow_checker) fn match_typed_lane(
     input: &impl MatchInput,
     lane: &typed::Lane,
@@ -342,12 +932,12 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn match_typed_lane(
     lane.visit_compatible(
         |predicate| observe_typed_guard(input, predicate),
         |path, product| {
-            if let Some(presentation) = guard_presentation(input, path)? {
-                let mut components = capture_product(&presentation, product)?;
+            if let Some(presentation) = guard_presentation(input, path, &[])? {
+                let mut components = capture_product(&presentation, path, product)?;
                 weaken_product_collisions(input.state(), &mut components);
                 strata.push(MatchedStratum {
+                    #[cfg(test)]
                     guard: path.to_vec(),
-                    restrictions: presentation.entries,
                     components,
                 });
             }
@@ -358,7 +948,8 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn match_typed_lane(
 }
 
 fn capture_product(
-    input: &impl MatchInput,
+    input: &GuardPresentation<'_, impl MatchInput>,
+    guard: &[typed::Literal],
     product: &typed::Product,
 ) -> Result<Vec<MatchedComponent>, InfrastructureFailure> {
     let mut components = Vec::with_capacity(product.components().len());
@@ -366,20 +957,75 @@ fn capture_product(
     for component in product.components() {
         let mut alternatives = Vec::with_capacity(component.alternatives.len());
         for post in &component.alternatives {
-            let mut locations = FxHashSet::default();
-            alternatives.push(capture_typed_post(input, post, |location, prefix| {
-                if location.is_occurrence(input.state())
-                    && ((prefix && !locations.insert(location))
-                        || owners
-                            .insert(location, component.support)
-                            .is_some_and(|old| old != component.support))
+            let mut capture = |presentation: &GuardPresentation<'_, _>| {
+                let mut locations = FxHashSet::default();
+                let mut captured = capture_typed_post(presentation, post, |location, definite| {
+                    if definite
+                        && location.is_occurrence(input.state())
+                        && (!locations.insert(location)
+                            || owners
+                                .insert(location, component.support)
+                                .is_some_and(|old| old != component.support))
+                    {
+                        return Err(allocation_error(
+                            "typed call updates collide after actual substitution",
+                        ));
+                    }
+                    Ok(())
+                })?;
+                if (component.alternatives.len() > 1 || !guard.is_empty())
+                    && post.coverage == typed::Coverage::Complete
+                    && let Some(layout) = presentation.reach_layout()
                 {
-                    return Err(allocation_error(
-                        "typed call updates collide after actual substitution",
-                    ));
+                    let results: Vec<_> = post
+                        .results
+                        .iter()
+                        .filter_map(|(slot, value)| {
+                            if !matches!(
+                                &value.source,
+                                typed::ValueSource::Allocation(typed::ObjectRef::Exact(_))
+                            ) {
+                                return None;
+                            }
+                            presentation.result_type(*slot).map(|ty| (*slot, ty))
+                        })
+                        .collect();
+                    if !results.is_empty() {
+                        captured.result_views = Some(CorrelatedResultViews {
+                            results,
+                            row: input.state().call_view_row(post),
+                            support: component.support,
+                            layout: Rc::clone(layout),
+                        });
+                    }
                 }
+                alternatives.push(captured);
                 Ok(())
-            })?);
+            };
+            let mut keys = Vec::new();
+            post.visit_entry_ports(true, &mut |port| {
+                for &(test, _) in guard {
+                    if let typed::Predicate::Equal(kind, left, right) = test
+                        && (left == port || right == port)
+                    {
+                        keys.push((kind, port));
+                    }
+                }
+            });
+            keys.sort_unstable();
+            keys.dedup();
+            if keys.len() < 2 {
+                capture(input)?;
+                continue;
+            }
+            let choices: Vec<_> = keys
+                .into_iter()
+                .filter_map(|key @ (kind, port)| {
+                    let (candidates, complete) = observed_candidates(input.entry(port)?, kind);
+                    (complete && candidates.len() > 1).then_some((key, candidates))
+                })
+                .collect();
+            capture_joint_post(input, guard, &choices, &mut Vec::new(), &mut capture)?;
         }
         components.push(MatchedComponent {
             support: component.support,
@@ -387,6 +1033,32 @@ fn capture_product(
         });
     }
     Ok(components)
+}
+
+fn capture_joint_post<I: MatchInput>(
+    marginal: &GuardPresentation<'_, I>,
+    guard: &[typed::Literal],
+    choices: &[(IdentityPort, Vec<Candidate>)],
+    fixed: &mut Vec<(IdentityPort, Candidate)>,
+    capture: &mut impl FnMut(&GuardPresentation<'_, I>) -> Result<(), InfrastructureFailure>,
+) -> Result<(), InfrastructureFailure> {
+    let Some(((key, candidates), remaining)) = choices.split_first() else {
+        return if fixed.is_empty() {
+            capture(marginal)
+        } else if let Some(joint) = guard_presentation(marginal.input, guard, fixed)? {
+            capture(&joint)
+        } else {
+            Ok(())
+        };
+    };
+    // Enumerate only identities read by this post, never the choices of an
+    // independent support. The guard still checks the unobserved identities.
+    for &candidate in candidates {
+        fixed.push((*key, candidate));
+        capture_joint_post(marginal, guard, remaining, fixed, capture)?;
+        fixed.pop();
+    }
+    Ok(())
 }
 
 fn weaken_product_collisions(state: &BorrowState, components: &mut [MatchedComponent]) {
@@ -529,7 +1201,7 @@ fn same_candidate(state: &BorrowState, left: Candidate, right: Candidate) -> Opt
             if a != b {
                 Some(false)
             } else {
-                (a.age == WrapperAge::Current).then_some(true)
+                a.is_singleton().then_some(true)
             }
         }
         (Candidate::Cell(CellId::Projected(a, x)), Candidate::Cell(CellId::Projected(b, y))) => {
@@ -563,6 +1235,7 @@ type IdentityPort = (typed::IdentityKind, typed::PortId);
 fn guard_presentation<'a, I: MatchInput>(
     input: &'a I,
     path: &[typed::Literal],
+    fixed: &[(IdentityPort, Candidate)],
 ) -> Result<Option<GuardPresentation<'a, I>>, InfrastructureFailure> {
     use typed::Predicate;
     let mut indices = FxHashMap::default();
@@ -644,6 +1317,11 @@ fn guard_presentation<'a, I: MatchInput>(
                 }
             }
         }
+    }
+    for &(key, candidate) in fixed {
+        domains[indices[&key]]
+            .1
+            .retain(|value| *value == Some(candidate));
     }
     let compatible = |a: IdentityPort, left, b: IdentityPort, right| {
         let equal = classes[indices[&a]] == classes[indices[&b]];
@@ -855,7 +1533,7 @@ fn guard_presentation<'a, I: MatchInput>(
                 .and_then(|entry| match entry.wrappers.as_slice() {
                     [wrapper]
                         if entry.wrapper_coverage == Some(Coverage::Complete)
-                            && wrapper.age == WrapperAge::Current =>
+                            && wrapper.is_singleton() =>
                     {
                         Some(*wrapper)
                     }
@@ -900,6 +1578,15 @@ fn guard_presentation<'a, I: MatchInput>(
                     } else if entry.derivation == Some(wrapper) {
                         entry.derivation = None;
                     }
+                    if wrapper.age == WrapperAge::Current
+                        && let Some(roots) = &mut entry.derivation_roots
+                    {
+                        if truth {
+                            roots.insert(wrapper.local);
+                        } else {
+                            roots.remove(wrapper.local);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -912,7 +1599,6 @@ fn required<T>(capture: Option<T>) -> Result<T, InfrastructureFailure> {
     capture.ok_or_else(|| allocation_error("typed call capture is missing a required observation"))
 }
 
-#[allow(dead_code)]
 pub(in crate::compiler_frontend::analysis::borrow_checker) fn observe_typed_guard(
     input: &impl MatchInput,
     predicate: typed::Predicate,
@@ -928,9 +1614,18 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn observe_typed_guar
             match holder.wrappers.as_slice() {
                 [wrapper]
                     if holder.wrapper_coverage == Some(Coverage::Complete)
-                        && wrapper.age == WrapperAge::Current =>
+                        && wrapper.is_singleton() =>
                 {
-                    value.derivation.map(|source| source == *wrapper)
+                    if wrapper.age == WrapperAge::Current
+                        && value
+                            .derivation_roots
+                            .as_ref()
+                            .is_some_and(|roots| roots.contains(wrapper.local))
+                    {
+                        Some(true)
+                    } else {
+                        value.derivation.map(|source| source == *wrapper)
+                    }
                 }
                 _ => None,
             }
@@ -952,11 +1647,7 @@ pub(in crate::compiler_frontend::analysis::borrow_checker) fn observe_typed_guar
                         return Ok(None);
                     }
                     match (left.wrappers.as_slice(), right.wrappers.as_slice()) {
-                        ([a], [b])
-                            if a.age == WrapperAge::Current && b.age == WrapperAge::Current =>
-                        {
-                            Some(a == b)
-                        }
+                        ([a], [b]) if a.is_singleton() && b.is_singleton() => Some(a == b),
                         (a, b) if !a.iter().any(|id| b.contains(id)) => Some(false),
                         _ => None,
                     }
@@ -1016,9 +1707,7 @@ enum ExactLocation {
 impl ExactLocation {
     fn is_occurrence(self, state: &BorrowState) -> bool {
         match self {
-            Self::Binding(wrapper) | Self::Cell(CellId::Slot(wrapper)) => {
-                wrapper.age == WrapperAge::Current
-            }
+            Self::Binding(wrapper) | Self::Cell(CellId::Slot(wrapper)) => wrapper.is_singleton(),
             Self::Cell(CellId::Projected(holder, selector)) => {
                 state.projected_cell_is_exact(holder, selector)
             }
@@ -1036,6 +1725,10 @@ fn capture_typed_post(
     let mut capture = CapturedPost::default();
     for (target, edit) in &post.bindings {
         let target = resolve_object(input, target)?;
+        let Some((&last, earlier)) = target.wrappers.as_slice().split_last() else {
+            // A direct projection or rvalue has no caller binding to rebind.
+            continue;
+        };
         let mut roots = None;
         let update = match edit {
             BindingPost::OwnSlot => BindingEdit::Slot,
@@ -1051,13 +1744,25 @@ fn capture_typed_post(
                         "retained link dependency has no captured route",
                     ));
                 }
-                BindingEdit::Link {
-                    targets: source.wrappers.clone(),
-                    coverage: source.wrapper_coverage.unwrap_or(Coverage::Partial),
-                    origin: capture_origin(input, route.access.derived_from.as_ref())?,
-                    writable: source.writable == Some(true)
-                        && route.access.restriction != Some(typed::Permission::ReadOnly),
-                    routes,
+                let origin = capture_origin(input, route.access.derived_from.as_ref())?;
+                let writable = source.writable == Some(true)
+                    && route.access.restriction != Some(typed::Permission::ReadOnly);
+                if source.wrappers.as_slice().is_empty()
+                    && source.role == Some(typed::Role::ProjectedAlias)
+                {
+                    BindingEdit::Projected {
+                        addresses: required(routes)?,
+                        writable,
+                        origin,
+                    }
+                } else {
+                    BindingEdit::Link {
+                        targets: source.wrappers.clone(),
+                        coverage: source.wrapper_coverage.unwrap_or(Coverage::Partial),
+                        origin,
+                        writable,
+                        routes,
+                    }
                 }
             }
             BindingPost::Projected(cell, route) => {
@@ -1084,13 +1789,10 @@ fn capture_typed_post(
                 }
             }
         };
-        let Some((&last, earlier)) = target.wrappers.as_slice().split_last() else {
-            continue;
-        };
         let unique = target.wrapper_coverage == Some(Coverage::Complete) && earlier.is_empty();
         let mut capture_binding = |wrapper: WrapperId, update, roots| {
-            let exact = unique && wrapper.age == WrapperAge::Current;
-            observe_write(ExactLocation::Binding(wrapper), true)?;
+            let exact = unique && wrapper.is_singleton();
+            observe_write(ExactLocation::Binding(wrapper), exact)?;
             capture.bindings.push(CapturedBinding {
                 target: wrapper,
                 update,
@@ -1111,7 +1813,7 @@ fn capture_typed_post(
     for (cell, edit) in &post.cells {
         let address = resolve_writable_cell(input, cell)?;
         for &cell in address.cells() {
-            observe_write(ExactLocation::Cell(cell), true)?;
+            observe_write(ExactLocation::Cell(cell), address.definite() == Some(cell))?;
         }
         let (CellPost::Replace(values) | CellPost::WeakJoin(values)) = edit;
         let mut value = CapturedValue::default();
@@ -1143,21 +1845,12 @@ fn capture_typed_post(
     for (family, edit) in &post.families {
         let holder = resolve_object(input, &family.receiver)?;
         let key = required(input.field(required(holder.ty)?, family.selector))?;
-        let mut receivers: Vec<_> = holder
-            .value
-            .values
-            .iter()
-            .filter(|value| value.writable)
-            .map(|value| value.id)
-            .collect();
-        if holder.value.values.is_empty() && holder.writable != Some(false) {
-            receivers.extend_from_slice(&holder.value.views);
-        }
-        receivers.sort_unstable();
-        receivers.dedup();
-        let coverage = holder.allocation_coverage.unwrap_or(Coverage::Partial);
+        let (receivers, coverage) = writable_holders(input, holder)?;
         for &receiver in &receivers {
-            observe_write(ExactLocation::Cell(CellId::Projected(receiver, key)), true)?;
+            observe_write(
+                ExactLocation::Cell(CellId::Projected(receiver, key)),
+                coverage == Coverage::Complete && receivers.len() == 1,
+            )?;
         }
         let (FamilyPost::Extend(members) | FamilyPost::ReplaceAll(members)) = edit;
         let replace = match edit {
@@ -1168,8 +1861,7 @@ fn capture_typed_post(
         for (member, occurrence) in members {
             captured.push(FamilyMember {
                 value: capture_typed_value(input, member)?.value,
-                at_most_once: replace == Replacement::Must
-                    && *occurrence == typed::Occurrence::AtMostOnce,
+                at_most_once: *occurrence == typed::Occurrence::AtMostOnce,
             });
         }
         capture.edits.push(CapturedEdit::Family {
@@ -1216,11 +1908,6 @@ fn capture_typed_post(
                 .into_iter()
                 .flat_map(|reach| reach.results.iter().map(|(slot, _)| (slot, ()))),
         ) {
-            if !capture.results.iter().any(|result| result.slot == *slot) {
-                return Err(allocation_error(
-                    "unresolved result has no prefix descriptor",
-                ));
-            }
             observe_write(ExactLocation::Result(*slot), false)?;
         }
         capture.uncertainty = Some(unknown);
@@ -1252,7 +1939,7 @@ fn capture_uncertainty(
             }
             let reach = capture_writable_reach(input, bound)?;
             let bindings = if bound.region == typed::ReachKind::EntryStructure {
-                capture_reach_bindings(input, &reach)?
+                capture_reach_bindings(input, &reach, true)?
             } else {
                 Vec::new()
             };
@@ -1465,20 +2152,72 @@ fn cell_may_write(
         }
     })
 }
+fn writable_holders(
+    input: &impl MatchInput,
+    entry: &EntryCapture,
+) -> Result<(Vec<AllocId>, Coverage), InfrastructureFailure> {
+    let coverage = entry.allocation_coverage.unwrap_or(Coverage::Partial);
+    if entry.writable == Some(false) {
+        return Ok((Vec::new(), coverage));
+    }
+    let mut holders: Vec<_> = entry
+        .value
+        .values
+        .iter()
+        .filter(|value| value.writable)
+        .map(|value| value.id)
+        .collect();
+    if entry.value.values.is_empty() {
+        holders.extend_from_slice(&entry.value.views);
+        if holders.is_empty()
+            && coverage == Coverage::Partial
+            && let Some(address) = &entry.address
+        {
+            let captured =
+                capture_graph_values(input.state().resolve_captured_allocs(address, None));
+            holders.extend(
+                captured
+                    .values
+                    .into_iter()
+                    .filter_map(|value| value.writable.then_some(value.id)),
+            );
+            holders.extend(captured.views);
+        }
+        if holders.is_empty() && coverage == Coverage::Partial {
+            return Err(unresolved_footprint_error());
+        }
+    }
+    holders.sort_unstable();
+    holders.dedup();
+    Ok((holders, coverage))
+}
 
 fn resolve_writable_cell(
     input: &impl MatchInput,
     cell: &typed::CellPort,
 ) -> Result<AddressSet, InfrastructureFailure> {
-    let mut address = resolve_cell(input, cell)?.0;
-    if let typed::CellPort::Edge(holder, _) = cell {
+    if let typed::CellPort::Edge(holder, selector) = cell {
         let entry = resolve_object(input, holder)?;
-        if entry.value.values.iter().any(|value| !value.writable) {
-            let permitted: Vec<_> = address.cells().iter().copied().filter(|candidate| {
-                matches!(candidate, CellId::Projected(id, _) if entry.value.values.iter().any(|value| value.id == *id && value.writable))
-            }).collect();
-            address.restrict_cells(permitted, false, input.state());
-        }
+        let field = required(input.field(required(entry.ty)?, *selector))?;
+        let (holders, coverage) = writable_holders(input, entry)?;
+        let exact = matches!(&holders[..], [holder] if input.state().alloc_singular(*holder))
+            && entry.value.values.iter().all(|value| value.writable);
+        let address = AddressSet::from_cells(
+            holders.into_iter().map(|id| CellId::Projected(id, field)),
+            coverage,
+        );
+        return Ok(if exact {
+            address.with_singleton_proof()
+        } else {
+            address
+        });
+    }
+    let (address, _) = resolve_cell(input, cell)?;
+    if address.cells().is_empty()
+        && address.may_coverage() == Coverage::Partial
+        && cell_may_write(input, cell)?
+    {
+        return Err(unresolved_footprint_error());
     }
     Ok(address)
 }
@@ -1581,11 +2320,7 @@ fn capture_opaque_locations(
                 if root.writable == Some(false) {
                     return Err(allocation_error("bounded binding target is read-only"));
                 }
-                let ty = required(root.ty)?;
-                reach
-                    .bound
-                    .types
-                    .push(required(reach.layout.types.get(&ty))?.identity.clone());
+                required(reach.layout.types.get(&required(root.ty)?))?;
                 reach.roots.push(root.clone());
             }
             OutputPort::Cell(cell) => {
@@ -1616,9 +2351,7 @@ fn capture_opaque_locations(
             }
         }
     }
-    reach.bound.types.sort_unstable();
-    reach.bound.types.dedup();
-    let bindings = capture_reach_bindings(input, &reach)?;
+    let bindings = capture_reach_bindings(input, &reach, false)?;
     reach.roots.clear();
     Ok(CapturedUncertainty {
         bindings,
@@ -1672,7 +2405,7 @@ fn capture_writable_reach(
     if bound.types.iter().any(|expected| {
         !types
             .iter()
-            .any(|ty| layout.types[ty].identity == *expected)
+            .any(|ty| layout.types[ty].identity.as_ref() == Some(expected))
     }) {
         return Err(allocation_error(
             "writable reach contains a type outside its root layout",
@@ -1692,16 +2425,17 @@ fn capture_writable_reach(
 fn capture_reach_bindings(
     input: &impl MatchInput,
     reach: &CapturedReach,
+    restrict_types: bool,
 ) -> Result<Vec<CapturedBinding>, InfrastructureFailure> {
     let mut edits = Vec::new();
     for root in &reach.roots {
         let ty = required(root.ty)?;
         if root.wrappers.as_slice().is_empty()
-            || reach
-                .bound
-                .types
-                .binary_search(&reach.layout.types[&ty].identity)
-                .is_err()
+            || restrict_types
+                && !reach.layout.types[&ty]
+                    .identity
+                    .as_ref()
+                    .is_some_and(|identity| reach.bound.types.binary_search(identity).is_ok())
         {
             continue;
         }
@@ -1847,10 +2581,10 @@ fn visit_bound_values(
         roots,
         bound.region != typed::ReachKind::Cell,
         |ty, value| {
-            if bound
-                .types
-                .binary_search(&layout.types[&ty].identity)
-                .is_ok()
+            if layout.types[&ty]
+                .identity
+                .as_ref()
+                .is_some_and(|identity| bound.types.binary_search(identity).is_ok())
             {
                 visit(value);
             }
@@ -1885,10 +2619,10 @@ impl CapturedReach {
         opaque.dependencies.dedup();
 
         let includes = |ty| {
-            self.bound
-                .types
-                .binary_search(&self.layout.types[&ty].identity)
-                .is_ok()
+            self.layout.types[&ty]
+                .identity
+                .as_ref()
+                .is_some_and(|identity| self.bound.types.binary_search(identity).is_ok())
         };
         let mut targets = FxHashMap::<TypeId, Vec<CellId>>::default();
         for (ty, address) in self.locations {
@@ -2007,13 +2741,14 @@ impl CapturedReach {
             }
             if !cells.is_empty() {
                 receipt.append(
-                    state.publish_captured_store(
+                    state.publish_store(
                         &TypedStore::write_cells(
                             AddressSet::from_cells(cells, Coverage::Partial),
                             value,
                         )
                         .with_explicit_slot_payload(),
                         order,
+                        None,
                     ),
                 );
             }
@@ -2022,8 +2757,17 @@ impl CapturedReach {
             .results
             .into_iter()
             .map(|(slot, ty)| {
-                let value =
+                let mut value =
                     Self::opaque_value(&self.layout, &mut opaque, state, order, ty, &mut receipt);
+                if self.layout.types[&ty].allocation && value.values.len() > 1 {
+                    // A loaded opaque result is one occurrence even when its
+                    // predecessor may supply any of several allocations.
+                    let view = state.call_view_id(order, self.layout.error, slot as u32);
+                    for member in &value.values {
+                        state.add_view_member(view, member.id);
+                    }
+                    value.views.push(view);
+                }
                 (slot, value)
             })
             .collect();
@@ -2049,9 +2793,10 @@ impl CapturedReach {
             if opaque.built.insert(ty) {
                 for &(key, child) in &descriptor.children {
                     let child = Self::opaque_value(layout, opaque, state, order, child, receipt);
-                    receipt.append(state.publish_captured_store(
+                    receipt.append(state.publish_store(
                         &TypedStore::write_projected([fresh], key, Coverage::Partial, child, false),
                         order,
+                        None,
                     ));
                 }
             }
@@ -2147,7 +2892,7 @@ fn capture_derivation(
             match holder.wrappers.as_slice() {
                 [wrapper]
                     if holder.wrapper_coverage == Some(Coverage::Complete)
-                        && wrapper.age == WrapperAge::Current =>
+                        && wrapper.is_singleton() =>
                 {
                     Some(*wrapper)
                 }
@@ -2283,14 +3028,22 @@ fn capture_typed_value(
     value.restrict_permission(descriptor.access.restriction == Some(typed::Permission::ReadOnly));
     canonicalise_capture(&mut value);
     let derivation = match descriptor.access.derived_from.as_ref() {
-        Some(derivation) => capture_derivation(input, Some(derivation))?,
-        None => transported.and_then(|source| source.derivation),
+        Some(derivation) => {
+            capture_derivation(input, Some(derivation))?.map(CapturedDerivation::Wrapper)
+        }
+        None => transported.and_then(|source| {
+            source
+                .derivation_roots
+                .clone()
+                .map(CapturedDerivation::Roots)
+                .or_else(|| source.derivation.map(CapturedDerivation::Wrapper))
+        }),
     };
     Ok(CapturedResult {
         slot: 0,
         value,
         roots: transported.and_then(|source| source.roots.clone()),
-        derivation: derivation.map(CapturedDerivation::Wrapper),
+        derivation,
     })
 }
 
@@ -2492,7 +3245,7 @@ impl CapturedEdit {
                 } else {
                     store
                 };
-                state.publish_captured_store(&store, order)
+                state.publish_store(&store, order, None)
             }
             Self::Family {
                 mut receivers,
@@ -2666,9 +3419,9 @@ impl CapturedPost {
             match edit {
                 CapturedEdit::Cell(store) => store.weaken(),
                 CapturedEdit::Family {
-                    replace, members, ..
+                    coverage, members, ..
                 } => {
-                    *replace = Replacement::May;
+                    *coverage = Coverage::Partial;
                     for member in members {
                         member.at_most_once = false;
                     }
@@ -2731,7 +3484,10 @@ impl CapturedPost {
             }
             if let Some(reach) = &mut unknown.reach {
                 for root in &mut reach.roots {
-                    root.remap(state, retirement);
+                    if let Some(address) = &mut root.address {
+                        address.remap_allocations(state, retirement);
+                    }
+                    root.value.remap(state, retirement);
                 }
                 for (_, value) in &mut reach.sources {
                     value.remap(state, retirement);
@@ -2753,10 +3509,19 @@ impl CapturedPost {
             edits,
             mut results,
             uncertainty,
+            result_views,
         } = self;
         let mut receipt = PublicationCarriers::default();
+        let links = SmallSet::from_iter(bindings.iter().filter_map(|binding| {
+            (binding.replace == Replacement::Must
+                && matches!(&binding.update, BindingEdit::Link { .. }))
+            .then_some(binding.target)
+        }));
         for edit in bindings {
             receipt.append(edit.apply(state, false));
+        }
+        for &wrapper in links.as_slice() {
+            state.refresh_captured_link_derivation(wrapper);
         }
         for edit in edits {
             receipt.append(edit.apply(state, order, false));
@@ -2777,14 +3542,23 @@ impl CapturedPost {
                 suffix_results.extend(bounded_results);
             }
             for (slot, value) in suffix_results {
-                let result = results
-                    .iter_mut()
-                    .find(|result| result.slot == slot)
-                    .expect("validated prefix has a result descriptor for the affected slot");
-                merge_capture(&mut result.value, value);
-                canonicalise_capture(&mut result.value);
-                result.derivation = None;
+                if let Some(result) = results.iter_mut().find(|result| result.slot == slot) {
+                    merge_capture(&mut result.value, value);
+                    canonicalise_capture(&mut result.value);
+                    result.derivation = None;
+                } else {
+                    results.push(CapturedResult {
+                        slot,
+                        value,
+                        roots: None,
+                        derivation: None,
+                    });
+                }
             }
+            results.sort_unstable_by_key(|result| result.slot);
+        }
+        if let Some(views) = result_views {
+            views.install(state, order, &mut results);
         }
         (results, receipt)
     }
@@ -2803,8 +3577,6 @@ fn union_optional_roots(target: &mut Option<RootSet>, source: Option<RootSet>) {
 
 #[derive(Clone, Copy)]
 pub(super) enum CallLane<'a> {
-    Unreachable,
-    Known(&'a CallLaneSummary),
     Lookup,
     External(&'a [ExternalReturnSlot]),
     Opaque(Inputs<'a>),
@@ -2820,30 +3592,11 @@ pub(super) enum Inputs<'a> {
 impl<'a> CallLane<'a> {
     pub(super) fn new(returns: CallReturns<'a>, lane: InvokeLane) -> Self {
         match (returns, lane) {
-            (CallReturns::Summary(FunctionReturnAliasSummary::Pending), _) => {
-                Self::Opaque(Inputs::Any)
-            }
-            (CallReturns::Summary(FunctionReturnAliasSummary::Known(facts)), lane) => {
-                let facts = match lane {
-                    InvokeLane::Success => &facts.success,
-                    InvokeLane::Error => &facts.error,
-                };
-                if facts.reachable {
-                    Self::Known(facts)
-                } else if facts.can_return() {
-                    Self::Opaque(Inputs::Any)
-                } else {
-                    Self::Unreachable
-                }
-            }
             (CallReturns::External(slots), InvokeLane::Success) => Self::External(slots),
             (CallReturns::External(_), InvokeLane::Error) => Self::Opaque(Inputs::Any),
             (CallReturns::Fresh, _) => Self::Opaque(Inputs::Fresh),
+            (CallReturns::Summary(_), _) => unreachable!("source calls use typed continuations"),
         }
-    }
-
-    pub(super) fn unreachable(self) -> bool {
-        matches!(self, Self::Unreachable)
     }
 
     fn opaque_inputs(self, slot: usize) -> Inputs<'a> {
@@ -2854,19 +3607,14 @@ impl<'a> CallLane<'a> {
                 Some(ExternalReturnAlias::Fresh) => Inputs::Fresh,
                 None => Inputs::Any,
             },
-            Self::Lookup | Self::Known(_) | Self::Unreachable => {
-                unreachable!("expected an opaque lane")
-            }
+            Self::Lookup => unreachable!("lookups capture their member directly"),
         }
     }
 
     pub(super) fn retains_result(self) -> bool {
         match self {
-            Self::Unreachable | Self::Opaque(Inputs::Fresh) => false,
+            Self::Opaque(Inputs::Fresh) => false,
             Self::Lookup => true,
-            Self::Known(facts) => facts.sources.iter().any(|row| {
-                matches!(row.source, CallAllocationSource::Parameter(_))
-            }),
             Self::External(slots) => slots.iter().any(|slot| {
                 matches!(&slot.alias, ExternalReturnAlias::AliasArgs(indices) if !indices.is_empty())
             }),
@@ -2874,62 +3622,21 @@ impl<'a> CallLane<'a> {
         }
     }
 
-    pub(super) fn may_store(self, argument: usize) -> bool {
-        matches!(self, Self::Known(facts) if facts.stores.iter().any(|row| match &row.source {
-            CallAllocationSource::Parameter(path) => path.index == argument,
-            CallAllocationSource::OpaqueFresh | CallAllocationSource::Fresh => false,
-        }))
-    }
-
     pub(super) fn may_retain(self, argument: usize, roots: &[RootSet]) -> bool {
-        let opaque = || roots.get(argument).is_some_and(|root| !root.is_empty());
         match self {
             Self::Lookup => argument == 0,
-            Self::Known(facts) => facts.sources.iter().any(|row| match &row.source {
-                CallAllocationSource::Parameter(path) => path.index == argument,
-                CallAllocationSource::OpaqueFresh | CallAllocationSource::Fresh => false,
-            }),
             Self::External(slots) => slots.iter().any(|slot| {
                 matches!(&slot.alias, ExternalReturnAlias::AliasArgs(indices) if indices.contains(&argument))
             }),
             Self::Opaque(Inputs::Args(indices)) => indices.contains(&argument),
-            Self::Opaque(Inputs::Any) => opaque(),
-            Self::Opaque(Inputs::Fresh) | Self::Unreachable => false,
+            Self::Opaque(Inputs::Any) => roots.get(argument).is_some_and(|root| !root.is_empty()),
+            Self::Opaque(Inputs::Fresh) => false,
         }
     }
 
-    /// Coarse value roots name only sources of this slot's whole allocation, not its children.
-    pub(super) fn root_sources<'b>(
-        self,
-        slot: usize,
-        sources: &'b mut Vec<usize>,
-    ) -> Option<&'b [usize]>
-    where
-        'a: 'b,
-    {
+    pub(super) fn root_sources(self, slot: usize) -> Option<&'a [usize]> {
         match self {
             Self::Lookup => Some(if slot == 0 { &[0] } else { &[] }),
-            Self::Known(facts) => {
-                let rows = result_root_rows(&facts.sources, slot);
-                if let [row] = rows
-                    && let CallAllocationSource::Parameter(path) = &row.source
-                    && path.path.is_empty()
-                {
-                    return Some(std::slice::from_ref(&path.index));
-                }
-                sources.clear();
-                for row in rows {
-                    if let CallAllocationSource::Parameter(path) = &row.source
-                        && path.path.is_empty()
-                    {
-                        sources.push(path.index);
-                    }
-                }
-                sources.sort_unstable();
-                sources.dedup();
-                Some(sources)
-            }
-            Self::Unreachable => Some(&[]),
             _ => match self.opaque_inputs(slot) {
                 Inputs::Fresh => Some(&[]),
                 Inputs::Args(indices) => Some(indices),
@@ -2938,57 +3645,20 @@ impl<'a> CallLane<'a> {
         }
     }
 
-    /// Unlike alias roots, a derivation is an exemption only if every possible root value
-    /// derives from that same writer. A projected parameter source still carries its ledger.
     pub(super) fn derive_result(
         self,
         slot: usize,
         actuals: &CallActuals<'_>,
         local_count: usize,
     ) -> RootSet {
-        let empty = || RootSet::empty(local_count);
-        if matches!(self, Self::Lookup) {
-            return if slot == 0 {
-                actuals.derivations.first().cloned().unwrap_or_else(empty)
-            } else {
-                empty()
-            };
+        if matches!(self, Self::Lookup)
+            && slot == 0
+            && let Some(roots) = actuals.derivations.first()
+        {
+            return roots.clone();
         }
-        let Self::Known(facts) = self else {
-            // An opaque result may be fresh even when it is allowed to alias an actual.
-            return empty();
-        };
-        let mut rows = result_root_rows(&facts.sources, slot).iter();
-        let origin = |row: &CallPathSource| {
-            if let CallAllocationSource::Parameter(path) = &row.source {
-                actuals.derivations.get(path.index)
-            } else {
-                None
-            }
-        };
-        let Some(first) = rows.next().and_then(origin) else {
-            return empty();
-        };
-        let mut derived = first.clone();
-        for row in rows {
-            let Some(other) = origin(row) else {
-                return empty();
-            };
-            derived.intersect_with(other);
-        }
-        derived
+        RootSet::empty(local_count)
     }
-}
-
-fn result_root_rows(sources: &[CallPathSource], slot: usize) -> &[CallPathSource] {
-    let start = sources.partition_point(
-        |row| matches!(&row.output, CallOutputPath::Result(result) if result.slot < slot),
-    );
-    let remaining = &sources[start..];
-    let end = remaining.partition_point(|row| {
-        matches!(&row.output, CallOutputPath::Result(result) if result.slot == slot && result.path.is_empty())
-    });
-    &remaining[..end]
 }
 
 pub(super) fn call_result_ops(
@@ -2997,30 +3667,9 @@ pub(super) fn call_result_ops(
     results: impl Iterator<Item = HirLocalDestination> + Clone,
     lane: CallLane<'_>,
     outcome: InvokeLane,
-    allow_plain_roots: bool,
 ) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
     let mut ops = Vec::new();
     let mut opaque = FxHashMap::default();
-    match lane {
-        CallLane::Unreachable => return Ok(ops),
-        CallLane::Known(facts) => {
-            let mut ops = if facts.stores.is_empty()
-                && facts.sharing.is_empty()
-                && let Some(ops) =
-                    direct_result_ops(input, actuals, results.clone(), facts, allow_plain_roots)?
-            {
-                ops
-            } else {
-                instantiate_lane(input, actuals, results.clone(), facts, outcome)?
-            };
-            if input.state.has_value_alternatives() {
-                append_scalar_results(input, actuals, results, facts, &mut ops)?;
-                append_uncertain_scalar_stores(input, actuals, facts, &mut ops)?;
-            }
-            return Ok(ops);
-        }
-        _ => {}
-    }
     let multiple = results.clone().nth(1).is_some();
     for (slot, dest) in results.enumerate() {
         let Some(ty) = result_type(input, dest)? else {
@@ -3050,64 +3699,6 @@ pub(super) fn call_result_ops(
     Ok(ops)
 }
 
-fn append_scalar_results(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    results: impl Iterator<Item = HirLocalDestination>,
-    facts: &CallLaneSummary,
-    ops: &mut Vec<InvokeLayerOp>,
-) -> Result<(), BorrowCheckError> {
-    let mut captures = PathCaptures::default();
-    let mut possible = None;
-    for (slot, dest) in results.enumerate() {
-        if result_type(input, dest)?.is_some() {
-            continue;
-        }
-        let mut alternatives = Vec::new();
-        let rows = result_root_rows(&facts.sources, slot);
-        let mut unresolved = rows.is_empty();
-        for row in rows {
-            if let CallAllocationSource::Parameter(source) = &row.source {
-                let value = captures.get(input, actuals, source.index, &source.path)?;
-                if value.alternatives.is_empty() {
-                    alternatives.push(ValueAlt::plain(PayloadKind::Scalar));
-                } else {
-                    alternatives.extend_from_slice(&value.alternatives);
-                }
-            } else {
-                unresolved = true;
-            }
-        }
-        if unresolved {
-            if possible.is_none() {
-                possible = Some(possible_dependencies(input, actuals, Inputs::Any)?);
-            }
-            let deps = possible
-                .as_ref()
-                .expect("unresolved output captures possible sources");
-            if !deps.is_empty() {
-                alternatives.push(ValueAlt::plain(PayloadKind::Scalar));
-                alternatives.push(ValueAlt {
-                    kind: PayloadKind::Unknown,
-                    deps: deps.clone(),
-                });
-            }
-        }
-        if alternatives.iter().any(|alt| !alt.deps.is_empty()) {
-            bind_result(
-                ops,
-                dest,
-                CapturedValue {
-                    alternatives,
-                    ..CapturedValue::default()
-                }
-                .into_scalar(),
-            );
-        }
-    }
-    Ok(())
-}
-
 fn captured_scalar(deps: DependencySet) -> CapturedValue {
     CapturedValue {
         alternatives: vec![ValueAlt {
@@ -3116,157 +3707,6 @@ fn captured_scalar(deps: DependencySet) -> CapturedValue {
         }],
         ..Default::default()
     }
-}
-
-/// The allocation summary can describe a store without recording scalar writes. Replay the
-/// omitted scalar destinations as may writes; an absent allocation row cannot kill anything.
-fn append_uncertain_scalar_stores(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    facts: &CallLaneSummary,
-    ops: &mut Vec<InvokeLayerOp>,
-) -> Result<(), BorrowCheckError> {
-    if !actuals.args.iter().any(CallArgumentTransfer::may_write) {
-        return Ok(());
-    }
-    let deps = possible_dependencies(input, actuals, Inputs::Any)?;
-    if deps.is_empty() {
-        return Ok(());
-    }
-    for index in 0..actuals.args.len() {
-        if !actuals.args[index].may_write() {
-            continue;
-        }
-        let ty = actuals.ty(input, index)?;
-        if !heap_type(input.context, ty)? {
-            if !has_scalar_store(facts, index, &[])
-                && let Some(place) = actuals.entry_place(input, index)?
-                && !place.address.cells().is_empty()
-            {
-                ops.push(InvokeLayerOp::Store(TypedStore::write_cells(
-                    place.address.clone(),
-                    captured_scalar(deps.clone()),
-                )));
-            }
-            continue;
-        }
-        let root = ResolvedPlace::from_capture(actuals.root(input, index)?);
-        visit_uncertain_scalar_stores(input, facts, index, ty, root, &mut Vec::new(), &deps, ops)?;
-    }
-    Ok(())
-}
-
-fn has_scalar_store(facts: &CallLaneSummary, index: usize, fields: &[CallField]) -> bool {
-    facts.stores.iter().any(|row| {
-        matches!(&row.output,
-        CallOutputPath::Store { target, path } if target.index == index
-            && target.path.iter().chain(path).copied().eq(fields.iter().copied())
-            && matches!(row.source, CallAllocationSource::Parameter(_)))
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn visit_uncertain_scalar_stores(
-    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    facts: &CallLaneSummary,
-    index: usize,
-    ty: TypeId,
-    holders: ResolvedPlace,
-    path: &mut Vec<CallField>,
-    deps: &DependencySet,
-    ops: &mut Vec<InvokeLayerOp>,
-) -> Result<(), BorrowCheckError> {
-    if holders.ids.is_empty() {
-        return Ok(());
-    }
-    CallField::for_each_child(ty, input.context.type_environment, |selector, _| {
-        let (key, child) = typed_child(input.context, ty, selector)?;
-        path.push(selector);
-        if heap_type(input.context, child)? {
-            let mut nested = holders.clone();
-            step_graph(input.state, input.view.local_mutable, &mut nested, key);
-            visit_uncertain_scalar_stores(input, facts, index, child, nested, path, deps, ops)?;
-        } else if !has_scalar_store(facts, index, path) {
-            ops.push(InvokeLayerOp::Store(TypedStore::write_projected(
-                holders.ids.iter().copied(),
-                key,
-                Coverage::Partial,
-                captured_scalar(deps.clone()),
-                false,
-            )));
-        }
-        path.pop();
-        Ok(())
-    })
-}
-
-/// The identity/forwarding boundary does not require a synthetic graph, even when an
-/// immutable actual needs an explicit allocation capture to retain its permission.
-fn direct_result_ops(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    mut results: impl Iterator<Item = HirLocalDestination>,
-    facts: &CallLaneSummary,
-    allow_plain_roots: bool,
-) -> Result<Option<Vec<InvokeLayerOp>>, BorrowCheckError> {
-    let Some(dest) = results.next() else {
-        return Ok(None);
-    };
-    let Some(first) = facts.sources.first() else {
-        return Ok(None);
-    };
-    if results.next().is_some()
-        || !matches!(&first.output, CallOutputPath::Result(path) if path.slot == 0 && path.path.is_empty())
-    {
-        return Ok(None);
-    }
-    let Some(ty) = result_type(input, dest)? else {
-        return Ok(Some(Vec::new()));
-    };
-    if matches!(first.source, CallAllocationSource::Fresh) && input.state.has_value_alternatives() {
-        return Ok(None);
-    }
-    let CallAllocationSource::Parameter(param) = &first.source else {
-        return Ok((facts.sources.len() == 1
-            && matches!(first.source, CallAllocationSource::Fresh)
-            && matches!(dest, HirLocalDestination::Define(_)))
-        .then(Vec::new));
-    };
-    if !param.path.is_empty()
-        || facts.sources[1..].iter().any(|row| {
-            !matches!((&row.output, &row.source),
-                (CallOutputPath::Result(result), CallAllocationSource::Parameter(source))
-                    if result.slot == 0 && !result.path.is_empty()
-                        && source.index == param.index && source.path == result.path)
-        })
-    {
-        return Ok(None);
-    }
-    if actuals.ty(input, param.index)? != ty {
-        return Err(input
-            .context
-            .diagnostics
-            .internal_error("Argument and output allocation types differ at call site"));
-    }
-    let index = input
-        .view
-        .index_of(dest.local())
-        .expect("result type lookup checked layout");
-    if allow_plain_roots
-        && !input
-            .state
-            .binding_mode(index)
-            .contains(super::LocalMode::ALIAS)
-        && preserves_plain_roots(input, actuals, index, param.index)?
-        && (!input.state.has_value_alternatives()
-            || actuals.root(input, param.index)?.alternatives.is_empty())
-    {
-        return Ok(Some(Vec::new()));
-    }
-    let captured = actuals.root(input, param.index)?;
-    let mut ops = Vec::new();
-    bind_result(&mut ops, dest, captured.clone());
-    Ok(Some(ops))
 }
 
 fn result_type(
@@ -3311,49 +3751,6 @@ pub(super) fn bind_result(
             value,
         });
     }
-}
-
-/// A direct same-root return needs no override when existing value roots already carry its
-/// allocation and permission. Projected paths, alias destinations and rebinding a source
-/// need the explicit capture instead.
-fn preserves_plain_roots(
-    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    destination: usize,
-    index: usize,
-) -> Result<bool, BorrowCheckError> {
-    let argument = actuals.argument(input, index)?.argument;
-    let expression = input.context.expressions.expression(argument);
-    let HirExpressionKind::Load(place) = &expression.kind else {
-        return Ok(false);
-    };
-    let Some(source) = input.view.index_of(place.root) else {
-        return Ok(false);
-    };
-    if !place.projections.is_empty()
-        || expression.value_kind == ValueKind::Const
-        || !input.view.local_mutable[source]
-    {
-        return Ok(false);
-    }
-    let Some(place) = actuals.entry_place(input, index)? else {
-        return Ok(false);
-    };
-    input
-        .state
-        .load_place_content(place, input.view.local_mutable, false);
-    let content = place
-        .content
-        .as_ref()
-        .expect("forwarded place requests content");
-    Ok(!content.layer_only
-        && !content.readonly
-        && content.ids.iter().all(|&id| {
-            input
-                .state
-                .alloc_origin_local(id)
-                .is_none_or(|origin| origin != destination && input.view.local_mutable[origin])
-        }))
 }
 
 fn heap_type(context: &BorrowTransferContext<'_>, ty: TypeId) -> Result<bool, BorrowCheckError> {
@@ -3413,7 +3810,6 @@ impl<'a> CallActuals<'a> {
         })
     }
 
-    #[allow(dead_code)]
     pub(super) fn expression(
         &self,
         index: usize,
@@ -3516,6 +3912,7 @@ impl<'a> CallActuals<'a> {
                         context: input.context,
                         view: input.view,
                         block_id: input.block_id,
+                        materialise_contents: input.stats.sparse,
                     },
                     input.state,
                     argument,
@@ -3528,6 +3925,7 @@ impl<'a> CallActuals<'a> {
                         context: input.context,
                         view: input.view,
                         block_id: input.block_id,
+                        materialise_contents: input.stats.sparse,
                     },
                     input.state,
                     argument,
@@ -3551,29 +3949,6 @@ impl<'a> CallActuals<'a> {
             .expect("demanded entry value was captured"))
     }
 
-    /// A replacement writes argument storage. A raw rvalue has only an entry value.
-    fn capture_cell_store(
-        &mut self,
-        input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
-        index: usize,
-        node: &LaneNode<'_>,
-    ) -> Result<Option<InvokeLayerOp>, BorrowCheckError> {
-        let argument = self.argument(input, index)?.argument;
-        let expression = input.context.expressions.expression(argument);
-        if expression.value_kind != ValueKind::Place
-            || !matches!(&expression.kind, HirExpressionKind::Load(_))
-        {
-            return Ok(None);
-        }
-        let Some(place) = self.entry_place(input, index)? else {
-            return Ok(None);
-        };
-        let addresses = &place.address;
-        Ok((!addresses.cells().is_empty()).then(|| {
-            InvokeLayerOp::Store(TypedStore::write_cells(addresses.clone(), node.capture()))
-        }))
-    }
-
     fn ty(
         &self,
         input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
@@ -3584,64 +3959,7 @@ impl<'a> CallActuals<'a> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct ActualPath<'a> {
-    index: usize,
-    path: &'a [CallField],
-}
-
-#[derive(Default)]
-struct PathCaptures<'a>(FxHashMap<ActualPath<'a>, CapturedValue>);
-
-impl<'a> PathCaptures<'a> {
-    fn get<'b>(
-        &'b mut self,
-        input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-        actuals: &'b mut CallActuals<'_>,
-        index: usize,
-        path: &'a [CallField],
-    ) -> Result<&'b CapturedValue, BorrowCheckError> {
-        if path.is_empty() {
-            return actuals.root(input, index);
-        }
-        let key = ActualPath { index, path };
-        match self.0.entry(key) {
-            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let mut ty = actuals.ty(input, index)?;
-                let actual = actuals.root_entry(input, index)?;
-                let value = actual
-                    .value
-                    .as_ref()
-                    .expect("demanded entry value was captured");
-                let mut graph = ResolvedPlace::from_capture(value);
-                if !actual.is_copy
-                    && let Some(content) = actual
-                        .place
-                        .as_ref()
-                        .and_then(|place| place.content.as_ref())
-                {
-                    graph.coverage = content.coverage;
-                    graph.may_be_absent = content.may_be_absent;
-                }
-                for (index, &field) in path.iter().enumerate() {
-                    let (key, child) = typed_child(input.context, ty, field)?;
-                    if index + 1 == path.len()
-                        && input.state.has_value_alternatives()
-                        && !heap_type(input.context, child)?
-                    {
-                        return Ok(entry.insert(input.state.capture_scalar_projection(&graph, key)));
-                    }
-                    step_graph(input.state, input.view.local_mutable, &mut graph, key);
-                    ty = child;
-                }
-                Ok(entry.insert(capture_graph_values(graph)))
-            }
-        }
-    }
-}
-
-fn typed_child(
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn boundary_child(
     context: &BorrowTransferContext<'_>,
     ty: TypeId,
     step: CallField,
@@ -3669,446 +3987,8 @@ fn field_key(step: CallFieldHir) -> FieldKey {
     }
 }
 
-fn typed_path(
-    context: &BorrowTransferContext<'_>,
-    mut ty: TypeId,
-    path: &[CallField],
-) -> Result<TypeId, BorrowCheckError> {
-    for &step in path {
-        ty = typed_child(context, ty, step)?.1;
-    }
-    Ok(ty)
-}
-
-struct LaneNode<'a> {
-    route: &'a CallOutputPath,
-    ty: TypeId,
-    values: Vec<StoredValue>,
-    alternatives: ValueAlternatives,
-    inherited: Vec<AllocId>,
-    view: Option<AllocId>,
-    nonsingular: bool,
-    /// A projected parent that came from a parameter already has its own graph.
-    /// Only these call-owned alternatives receive synthetic child edges.
-    fresh: Vec<AllocId>,
-}
-
-impl LaneNode<'_> {
-    fn capture(&self) -> CapturedValue {
-        CapturedValue {
-            values: self.values.clone(),
-            views: output_views(self),
-            alternatives: self.alternatives.clone(),
-        }
-    }
-
-    fn contribute(&mut self, value: &CapturedValue) {
-        if self.alternatives.is_empty() && !value.alternatives.is_empty() {
-            self.alternatives
-                .extend(self.values.iter().copied().map(allocation_alt));
-        }
-        if !self.alternatives.is_empty() || !value.alternatives.is_empty() {
-            if value.alternatives.is_empty() {
-                self.alternatives
-                    .extend(value.values.iter().copied().map(allocation_alt));
-            } else {
-                self.alternatives.extend_from_slice(&value.alternatives);
-            }
-        }
-        self.values.extend_from_slice(&value.values);
-    }
-
-    fn add_fresh(&mut self, id: AllocId, writable: bool) {
-        let value = StoredValue { id, writable };
-        self.fresh.push(id);
-        self.values.push(value);
-        self.inherited.push(id);
-        if !self.alternatives.is_empty() {
-            self.alternatives.push(allocation_alt(value));
-        }
-    }
-}
-
 fn allocation_alt(value: StoredValue) -> ValueAlt {
     ValueAlt::plain(PayloadKind::Allocation(value))
-}
-
-fn instantiate_lane(
-    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    actuals: &mut CallActuals<'_>,
-    results: impl Iterator<Item = HirLocalDestination> + Clone,
-    facts: &CallLaneSummary,
-    outcome: InvokeLane,
-) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
-    if facts.sources.is_empty() && facts.stores.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut captures = PathCaptures::default();
-    let mut nodes: Vec<LaneNode<'_>> = Vec::new();
-    let mut ops = Vec::new();
-    for row in facts.sources.iter().chain(&facts.stores) {
-        let output = &row.output;
-        if !nodes.last().is_some_and(|node| node.route == output) {
-            let (root_ty, path) = match output {
-                CallOutputPath::Result(result) => {
-                    let dest = results.clone().nth(result.slot).ok_or_else(|| {
-                        input
-                            .context
-                            .diagnostics
-                            .internal_error("Allocation summary names a missing result")
-                    })?;
-                    let Some(ty) = result_type(input, dest)? else {
-                        continue;
-                    };
-                    (ty, result.path.as_slice())
-                }
-                CallOutputPath::Store { target, path } => {
-                    let ty = actuals.ty(input, target.index)?;
-                    (
-                        typed_path(input.context, ty, &target.path)?,
-                        path.as_slice(),
-                    )
-                }
-            };
-            nodes.push(LaneNode {
-                route: output,
-                ty: typed_path(input.context, root_ty, path)?,
-                values: Vec::new(),
-                alternatives: Vec::new(),
-                fresh: Vec::new(),
-                inherited: Vec::new(),
-                view: None,
-                nonsingular: output.has_collapsed_selector(),
-            });
-        }
-        let site = nodes.len() as u32 - 1;
-        let node = nodes.last_mut().expect("source endpoint was just inserted");
-        match &row.source {
-            CallAllocationSource::Parameter(path) => {
-                let actual_ty = actuals.ty(input, path.index)?;
-                if typed_path(input.context, actual_ty, &path.path)? != node.ty {
-                    return Err(input.context.diagnostics.internal_error(
-                        "Argument and output allocation types differ at call site",
-                    ));
-                }
-                let values = captures.get(input, actuals, path.index, &path.path)?;
-                node.inherited.extend(captured_occurrences(values));
-                node.contribute(values);
-            }
-            CallAllocationSource::Fresh | CallAllocationSource::OpaqueFresh => {
-                let opaque = matches!(row.source, CallAllocationSource::OpaqueFresh);
-                let nonsingular = node.nonsingular || opaque;
-                node.nonsingular = nonsingular;
-                let site = if opaque {
-                    site + (facts.sources.len() + facts.stores.len() + facts.sharing.len()) as u32
-                } else {
-                    site
-                };
-                let id = input.state.call_site_id(
-                    input.current_order,
-                    matches!(outcome, InvokeLane::Error),
-                    site,
-                    nonsingular,
-                    input.block_id,
-                    input.view.block_successors,
-                );
-                node.add_fresh(id, true);
-            }
-        }
-    }
-    let find = |nodes: &[LaneNode<'_>], endpoint: &CallOutputPath| {
-        nodes.binary_search_by(|node| node.route.cmp(endpoint)).ok()
-    };
-    let mut permitted = FxHashSet::default();
-    for (ordinal, pair) in facts.sharing.iter().enumerate() {
-        let (Some(left), Some(right)) = (find(&nodes, &pair.left), find(&nodes, &pair.right))
-        else {
-            continue;
-        };
-        let may_share = match &pair.condition {
-            CallSharingCondition::Always => true,
-            CallSharingCondition::Parameters(a, b) => {
-                let first = captures.get(input, actuals, a.index, &a.path)?.clone();
-                let second = captures.get(input, actuals, b.index, &b.path)?;
-                let left = first
-                    .values
-                    .iter()
-                    .map(|value| value.id)
-                    .collect::<Vec<_>>();
-                let right = second
-                    .values
-                    .iter()
-                    .map(|value| value.id)
-                    .collect::<Vec<_>>();
-                input
-                    .state
-                    .alloc_paths_may_share(&left, &first.views, &right, &second.views)
-            }
-        };
-        if !may_share || !permitted.insert((left, right)) {
-            continue;
-        }
-        if !nodes[left].fresh.is_empty() && !nodes[right].fresh.is_empty() {
-            let id = input.state.call_site_id(
-                input.current_order,
-                matches!(outcome, InvokeLane::Error),
-                (facts.sources.len() + facts.stores.len() + ordinal) as u32,
-                nodes[left].nonsingular || nodes[right].nonsingular,
-                input.block_id,
-                input.view.block_successors,
-            );
-            for index in [left, right] {
-                let node = &mut nodes[index];
-                let writable = node.values.iter().all(|value| value.writable);
-                node.add_fresh(id, writable);
-            }
-        }
-    }
-
-    // A repeated site's marginal allocations may refer to different evaluations.
-    let correlate = nodes.len() > 1
-        && !input
-            .state
-            .block_may_repeat(input.block_id, input.view.block_successors);
-    let mut inverse = FxHashMap::<AllocId, Vec<usize>>::default();
-    for (index, node) in nodes.iter_mut().enumerate() {
-        node.values
-            .sort_unstable_by_key(|value| (value.id, value.writable));
-        node.values.dedup_by_key(|value| value.id);
-        node.inherited.sort_unstable();
-        node.inherited.dedup();
-        if correlate {
-            for value in &node.values {
-                inverse.entry(value.id).or_default().push(index);
-            }
-        }
-    }
-    let mut restricted = FxHashSet::default();
-    for endpoints in inverse.values() {
-        for (at, &left) in endpoints.iter().enumerate() {
-            for &right in &endpoints[at + 1..] {
-                if !permitted.contains(&(left, right)) {
-                    restricted.insert((left, right));
-                }
-            }
-        }
-    }
-    if !restricted.is_empty() {
-        // Concrete sets keep caller aliases for uncopied reachability. A separate view
-        // names the outcome occurrence when paths with overlapping sets do not share.
-        for (ordinal, node) in nodes.iter_mut().enumerate() {
-            if node.values.is_empty() {
-                continue;
-            }
-            let view = input.state.call_view_id(
-                input.current_order,
-                matches!(outcome, InvokeLane::Error),
-                ordinal as u32,
-            );
-            node.view = Some(view);
-            for value in &node.values {
-                ops.push(InvokeLayerOp::ViewMember { view, id: value.id });
-            }
-        }
-        let mut pairs: Vec<_> = restricted
-            .into_iter()
-            .map(|pair| (pair, false))
-            .chain(permitted.into_iter().map(|pair| (pair, true)))
-            .collect();
-        pairs.sort_unstable();
-        for ((left, right), may_share) in pairs {
-            if let (Some(left), Some(right)) = (nodes[left].view, nodes[right].view) {
-                ops.push(InvokeLayerOp::ViewPair {
-                    left,
-                    right,
-                    may_share,
-                });
-            }
-        }
-    }
-
-    for node in &nodes {
-        let (parent, last) = match node.route {
-            CallOutputPath::Result(result) => {
-                let Some((&last, parent)) = result.path.split_last() else {
-                    continue;
-                };
-                (
-                    CallOutputPath::Result(
-                        crate::compiler_frontend::public_call_summary::CallResultPath {
-                            slot: result.slot,
-                            path: parent.to_vec(),
-                        },
-                    ),
-                    last,
-                )
-            }
-            CallOutputPath::Store { target, path } => {
-                let Some((&last, parent)) = path.split_last() else {
-                    let Some((&key, holders)) = target.path.split_last() else {
-                        ops.extend(actuals.capture_cell_store(input, target.index, node)?);
-                        continue;
-                    };
-                    let ty = actuals.ty(input, target.index)?;
-                    let ty = typed_path(input.context, ty, holders)?;
-                    let (key, _) = typed_child(input.context, ty, key)?;
-                    let holders = captures.get(input, actuals, target.index, holders)?;
-                    ops.push(InvokeLayerOp::Store(TypedStore::write_projected(
-                        holders.values.iter().map(|holder| holder.id),
-                        key,
-                        Coverage::Partial,
-                        node.capture(),
-                        false,
-                    )));
-                    continue;
-                };
-                (
-                    CallOutputPath::Store {
-                        target: target.clone(),
-                        path: parent.to_vec(),
-                    },
-                    last,
-                )
-            }
-        };
-        if let Some(parent) = find(&nodes, &parent).map(|index| &nodes[index]) {
-            let (key, _) = typed_child(input.context, parent.ty, last)?;
-            let views = output_views(node);
-            if let Some(holder) = parent.view {
-                for &view in &views {
-                    ops.push(InvokeLayerOp::ViewField { holder, key, view });
-                }
-            }
-            for &holder in &parent.fresh {
-                if parent.view.is_none() && !views.is_empty() || !node.alternatives.is_empty() {
-                    // Rewrapping a projected actual carries its occurrence with the edge.
-                    ops.push(InvokeLayerOp::ConstructField {
-                        holder,
-                        key,
-                        value: CapturedValue {
-                            values: node.values.clone(),
-                            views: if parent.view.is_none() {
-                                views.clone()
-                            } else {
-                                Vec::new()
-                            },
-                            alternatives: node.alternatives.clone(),
-                        },
-                    });
-                } else {
-                    for &value in &node.values {
-                        ops.push(InvokeLayerOp::Contribute { holder, key, value });
-                    }
-                }
-            }
-        }
-    }
-    if input.state.has_value_alternatives() && nodes.iter().any(|node| !node.fresh.is_empty()) {
-        let deps = possible_dependencies(input, actuals, Inputs::Any)?;
-        if !deps.is_empty() {
-            for node in &nodes {
-                if node.fresh.is_empty() || !heap_type(input.context, node.ty)? {
-                    continue;
-                }
-                append_fresh_scalar_fields(
-                    input,
-                    &nodes,
-                    node.route,
-                    node.ty,
-                    &node.fresh,
-                    &deps,
-                    &mut ops,
-                )?;
-            }
-        }
-    }
-    for node in nodes {
-        let CallOutputPath::Result(result) = node.route else {
-            continue;
-        };
-        if !result.path.is_empty() {
-            continue;
-        }
-        let dest = results
-            .clone()
-            .nth(result.slot)
-            .expect("allocation summary result slot must name a destination");
-        // The direct-root fast path above handles elision. A shaped return keeps its
-        // pre-call allocation captures even when a second result also retires their source.
-        let views = output_views(&node);
-        bind_result(
-            &mut ops,
-            dest,
-            CapturedValue {
-                values: node.values,
-                views,
-                alternatives: node.alternatives,
-            },
-        );
-    }
-    Ok(ops)
-}
-
-/// Only synthesised allocations lack field captures. Parameter-derived alternatives keep their
-/// own graphs; an explicitly supplied child is handled at its own allocation-summary node.
-fn append_fresh_scalar_fields(
-    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    nodes: &[LaneNode<'_>],
-    parent: &CallOutputPath,
-    ty: TypeId,
-    holders: &[AllocId],
-    deps: &DependencySet,
-    ops: &mut Vec<InvokeLayerOp>,
-) -> Result<(), BorrowCheckError> {
-    CallField::for_each_child(ty, input.context.type_environment, |selector, _| {
-        let (key, child) = typed_child(input.context, ty, selector)?;
-        let mut route = parent.clone();
-        match &mut route {
-            CallOutputPath::Result(result) => result.path.push(selector),
-            CallOutputPath::Store { path, .. } => path.push(selector),
-        }
-        if nodes.iter().any(|node| *node.route == route) {
-            return Ok(());
-        }
-        if heap_type(input.context, child)? {
-            let nested: Vec<_> = holders
-                .iter()
-                .map(|&holder| input.state.alloc_child(holder, key))
-                .collect();
-            append_fresh_scalar_fields(input, nodes, &route, child, &nested, deps, ops)?;
-        } else {
-            ops.extend(holders.iter().map(|&holder| InvokeLayerOp::ConstructField {
-                holder,
-                key,
-                value: captured_scalar(deps.clone()),
-            }));
-        }
-        Ok(())
-    })
-}
-
-fn captured_occurrences(value: &CapturedValue) -> impl Iterator<Item = AllocId> + '_ {
-    value.views.iter().copied().chain(
-        value
-            .values
-            .iter()
-            .filter(|_| value.views.is_empty())
-            .map(|value| value.id),
-    )
-}
-
-fn output_views(node: &LaneNode<'_>) -> Vec<AllocId> {
-    if let Some(view) = node.view {
-        vec![view]
-    } else if node
-        .inherited
-        .iter()
-        .any(|id| !node.values.iter().any(|value| value.id == *id))
-    {
-        node.inherited.clone()
-    } else {
-        Vec::new()
-    }
 }
 
 fn step(

@@ -63,12 +63,13 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_infrastructure_error_contains, assert_invalid_mutable_access_reason, run_borrow_checker,
-    run_borrow_checker_with_types,
+    run_borrow_checker_with_types, run_prepared_borrow_checker,
+    summarize_prepared_call_allocations,
 };
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
 };
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::hir_fixture_support::{PreparedHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast,
@@ -78,32 +79,63 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::sync::Arc;
 
+use crate::compiler_frontend::public_call_summary::typed::{
+    EntryPort, Lane, ObjectRef, ScalarSource, TypedCallAllocationFacts, ValueSource,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallAllocationSource, CallOutputPath, CallParameterPath, CallResultPath,
-    CallSharingCondition, FunctionReturnAliasSummary, PublicCallMutationEffect,
-    PublicCallParameterAccess, PublicCallTransferEffect,
+    FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
+    PublicCallTransferEffect,
 };
 
-fn allocation_facts(summary: &FunctionReturnAliasSummary) -> &CallAllocationFacts {
+fn allocation_facts(summary: &FunctionReturnAliasSummary) -> &TypedCallAllocationFacts {
     let FunctionReturnAliasSummary::Known(facts) = summary else {
         panic!("expected completed call allocation facts, got {summary:?}");
     };
     facts
 }
 
-fn root_source_arguments(facts: &CallAllocationFacts) -> Vec<usize> {
-    facts
-        .success
-        .sources
-        .iter()
-        .filter_map(|row| {
-            let CallAllocationSource::Parameter(path) = &row.source else {
-                return None;
+pub(super) fn result_sources(lane: &Lane, slot: usize) -> Vec<ValueSource> {
+    let mut sources = Vec::new();
+    lane.visit_compatible(
+        |_| Ok::<_, std::convert::Infallible>(None),
+        |_, product| {
+            sources.extend(
+                product
+                    .components()
+                    .iter()
+                    .flat_map(|component| &component.alternatives)
+                    .flat_map(|post| &post.results)
+                    .filter(|(index, _)| *index == slot)
+                    .map(|(_, value)| value.source.clone()),
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
+    sources.sort_unstable();
+    sources.dedup();
+    sources
+}
+
+fn root_source_arguments(facts: &TypedCallAllocationFacts) -> Vec<usize> {
+    let mut arguments = Vec::new();
+    for slot in 0..facts.success.result_extent() {
+        for source in result_sources(&facts.success, slot) {
+            let port = match source {
+                ValueSource::Allocation(ObjectRef::Entry(port))
+                | ValueSource::Scalar(ScalarSource::EntryValue(port)) => port,
+                _ => continue,
             };
-            matches!(&row.output, CallOutputPath::Result(result) if result.path.is_empty())
-                .then_some(path.index)
-        })
-        .collect()
+            if let EntryPort::Value { parameter, path } = &facts.ports[port.0 as usize]
+                && path.is_empty()
+            {
+                arguments.push(*parameter);
+            }
+        }
+    }
+    arguments.sort_unstable();
+    arguments.dedup();
+    arguments
 }
 
 fn i32_expression(
@@ -314,7 +346,8 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         .expect("the zero-parameter start function should have a summary");
     assert!(start_summary.parameters.is_empty());
     let start_facts = allocation_facts(&start_summary.return_alias);
-    assert!(start_facts.success.reachable && start_facts.success.sources.is_empty());
+    assert!(start_facts.success.can_return());
+    assert_eq!(start_facts.success.result_extent(), 0);
 
     let rendered = format!("{target_summary:?}");
     assert!(!rendered.contains("LocalId"));
@@ -1472,24 +1505,9 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             .get(&function_id)
             .expect("fallible alias function should have a retained call summary");
         let facts = allocation_facts(&summary.return_alias);
-        assert!(facts.success.reachable);
-        assert_eq!(facts.success.sources.len(), 1);
-        let row = &facts.success.sources[0];
-        assert_eq!(
-            row.output,
-            CallOutputPath::Result(CallResultPath {
-                slot: 0,
-                path: vec![]
-            })
-        );
-        assert_eq!(
-            row.source,
-            CallAllocationSource::Parameter(CallParameterPath {
-                index: argument,
-                path: vec![]
-            })
-        );
-        assert!(!facts.error.reachable);
+        assert_eq!(root_source_arguments(facts), [argument]);
+        assert_eq!(result_sources(&facts.success, 0).len(), 1);
+        assert_eq!(facts.error, Lane::Bottom);
     }
 }
 
@@ -1639,13 +1657,9 @@ fn fresh_user_return_does_not_alias_caller_roots() {
         .get(&fresh_function_id)
         .expect("fresh function should have a retained call summary");
     let facts = allocation_facts(&fresh_summary.return_alias);
-    assert!(facts.success.reachable);
-    assert!(
-        facts
-            .success
-            .sources
-            .iter()
-            .all(|row| row.source == CallAllocationSource::Fresh)
+    assert_eq!(
+        result_sources(&facts.success, 0),
+        [ValueSource::Scalar(ScalarSource::Independent)]
     );
 }
 
@@ -1810,7 +1824,7 @@ fn multi_return_fallible_external_preserves_ordered_contract() {
                 "declaration order must not affect the forwarded native contract"
             );
             let facts = allocation_facts(&summary.return_alias);
-            assert!(facts.success.reachable && facts.error.reachable);
+            assert!(facts.success.can_return() && facts.error.can_return());
             let function = hir
                 .functions
                 .iter()
@@ -1883,13 +1897,9 @@ return input + 1
         .expect("numeric return function should have a call summary");
 
     let facts = allocation_facts(&summary.return_alias);
-    assert!(facts.success.reachable);
-    assert!(
-        facts
-            .success
-            .sources
-            .iter()
-            .all(|row| row.source == CallAllocationSource::Fresh)
+    assert_eq!(
+        result_sources(&facts.success, 0),
+        [ValueSource::Scalar(ScalarSource::Independent)]
     );
 }
 
@@ -1934,8 +1944,9 @@ return ~scores.remove("key")!
         .expect("map return function should have a call summary");
 
     let facts = allocation_facts(&summary.return_alias);
-    assert!(facts.success.reachable && facts.error.reachable);
-    assert!(facts.success.sharing.is_empty());
+    assert!(facts.success.can_return() && facts.error.can_return());
+    assert_eq!(facts.success.result_extent(), 1);
+    assert_eq!(facts.error.result_extent(), 1);
 }
 
 #[test]
@@ -1957,15 +1968,9 @@ copy_one |value Point| -> Point, Point:
 return value, copy value
 ;
 "#;
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-    let hir = lower_hir(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &external_package_registry,
-    );
-    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+    let fixture = PreparedHirFixture::new(source);
+    let hir = &fixture.hir;
+    let report = run_prepared_borrow_checker(&fixture)
         .expect("multi-return alias summaries should validate");
 
     let summary_for = |name: &str| {
@@ -1976,9 +1981,10 @@ return value, copy value
                 hir.side_table
                     .function_name_path(function.id)
                     .is_some_and(|path| {
-                        path_fork
+                        fixture
+                            .paths
                             .component(path)
-                            .is_some_and(|component| string_table.resolve(component) == name)
+                            .is_some_and(|component| fixture.strings.resolve(component) == name)
                     })
             })
             .expect("multi-return function should lower to HIR");
@@ -1991,31 +1997,28 @@ return value, copy value
             .clone()
     };
 
-    let parameter = |index| {
-        CallAllocationSource::Parameter(CallParameterPath {
-            index,
-            path: Vec::new(),
-        })
-    };
-    for (name, source0, source1) in [
-        ("pair", parameter(0), parameter(1)),
-        ("duplicate", parameter(0), parameter(0)),
-        ("copy_one", parameter(0), CallAllocationSource::Fresh),
+    for (name, first, second) in [
+        ("pair", 0, Some(1)),
+        ("duplicate", 0, Some(0)),
+        ("copy_one", 0, None),
     ] {
         let summary = summary_for(name);
         let facts = allocation_facts(&summary);
-        for (slot, source) in [source0, source1].into_iter().enumerate() {
-            assert!(facts.success.sources.iter().any(|row| {
-                matches!(&row.output, CallOutputPath::Result(path) if path.slot == slot && path.path.is_empty())
-                    && row.source == source
-            }));
-        }
-        match name {
-            "pair" => assert!(facts.success.sharing.iter().any(|row| {
-                matches!(&row.condition, CallSharingCondition::Parameters(a, b) if a.index == 0 && b.index == 1)
-            })),
-            "duplicate" => assert!(facts.success.sharing.iter().any(|row| row.condition == CallSharingCondition::Always)),
-            _ => assert!(facts.success.sharing.is_empty()),
+        for (slot, parameter) in [Some(first), second].into_iter().enumerate() {
+            match (result_sources(&facts.success, slot).as_slice(), parameter) {
+                ([ValueSource::Allocation(ObjectRef::Entry(port))], Some(parameter)) => {
+                    assert_eq!(
+                        facts.ports[port.0 as usize],
+                        EntryPort::Value {
+                            parameter,
+                            path: Box::new([])
+                        },
+                        "{name}, slot {slot}",
+                    );
+                }
+                ([ValueSource::Allocation(ObjectRef::Exact(_))], None) => {}
+                (sources, _) => panic!("{name}, slot {slot}: {sources:?}"),
+            }
         }
     }
 }
@@ -2054,7 +2057,7 @@ return recursive(value)
 
     let summary = &report.analysis.public_call_summaries[&recursive_id];
     let facts = allocation_facts(&summary.return_alias);
-    assert!(!facts.success.reachable && facts.success.sources.is_empty());
+    assert_eq!(facts.success, Lane::Bottom);
 }
 
 #[test]
@@ -2418,24 +2421,31 @@ fn call_reservations_distinguish_projected_cells_and_fresh_values() {
         install_private_failure_lanes(&mut hir, &summaries, &mut types, &registry)
             .expect("the fixture's private call lanes should be finalized");
         let links = collect_module_function_link_facts(&hir).expect("the fixture's call links");
-        refresh_call_allocations(
-            &hir,
-            &types,
-            &registry,
-            &path_fork,
-            &string_table,
-            (&links, &Default::default()),
-            &mut summaries,
-        )
-        .expect("call allocation summaries should converge before validation");
-        let result = check_borrows(
-            &hir,
-            &types,
-            &registry,
-            &path_fork,
-            &string_table,
-            Some(summaries.analysis.public_call_summaries),
-        );
+        let result =
+            crate::compiler_frontend::ast::generic_functions::with_registered_type_projection(
+                &types,
+                &registry,
+                |projection| {
+                    refresh_call_allocations(
+                        &hir,
+                        &types,
+                        &registry,
+                        &path_fork,
+                        &string_table,
+                        (&links, &Default::default(), projection),
+                        &mut summaries,
+                    )
+                    .expect("call allocation summaries should converge before validation");
+                    check_borrows(
+                        &hir,
+                        &types,
+                        &registry,
+                        &path_fork,
+                        &string_table,
+                        Some((summaries.analysis.public_call_summaries, projection)),
+                    )
+                },
+            );
         if let Some(code) = expected_code {
             let error = result.expect_err("overlapping call operands must conflict");
             assert_borrow_code_at(error, &source, call, code);
@@ -4105,7 +4115,7 @@ retained_reference |value ~String, fallback String, trigger I32| -> String:
             .expect("each catch fixture must lower to a function");
         let summary = &report.analysis.public_call_summaries[&function.id];
         let facts = allocation_facts(&summary.return_alias);
-        assert!(facts.success.reachable, "{name}");
+        assert!(facts.success.can_return(), "{name}");
         assert_eq!(root_source_arguments(facts), expected_arguments, "{name}");
         assert_eq!(
             summary.parameters[0].access,
@@ -4231,9 +4241,68 @@ seen = {read}
 }
 
 #[test]
-fn call_scalar_field_keeps_lookup_dependency() {
-    let source = r#"
-Saved = |item I32, count I32|
+fn summary_scalar_descriptors_limit_dependencies_to_selected_source() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    use crate::compiler_frontend::public_call_summary::{CallField, typed::CellPost};
+
+    let clear = "~scores.clear()";
+    let cases = [
+        (
+            include_str!("../../../../../tests/cases/borrow_call_scalar_field/input/@entry.moth"),
+            "pack",
+            Some(0),
+            Some(0),
+            &[][..],
+            true,
+        ),
+        (
+            include_str!("../../../../../tests/cases/borrow_call_scalar_store/input/@entry.moth"),
+            "store",
+            Some(0),
+            Some(1),
+            &[][..],
+            true,
+        ),
+        (
+            include_str!("../../../../../tests/cases/borrow_pack_then_extract/input/@entry.moth"),
+            "item_of",
+            None,
+            Some(0),
+            &[CallField::Field(0)][..],
+            true,
+        ),
+        (
+            r#"fresh |value I32| -> I32:
+    return 3
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k") catch then 0
+forwarded = fresh(score)
+~scores.clear()
+~[:[forwarded]]"#,
+            "fresh",
+            None,
+            None,
+            &[][..],
+            false,
+        ),
+        (
+            r#"count_of |value I32| -> I32:
+    return 0
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k") catch then 0
+n = count_of(score)
+~scores.clear()
+~[:[n]]"#,
+            "count_of",
+            None,
+            None,
+            &[][..],
+            false,
+        ),
+        (
+            r#"Saved = |item I32, count I32|
 pack |item I32| -> Saved:
     return Saved(item, 3)
 ;
@@ -4241,46 +4310,255 @@ scores ~{String = I32} = {"k" = 7}
 score = scores.get("k")!
 saved = pack(score)
 ~scores.clear()
-~[:[saved.item]]
-"#;
-    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
-}
+~[:[saved.count]]"#,
+            "pack",
+            Some(1),
+            None,
+            &[][..],
+            false,
+        ),
+        (
+            r#"Saved = |item I32, count I32|
+pack |item I32, count I32| -> Saved:
+    return Saved(item, count)
+;
+scores ~{String = I32} = {"k" = 7}
+score = scores.get("k") catch then 0
+saved = pack(score, 3)
+~scores.clear()
+~[:[saved.count]]"#,
+            "pack",
+            Some(1),
+            Some(1),
+            &[][..],
+            false,
+        ),
+    ];
+    for (source, name, field, parameter, entry_path, conflict) in cases {
+        let fixture = PreparedHirFixture::new(source);
+        let facts = summarize_prepared_call_allocations(&fixture)
+            .expect("the typed producer must describe the selected scalar");
+        let callee = fixture
+            .hir
+            .functions
+            .iter()
+            .find(|function| {
+                fixture
+                    .hir
+                    .side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| fixture.paths.component(path))
+                    .is_some_and(|component| fixture.strings.resolve(component) == name)
+            })
+            .unwrap();
+        let facts =
+            allocation_facts(&facts.analysis.public_call_summaries[&callee.id].return_alias);
+        let mut sources = Vec::new();
+        if let Some(field) = field {
+            facts
+                .success
+                .visit_compatible(
+                    |_| Ok::<_, std::convert::Infallible>(None),
+                    |_, product| {
+                        use crate::compiler_frontend::public_call_summary::typed::{
+                            CellPort, ExportPort,
+                        };
+                        for post in product
+                            .components()
+                            .iter()
+                            .flat_map(|component| &component.alternatives)
+                        {
+                            for (cell, edit) in &post.cells {
+                                let CellPort::Edge(holder, CallField::Field(ordinal)) = cell else {
+                                    continue;
+                                };
+                                let selected_holder = match holder {
+                                    ObjectRef::Entry(port) => {
+                                        matches!(&facts.ports[port.0 as usize],
+                                    EntryPort::Value { parameter: 0, path } if path.is_empty())
+                                    }
+                                    ObjectRef::Exact(ExportPort::Result(path)) => {
+                                        path.slot == 0 && path.path.is_empty()
+                                    }
+                                    _ => false,
+                                };
+                                if selected_holder && *ordinal == field {
+                                    let (CellPost::Replace(values) | CellPost::WeakJoin(values)) =
+                                        edit;
+                                    sources.extend(
+                                        values.iter().flatten().map(|value| value.source.clone()),
+                                    );
+                                }
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            sources.sort_unstable();
+            sources.dedup();
+        } else {
+            sources = result_sources(&facts.success, 0);
+        }
+        match (sources.as_slice(), parameter) {
+            ([ValueSource::Scalar(ScalarSource::EntryValue(port))], Some(parameter)) => {
+                assert_eq!(
+                    facts.ports[port.0 as usize],
+                    EntryPort::Value {
+                        parameter,
+                        path: entry_path.into(),
+                    },
+                    "{source}"
+                );
+            }
+            ([ValueSource::Scalar(ScalarSource::Independent)], None) => {}
+            _ => panic!("{source}: unexpected scalar sources {sources:?}"),
+        }
+        if conflict {
+            assert_lookup_conflict(source, clear);
+        } else {
+            check_place_access_source(source).expect("the other scalar has no receiver dependency");
+        }
+        let (before, last_use) = source.split_once("~scores.clear()\n").unwrap();
+        check_place_access_source(&format!("{before}{last_use}\n{clear}\n"))
+            .expect("the same value was last used before the clear");
 
-#[test]
-fn call_scalar_store_keeps_lookup_dependency() {
-    let source = r#"
+        let (declarations, body) = source.split_once("scores ~").unwrap();
+        let (initial, rest) = body.split_once('\n').unwrap();
+        let (_, continuation) = rest.split_once('\n').unwrap();
+        let (commands, observation) = continuation.trim_end().rsplit_once('\n').unwrap();
+        let commands = commands
+            .replace("(score", "(fallback")
+            .replace(", score", ", fallback")
+            .replace('\n', "\n        ");
+        let observation = observation
+            .strip_prefix("~[:[")
+            .unwrap()
+            .strip_suffix("]]")
+            .unwrap();
+        let selected_error = format!(
+            r#"{declarations}
+probe || -> I32:
+    scores ~{initial}
+    score = scores.get("k") catch:
+        fallback = 0
+        {commands}
+        return {observation}
+    ;
+    return score
+;
+"#
+        );
+        check_place_access_source(&selected_error)
+            .expect("the selected lookup error loaned no receiver, even with a live observation");
+    }
+
+    let replacement = |write| {
+        format!(
+            r#"
 Saved = |item I32|
 store |dst ~Saved, item I32|:
     ~dst.item = item
 ;
-scores ~{String = I32} = {"k" = 7}
-score = scores.get("k")!
-saved ~= Saved(3)
-store(~saved, score)
-~scores.clear()
-~[:[saved.item]]
-"#;
-    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+probe |replace Bool| -> I32:
+    scores ~{{String = I32}} = {{"k" = 7}}
+    score = scores.get("k") catch then 0
+    saved ~= Saved(3)
+    store(~saved, score)
+    {write}
+    ~scores.clear()
+    return saved.item
+;
+"#
+        )
+    };
+    check_place_access_source(&replacement("store(~saved, 0)"))
+        .expect("a definite replacement kills the old scalar carrier");
+    assert_lookup_conflict(
+        &replacement("if replace:\n        store(~saved, 0)\n    ;"),
+        clear,
+    );
 }
 
 #[test]
-fn pack_then_extract_keeps_lookup_dependency() {
+fn exported_fresh_receiver_loans_do_not_depend_on_field_order() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+
+    for (fields, values) in [
+        ("item I32, box {I32}", "score, box"),
+        ("box {I32}, item I32", "box, score"),
+    ] {
+        let fixture = |score| {
+            format!(
+                r#"
+Saved = |{fields}|
+pack |seed {{I32}}| -> Saved:
+    box ~= copy seed
+    score = {score}
+    return Saved({values})
+;
+seed ~= {{7}}
+saved ~= pack(seed)
+seen = saved.item
+~saved.box.push(1)
+~[:[seen]]
+"#
+            )
+        };
+        assert_lookup_conflict(&fixture("box.get(0) catch then 0"), "~saved.box.push(1)");
+        check_place_access_source(&fixture("7"))
+            .expect("an independent scalar does not borrow the fresh receiver");
+    }
+}
+
+#[test]
+fn summary_lookup_dependencies_survive_scalar_forwarding_and_catch() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |success_before, success_after| {
+        format!(
+            r#"
+lookup |scores {{String = I32}}| -> I32, Error!:
+    return scores.get("k")!
+;
+forward |scores {{String = I32}}| -> I32, Error!:
+    return lookup(scores)!
+;
+probe |scores ~{{String = I32}}| -> I32:
+    value = forward(scores) catch:
+        ~scores.clear()
+        return 0
+    ;
+    {success_before}
+    seen = value
+    io.line([:[seen]])
+    {success_after}
+    return 1
+;
+"#
+        )
+    };
+    assert_lookup_conflict(&fixture("~scores.clear()", ""), "~scores.clear()\n    seen");
+    check_place_access_source(&fixture("", "~scores.clear()"))
+        .expect("the error has no loan and the successful value was last used before clear");
+}
+
+#[test]
+fn summary_import_only_scalar_lookup_activates_observation() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
     let source = r#"
-Saved = |item I32, count I32|
-pack |item I32| -> Saved:
-    return Saved(item, 3)
+Scores as {String = I32}
+lookup |scores Scores| -> I32:
+    return scores.get("k") catch then 0
 ;
-item_of |saved Saved| -> I32:
-    return saved.item
-;
-scores ~{String = I32} = {"k" = 7}
-score = scores.get("k") catch then 0
-saved = pack(score)
-forwarded = item_of(saved)
+scores ~Scores = {"k" = 7}
+score = lookup(scores)
 ~scores.clear()
-~[:[forwarded]]
+~[:[score]]
 "#;
-    super::borrow_checker_fact_tests::assert_lookup_conflict(source, "~scores.clear()");
+    assert_lookup_conflict(source, "~scores.clear()");
+    let (before, use_score) = source.split_once("~scores.clear()\n").unwrap();
+    check_place_access_source(&format!("{before}{use_score}~scores.clear()\n"))
+        .expect("the imported observation ends at the last use");
 }
 
 #[test]
@@ -4306,4 +4584,147 @@ wrapped = pack(plain, score)
     assert_lookup_conflict(&fixture("dependent"), "~scores.clear()");
     check_place_access_source(&fixture("plain.item"))
         .expect("the known parameter subtree keeps its own independent contents");
+}
+
+#[test]
+fn summary_transport_keeps_raw_permission_but_restricts_new_shared_edge() {
+    use super::borrow_checker_fact_tests::check_place_access_source;
+    let declarations = r#"
+Link = |items {I32}|
+raw |items {I32}| -> {I32}:
+    return items
+;
+wrap |items {I32}| -> Link:
+    return Link(items)
+;
+"#;
+    let raw = format!("{declarations}\nitems ~= {{1}}\nwriter ~= raw(items)\n~writer.push(2)\n");
+    check_place_access_source(&raw)
+        .expect("a raw return preserves its actual's writable permission");
+
+    let wrapped =
+        format!("{declarations}\nitems ~= {{1}}\nholder ~= wrap(items)\n~holder.items.push(2)\n");
+    let error = check_place_access_source(&wrapped)
+        .expect_err("the new field may not acquire a writable edge through a shared formal");
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+
+    let copied = wrapped.replace("return Link(items)", "return Link(copy items)");
+    check_place_access_source(&copied).expect("the callee can create a writable field by copying");
+}
+
+#[test]
+fn summary_clear_refill_transports_new_members_and_kills_old_members() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    for inline in [false, true] {
+        for retained in [false, true] {
+            let initial = if retained { "0" } else { "score" };
+            let incoming = if retained { "score" } else { "0" };
+            let operation = if inline {
+                format!("~dst.clear()\n~dst.set(\"k\", {incoming})!")
+            } else {
+                format!("refill(~dst, {incoming})!")
+            };
+            let source = format!(
+                r#"
+Scores as {{String = I32}}
+refill |dst ~Scores, value I32| -> Error!:
+    ~dst.clear()
+    ~dst.set("k", value)!
+;
+src ~Scores = {{"k" = 7}}
+score = src.get("k")!
+dst ~Scores = {{"old" = {initial}}}
+{operation}
+~src.clear()
+removed = ~dst.remove("k")!
+~[:[removed]]
+"#
+            );
+            if retained {
+                assert_lookup_conflict(&source, "~src.clear()");
+            } else {
+                check_place_access_source(&source)
+                    .expect("refill with an independent value kills the old member's loan");
+            }
+        }
+    }
+}
+
+#[test]
+fn summary_refill_preserves_duplicate_child_occurrences() {
+    use super::borrow_checker_fact_tests::check_place_access_source;
+    for duplicate in [false, true] {
+        let second = if duplicate {
+            "~dst.set(\"second\", child)!"
+        } else {
+            ""
+        };
+        let observe = if duplicate {
+            "remaining = entries.get(\"second\") catch then {0}\n    return remaining.length()"
+        } else {
+            "return entries.length"
+        };
+        let source = format!(
+            r#"
+refill |dst ~{{String = {{I32}}}}| -> Error!:
+    ~dst.clear()
+    child ~= {{1}}
+    ~dst.set("first", child)!
+    {second}
+;
+probe || -> I32, Error!:
+    entries ~{{String = {{I32}}}} = {{"old" = {{0}}}}
+    refill(~entries)!
+    detached ~= ~entries.remove("first") catch then {{0}}
+    ~detached.push(2)
+    {observe}
+;
+"#
+        );
+        if duplicate {
+            let error = check_place_access_source(&source)
+                .expect_err("removing one occurrence cannot detach another occurrence");
+            assert_borrow_code_at(error, &source, "detached.push", "MOTH-BORROW-0007");
+        } else {
+            check_place_access_source(&source).expect("the single inserted child detaches");
+        }
+    }
+}
+
+#[test]
+fn a_refill_failure_erases_old_members_without_importing_success_members() {
+    use super::borrow_checker_fact_tests::{assert_lookup_conflict, check_place_access_source};
+    let fixture = |body, success_clear| {
+        format!(
+            r#"
+Scores as {{String = I32}}
+refill |dst ~Scores, item I32, ready Bool| -> I32, Error!:
+    ~dst.clear()
+    {body}
+;
+probe |ready Bool| -> I32:
+    src ~Scores = {{"k" = 7}}
+    score = src.get("k") catch then 0
+    dst ~Scores = {{"old" = score}}
+    status = refill(~dst, score, ready) catch:
+        ~src.clear()
+        return dst.get("old") catch then 0
+    ;
+    {success_clear}
+    return dst.get("k") catch then status
+;
+"#
+        )
+    };
+    for body in [
+        "if ready:\n        ~dst.set(\"k\", item)!\n        return 1\n    ;\n    return! Error(\"skipped refill\")",
+        "if ready is false:\n        return! Error(\"skipped refill\")\n    ;\n    ~dst.set(\"k\", item)!\n    return 1",
+    ] {
+        assert_lookup_conflict(
+            &fixture(body, "~src.clear()"),
+            "~src.clear()\n    return dst",
+        );
+        check_place_access_source(&fixture(body, ""))
+            .expect("the clear-only error outcome cannot carry either old or new score");
+    }
 }

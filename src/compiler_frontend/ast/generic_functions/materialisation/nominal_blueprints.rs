@@ -4,8 +4,8 @@ use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisat
 use super::semantic_closure::collect_reachable_nominal_identities;
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
-    MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    const_store_error_into_prepared_failure, import_canonical_folded_value,
+    MaterialisationNominalSource, const_store_error_into_prepared_failure,
+    import_canonical_folded_value,
 };
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::store::{ConstValueStore, ConstValueStoreError};
@@ -1417,14 +1417,32 @@ fn stable_type_identity(
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
 ) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
-    let nominal_origins = MaterialisationNominalOriginResolver { type_environment };
-    let generic_parameter_origins = FoldedValueGenericParameterResolver;
-    let projection_context = CanonicalTypeProjectionContext::new(
-        &nominal_origins,
-        &generic_parameter_origins,
+    with_registered_type_projection(type_environment, external_package_registry, |context| {
+        project_type_id_to_canonical_identity(type_id, type_environment, context)
+    })
+}
+
+pub(crate) fn with_registered_type_projection<R>(
+    types: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    use_projection: impl FnOnce(&CanonicalTypeProjectionContext<'_>) -> R,
+) -> R {
+    use_projection(&registered_type_projection(
+        types,
         external_package_registry,
-    );
-    project_type_id_to_canonical_identity(type_id, type_environment, &projection_context)
+    ))
+}
+
+pub(crate) fn registered_type_projection<'a>(
+    types: &'a TypeEnvironment,
+    external_package_registry: &'a ExternalPackageRegistry,
+) -> CanonicalTypeProjectionContext<'a> {
+    CanonicalTypeProjectionContext::new(
+        types,
+        &FoldedValueGenericParameterResolver,
+        external_package_registry,
+    )
+    .with_registered_types(types)
 }
 #[cfg(test)]
 #[path = "../tests/blueprint_tests.rs"]

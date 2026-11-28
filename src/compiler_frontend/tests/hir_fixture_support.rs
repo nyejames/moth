@@ -6,14 +6,18 @@
 //!      the first backend-facing semantic IR, so node construction is language-owned rather than
 //!      target-owned and both backends consume these constructors instead of copying them.
 
-use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::generic_functions::{
+    ModuleMaterialisationPreparationBuilder, registered_type_projection,
+};
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext,
 };
+use crate::compiler_frontend::ast::{Ast, AstBuildResult};
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -25,14 +29,21 @@ use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// One lowered fixture module paired with the environment that owns its semantic type ids.
 ///
@@ -57,6 +68,63 @@ impl std::ops::Deref for LoweredHirFixture {
 impl std::ops::DerefMut for LoweredHirFixture {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.hir_module
+    }
+}
+
+/// A parsed module with the production declaring-type registrations installed before lowering.
+/// Tests that deliberately exercise unresolved identities should use `lower_hir` instead.
+pub(crate) struct PreparedHirFixture {
+    pub(crate) hir: LoweredHirFixture,
+    pub(crate) packages: Arc<ExternalPackageRegistry>,
+    pub(crate) paths: PathInternerFork,
+    pub(crate) strings: StringTable,
+    declaring: ModuleMaterialisationPreparationBuilder,
+}
+
+impl PreparedHirFixture {
+    pub(crate) fn new(source: &str) -> Self {
+        let (build, mut paths, mut strings) =
+            parse_single_file_ast_build_result(source).expect("fixture should parse");
+        let AstBuildResult {
+            ast,
+            materialisation_context,
+            module_resources,
+            ..
+        } = build;
+        let mut declaring =
+            materialisation_context.expect("module fixture retains declaring types");
+        let origin = StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("prepared-hir-fixture"),
+            "main".to_owned(),
+            ModuleRootRole::Normal,
+        );
+        let empty_resources = ModuleResourceTable::new();
+        let resources = module_resources
+            .as_ref()
+            .map(|resources| resources.borrow());
+        declaring
+            .install_concrete_executable_contracts(
+                &ast.const_values,
+                &origin,
+                &Default::default(),
+                &Default::default(),
+                resources.as_deref().unwrap_or(&empty_resources),
+                &paths,
+            )
+            .expect("fixture private nominal identities should install before lowering");
+        let packages = default_external_package_registry(&mut strings);
+        let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
+        Self {
+            hir,
+            packages,
+            paths,
+            strings,
+            declaring,
+        }
+    }
+
+    pub(crate) fn type_projection(&self) -> CanonicalTypeProjectionContext<'_> {
+        registered_type_projection(&self.declaring.context().type_environment, &self.packages)
     }
 }
 

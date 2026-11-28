@@ -3,6 +3,8 @@
 //! WHAT: defines the immutable analysis records produced while validating HIR borrows.
 //! WHY: transfer and diagnostics need a shared vocabulary for states, facts, and summaries.
 
+#[cfg(test)]
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
@@ -12,6 +14,10 @@ use rustc_hash::FxHashMap;
 pub(crate) struct BorrowCheckReport {
     pub analysis: BorrowAnalysis,
     pub stats: BorrowCheckStats,
+    /// Declaring arena used for canonical projection of the base module. Its stable identities
+    /// are keyed by dense type IDs, which do not change when executable strings and paths remap.
+    #[cfg(test)]
+    pub(crate) declaring_types_for_cold_check: Option<TypeEnvironment>,
 }
 
 impl BorrowCheckReport {

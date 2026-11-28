@@ -45,14 +45,12 @@ pub(in super::super) enum CallReturns<'a> {
 
 /// The executable prefix is observed even when there is no continuation.
 /// Pending is not a settled proof of divergence.
-#[allow(dead_code)]
 pub(super) enum TypedContinuation<'a> {
     Deferred,
     NoContinuation,
     Match(&'a Lane),
 }
 
-#[allow(dead_code)]
 pub(super) fn classify_typed_continuation<'a>(
     facts: Option<&'a TypedCallAllocationFacts>,
     terminal: bool,

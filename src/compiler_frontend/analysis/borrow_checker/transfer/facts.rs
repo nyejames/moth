@@ -5,8 +5,8 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, AllocationRetirement, BorrowState, CellId, Coverage, DependencySet,
-    FieldKey, FunctionLayout, OrderKey, PublicationCarriers, ResolvedPlace, RootSet, SmallSet,
-    StoreReceipt, ValueAlt, ValueKind, WrapperAge, WrapperId, remap_dependencies,
+    FieldKey, FunctionLayout, OrderKey, ResolvedPlace, RootSet, SmallSet, StoreReceipt, ValueAlt,
+    ValueKind, WrapperAge, WrapperId, remap_dependencies,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     AccessKind, OptionalTransferStatus, ValueAccessClassification, ValueBorrowFact,
@@ -180,21 +180,11 @@ impl ObservationSegment {
         }
     }
 
-    pub(in super::super) fn replace(&mut self, receipt: StoreReceipt) {
-        self.kill(receipt.replaced.into_iter().flatten());
-    }
-
-    fn kill(&mut self, rows: impl IntoIterator<Item = (CellId, Vec<ValueAlt>)>) {
-        for (cell, old) in rows {
-            self.definite_kills
-                .extend(old.into_iter().filter_map(|value| {
-                    (!value.deps.is_empty())
-                        .then(|| Carrier::Cell(cell, CarrierValue::of(&value), value.deps))
-                }));
+    fn append(&mut self, next: Self) {
+        if self.upward_reads.is_empty() && self.definite_kills.is_empty() {
+            *self = next;
+            return;
         }
-    }
-
-    pub(in super::super) fn then(&mut self, next: Self) {
         self.read(next.upward_reads);
         self.definite_kills.extend(next.definite_kills);
     }
@@ -223,7 +213,6 @@ pub(in super::super) enum ObservationBoundary {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in super::super) struct ValueObservations {
-    pub enabled: bool,
     pub tail: ObservationSegment,
     pub splits: Vec<(ObservationSegment, ObservationBoundary)>,
 }
@@ -233,17 +222,50 @@ impl ValueObservations {
         self.splits.push((std::mem::take(&mut self.tail), boundary));
     }
 
-    #[allow(dead_code)] // Prepared for keyed publication without treating acquisition as a read.
-    pub(in super::super) fn publish(&mut self, receipt: PublicationCarriers) {
-        let mut operation = ObservationSegment::default();
-        operation.kill(receipt.definite_old);
-        self.tail.then(operation);
-        let mut introduced = ObservationSegment::default();
-        introduced.kill(receipt.introduced);
-        if !introduced.definite_kills.is_empty() {
-            self.split(ObservationBoundary::Publication(introduced.definite_kills));
+    pub(in super::super) fn append(&mut self, next: Self) {
+        let Self { tail, mut splits } = next;
+        if let Some((initial, _)) = splits.first_mut() {
+            let mut preceding = std::mem::replace(&mut self.tail, tail);
+            preceding.append(std::mem::take(initial));
+            *initial = preceding;
+            if self.splits.is_empty() {
+                self.splits = splits;
+            } else {
+                self.splits.append(&mut splits);
+            }
+        } else {
+            self.tail.append(tail);
         }
     }
+
+    pub(in super::super) fn publish(&mut self, receipt: StoreReceipt) {
+        fn carriers(
+            cells: Vec<(CellId, Vec<ValueAlt>)>,
+            routes: Vec<(WrapperId, CellId, DependencySet)>,
+        ) -> impl Iterator<Item = Carrier> {
+            cells
+                .into_iter()
+                .flat_map(|(cell, values)| {
+                    values
+                        .into_iter()
+                        .map(move |value| Carrier::Cell(cell, CarrierValue::of(&value), value.deps))
+                })
+                .chain(
+                    routes
+                        .into_iter()
+                        .map(|(owner, cell, deps)| Carrier::Route(owner, cell, deps)),
+                )
+        }
+
+        self.tail
+            .definite_kills
+            .extend(carriers(receipt.definite_old, receipt.definite_old_routes));
+        if !receipt.introduced.is_empty() || !receipt.introduced_routes.is_empty() {
+            let introduced = carriers(receipt.introduced, receipt.introduced_routes).collect();
+            self.split(ObservationBoundary::Publication(introduced));
+        }
+    }
+
     #[cfg(test)]
     pub(in super::super) fn canonicalise_test_carriers(
         &mut self,
@@ -304,7 +326,7 @@ impl ValueObservations {
     }
 
     pub(in super::super) fn before_rekey(&self, state: &BorrowState) -> Vec<Carrier> {
-        if self.enabled && state.has_value_alternatives() {
+        if state.has_dependency_carriers() {
             matching_carriers(state, |_| true).collect()
         } else {
             Vec::new()
@@ -442,7 +464,7 @@ pub(super) fn visit_observed_carriers(
     actor: Option<usize>,
     mut visit: impl FnMut(Carrier),
 ) {
-    if !state.has_value_alternatives() {
+    if !state.has_dependency_carriers() {
         return;
     }
     let content = if terminal {
@@ -525,7 +547,10 @@ pub(super) fn selected_members<'a>(
     receiver: &'a ResolvedPlace,
 ) -> impl Iterator<Item = Carrier> + 'a {
     state
-        .value_cells()
+        .has_dependency_carriers()
+        .then(|| state.value_cells())
+        .into_iter()
+        .flatten()
         .filter(move |(cell, _)| match *cell {
             CellId::Projected(holder, FieldKey::Elem) => {
                 receiver.holder_coverage() == Coverage::Partial

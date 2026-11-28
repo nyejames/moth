@@ -30,8 +30,11 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, 
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
+use crate::compiler_frontend::public_call_summary::typed::{
+    Lane, Product, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallAllocationFacts, CallLaneSummary, FunctionReturnAliasSummary, PublicCallSummary,
+    FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1195,12 +1198,9 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         FunctionId(2),
         PublicCallSummary {
             parameters: vec![],
-            return_alias: FunctionReturnAliasSummary::Known(Box::new(CallAllocationFacts {
-                success: CallLaneSummary {
-                    reachable: true,
-                    ..Default::default()
-                },
-                error: CallLaneSummary::default(),
+            return_alias: FunctionReturnAliasSummary::Known(Box::new(TypedCallAllocationFacts {
+                success: Lane::Returning(Product::default()),
+                ..Default::default()
             })),
             escapes_builtin_failure: true,
             uses_fast_semantics: false,

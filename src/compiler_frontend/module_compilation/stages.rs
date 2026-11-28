@@ -64,7 +64,11 @@ pub(in crate::compiler_frontend::module_compilation) fn refresh_call_allocations
     types: &TypeEnvironment,
     warnings: &mut DiagnosticBag,
     owner: Option<&FrozenIdentityHandle>,
-    inputs: (&HirModuleLinkFacts, &FxHashSet<FunctionId>),
+    inputs: (
+        &HirModuleLinkFacts,
+        &FxHashSet<FunctionId>,
+        &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
+    ),
     report: &mut BorrowCheckReport,
 ) -> Result<(), PreparedFailure> {
     let result = update_allocation_facts(
@@ -86,6 +90,9 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     warnings: &mut DiagnosticBag,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
     report: &mut BorrowCheckReport,
+    projection: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<
+        '_,
+    >,
 ) -> Result<(), PreparedFailure> {
     let result = check_hir_borrows(
         hir_module,
@@ -93,7 +100,10 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
         compiler.external_package_registry.as_ref(),
         &compiler.path_fork,
         &compiler.string_table,
-        Some(std::mem::take(&mut report.analysis.public_call_summaries)),
+        Some((
+            std::mem::take(&mut report.analysis.public_call_summaries),
+            projection,
+        )),
     );
     *report = compiler.prepare_borrow_check_result(
         result,

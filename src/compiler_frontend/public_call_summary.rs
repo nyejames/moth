@@ -14,9 +14,7 @@ use crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::structs::HirStruct;
-
-#[allow(dead_code)] // The payload is exercised directly before it replaces the live contract.
-pub(in crate::compiler_frontend) mod typed;
+pub(crate) mod typed;
 
 /// The source-level access contract for one function parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,25 +53,24 @@ pub(crate) struct PublicCallParameterSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FunctionReturnAliasSummary {
     Pending,
-    Known(Box<CallAllocationFacts>),
+    Known(Box<typed::TypedCallAllocationFacts>),
 }
 
 impl FunctionReturnAliasSummary {
     /// A pending contract and two bottom lanes expose no continuation or allocation facts
     /// to the internal fixed point. They differ at the mandatory validation boundary.
     pub(crate) fn same_allocation_transfer_as(&self, next: &Self) -> bool {
-        let both_lanes_unreachable =
-            |facts: &CallAllocationFacts| !facts.success.can_return() && !facts.error.can_return();
-        match (self, next) {
-            (Self::Pending, Self::Known(facts)) | (Self::Known(facts), Self::Pending) => {
-                both_lanes_unreachable(facts)
-            }
-            _ => self == next,
+        same_typed_allocation_transfer_as(self.facts(), next.facts())
+    }
+
+    pub(crate) fn facts(&self) -> Option<&typed::TypedCallAllocationFacts> {
+        match self {
+            Self::Known(facts) => Some(facts),
+            Self::Pending => None,
         }
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn same_typed_allocation_transfer_as(
     previous: Option<&typed::TypedCallAllocationFacts>,
     next: Option<&typed::TypedCallAllocationFacts>,
@@ -84,7 +81,7 @@ pub(crate) fn same_typed_allocation_transfer_as(
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn validate_typed_allocation_transition(
     previous: Option<&typed::TypedCallAllocationFacts>,
     next: Option<&typed::TypedCallAllocationFacts>,
@@ -101,64 +98,6 @@ pub(crate) fn validate_typed_allocation_transition(
     } else {
         PublicCallSummaryTransition::Widened
     })
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CallAllocationFacts {
-    pub success: CallLaneSummary,
-    pub error: CallLaneSummary,
-}
-
-/// A lane with allocation evidence has sorted, duplicate-free result, sharing and store atoms.
-/// Structural return flow is tracked separately: a missing allocation holder is not proof that
-/// the lane cannot execute.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CallLaneSummary {
-    pub reachable: bool,
-    /// The HIR and call contracts allow this outcome even though extraction found no complete
-    /// allocation path. The precise case (`reachable`) implies the same structural fact.
-    pub structural_only: bool,
-    pub sources: Vec<CallPathSource>,
-    pub sharing: Vec<CallSharing>,
-    pub stores: Vec<CallPathSource>,
-}
-
-impl CallLaneSummary {
-    pub(crate) fn can_return(&self) -> bool {
-        self.reachable || self.structural_only
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CallPathSource {
-    pub output: CallOutputPath,
-    pub source: CallAllocationSource,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum CallOutputPath {
-    Result(CallResultPath),
-    /// Store into the caller's mutable argument cell when `target.path` is empty. A
-    /// nonempty target instead names a cell in the allocation passed at call entry.
-    /// `path` selects within the newly stored value, not within the old allocation.
-    Store {
-        target: CallParameterPath,
-        path: Vec<CallField>,
-    },
-}
-
-impl CallOutputPath {
-    /// An element or key selector can stand for more than one allocation.
-    pub(crate) fn has_collapsed_selector(&self) -> bool {
-        match self {
-            Self::Result(result) => result.path.iter().any(|step| step.is_collapsed()),
-            Self::Store { target, path } => target
-                .path
-                .iter()
-                .chain(path)
-                .any(|step| step.is_collapsed()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -322,29 +261,6 @@ impl CallField {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum CallAllocationSource {
-    Parameter(CallParameterPath),
-    /// Fresh at this endpoint; only a sharing row says which other endpoint shares it.
-    Fresh,
-    /// Typed opaque topology of storage that cannot retain an input allocation.
-    OpaqueFresh,
-}
-
-/// One same-execution sharing atom. Separate rows are a disjunction, not a transitive relation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CallSharing {
-    pub left: CallOutputPath,
-    pub right: CallOutputPath,
-    pub condition: CallSharingCondition,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum CallSharingCondition {
-    Always,
-    Parameters(CallParameterPath, CallParameterPath),
-}
-
 /// Complete semantic call contract for one local or generated function.
 ///
 /// Parameter positions use vector order and the indices in [`FunctionReturnAliasSummary`]. No
@@ -352,7 +268,7 @@ pub(crate) enum CallSharingCondition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublicCallSummary {
     pub parameters: Vec<PublicCallParameterSummary>,
-    /// Result allocation sources, same-execution sharing and retained stores by return lane.
+    /// Executed retention and guarded postconditions for each continuation.
     pub return_alias: FunctionReturnAliasSummary,
     /// Whether unhandled implicit builtin failure escapes the function boundary.
     /// Signature-only `false` is the initial convergence value, not proof of infallibility.
@@ -493,11 +409,31 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
         }
     }
 
-    if !return_alias_is_widening(&previous.return_alias, &next.return_alias) {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::AstConstruction,
-            "public call summary transition narrowed or changed return alias incompatibly",
-        ));
+    match (&previous.return_alias, &next.return_alias) {
+        (FunctionReturnAliasSummary::Known(before), FunctionReturnAliasSummary::Known(after)) => {
+            let access: Vec<_> = next
+                .parameters
+                .iter()
+                .map(|parameter| parameter.access)
+                .collect();
+            before.validate_transition(
+                after,
+                &after.shape(
+                    &access,
+                    Some(
+                        before
+                            .success
+                            .result_extent()
+                            .max(after.success.result_extent()),
+                    ),
+                    before.error.can_return() || after.error.can_return(),
+                ),
+            )?;
+        }
+        (FunctionReturnAliasSummary::Known(_), FunctionReturnAliasSummary::Pending) => {
+            return Err(allocation_error("solved typed call became pending"));
+        }
+        _ => {}
     }
     if previous.return_alias != next.return_alias {
         widened = true;
@@ -508,31 +444,6 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     } else {
         PublicCallSummaryTransition::Unchanged
     })
-}
-
-fn return_alias_is_widening(
-    previous: &FunctionReturnAliasSummary,
-    next: &FunctionReturnAliasSummary,
-) -> bool {
-    use FunctionReturnAliasSummary::{Known, Pending};
-
-    match (previous, next) {
-        (Pending, _) => true,
-        (Known(previous), Known(next)) => {
-            lane_is_widening(&previous.success, &next.success)
-                && lane_is_widening(&previous.error, &next.error)
-        }
-        (Known(_), Pending) => false,
-    }
-}
-
-fn lane_is_widening(previous: &CallLaneSummary, next: &CallLaneSummary) -> bool {
-    (!previous.can_return() || next.can_return())
-        && (!previous.reachable
-            || (next.reachable
-                && sorted_subset(&previous.sources, &next.sources)
-                && sorted_subset(&previous.sharing, &next.sharing)
-                && sorted_subset(&previous.stores, &next.stores)))
 }
 
 fn sorted_subset<T: Ord>(previous: &[T], next: &[T]) -> bool {
@@ -581,138 +492,19 @@ fn validate_parameter_summary(
 }
 
 fn validate_return_alias_summary(summary: &PublicCallSummary) -> Result<(), InfrastructureFailure> {
-    match &summary.return_alias {
-        FunctionReturnAliasSummary::Known(facts) => {
-            validate_lane_atoms(&facts.success, &summary.parameters)?;
-            validate_lane_atoms(&facts.error, &summary.parameters)?;
-        }
-        FunctionReturnAliasSummary::Pending => {}
+    if let Some(facts) = summary.return_alias.facts() {
+        let access: Vec<_> = summary
+            .parameters
+            .iter()
+            .map(|parameter| parameter.access)
+            .collect();
+        facts.validate(&facts.shape(
+            &access,
+            Some(facts.success.result_extent()),
+            facts.error.can_return(),
+        ))?;
     }
     Ok(())
-}
-
-fn validate_lane_atoms(
-    lane: &CallLaneSummary,
-    parameters: &[PublicCallParameterSummary],
-) -> Result<(), InfrastructureFailure> {
-    if !lane.reachable
-        && !(lane.sources.is_empty() && lane.stores.is_empty() && lane.sharing.is_empty())
-    {
-        return Err(allocation_error("unreachable lane has allocation facts"));
-    }
-    if !strictly_sorted(&lane.sources)
-        || !strictly_sorted(&lane.stores)
-        || !strictly_sorted(&lane.sharing)
-    {
-        return Err(allocation_error(
-            "lane source, sharing and store rows must each be strictly increasing",
-        ));
-    }
-
-    for row in &lane.sources {
-        if !matches!(row.output, CallOutputPath::Result(_)) {
-            return Err(allocation_error("result source row uses a store endpoint"));
-        }
-        validate_parent_output(&lane.sources, &row.output)?;
-    }
-    for row in &lane.stores {
-        let CallOutputPath::Store { target, .. } = &row.output else {
-            return Err(allocation_error("store row uses a result endpoint"));
-        };
-        let receiver = validate_parameter_index(target.index, parameters)?;
-        if receiver.access != PublicCallParameterAccess::Mutable {
-            return Err(allocation_error(format!(
-                "store target {target:?} must name a mutable parameter or its projection"
-            )));
-        }
-        validate_parent_output(&lane.stores, &row.output)?;
-    }
-    for row in lane.sources.iter().chain(&lane.stores) {
-        if let CallAllocationSource::Parameter(parameter) = &row.source {
-            validate_parameter_index(parameter.index, parameters)?;
-        }
-    }
-    for sharing in &lane.sharing {
-        if sharing.left >= sharing.right {
-            return Err(allocation_error(format!(
-                "sharing endpoints are not in strict canonical order: {sharing:?}"
-            )));
-        }
-        let contains_output = |output: &CallOutputPath| {
-            let rows = match output {
-                CallOutputPath::Result(_) => &lane.sources,
-                CallOutputPath::Store { .. } => &lane.stores,
-            };
-            rows.binary_search_by(|row| row.output.cmp(output)).is_ok()
-        };
-        if !contains_output(&sharing.left) || !contains_output(&sharing.right) {
-            return Err(allocation_error(format!(
-                "sharing endpoint has no source in its lane: {sharing:?}"
-            )));
-        }
-        if let CallSharingCondition::Parameters(left, right) = &sharing.condition {
-            if left > right {
-                return Err(allocation_error(format!(
-                    "sharing parameter condition is not in canonical order: {sharing:?}"
-                )));
-            }
-            validate_parameter_index(left.index, parameters)?;
-            validate_parameter_index(right.index, parameters)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_parent_output(
-    rows: &[CallPathSource],
-    output: &CallOutputPath,
-) -> Result<(), InfrastructureFailure> {
-    let path = match output {
-        CallOutputPath::Result(result) => &result.path,
-        CallOutputPath::Store { path, .. } => path,
-    };
-    let Some((_, parent)) = path.split_last() else {
-        return Ok(());
-    };
-    let parent_exists = rows
-        .binary_search_by(|row| match (&row.output, output) {
-            (CallOutputPath::Result(candidate), CallOutputPath::Result(result)) => candidate
-                .slot
-                .cmp(&result.slot)
-                .then_with(|| candidate.path.as_slice().cmp(parent)),
-            (
-                CallOutputPath::Store {
-                    target: candidate,
-                    path,
-                },
-                CallOutputPath::Store { target, .. },
-            ) => candidate
-                .cmp(target)
-                .then_with(|| path.as_slice().cmp(parent)),
-            (CallOutputPath::Result(_), CallOutputPath::Store { .. }) => std::cmp::Ordering::Less,
-            (CallOutputPath::Store { .. }, CallOutputPath::Result(_)) => {
-                std::cmp::Ordering::Greater
-            }
-        })
-        .is_ok();
-    if !parent_exists {
-        return Err(allocation_error(format!(
-            "output {output:?} has no immediate parent row"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_parameter_index(
-    index: usize,
-    parameters: &[PublicCallParameterSummary],
-) -> Result<&PublicCallParameterSummary, InfrastructureFailure> {
-    parameters.get(index).ok_or_else(|| {
-        allocation_error(format!(
-            "references parameter index {index}, but the declaration has {} parameter(s)",
-            parameters.len()
-        ))
-    })
 }
 
 fn strictly_sorted<T: Ord>(atoms: impl IntoIterator<Item = T>) -> bool {
@@ -733,7 +525,6 @@ pub(crate) struct CallEndpoint<T> {
     pub allocation: bool,
 }
 
-#[allow(dead_code)]
 impl CallEndpoint<TypeId> {
     pub(crate) fn hir(ty: TypeId, types: &TypeEnvironment) -> Option<Self> {
         Some(Self {
@@ -743,112 +534,6 @@ impl CallEndpoint<TypeId> {
                 .has_in_place_mutation_surface(),
         })
     }
-}
-
-impl CallPathType<TypeId> {
-    /// The terminal path must be eligible for tracking as an allocation, not just well-typed.
-    pub(crate) fn hir_allocation(ty: TypeId, types: &TypeEnvironment) -> Option<Self> {
-        classify_hir_type(ty, types)
-            .ok()?
-            .has_in_place_mutation_surface()
-            .then_some(Self::Known(ty))
-    }
-}
-
-fn compatible_path_types<T: Eq>(left: &CallPathType<T>, right: &CallPathType<T>) -> bool {
-    match (left, right) {
-        (CallPathType::Known(left), CallPathType::Known(right)) => left == right,
-        _ => true,
-    }
-}
-
-fn resolved_paths_are_compatible<T: Eq>(
-    left: Option<CallPathType<T>>,
-    right: Option<CallPathType<T>>,
-) -> bool {
-    matches!((left, right), (Some(left), Some(right)) if compatible_path_types(&left, &right))
-}
-
-/// Validate allocation facts that cross a completed callable boundary using its own layout.
-/// `None` success slots denotes Never, as distinct from an ordinary zero-result success lane.
-/// Error results, when available, always use slot zero.
-pub(crate) fn validate_public_call_allocation_layout<T: Eq>(
-    summary: &PublicCallSummary,
-    success_slot_count: Option<usize>,
-    has_error_slot: bool,
-    mut parameter_path: impl FnMut(&CallParameterPath) -> Option<CallPathType<T>>,
-    mut result_path: impl FnMut(bool, &CallResultPath) -> Option<CallPathType<T>>,
-    mut store_path: impl FnMut(&CallParameterPath, &[CallField]) -> Option<CallPathType<T>>,
-) -> Result<(), InfrastructureFailure> {
-    validate_return_alias_summary(summary)?;
-    match &summary.return_alias {
-        FunctionReturnAliasSummary::Pending => {
-            return Err(allocation_error(
-                "completed callable still has pending facts",
-            ));
-        }
-        FunctionReturnAliasSummary::Known(facts) => {
-            for (error_lane, lane, slot_count) in [
-                (false, &facts.success, success_slot_count),
-                (true, &facts.error, has_error_slot.then_some(1)),
-            ] {
-                let lane_name = if error_lane { "error" } else { "success" };
-                let Some(slot_count) = slot_count else {
-                    if lane.can_return() {
-                        return Err(allocation_error(format!(
-                            "reachable {lane_name} lane has no declared return contract"
-                        )));
-                    }
-                    continue;
-                };
-                let mut output_type = |output: &CallOutputPath| match output {
-                    CallOutputPath::Result(path) if path.slot < slot_count => {
-                        result_path(error_lane, path)
-                    }
-                    CallOutputPath::Result(_) => None,
-                    CallOutputPath::Store { target, path } => store_path(target, path),
-                };
-                for row in lane.sources.iter().chain(&lane.stores) {
-                    let output = output_type(&row.output).ok_or_else(|| {
-                        allocation_error(format!(
-                            "invalid {lane_name} lane output path {:?}",
-                            row.output
-                        ))
-                    })?;
-                    if let CallAllocationSource::Parameter(path) = &row.source {
-                        let valid = parameter_path(path)
-                            .is_some_and(|source| compatible_path_types(&output, &source));
-                        if !valid {
-                            return Err(allocation_error(format!(
-                                "invalid or incompatible {lane_name} lane parameter source {path:?}"
-                            )));
-                        }
-                    }
-                }
-                for sharing in &lane.sharing {
-                    if !resolved_paths_are_compatible(
-                        output_type(&sharing.left),
-                        output_type(&sharing.right),
-                    ) {
-                        return Err(allocation_error(format!(
-                            "incompatible {lane_name} lane sharing endpoints {sharing:?}"
-                        )));
-                    }
-                    if let CallSharingCondition::Parameters(left, right) = &sharing.condition
-                        && !resolved_paths_are_compatible(
-                            parameter_path(left),
-                            parameter_path(right),
-                        )
-                    {
-                        return Err(allocation_error(format!(
-                            "invalid or incompatible {lane_name} lane sharing condition {sharing:?}"
-                        )));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn allocation_error(message: impl std::fmt::Display) -> InfrastructureFailure {

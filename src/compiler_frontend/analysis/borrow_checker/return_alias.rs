@@ -4,27 +4,34 @@ use super::{BorrowCheckError, BorrowChecker};
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::public_call_summary::typed::{
-    Layout, Shape, TypedCallAllocationFacts,
-};
+use crate::compiler_frontend::public_call_summary::typed::Layout;
 use crate::compiler_frontend::public_call_summary::{
-    CallEndpoint, CallField, CallPathType, FunctionReturnAliasSummary, PublicCallSummary,
-    validate_public_call_allocation_layout,
+    CallEndpoint, CallField, FunctionReturnAliasSummary, PublicCallSummary,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::OnceCell;
 
 #[path = "return_alias/result_paths.rs"]
 mod result_paths;
-pub(super) use result_paths::IndexedFunction;
+pub(super) use result_paths::SparseFunction;
+
+pub(super) fn build_sparse(
+    checker: &BorrowChecker<'_>,
+) -> Result<
+    rustc_hash::FxHashMap<crate::compiler_frontend::hir::ids::FunctionId, SparseFunction>,
+    BorrowCheckError,
+> {
+    SparseFunction::build_sparse(checker)
+}
 pub(in crate::compiler_frontend::analysis::borrow_checker) use result_paths::ProjectedSupport;
 
-#[allow(dead_code)]
-struct LocalCallLayout<'a, 'hir, F> {
+struct LocalCallLayout<'a, 'hir> {
     checker: &'a BorrowChecker<'hir>,
     function: &'a HirFunction,
-    resolve_stable: F,
+    signature_types: OnceCell<FxHashMap<CanonicalTypeIdentity, TypeId>>,
 }
 
-impl<F: Fn(&CanonicalTypeIdentity) -> Option<TypeId>> Layout for LocalCallLayout<'_, '_, F> {
+impl Layout for LocalCallLayout<'_, '_> {
     type Type = TypeId;
 
     fn parameter(&self, index: usize) -> Option<CallEndpoint<TypeId>> {
@@ -54,7 +61,40 @@ impl<F: Fn(&CanonicalTypeIdentity) -> Option<TypeId>> Layout for LocalCallLayout
     }
 
     fn stable(&self, ty: &CanonicalTypeIdentity) -> Option<CallEndpoint<TypeId>> {
-        CallEndpoint::hir((self.resolve_stable)(ty)?, self.checker.type_environment)
+        let types = self.checker.type_environment;
+        let id = types.type_id_for_canonical_identity(ty).or_else(|| {
+            self.signature_types
+                .get_or_init(|| {
+                    let mut pending: Vec<_> = self
+                        .function
+                        .params
+                        .iter()
+                        .map(|local| self.checker.local_types[local])
+                        .collect();
+                    if let Some(returns) = self.function.return_contract.ordinary() {
+                        pending.extend_from_slice(returns.success());
+                        pending.extend(returns.error());
+                    }
+                    let mut seen = FxHashSet::default();
+                    let mut identities = FxHashMap::default();
+                    while let Some(id) = pending.pop() {
+                        if seen.insert(id) {
+                            if let Some(identity) = self.checker.project_type(id) {
+                                identities.insert(identity, id);
+                            }
+                            self.children(&id, &mut |child| pending.push(child.ty));
+                        }
+                    }
+                    identities
+                })
+                .get(ty)
+                .copied()
+        })?;
+        CallEndpoint::hir(id, types)
+    }
+
+    fn matches_identity(&self, endpoint: &TypeId, identity: &CanonicalTypeIdentity) -> bool {
+        self.checker.project_type(*endpoint).as_ref() == Some(identity)
     }
 
     fn children(&self, ty: &TypeId, visit: &mut dyn FnMut(CallEndpoint<TypeId>)) {
@@ -73,44 +113,11 @@ impl BorrowChecker<'_> {
     pub(super) fn classify_function_return_alias(
         &self,
         function: &HirFunction,
-        index: &IndexedFunction,
+        index: &SparseFunction,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
         Ok(FunctionReturnAliasSummary::Known(Box::new(
-            result_paths::FunctionEvidence {
-                checker: self,
-                function,
-                index,
-            }
-            .evaluate()?,
+            index.evaluate_canonical(self, function)?,
         )))
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn validate_local_typed_allocation_summary(
-        &self,
-        function: &HirFunction,
-        facts: &TypedCallAllocationFacts,
-        shape: &Shape<'_>,
-        resolve_stable: impl Fn(&CanonicalTypeIdentity) -> Option<TypeId>,
-    ) -> Result<(), BorrowCheckError> {
-        let returns = function.return_contract.ordinary();
-        if function.params.len() != shape.parameters.len()
-            || returns.map(|returns| returns.success().len()) != shape.success_slots
-            || returns.and_then(|returns| returns.error()).is_some() != shape.error_slot
-        {
-            return Err(self
-                .diagnostics
-                .internal_error("typed call shape disagrees with its HIR signature"));
-        }
-        facts.validate_layout(
-            shape,
-            &LocalCallLayout {
-                checker: self,
-                function,
-                resolve_stable,
-            },
-        )?;
-        Ok(())
     }
 
     pub(super) fn validate_local_allocation_summary(
@@ -118,39 +125,27 @@ impl BorrowChecker<'_> {
         function: &HirFunction,
         summary: &PublicCallSummary,
     ) -> Result<(), BorrowCheckError> {
-        let shape = function.return_contract.ordinary();
-        let parameter_type = |index| self.local_types.get(function.params.get(index)?).copied();
-        let allocation = |ty| CallPathType::hir_allocation(ty, self.type_environment);
-        validate_public_call_allocation_layout(
-            summary,
-            shape.map(|shape| shape.success().len()),
-            shape.and_then(|shape| shape.error()).is_some(),
-            |path| {
-                self.call_path_type(parameter_type(path.index)?, &path.path)
-                    .and_then(allocation)
-            },
-            |error, path| {
-                let shape = shape?;
-                let ty = if error {
-                    shape.error()?
-                } else {
-                    *shape.success().get(path.slot)?
-                };
-                self.call_path_type(ty, &path.path).and_then(allocation)
-            },
-            |target, relative| {
-                let ty = self.call_path_type(parameter_type(target.index)?, &target.path)?;
-                self.call_path_type(ty, relative).and_then(allocation)
+        let Some(facts) = summary.return_alias.facts() else {
+            return Err(self
+                .diagnostics
+                .internal_error("completed call contract is still pending"));
+        };
+        let parameters: Vec<_> = summary.parameters.iter().map(|arg| arg.access).collect();
+        let returns = function.return_contract.ordinary();
+        let shape = facts.shape(
+            &parameters,
+            returns.map(|returns| returns.success().len()),
+            returns.and_then(|returns| returns.error()).is_some(),
+        );
+        facts.validate_layout(
+            &shape,
+            &LocalCallLayout {
+                checker: self,
+                function,
+                signature_types: OnceCell::new(),
             },
         )?;
         Ok(())
-    }
-
-    fn call_path_type(&self, mut ty: TypeId, path: &[CallField]) -> Option<TypeId> {
-        for &field in path {
-            ty = self.call_child_type(ty, field)?;
-        }
-        Some(ty)
     }
 
     fn call_child_type(&self, ty: TypeId, field: CallField) -> Option<TypeId> {
