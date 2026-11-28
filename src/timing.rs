@@ -35,7 +35,7 @@
 //! It must not import or depend on frontend, analysis, IR, or backend modules.
 
 #[cfg(feature = "timers")]
-mod enabled;
+pub(crate) mod enabled;
 
 #[cfg(feature = "timers")]
 /// Re-exported for facade macros and timing tests; many names are unused in

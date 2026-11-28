@@ -67,7 +67,7 @@ fn transfer_survives_when_every_observed_use_proves_it_or_other_contexts_are_abs
 }
 
 fn serialize(
-    facts: ValueFactBuffer,
+    mut facts: ValueFactBuffer,
 ) -> crate::compiler_frontend::analysis::borrow_checker::types::ValueBorrowFact {
     let layout = FunctionLayout::new(FunctionLayoutInputs {
         local_ids: vec![LocalId(0)],
@@ -84,5 +84,5 @@ fn serialize(
         must_use_from_block: FxHashMap::default(),
         may_assign_from_block: FxHashMap::default(),
     });
-    facts.into_serialized(&layout).remove(0).1
+    facts.drain_serialized(&layout).next().unwrap().1
 }

@@ -663,7 +663,7 @@ impl StatementAccessTracker {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ValueFactBuffer {
+pub(in super::super) struct ValueFactBuffer {
     local_count: usize,
     facts: FxHashMap<HirValueId, BufferedValueFact>,
     current_use_values: Vec<HirValueId>,
@@ -691,7 +691,7 @@ impl BufferedValueFact {
 }
 
 impl ValueFactBuffer {
-    pub(super) fn new(local_count: usize) -> Self {
+    pub(in super::super) fn new(local_count: usize) -> Self {
         Self {
             local_count,
             facts: FxHashMap::default(),
@@ -749,29 +749,26 @@ impl ValueFactBuffer {
         }
     }
 
-    pub(super) fn into_serialized(
-        self,
-        layout: &FunctionLayout,
-    ) -> Vec<(HirValueId, ValueBorrowFact)> {
+    pub(in super::super) fn drain_serialized<'a>(
+        &'a mut self,
+        layout: &'a FunctionLayout,
+    ) -> impl Iterator<Item = (HirValueId, ValueBorrowFact)> + 'a {
         debug_assert!(
             self.current_use_values.is_empty(),
             "all value-fact use contexts must be completed before serialization"
         );
-        self.facts
-            .into_iter()
-            .map(|(value_id, entry)| {
-                (
-                    value_id,
-                    ValueBorrowFact {
-                        classification: entry.classification,
-                        roots: roots_to_local_ids(layout, &entry.roots),
-                        optional_transfer: entry
-                            .completed_use_transfer
-                            .expect("every buffered value row should have a completed use"),
-                    },
-                )
-            })
-            .collect::<Vec<_>>()
+        self.facts.drain().map(move |(value_id, entry)| {
+            (
+                value_id,
+                ValueBorrowFact {
+                    classification: entry.classification,
+                    roots: roots_to_local_ids(layout, &entry.roots),
+                    optional_transfer: entry
+                        .completed_use_transfer
+                        .expect("every buffered value row should have a completed use"),
+                },
+            )
+        })
     }
 
     fn entry_for_current_use(&mut self, value_id: HirValueId) -> &mut BufferedValueFact {

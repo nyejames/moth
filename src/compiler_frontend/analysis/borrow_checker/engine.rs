@@ -13,7 +13,7 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     AccessFootprint, Carrier, Demand, ObservationBoundary, ObservationCheckpoint, PlaceUse,
-    ValueObservations,
+    ValueFactBuffer, ValueObservations,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
     CapturedPosts, MatchedComponent, MatchedLane, MatchedStratum,
@@ -41,7 +41,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::try_for_each_terminator_target;
 #[cfg(feature = "benchmark_counters")]
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter_lazy};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -414,6 +414,7 @@ impl<'a> BorrowChecker<'a> {
         // snapshots after the state has stabilized.
         let mut final_value_facts_by_block: FxHashMap<BlockId, Vec<(HirValueId, ValueBorrowFact)>> =
             FxHashMap::default();
+        let mut value_fact_buffer = ValueFactBuffer::new(layout.local_count());
 
         // Entry state starts as UNINIT, with parameters immediately initialized.
         let mut initial_state = BorrowState::new_uninitialized(layout.local_count());
@@ -504,7 +505,13 @@ impl<'a> BorrowChecker<'a> {
             let block = self.block_by_id_or_error(block_id, function.id)?;
 
             // Transfer the block once and collect facts while the state is hot.
-            let block_stats = transfer_block(&transfer_context, &layout, block, &mut output_state)?;
+            let block_stats = transfer_block(
+                &transfer_context,
+                &layout,
+                block,
+                &mut output_state,
+                &mut value_fact_buffer,
+            )?;
             self.merge_block_stats(&mut report.stats, &block_stats);
             summary.mutable_call_sites += block_stats.mutable_call_sites;
 
@@ -524,7 +531,12 @@ impl<'a> BorrowChecker<'a> {
                     .terminator_facts
                     .insert(terminator_block, fact);
             }
-            final_value_facts_by_block.insert(block_id, block_stats.value_facts);
+            let value_facts = value_fact_buffer.drain_serialized(&layout);
+            if consume_states {
+                merge_value_facts(&mut report.analysis.value_facts, value_facts);
+            } else {
+                final_value_facts_by_block.insert(block_id, value_facts.collect());
+            }
             #[cfg(any(test, feature = "show_borrow_checker"))]
             if consume_states {
                 report
@@ -632,7 +644,7 @@ impl<'a> BorrowChecker<'a> {
                 // Apply lexical visibility kills before join to prevent
                 // branch-local aliases from leaking into outer regions.
                 if let Some(mask) = visible_locals_by_block.get(&successor)
-                    && !mask.covers_all(layout.local_count())
+                    && successor_input.needs_visibility_narrowing(mask)
                 {
                     let before = edge_observations.before_rekey(&successor_input);
                     successor_input.kill_invisible(mask);
@@ -663,10 +675,12 @@ impl<'a> BorrowChecker<'a> {
                     Some(existing) => {
                         report.stats.state_joins += 1;
                         #[cfg(feature = "benchmark_counters")]
-                        add_frontend_counter(
+                        add_frontend_counter_lazy(
                             FrontendCounter::BorrowValidationRowsJoined,
-                            existing.validation_row_count()
-                                + successor_input.validation_row_count(),
+                            || {
+                                existing.validation_row_count()
+                                    + successor_input.validation_row_count()
+                            },
                         );
                         existing.join_in_place(&successor_input)
                     }
@@ -723,20 +737,12 @@ impl<'a> BorrowChecker<'a> {
             ));
         }
 
-        // A row may be observed under different final states in different blocks or functions.
-        // Merge only the last transfer result for each reachable block; merging during worklist
-        // visits would retain transient facts from earlier iterations.
-        // A single context already has sorted roots: the layout sorts LocalIds before the root
-        // bitset is projected back to IDs. Only shared rows need the sorting merge.
-        for block_id in &reachable_blocks {
-            if let Some(value_facts) = final_value_facts_by_block.remove(block_id) {
-                for (value_id, fact) in value_facts {
-                    match report.analysis.value_facts.entry(value_id) {
-                        Entry::Occupied(mut existing) => existing.get_mut().merge(fact),
-                        Entry::Vacant(vacant) => {
-                            vacant.insert(fact);
-                        }
-                    }
+        if !consume_states {
+            // Only merge the last visit to each block. Joins across final contexts are
+            // order-independent (classification, sorted root union and transfer status).
+            for block_id in &reachable_blocks {
+                if let Some(value_facts) = final_value_facts_by_block.remove(block_id) {
+                    merge_value_facts(&mut report.analysis.value_facts, value_facts);
                 }
             }
         }
@@ -1089,18 +1095,14 @@ impl<'a> BorrowChecker<'a> {
                 ) {
                     (Some(lexical), Some(mut replay)) => {
                         replay.intersect_with(lexical);
-                        if !replay.covers_all(source.view.operations.local_count()) {
+                        if incoming.needs_visibility_narrowing(&replay) {
                             Rc::make_mut(&mut incoming).kill_invisible(&replay);
                         }
                     }
-                    (Some(visible), None)
-                        if !visible.covers_all(source.view.operations.local_count()) =>
-                    {
+                    (Some(visible), None) if incoming.needs_visibility_narrowing(visible) => {
                         Rc::make_mut(&mut incoming).kill_invisible(visible);
                     }
-                    (None, Some(visible))
-                        if !visible.covers_all(source.view.operations.local_count()) =>
-                    {
+                    (None, Some(visible)) if incoming.needs_visibility_narrowing(&visible) => {
                         Rc::make_mut(&mut incoming).kill_invisible(&visible);
                     }
                     _ => {}
@@ -1372,10 +1374,9 @@ impl<'a> BorrowChecker<'a> {
 
 fn clone_validation_state(state: &BorrowState) -> BorrowState {
     #[cfg(feature = "benchmark_counters")]
-    add_frontend_counter(
-        FrontendCounter::BorrowValidationRowsCloned,
-        state.validation_row_count(),
-    );
+    add_frontend_counter_lazy(FrontendCounter::BorrowValidationRowsCloned, || {
+        state.validation_row_count()
+    });
     state.clone()
 }
 
@@ -1487,6 +1488,20 @@ pub(super) fn reverse_postorder_ranks(
         }
     }
     ranks
+}
+
+fn merge_value_facts(
+    published: &mut FxHashMap<HirValueId, ValueBorrowFact>,
+    facts: impl IntoIterator<Item = (HirValueId, ValueBorrowFact)>,
+) {
+    for (value_id, fact) in facts {
+        match published.entry(value_id) {
+            Entry::Occupied(mut existing) => existing.get_mut().merge(fact),
+            Entry::Vacant(vacant) => {
+                vacant.insert(fact);
+            }
+        }
+    }
 }
 
 /// Replay a matched outcome onto a support before another operation reads its effects.

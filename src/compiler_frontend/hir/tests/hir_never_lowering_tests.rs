@@ -40,7 +40,9 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     entry_start_node, function_node, make_test_variable, param_with_type_id,
+    reference_expr_with_type_id,
 };
+use crate::compiler_frontend::tests::hir_fixture_support::PreparedHirFixture;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast,
 };
@@ -340,6 +342,77 @@ fn never_call_has_no_result_local_or_successor_and_preserves_argument_order() {
         1,
         "only the fresh mutable materialisation statement precedes the terminator"
     );
+}
+
+#[test]
+fn never_call_pins_projected_actual_before_prelude_and_keeps_whole_actual() {
+    let fixture = PreparedHirFixture::new(
+        r#"Cell = |item I32|
+stop |slot ~I32, item ~I32, number I32| -> !:
+    ~item = number
+    assert(false, "stop")
+;
+mark || -> I32:
+    return 9
+;
+probe |slot ~I32, holder ~Cell| -> !:
+    stop(~slot, ~holder.item, mark())
+;
+"#,
+    );
+    let module = &fixture.hir;
+    let function = |name| function_id_by_name(module, &fixture.strings, &fixture.paths, name);
+    let probe = &module.functions[function("probe").0 as usize];
+    let block = &module.blocks[probe.entry.0 as usize];
+    let HirTerminator::NeverCall { target, args } = &block.terminator else {
+        panic!("probe must terminate at stop");
+    };
+    assert_eq!(*target, CallTarget::Local(function("stop")));
+    assert!(terminator_targets(&block.terminator).is_empty());
+    let [acquire, prelude] = block.statements.as_slice() else {
+        panic!("only the projected acquisition and the nested call precede dispatch");
+    };
+    let HirStatementKind::Write {
+        target: HirWriteTarget::DefineLocal(pin),
+        value,
+    } = acquire.kind
+    else {
+        panic!("expected the projected alias definition before the nested call");
+    };
+    let source = module.expressions.expression(value);
+    assert_eq!(source.value_kind, ValueKind::Place);
+    assert!(matches!(source.kind, HirExpressionKind::Load(place)
+        if place.root == probe.params[1] && place.projections.len() == 1));
+    assert!(
+        block
+            .locals
+            .iter()
+            .any(|local| local.id == pin && local.mutable)
+    );
+    let HirStatementKind::Call {
+        target, results, ..
+    } = &prelude.kind
+    else {
+        panic!("expected the nested mark call");
+    };
+    assert_eq!(*target, CallTarget::Local(function("mark")));
+    let [result] = results.as_slice() else {
+        panic!("mark must produce one result");
+    };
+
+    let args = module.expressions.values(*args);
+    let expected = [
+        (probe.params[0], ValueKind::Place),
+        (pin, ValueKind::Place),
+        (result.local(), ValueKind::RValue),
+    ];
+    assert_eq!(args.len(), expected.len());
+    for (&argument, (root, kind)) in args.iter().zip(expected) {
+        let row = module.expressions.expression(argument);
+        assert_eq!(row.value_kind, kind);
+        assert!(matches!(row.kind, HirExpressionKind::Load(place)
+            if place.root == root && place.projections.is_empty()));
+    }
 }
 
 #[test]
@@ -685,7 +758,7 @@ fn never_receiver_method_lowers_the_receiver_to_argument_slot_zero() {
             param_with_type_id(
                 self_name,
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                false,
+                true,
                 None,
             ),
             param_with_type_id(
@@ -704,15 +777,30 @@ fn never_receiver_method_lowers_the_receiver_to_argument_slot_zero() {
         None,
     );
 
-    let receiver = i32_literal(&mut builder, &mut constants, 1);
+    // Source syntax does not admit this receiver form; use the emitted call contract directly.
+    let receiver = reference_expr_with_type_id(
+        &mut builder,
+        self_name,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        call_span,
+        ValueMode::MutableReference,
+    );
     let argument = i32_literal(&mut builder, &mut constants, 2);
     let run = function_node(
         run_name,
-        ordinary_signature(),
+        FunctionSignature {
+            parameters: vec![param_with_type_id(
+                self_name,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                true,
+                None,
+            )],
+            ..ordinary_signature()
+        },
         vec![super::node(
             NodeKind::NeverCall(Box::new(NeverCall {
                 target: NeverCallTarget::Source(halt_name),
-                receiver: Some((receiver, CallAccessMode::Shared)),
+                receiver: Some((receiver, CallAccessMode::Mutable)),
                 arguments: vec![
                     CallArgument::positional(argument, CallAccessMode::Mutable, argument_span)
                         .with_passing_mode(CallPassingMode::FreshMutableValue),
@@ -752,12 +840,14 @@ fn never_receiver_method_lowers_the_receiver_to_argument_slot_zero() {
         2,
         "the receiver occupies argument slot zero before the declared argument"
     );
-    assert!(
-        matches!(
-            module.expressions.expression(args[0]).kind,
-            HirExpressionKind::FixedScalar(_)
-        ),
-        "the receiver is evaluated before the declared arguments"
+    let receiver = module.expressions.expression(args[0]);
+    assert_eq!(receiver.value_kind, ValueKind::Place);
+    assert!(matches!(receiver.kind, HirExpressionKind::Load(place)
+        if place.root == module.functions[run.0 as usize].params[0] && place.projections.is_empty()));
+    assert_eq!(
+        block.statements.len(),
+        1,
+        "only the fresh argument is materialised"
     );
     let HirExpressionKind::Load(place) = &module.expressions.expression(args[1]).kind else {
         panic!("the fresh mutable argument loads its hidden local");

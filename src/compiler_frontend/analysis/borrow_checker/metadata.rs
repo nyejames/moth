@@ -27,7 +27,9 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::{for_each_terminator_target, terminator_targets};
 #[cfg(feature = "benchmark_counters")]
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, frontend_counters_active,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
@@ -632,6 +634,20 @@ impl<'a> BorrowChecker<'a> {
         if queue.is_empty() {
             return Ok(Vec::new());
         }
+        #[cfg(feature = "benchmark_counters")]
+        let count_extractions = frontend_counters_active();
+        #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
+        let track_extractions = {
+            #[cfg(feature = "benchmark_counters")]
+            let counters = count_extractions;
+            #[cfg(not(feature = "benchmark_counters"))]
+            let counters = false;
+            #[cfg(feature = "detailed_timers")]
+            let timers = self.timing.is_some();
+            #[cfg(not(feature = "detailed_timers"))]
+            let timers = false;
+            counters || timers
+        };
         let mut changed = FxHashMap::<FunctionId, bool>::default();
         let mut queued = FxHashSet::default();
         for &position in &queue {
@@ -645,14 +661,15 @@ impl<'a> BorrowChecker<'a> {
             let index = &indices.current[&function.id];
             let return_alias = {
                 #[cfg(any(feature = "detailed_timers", feature = "benchmark_counters"))]
-                let first = bodies.as_deref_mut().is_some_and(|bodies| {
-                    !std::mem::replace(
-                        &mut bodies.get_mut(&function.id).expect("known body").extracted,
-                        true,
-                    )
-                });
+                let first = track_extractions
+                    && bodies.as_deref_mut().is_some_and(|bodies| {
+                        !std::mem::replace(
+                            &mut bodies.get_mut(&function.id).expect("known body").extracted,
+                            true,
+                        )
+                    });
                 #[cfg(feature = "benchmark_counters")]
-                if bodies.is_some() {
+                if count_extractions && bodies.is_some() {
                     let counter = if first {
                         FrontendCounter::BorrowFirstExtractions
                     } else if matches!(previous.return_alias, FunctionReturnAliasSummary::Pending) {
@@ -1330,18 +1347,23 @@ impl<'a> BorrowChecker<'a> {
         // A local is visible in a block when local.region is an ancestor
         // of block.region in the lexical region tree.
         let mut masks = FxHashMap::default();
+        let mut by_region = FxHashMap::<RegionId, RootSet>::default();
 
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function_id)?;
-            let mut mask = RootSet::empty(local_regions.len());
-
-            for (local_index, local_region) in local_regions.iter().enumerate() {
-                if self.is_region_ancestor_of(*local_region, block.region, *block_id)? {
-                    mask.insert(local_index);
+            let mask = match by_region.entry(block.region) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let mut mask = RootSet::empty(local_regions.len());
+                    for (local_index, &local_region) in local_regions.iter().enumerate() {
+                        if self.is_region_ancestor_of(local_region, block.region, *block_id)? {
+                            mask.insert(local_index);
+                        }
+                    }
+                    entry.insert(mask)
                 }
-            }
-
-            masks.insert(*block_id, mask);
+            };
+            masks.insert(*block_id, mask.clone());
         }
 
         Ok(masks)

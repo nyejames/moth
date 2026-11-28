@@ -1242,29 +1242,78 @@ fn capture_joint_post<I: MatchInput>(
 }
 
 fn weaken_product_collisions(state: &BorrowState, components: &mut [MatchedComponent]) {
+    // A component with no edits or suffix cannot contribute a cross-component write.
+    let cross_component = components
+        .iter()
+        .filter(|component| {
+            component
+                .alternatives
+                .iter()
+                .any(|post| !post.edits.is_empty() || post.uncertainty.is_some())
+        })
+        .take(2)
+        .count()
+        == 2;
+    if !cross_component {
+        for post in components
+            .iter_mut()
+            .flat_map(|component| &mut component.alternatives)
+        {
+            post.weaken_collisions(state);
+        }
+        return;
+    }
+
     let mut writes = Vec::new();
     for (index, component) in components.iter_mut().enumerate() {
         for post in &mut component.alternatives {
-            post.weaken_collisions(state);
-            writes.extend(post.write_footprints(true).map(|write| (index, write)));
+            let start = writes.len();
+            writes.extend(post.exact_write_footprints().map(|write| (index, write)));
+            if post.has_duplicate_bindings() || has_write_collision(state, &writes[start..]) {
+                post.weaken_writes();
+                // Weakening family coverage can change the exact write footprints.
+                writes.truncate(start);
+                writes.extend(post.exact_write_footprints().map(|write| (index, write)));
+            }
+            writes.extend(post.suffix_write_footprints().map(|write| (index, write)));
         }
     }
-    for index in overlapping_owners(state, &writes, |left, right| left != right) {
+    let mut overlapping = FxHashSet::default();
+    visit_write_collisions(
+        state,
+        &writes,
+        |left, right| left != right,
+        |left, right| {
+            overlapping.insert(left);
+            overlapping.insert(right);
+            false
+        },
+    );
+    for index in overlapping {
         for post in &mut components[index].alternatives {
             post.weaken_writes();
         }
     }
 }
 
-fn overlapping_owners(
+fn visit_write_collisions(
     state: &BorrowState,
     writes: &[(usize, super::super::super::facts::AccessFootprint)],
     compare: impl Fn(usize, usize) -> bool,
-) -> FxHashSet<usize> {
+    mut collision: impl FnMut(usize, usize) -> bool,
+) -> bool {
     use super::super::conflicts::{OperandAccessIndex, Overlap, overlap};
-    let mut overlapping = FxHashSet::default();
-    if writes.len() < 2 {
-        return overlapping;
+    let mut check = |left: usize, right: usize| {
+        let (left_owner, left) = &writes[left];
+        let (right_owner, right) = &writes[right];
+        compare(*left_owner, *right_owner)
+            && overlap(state, left, right) != Overlap::No
+            && collision(*left_owner, *right_owner)
+    };
+    // Short lists need neither postings nor a deduplication table.
+    if writes.len() <= 4 {
+        return (0..writes.len())
+            .any(|left| ((left + 1)..writes.len()).any(|right| check(left, right)));
     }
     let mut index = OperandAccessIndex::new(
         writes.len(),
@@ -1273,18 +1322,16 @@ fn overlapping_owners(
             .enumerate()
             .map(|(position, (_, access))| (position, access)),
     );
-    for (position, (owner, access)) in writes.iter().enumerate() {
-        index.any_later(state, position, access, |later| {
-            if compare(*owner, writes[later].0)
-                && overlap(state, access, &writes[later].1) != Overlap::No
-            {
-                overlapping.insert(*owner);
-                overlapping.insert(writes[later].0);
-            }
-            false
-        });
-    }
-    overlapping
+    writes.iter().enumerate().any(|(position, (_, access))| {
+        index.any_later(state, position, access, |later| check(position, later))
+    })
+}
+
+fn has_write_collision(
+    state: &BorrowState,
+    writes: &[(usize, super::super::super::facts::AccessFootprint)],
+) -> bool {
+    visit_write_collisions(state, writes, |_, _| true, |_, _| true)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3503,33 +3550,43 @@ impl CapturedResult {
 }
 
 impl CapturedPost {
-    fn write_footprints(
+    fn exact_write_footprints(
         &self,
-        include_suffix: bool,
+    ) -> impl Iterator<Item = super::super::super::facts::AccessFootprint> + '_ {
+        Self::edit_footprints(&self.edits)
+    }
+
+    fn edit_footprints(
+        edits: &[CapturedEdit],
     ) -> impl Iterator<Item = super::super::super::facts::AccessFootprint> + '_ {
         use super::super::super::facts::{AccessFootprint, PlaceUse};
-        let suffix = self.uncertainty.as_ref().filter(|_| include_suffix);
-        let exact = self
-            .edits
-            .iter()
-            .chain(suffix.into_iter().flat_map(|suffix| &suffix.edits))
-            .filter_map(|edit| {
-                let address = match edit {
-                    CapturedEdit::Cell(store) => store.captured_address()?.clone(),
-                    CapturedEdit::Family {
-                        receivers,
-                        key,
-                        coverage,
-                        ..
-                    } => AddressSet::from_cells(
-                        receivers
-                            .iter()
-                            .map(|&holder| CellId::Projected(holder, *key)),
-                        *coverage,
-                    ),
-                };
-                Some(AccessFootprint::cells(address, PlaceUse::Replace))
-            });
+        edits.iter().filter_map(|edit| {
+            let address = match edit {
+                CapturedEdit::Cell(store) => store.captured_address()?.clone(),
+                CapturedEdit::Family {
+                    receivers,
+                    key,
+                    coverage,
+                    ..
+                } => AddressSet::from_cells(
+                    receivers
+                        .iter()
+                        .map(|&holder| CellId::Projected(holder, *key)),
+                    *coverage,
+                ),
+            };
+            Some(AccessFootprint::cells(address, PlaceUse::Replace))
+        })
+    }
+
+    fn suffix_write_footprints(
+        &self,
+    ) -> impl Iterator<Item = super::super::super::facts::AccessFootprint> + '_ {
+        use super::super::super::facts::{AccessFootprint, PlaceUse};
+        let suffix = self.uncertainty.as_ref();
+        let edits = suffix
+            .into_iter()
+            .flat_map(|suffix| Self::edit_footprints(&suffix.edits));
         let reach = suffix
             .and_then(|suffix| suffix.reach.as_ref())
             .into_iter()
@@ -3587,7 +3644,7 @@ impl CapturedPost {
                 footprint.content = Some(ResolvedPlace::from_capture(value));
                 footprint
             });
-        exact
+        edits
             .chain(reach)
             .chain(direct_suffix)
             .chain(prefix_reachable)
@@ -3602,20 +3659,28 @@ impl CapturedPost {
         }
     }
 
-    fn has_collisions(&self, state: &BorrowState) -> bool {
+    fn has_duplicate_bindings(&self) -> bool {
+        if self.bindings.len() < 2 {
+            return false;
+        }
         let mut bindings = FxHashSet::default();
-        let duplicate = self
-            .bindings
+        self.bindings
             .iter()
-            .any(|binding| !bindings.insert(binding.target));
-        if duplicate {
+            .any(|binding| !bindings.insert(binding.target))
+    }
+
+    fn has_collisions(&self, state: &BorrowState) -> bool {
+        if self.has_duplicate_bindings() {
             return true;
         }
-        let writes: Vec<_> = self
-            .write_footprints(false)
+        if self.edits.len() < 2 {
+            return false;
+        }
+        let writes: InlineVec<_> = self
+            .exact_write_footprints()
             .map(|write| (0, write))
             .collect();
-        !overlapping_owners(state, &writes, |_, _| true).is_empty()
+        has_write_collision(state, &writes)
     }
 
     fn weaken_writes(&mut self) {

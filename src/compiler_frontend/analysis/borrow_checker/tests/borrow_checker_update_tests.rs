@@ -11,6 +11,7 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, BindingSpec, BorrowState, CellId, Coverage, FieldKey, FunctionLayout, RootSet,
     WrapperId,
 };
+use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::ValueFactBuffer;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, transfer_block,
 };
@@ -41,6 +42,7 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
+use rustc_hash::FxHashMap;
 
 fn assert_invalid_mutable_access_at(
     error: BorrowCheckError,
@@ -428,10 +430,10 @@ fn first_heap_definition_matches_retirement_with_sparse_facts() {
         let mut retirement_state = state.clone();
         let mut retirement_layout = layout.clone();
         retirement_layout.acyclic_entry_block = None;
-        let entry_facts =
+        let (entry_stats, mut entry_facts) =
             transfer_isolated_statement(checker, &layout, block, definition, &mut state)
                 .expect("the entry definition should keep the captured child");
-        let retirement_facts = transfer_isolated_statement(
+        let (retirement_stats, mut retirement_facts) = transfer_isolated_statement(
             checker,
             &retirement_layout,
             block,
@@ -441,14 +443,18 @@ fn first_heap_definition_matches_retirement_with_sparse_facts() {
         .expect("the same definition should also work with full retirement");
         assert_eq!(state, retirement_state);
         assert_eq!(
-            entry_facts.statement_facts,
-            retirement_facts.statement_facts
+            entry_stats.statement_facts,
+            retirement_stats.statement_facts
         );
-        assert_eq!(entry_facts.value_facts, retirement_facts.value_facts);
-        let (_, child_fact) = entry_facts
-            .value_facts
-            .iter()
-            .find(|(value, _)| *value == child_value)
+        let entry_facts = entry_facts
+            .drain_serialized(&layout)
+            .collect::<FxHashMap<_, _>>();
+        let retirement_facts = retirement_facts
+            .drain_serialized(&retirement_layout)
+            .collect::<FxHashMap<_, _>>();
+        assert_eq!(entry_facts, retirement_facts);
+        let child_fact = entry_facts
+            .get(&child_value)
             .expect("the incoming projected read should publish a value fact");
         assert_eq!(
             child_fact.classification,
@@ -2217,7 +2223,7 @@ fn transfer_isolated_statement(
     original_block: &HirBlock,
     statement: &HirStatement,
     state: &mut BorrowState,
-) -> Result<BlockTransferStats, BorrowCheckError> {
+) -> Result<(BlockTransferStats, ValueFactBuffer), BorrowCheckError> {
     let transfer_context = BorrowTransferContext {
         external_package_registry: checker.external_package_registry,
         public_call_summaries: &checker.public_call_summaries,
@@ -2254,5 +2260,13 @@ fn transfer_isolated_statement(
             kind: RuntimeFailureKind::NoMatchFallback,
         },
     };
-    transfer_block(&transfer_context, layout, &isolated_block, state)
+    let mut value_facts = ValueFactBuffer::new(layout.local_count());
+    let stats = transfer_block(
+        &transfer_context,
+        layout,
+        &isolated_block,
+        state,
+        &mut value_facts,
+    )?;
+    Ok((stats, value_facts))
 }

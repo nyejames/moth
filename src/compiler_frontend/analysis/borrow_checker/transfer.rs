@@ -19,14 +19,14 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    StatementBorrowFact, TerminatorBorrowFact, ValueBorrowFact,
+    StatementBorrowFact, TerminatorBorrowFact,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::structs::HirStruct;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -203,6 +203,24 @@ pub(crate) struct BorrowTiming {
 
 #[cfg(feature = "detailed_timers")]
 impl BorrowTiming {
+    /// All nested borrow metrics use the same Detailed channel and command scope.
+    pub(crate) fn when_detailed(
+        owner: BorrowTimingOwner,
+        context: Option<crate::timing::TimingContext>,
+    ) -> Option<Self> {
+        crate::timing::enabled::runtime::metric_active(
+            crate::timing::TimingMetric::FrontendBorrowConvergeFirstExtraction,
+        )
+        .then_some(Self { owner, context })
+    }
+
+    pub(crate) fn for_generated_recheck(self) -> Self {
+        Self {
+            owner: BorrowTimingOwner::GeneratedRecheck,
+            ..self
+        }
+    }
+
     pub(crate) fn start(
         self,
         base: crate::timing::TimingMetric,
@@ -562,7 +580,6 @@ pub(super) struct BlockTransferStats {
     // Emitted borrow facts.
     pub statement_facts: Vec<(HirNodeId, StatementBorrowFact)>,
     pub terminator_fact: Option<(BlockId, TerminatorBorrowFact)>,
-    pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
     // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
     pub invoke: InvokeTransfer,
     pub observations: ValueObservations,
@@ -582,9 +599,9 @@ pub(super) fn transfer_block(
     layout: &FunctionLayout,
     block: &HirBlock,
     state: &mut BorrowState,
+    value_fact_buffer: &mut ValueFactBuffer,
 ) -> Result<BlockTransferStats, BorrowCheckError> {
     let mut stats = BlockTransferStats::default();
-    let mut value_fact_buffer = ValueFactBuffer::new(layout.local_count());
 
     for statement in &block.statements {
         #[cfg(any(test, feature = "show_borrow_checker"))]
@@ -598,12 +615,11 @@ pub(super) fn transfer_block(
             block.id,
             statement,
             &mut stats,
-            &mut value_fact_buffer,
+            value_fact_buffer,
         )?;
         value_fact_buffer.finish_use();
         stats.statements_analyzed += 1;
         if stats.diverges {
-            stats.value_facts = value_fact_buffer.into_serialized(layout);
             #[cfg(test)]
             state.assert_allocation_incidence();
             return Ok(stats);
@@ -617,7 +633,7 @@ pub(super) fn transfer_block(
         block.id,
         &block.terminator,
         &mut stats,
-        &mut value_fact_buffer,
+        value_fact_buffer,
     )?;
     stats.terminators_analyzed += 1;
 
@@ -625,7 +641,7 @@ pub(super) fn transfer_block(
     let mut aggregate_context = AggregateTransferContext {
         diagnostics: &context.diagnostics,
         expressions: context.expressions,
-        value_fact_buffer: &mut value_fact_buffer,
+        value_fact_buffer,
     };
 
     match &block.terminator {
@@ -693,7 +709,6 @@ pub(super) fn transfer_block(
     }
 
     value_fact_buffer.finish_use();
-    stats.value_facts = value_fact_buffer.into_serialized(layout);
     #[cfg(test)]
     state.assert_allocation_incidence();
     Ok(stats)

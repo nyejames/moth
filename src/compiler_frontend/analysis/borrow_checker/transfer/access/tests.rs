@@ -2105,7 +2105,7 @@ view = writer
 }
 
 #[test]
-fn retained_projection_reborrow_can_write_through_its_live_parent() {
+fn retained_projection_derivation_lets_child_use_parent_but_not_the_reverse() {
     let source = r"Pair = |first I32, second I32|
 probe || -> I32:
     holder ~= Pair(1, 0)
@@ -2118,6 +2118,15 @@ probe || -> I32:
 ;
 ";
     check_source(source).expect("a writable reborrow can exercise its parent loan");
+    let reverse = source.replace(
+        "~child = 4\n    result = child + 1\n    return writer + result",
+        "~writer = 4\n    return child + 1",
+    );
+    check_rejection(
+        &reverse,
+        "~writer = 4",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
 }
 
 #[test]
@@ -2644,7 +2653,7 @@ fn escaped_slot_retains_prior_address_but_pristine_definition_does_not_retire() 
 }
 
 #[test]
-fn projected_destination_stays_on_the_old_holder_after_slot_replacement() {
+fn projected_capture_keeps_its_cell_and_reads_updated_conservative_payloads() {
     const HOLDER: usize = 0;
     const REPLACEMENT: usize = 1;
     const OLD: usize = 2;
@@ -2676,17 +2685,17 @@ fn projected_destination_stays_on_the_old_holder_after_slot_replacement() {
             writable: true,
         },
     );
+    let place = state.resolve_place_path(HOLDER, &[true; COUNT], [field]);
     let cell = CellId::Projected(holder, field);
+    let (binding, payload) =
+        super::layer::capture_projected_binding(&state, &[true; COUNT], place, true, false, false);
+    assert!(
+        payload.is_none(),
+        "writable acquisition does not snapshot the payload"
+    );
     state.set_binding(
         WRITER,
-        BindingSpec::Projected {
-            addresses: AddressSet::from_cells([cell], Coverage::Complete),
-            origin: WrapperId::current(HOLDER),
-            owner: Some(WrapperId::current(HOLDER)),
-            writable: true,
-            isolated: false,
-            route_roots: roots(COUNT, &[HOLDER]),
-        },
+        binding,
         roots(COUNT, &[HOLDER]),
         RootSet::empty(COUNT),
     );
@@ -2708,9 +2717,23 @@ fn projected_destination_stays_on_the_old_holder_after_slot_replacement() {
         &[CellId::Projected(retired_holder, field)]
     );
     assert_eq!(state.local_alloc_ids(WRITER).0, [old]);
+    // The retained address still names only the old holder. Its retired allocation
+    // is not singular, so an ordinary store joins the new payload with the old.
+    let retained_cell = CellId::Projected(retired_holder, field);
+    state.publish_store(
+        &TypedStore::replace_cells(
+            AddressSet::from_cells([retained_cell], Coverage::Complete).with_singleton_proof(),
+            writable_value(replacement),
+        ),
+        1,
+        None,
+    );
+    let mut payloads = [old, replacement];
+    payloads.sort_unstable();
+    assert_eq!(state.local_alloc_ids(WRITER).0, payloads);
     let store =
         TypedStore::write_through(addresses, writable_value(new), Replacement::Must, WRITER);
-    state.publish_store(&store, 1, None);
+    state.publish_store(&store, 2, None);
     assert_eq!(state.local_alloc_ids(WRITER).0, [new]);
     assert_eq!(
         state
@@ -2802,14 +2825,11 @@ fn view_rows_are_exclusive_only_within_one_recent_call_support() {
 }
 
 #[test]
-fn publisher_kills_only_exact_dependent_scalar_replacements() {
-    let mut entry = BorrowState::new_uninitialized(2);
-    entry.initialize_parameter(0);
-    entry.initialize_parameter(1);
-    let receiver = entry.local_alloc_ids(0).0[0];
-    let holder = entry.local_alloc_ids(1).0[0];
+fn publisher_kills_scalar_payload_only_for_an_exact_definite_replacement() {
+    let (mut entry, [receiver, holder, other]) = parameter_allocations::<3>();
     let field = FieldKey::Field(0);
     let cell = CellId::Projected(holder, field);
+    let other_cell = CellId::Projected(other, field);
     let old = ValueAlt {
         kind: ValueKind::Scalar,
         deps: vec![ReceiverDependency {
@@ -2821,27 +2841,49 @@ fn publisher_kills_only_exact_dependent_scalar_replacements() {
         alternatives: vec![old.clone()],
         ..Default::default()
     };
-    entry.record_constructed_value(holder, field, &capture, true);
+    for candidate in [holder, other] {
+        entry.record_constructed_value(candidate, field, &capture, true);
+    }
+    let fresh = ValueAlt::plain(ValueKind::Scalar);
+    let replacement_value = CapturedValue {
+        alternatives: vec![fresh.clone()],
+        ..Default::default()
+    };
 
-    for (coverage, replacement) in [
-        (Coverage::Complete, Replacement::May),
-        (Coverage::Partial, Replacement::Must),
-        (Coverage::Complete, Replacement::Must),
+    for (addressed, coverage, replacement, exact) in [
+        (&[cell][..], Coverage::Complete, Replacement::May, false),
+        (&[cell][..], Coverage::Partial, Replacement::Must, false),
+        (
+            &[cell, other_cell][..],
+            Coverage::Complete,
+            Replacement::Must,
+            false,
+        ),
+        (&[cell][..], Coverage::Complete, Replacement::Must, true),
     ] {
         let mut state = entry.clone();
-        let addresses = AddressSet::from_cells([cell], coverage).with_singleton_proof();
+        let mut addresses = AddressSet::from_cells(addressed.iter().copied(), coverage);
+        if addressed.len() == 1 {
+            addresses = addresses.with_singleton_proof();
+        }
         let store = match replacement {
-            Replacement::May => TypedStore::write_cells(addresses, CapturedValue::default()),
-            Replacement::Must => TypedStore::replace_cells(addresses, CapturedValue::default()),
+            Replacement::May => TypedStore::write_cells(addresses, replacement_value.clone()),
+            Replacement::Must => TypedStore::replace_cells(addresses, replacement_value.clone()),
         };
         let receipt = state.publish_store(&store, 0, None);
-        if coverage == Coverage::Complete && replacement == Replacement::Must {
+        if exact {
             assert_eq!(receipt.definite_old, [(cell, vec![old.clone()])]);
-            assert!(state.value_cell(cell).is_empty());
+            assert_eq!(state.value_cell(cell), std::slice::from_ref(&fresh));
         } else {
             assert!(receipt.definite_old.is_empty());
             assert!(state.value_cell(cell).contains(&old));
         }
+        assert!(state.value_cell(cell).contains(&fresh));
+        assert!(state.value_cell(other_cell).contains(&old));
+        assert_eq!(
+            state.value_cell(other_cell).contains(&fresh),
+            addressed.contains(&other_cell)
+        );
     }
 }
 
@@ -3017,6 +3059,82 @@ fn family_erase_receipt_distinguishes_exact_partial_and_multiple_receivers() {
             assert!(erased.is_empty());
         }
         assert_eq!(state.value_cells().count(), if exact { 0 } else { 2 });
+    }
+}
+
+#[test]
+fn setting_and_clearing_entries_do_not_replace_the_receiver_slot() {
+    let (mut entry, [receiver, replacement, dependency]) = parameter_allocations::<3>();
+    let scalar_from = |id| ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(id),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let old = scalar_from(dependency);
+    let new = scalar_from(replacement);
+    let capture = |value: &ValueAlt| CapturedValue {
+        alternatives: vec![value.clone()],
+        ..Default::default()
+    };
+    let keys = [FieldKey::MapKey, FieldKey::Elem];
+    for key in keys {
+        entry.record_constructed_value(receiver, key, &capture(&old), true);
+        entry.record_constructed_value(replacement, key, &capture(&new), true);
+        let receipt = entry.publish_store(
+            &TypedStore::write_projected([receiver], key, Coverage::Complete, capture(&new), true),
+            1,
+            None,
+        );
+        let family = entry.value_cell(CellId::Projected(receiver, key));
+        assert!(family.contains(&old) && family.contains(&new));
+        assert!(receipt.definite_old.is_empty());
+    }
+    assert_eq!(entry.local_alloc_ids(0).0, [receiver]);
+
+    let mut cleared = entry.clone();
+    let clear = cleared.publish_store(
+        &TypedStore::reset_families(
+            vec![receiver],
+            Coverage::Complete,
+            EntryFamilies::MapEntries,
+        ),
+        2,
+        None,
+    );
+    assert_eq!(cleared.local_alloc_ids(0).0, [receiver]);
+    for key in keys {
+        let cell = CellId::Projected(receiver, key);
+        assert!(cleared.value_cell(cell).is_empty());
+        assert!(clear.definite_old.iter().any(|(erased, values)| {
+            *erased == cell && values.contains(&old) && values.contains(&new)
+        }));
+        assert_eq!(
+            cleared.value_cell(CellId::Projected(replacement, key)),
+            [new.clone()]
+        );
+    }
+
+    let retirement = entry.retire_slot_value(0, 2);
+    let mut retained = receiver;
+    retirement.remap_id(&entry, &mut retained);
+    let replace = entry.publish_store(
+        &TypedStore::replace_cells(entry.resolve_cells(0), writable_value(replacement)),
+        2,
+        None,
+    );
+    assert_eq!(entry.local_alloc_ids(0).0, [replacement]);
+    for key in keys {
+        let cell = CellId::Projected(retained, key);
+        let family = entry.value_cell(cell);
+        assert!(family.contains(&old) && family.contains(&new));
+        assert!(
+            replace
+                .definite_old
+                .iter()
+                .all(|(erased, _)| *erased != cell)
+        );
     }
 }
 
@@ -3366,6 +3484,46 @@ probe || -> I32:\n\
         "{prefix}    ~holder = wrap(copy holder.items)\n{suffix}"
     ))
     .expect("passing a copied projection must not retain the previous child");
+}
+
+#[test]
+fn escaping_scalar_link_is_shared_by_whole_actuals_but_not_projected_destinations() {
+    let source = |left, right, rhs, extra_local, init| {
+        format!(
+            r"Cell = |item I32|
+mark || -> I32:
+    return 0
+;
+seed |first ~I32, second ~I32, marker I32|:
+    local ~= 2
+    {extra_local}
+    ~first = local
+    ~second = {rhs}
+;
+{init}
+seed(~{left}, ~{right}, mark())
+observed = {right}
+~{left} = 9
+~[:[observed]]
+"
+        )
+    };
+    let whole = "left ~= 0\nright ~= 1";
+    check_rejection(
+        &source("left", "right", "first", "", whole),
+        "~left = 9",
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+    check_source(&source("left", "right", "other", "other ~= 2", whole))
+        .expect("the same scalar payload does not make two distinct escapes share a cell");
+    check_source(&source(
+        "left.item",
+        "right.item",
+        "first",
+        "",
+        "left ~= Cell(0)\nright ~= Cell(1)",
+    ))
+    .expect("the captured projected actuals write through rather than link to the escaped slot");
 }
 
 #[test]
@@ -3944,7 +4102,14 @@ probe |rows ~{Holder}| -> I32:\n\
     }
     assert_eq!(stats.conflicts_checked, 0);
     assert!(stats.statement_facts.is_empty());
-    transfer_block(&context, &layout, block, &mut state).expect("transfer the authored append");
+    transfer_block(
+        &context,
+        &layout,
+        block,
+        &mut state,
+        &mut super::super::facts::ValueFactBuffer::new(layout.local_count()),
+    )
+    .expect("transfer the authored append");
     let (root_ids, _) = state.local_alloc_ids(rows);
     let [holder] = root_ids.as_slice() else {
         panic!("the incoming rows must have one root");

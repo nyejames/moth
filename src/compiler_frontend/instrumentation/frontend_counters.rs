@@ -601,13 +601,35 @@ mod detailed {
     }
 
     pub(crate) fn add_frontend_counter(counter: FrontendCounter, amount: usize) {
-        #[cfg(test)]
-        if !test_counter_capture_active() {
-            return;
-        }
-
-        atomic_counter(counter).fetch_add(amount, Ordering::Relaxed);
+        add_frontend_counter_lazy(counter, || amount);
     }
+
+    pub(crate) fn add_frontend_counter_lazy(
+        counter: FrontendCounter,
+        amount: impl FnOnce() -> usize,
+    ) {
+        if frontend_counters_active() {
+            atomic_counter(counter).fetch_add(amount(), Ordering::Relaxed);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn frontend_counters_active() -> bool {
+        // Preserve explicit test capture, including direct reads of the counter atomics.
+        #[cfg(test)]
+        {
+            test_counter_capture_active()
+        }
+        #[cfg(all(not(test), feature = "timers"))]
+        {
+            crate::timing::enabled::runtime::counters_active()
+        }
+        #[cfg(all(not(test), not(feature = "timers")))]
+        {
+            crate::timing::current_counter_output_mode().emits_bench_counter_lines()
+        }
+    }
+
     pub(crate) fn record_path_table_copy(node_rows: usize, bytes: usize) {
         increment_frontend_counter(FrontendCounter::PathTableCopyCount);
         add_frontend_counter(FrontendCounter::PathTableCopyNodeRows, node_rows);
@@ -624,19 +646,14 @@ mod detailed {
     }
 
     pub(crate) fn record_path_max_depth(depth: u32) {
-        #[cfg(test)]
-        if !test_counter_capture_active() {
-            return;
+        if frontend_counters_active() {
+            atomic_counter(FrontendCounter::PathMaxDepth)
+                .fetch_max(depth as usize, Ordering::Relaxed);
         }
-        atomic_counter(FrontendCounter::PathMaxDepth).fetch_max(depth as usize, Ordering::Relaxed);
     }
 
     pub(crate) fn log_frontend_counters() {
-        // Under test, ignore callers whose thread has not opted into capture so an
-        // unrelated compile test cannot prepend zero counter rows into a guarded
-        // test's active collection session.
-        #[cfg(test)]
-        if !test_counter_capture_active() {
+        if !frontend_counters_active() {
             return;
         }
 
@@ -1823,7 +1840,8 @@ mod detailed {
 
 #[cfg(feature = "benchmark_counters")]
 pub(crate) use detailed::{
-    add_frontend_counter, increment_frontend_counter, log_frontend_counters, record_path_max_depth,
+    add_frontend_counter, add_frontend_counter_lazy, frontend_counters_active,
+    increment_frontend_counter, log_frontend_counters, record_path_max_depth,
     record_path_table_copy, reset_frontend_counters,
 };
 

@@ -67,7 +67,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatementKind, HirWriteTarget,
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -77,7 +77,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     reference_expr_with_type_id, runtime_template_handoff_expr,
 };
-use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
+use crate::compiler_frontend::tests::hir_fixture_support::{
+    PreparedHirFixture, raw_template_expression_for_hir_invariant,
+};
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     choice_construct_expr, const_record_reference_expr, option_none_expr, runtime_expr,
     runtime_operand_item, runtime_operator_item,
@@ -2024,6 +2026,172 @@ fn preserves_left_to_right_call_prelude_order_in_nested_call_args() {
             CallTarget::Local(FunctionId(3)),
         ]
     );
+}
+
+#[test]
+fn named_call_stages_pins_and_values_in_authored_order_but_passes_abi_slots() {
+    let fixture = PreparedHirFixture::new(
+        r"Leaf = |item I32|
+Holder = |inner Leaf|
+mark || -> I32:
+    return 3
+;
+later || -> I32:
+    return 4
+;
+consume |marker I32, slot ~I32, fixed ~I32, fresh ~I32, snapshot {I32}, tail I32, link ~I32|:
+    ~fixed = marker
+;
+probe |holder ~Holder, slot ~I32, list {I32}, owner ~I32|:
+    alias ~= owner
+    consume(fixed = ~holder.inner.item, slot = ~slot, link = ~alias, snapshot = copy list, fresh = 7, marker = mark(), tail = later())
+;
+",
+    );
+    let module = &fixture.hir;
+    let leaf_name = |path| {
+        fixture
+            .strings
+            .resolve(fixture.paths.component(path).unwrap())
+    };
+    let function = |name: &str| {
+        module
+            .functions
+            .iter()
+            .find(|function| {
+                module
+                    .side_table
+                    .function_name_path(function.id)
+                    .is_some_and(|path| leaf_name(path) == name)
+            })
+            .expect("fixture function")
+    };
+    let probe = function("probe");
+    let [holder, slot, list, owner] = probe.params[..] else {
+        panic!("unexpected probe signature");
+    };
+    let block = &module.blocks[probe.entry.0 as usize];
+    let [
+        alias_def,
+        pin_def,
+        copy_def,
+        fresh_def,
+        mark,
+        later,
+        dispatch,
+    ] = &block.statements[..]
+    else {
+        panic!("expected just the authored alias, three materialisations and three calls");
+    };
+    let definition = |statement: &HirStatement| {
+        let HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(local),
+            value,
+        } = statement.kind
+        else {
+            panic!("expected a local definition, got {:?}", statement.kind);
+        };
+        (local, module.expressions.expression(value))
+    };
+    let (alias, original) = definition(alias_def);
+    assert_eq!(original.value_kind, ValueKind::Place);
+    assert!(matches!(original.kind, HirExpressionKind::Load(place)
+        if place.root == owner && place.projections.is_empty()));
+
+    let (pin, source) = definition(pin_def);
+    let HirExpressionKind::Load(place) = source.kind else {
+        panic!("the pin must acquire the authored place rather than snapshot its value");
+    };
+    assert_eq!(source.value_kind, ValueKind::Place);
+    assert_eq!(place.root, holder);
+    let [HirProjection::Field(inner), HirProjection::Field(item)] =
+        module.expressions.projections(place.projections)
+    else {
+        panic!("the pin must retain both field projections");
+    };
+    for (field, name) in [(*inner, "inner"), (*item, "item")] {
+        assert_eq!(
+            leaf_name(module.side_table.field_name_path(field).unwrap()),
+            name
+        );
+    }
+    assert!(
+        block
+            .locals
+            .iter()
+            .any(|local| local.id == pin && local.mutable)
+    );
+    assert_eq!(
+        module.side_table.local_origin_kind(pin),
+        Some(HirLocalOriginKind::User)
+    );
+    assert_eq!(
+        leaf_name(module.side_table.local_display_path(pin).unwrap()),
+        "holder.inner.item"
+    );
+
+    let (snapshot, copied) = definition(copy_def);
+    assert!(matches!(copied.kind, HirExpressionKind::Copy(place)
+        if place.root == list && place.projections.is_empty()));
+    assert_eq!(
+        module.side_table.local_origin_kind(snapshot),
+        Some(HirLocalOriginKind::CompilerTemp)
+    );
+    let (fresh, produced) = definition(fresh_def);
+    assert!(
+        matches!(produced.kind, HirExpressionKind::FixedScalar(value) if value == i32_value(7))
+    );
+    let origin = module
+        .side_table
+        .local_origin(fresh)
+        .expect("fresh argument origin");
+    assert_eq!(origin.kind, HirLocalOriginKind::CompilerFreshMutableArg);
+    assert_eq!(
+        origin.argument_index,
+        Some(3),
+        "origin indexes the ABI slot"
+    );
+
+    let call_result = |statement: &HirStatement, name: &str| {
+        let HirStatementKind::Call {
+            target, results, ..
+        } = &statement.kind
+        else {
+            panic!("expected call to {name}");
+        };
+        assert_eq!(*target, CallTarget::Local(function(name).id));
+        let [HirLocalDestination::Define(local)] = results.as_slice() else {
+            panic!("expected exactly one call result");
+        };
+        assert_eq!(
+            module.side_table.local_origin_kind(*local),
+            Some(HirLocalOriginKind::CompilerTemp)
+        );
+        *local
+    };
+    let marker = call_result(mark, "mark");
+    let tail = call_result(later, "later");
+    let HirStatementKind::Call { target, args, .. } = &dispatch.kind else {
+        panic!("expected dispatch after the operand preludes");
+    };
+    assert_eq!(*target, CallTarget::Local(function("consume").id));
+    let args = module.expressions.values(*args);
+    let expected = [
+        (marker, ValueKind::RValue),
+        (slot, ValueKind::Place),
+        (pin, ValueKind::Place),
+        (fresh, ValueKind::RValue),
+        (snapshot, ValueKind::RValue),
+        (tail, ValueKind::RValue),
+        (alias, ValueKind::Place),
+    ];
+    assert_eq!(args.len(), expected.len());
+    for (&argument, (root, kind)) in args.iter().zip(expected) {
+        let row = module.expressions.expression(argument);
+        assert_eq!(row.value_kind, kind);
+        assert!(matches!(row.kind, HirExpressionKind::Load(place)
+            if place.root == root && place.projections.is_empty()));
+    }
 }
 
 #[test]

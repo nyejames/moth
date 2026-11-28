@@ -1600,6 +1600,23 @@ impl BorrowState {
         changed
     }
 
+    /// Prove a narrowed state needs no retirement. Check the actual state after edge receives:
+    /// a predecessor mask alone says nothing about newly bound locals or unreachable graph rows.
+    pub(super) fn needs_visibility_narrowing(&self, visible: &RootSet) -> bool {
+        !visible.covers_all(self.locals.len())
+            && (!self.layer_is_empty()
+                || self.locals.iter().enumerate().any(|(index, local)| {
+                    if visible.contains(index) {
+                        local.value_roots.has_members_outside(visible)
+                            || local.derived_from_roots.has_members_outside(visible)
+                    } else {
+                        local.init != Init::No
+                            || !local.value_roots.is_empty()
+                            || !local.derived_from_roots.is_empty()
+                    }
+                }))
+    }
+
     /// Hide names outside the lexical mask, without invalidating retained storage.
     pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
         // WHY: the sweep is O(locals) and runs on every CFG edge. A mask that covers every local

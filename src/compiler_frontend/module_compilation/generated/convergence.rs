@@ -702,6 +702,9 @@ fn stabilize_final_call_metadata(
     base_projection: &CanonicalTypeProjectionContext<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<(), PreparedFailure> {
+    #[cfg(feature = "detailed_timers")]
+    let borrow_timing =
+        BorrowTiming::when_detailed(BorrowTimingOwner::BaseConverge, timing_context);
     if model.node_count() == 1 && graph.stable_inputs.is_empty() {
         return timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendBorrowConverge,
@@ -716,14 +719,13 @@ fn stabilize_final_call_metadata(
                 report,
                 None,
                 #[cfg(feature = "detailed_timers")]
-                Some(BorrowTiming {
-                    owner: BorrowTimingOwner::BaseConverge,
-                    context: timing_context,
-                }),
+                borrow_timing,
             )
         )
         .map(|_| ());
     }
+    #[cfg(feature = "detailed_timers")]
+    let generated_borrow_timing = borrow_timing.map(BorrowTiming::for_generated_recheck);
     let mut roots: Vec<_> = report
         .metadata
         .work_functions(hir)
@@ -784,10 +786,7 @@ fn stabilize_final_call_metadata(
                             report,
                             Some(scope),
                             #[cfg(feature = "detailed_timers")]
-                            Some(BorrowTiming {
-                                owner: BorrowTimingOwner::BaseConverge,
-                                context: timing_context,
-                            }),
+                            borrow_timing,
                         )
                     )?,
                     ConvergenceNode::Generated(identity) => {
@@ -811,10 +810,7 @@ fn stabilize_final_call_metadata(
                                         &mut executable.borrow_analysis,
                                         Some(scope),
                                         #[cfg(feature = "detailed_timers")]
-                                        Some(BorrowTiming {
-                                            owner: BorrowTimingOwner::GeneratedRecheck,
-                                            context: timing_context,
-                                        }),
+                                        generated_borrow_timing,
                                     )
                                 },
                             )
@@ -1036,6 +1032,11 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     base_projection: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<BorrowCheckReport, PreparedFailure> {
+    #[cfg(feature = "detailed_timers")]
+    let borrow_timing =
+        BorrowTiming::when_detailed(BorrowTimingOwner::BaseConverge, timing_context);
+    #[cfg(feature = "detailed_timers")]
+    let generated_borrow_timing = borrow_timing.map(BorrowTiming::for_generated_recheck);
     let projection_registry = std::sync::Arc::clone(compiler.external_package_registry);
     let base_public_origins = hir_module
         .function_ids_by_origin
@@ -1240,10 +1241,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         base_projection,
                         true,
                         #[cfg(feature = "detailed_timers")]
-                        Some(BorrowTiming {
-                            owner: BorrowTimingOwner::BaseConverge,
-                            context: timing_context,
-                        }),
+                        borrow_timing,
                     )
                 )?;
                 let Some(previous_summaries) = previous_summaries else {
@@ -1304,10 +1302,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                                 projection,
                                 false,
                                 #[cfg(feature = "detailed_timers")]
-                                Some(BorrowTiming {
-                                    owner: BorrowTimingOwner::GeneratedRecheck,
-                                    context: timing_context,
-                                }),
+                                generated_borrow_timing,
                             ),
                         )
                     )?;
