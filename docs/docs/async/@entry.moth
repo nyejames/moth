@@ -71,6 +71,8 @@ listed = sync_navigation(sidebar_id)!
         reader, writer Channel of String = Channel(capacity = 32)
     ]
 
+    The capacity is a non-negative compile-time `I32`. Zero, including the omitted default, creates an unbuffered channel.
+
     This channel can queue up to 32 strings. A full queue makes a sender wait. An empty, open queue makes a reader wait. Several readers and writers can share the channel. Each accepted message reaches one reader and queued messages come out in order.
 
     Dispatch evaluates the written arguments once in source order. If preparation fails, the child never starts. A child can return a built-in error slot. When a child fails, its owning invocation cancels its other children, waits for cleanup and delivers the failure. Handle it at the owning call. If the parent fails first, it cancels and joins its children before delivering its own error.

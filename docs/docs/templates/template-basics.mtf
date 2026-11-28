@@ -1,6 +1,6 @@
 Square brackets construct text or sequences and can compose contributions
-through slots, wrappers and control flow. A non-empty text body establishes
-String. A concrete receiver or formatter can establish the type before the
+through slots, wrappers and control flow. Non-whitespace raw body text establishes
+String evidence. Formatting whitespace alone supplies no type evidence. A concrete receiver or formatter can establish the type before the
 compiler checks a contribution.
 
 [codeblock, $code "moth":
@@ -35,7 +35,9 @@ ordinary loop header. Template control flow excludes `else`, `else if`,
 
 In a String body, authored text and nested contributions produce text. In a
 sequence body, write child constructions. Formatting whitespace between them
-contributes nothing. A raw word in a sequence body is an error.
+contributes nothing. A typed sequence body may contain no children and produce
+zero elements under the ordinary empty-value rules. A raw word in a sequence
+body is an error.
 
 Authored `.moth` templates must close with a closing square bracket.
 
@@ -100,8 +102,9 @@ The colon by itself supplies neither a receiving type nor a conversion.
 ]
 
 A String receiver formats 42 as text. A sequence receiver stores it as one
-byte. A nested head preserves the inner collection. For splicing, empties
-and the full inference rules, see @../collections/#collection-literals (Collection literals).
+byte. A direct nested plain ordered head preserves the inner collection.
+A child that independently constructs text or a map contributes its completed
+value. For splicing, empties and the full inference rules, see @../collections/#collection-literals (Collection literals).
 
 Runtime fixed binary-float interpolation and compile-time folding use the same
 Moth formatter.

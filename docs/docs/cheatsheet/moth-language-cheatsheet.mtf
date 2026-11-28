@@ -809,17 +809,19 @@ A fixed type names both the capacity and element type. The compiler needs a soun
     second = [3, 4]
     flat = [first, second]                    -- four integers
     rows = [[first], [second]]                -- two fresh rows
+    words [String] = [[:Hello], [:World]]      -- two Strings
+    message = [[:Hello], [:World]]             -- "HelloWorld"
     blank String = []
     one_empty_row [[I32]] = [[]]
 ]
 
 A receiver, compatible wrapper or type-specific directive can establish the construction type. Without stronger evidence, an all-String head joins text and a homogeneous non-String head builds a sequence. A direct keyed entry establishes a map. A mixed head such as `["[1, \"log\"]"]` needs compatible receiving evidence. An existing typed value keeps its type.
 
-In concrete code, a compatible sequence splices its elements once in order. A direct nested bracket in the head constructs a fresh row, whose reference-valued elements keep their normal sharing. To store an existing row with its identity, insert it with `push`. Contributions evaluate once in written order and capture their value where written.
+In concrete code, a compatible sequence splices its elements once in order. A direct nested plain ordered head constructs a fresh row, even if its leaves are Strings. A child with independently established String or map output contributes its completed value instead. For example, `words` below stores two Strings rather than two rows. To store an existing row with its identity, insert it with `push`. Contributions evaluate once in written order and capture their value where written.
 
 A generic body fixes each contribution's role before specialisation. In a collection of T, a parameter declared as T stores one element even if T later becomes a collection. A parameter declared as a collection of T splices its elements.
 
-Empty constructions need type evidence. For example, a typed binding can receive an empty String, sequence or nested row. A non-empty sibling row can supply the element type of an empty row in either order. An empty map uses its own marker and needs key and value type evidence.
+Empty and whitespace-only constructions need type evidence. A typed sequence body can contain no children and produce zero elements. String whitespace follows the ordinary formatter rules. A typed binding can receive an empty String, sequence or nested row. A non-empty sibling row can supply the element type of an empty row in either order. An empty map uses its own marker and needs key and value type evidence.
 
 `get` returns a shared element. `set` replaces, `push` appends, `remove` returns and shifts elements and `clear` empties the collection.
 Invalid indexes fail without changing contents. Fixed `push` fails when full. Growable `push` only fails fatally on allocation exhaustion.
@@ -897,7 +899,7 @@ Some format templates, while others mark declarations or declare build inputs (s
 
 `$md` formats Markdown. `$raw` preserves text and whitespace. `$note` discards template comments only as a child of a template body. `$doc` and `$todo` annotate source declarations or statements.
 The compiler provides `$html`, `$css`, `$escape_html` and `$code` (optionally `$code "language"`) under every builder. `$code` highlights literal code.
-Formatters apply to their own templates, and incompatible formatters can't share a head.
+Formatters require String output and apply to their own templates. Structural template directives accept String or sequence construction under their usual placement rules. Incompatible formatters can't share a head.
 
 ### Slots and wrappers
 

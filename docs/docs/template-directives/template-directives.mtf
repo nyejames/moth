@@ -18,6 +18,19 @@ Here `$in summary` chooses the destination and `$md` formats the content sent
 there. A second formatter or a second `$in` in the same head would be an
 error. To fill another slot, write another insert.
 
+### Construction requirements
+
+The text formatters `$md`, `$html`, `$css`, `$escape_html`, `$code` and
+`$raw` require String output and establish String type evidence. `$slot`,
+`$in`, `$supplied`, `$before`, `$after` and `$fresh` accept String or sequence
+construction. They restrict the allowed types without selecting String or an
+element type by themselves. A conflicting receiving type is an error. Maps
+accept neither template bodies nor structural template directives.
+
+Construction requirements do not replace operand or placement rules. A source
+directive can require a particular kind of declaration or statement rather
+than a particular value type.
+
 ### Comments and source annotations
 
 `$note` takes no operand and requires a balanced body. It can appear only as

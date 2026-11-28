@@ -8,5 +8,7 @@ Square brackets can construct an ordered collection or a String. Read the receiv
 ]
 
 `scores` holds three integers. `title` joins two Strings into `"Build log"`,
-while `tags` keeps two separate Strings. Give an empty construction a type.
+while `tags` keeps two separate Strings. An empty construction needs type
+evidence, even when its body contains whitespace. With a known collection
+type, an empty body contributes zero elements.
 Read or update an element with methods such as `get` and `set`. Indices start at zero.

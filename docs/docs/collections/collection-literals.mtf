@@ -35,9 +35,31 @@ together in either order. Already typed items keep their types.
 ]
 
 `flat` contains five integers. A sequence contributes its elements in order
-and a scalar contributes one element. A direct nested head preserves a
+and a scalar contributes one element. A direct nested plain ordered head preserves a
 dimension. `rows` contains two fresh rows, `one_row` contains one row of four
 integers and `tags` contains rows of separate Strings.
+
+A plain ordered head has no body, keyed entry or independent structural
+contract. Its directly nested use creates a fresh row even when every leaf
+is String. Grouping parentheses do not change that role. A String receiver
+cannot turn such a row into text, and incompatible rows and scalars cannot
+share a collection.
+
+A child with independently established String or map output contributes its
+completed value instead. String formatters, non-whitespace raw body text and
+String-producing wrappers establish String evidence. A keyed child constructs
+a map.
+
+[codeblock, $code "moth":
+    words [String] = [[:Hello], [:World]]
+    message = [[:Hello], [:World]]
+    scores = [["Priya" = 10], ["Rob" = 8]]
+]
+
+`words` contains two Strings. `message` joins them into `"HelloWorld"`.
+`scores` contains two maps, not two rows of map entries. A bracket inside a
+call argument, directive operand or routed slot argument follows that
+operand's receiving contract instead of establishing an outer dimension.
 
 Splicing reads membership exactly once at the written position. New membership
 is independent, while reference-valued elements keep their usual sharing.
@@ -51,13 +73,18 @@ gets no partial result. Earlier explicit effects still stand.
 [codeblock, $code "moth":
     title String = []
     labels [String] = []
+    blank [I32] = [:   ]
     rows [[I32]] = [[]]
     other_rows = [[], [1, 2]]
     scores [String = I32] = [=]
 ]
 
-An empty head or empty colon body needs type evidence. A known String receiver
-produces the empty String. A collection receiver produces zero items.
+An empty construction or a body containing only layout whitespace needs type
+evidence. Neither a colon nor formatting whitespace establishes String. An
+empty construction with a String receiver produces the empty String. A String
+body containing whitespace follows its ordinary formatting rules. A typed
+sequence body with no children produces zero items, subject to the ordinary
+empty-value rules for its collection type.
 The first row of `other_rows` takes its element type from the second row.
 An empty map requires `["[=]"]` and evidence for both types. A map
 receiver rejects `["[]"]`. An optional receiver can wrap a completed
