@@ -9,7 +9,8 @@
         "moth"
       ],
       "highlights": "grammars/moth/queries/highlights.scm",
-      "injections": "grammars/moth/queries/injections.scm"
+      "injections": "grammars/moth/queries/injections.scm",
+      "injection-regex": "^moth$"
     },
     {
       "name": "moth_template",

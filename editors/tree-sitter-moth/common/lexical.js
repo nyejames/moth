@@ -2,9 +2,9 @@
 const number = /-?[0-9](_?[0-9])*(\.[0-9](_?[0-9])*)?(e[+-]?[0-9](_?[0-9])*)?/;
 const identifier = /[_\p{Alphabetic}][_\p{Alphabetic}\p{N}]*/u;
 const mothString = /"([^"\\\r\n]|\\["\\nrt])*"/;
-const mothChar = /'([^'\\\r\n]|\\['\\nrt])'/;
+const mothChar = /'([^'\\\r\n]|\\['\\nrt])'/u;
 const monString = /"([^"\\]|\\(["\\nrt]|u\{[0-9a-fA-F]{1,6}\}))*"/;
-const monChar = /'([^'\\]|\\(['\\nrt]|u\{[0-9a-fA-F]{1,6}\}))'/;
+const monChar = /'([^'\\]|\\(['\\nrt]|u\{[0-9a-fA-F]{1,6}\}))'/u;
 
 function lexicalRules(mon = false) {
     return {

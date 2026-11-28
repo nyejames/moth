@@ -15,11 +15,12 @@ From this directory, with Node.js LTS, npm, a native C compiler and network acce
 
 ```sh
 npm install
+npm run test:lexical
 npm run generate
 npm test
 ```
 
-The CLI is pinned to 0.25.10 and generation targets ABI 14. The initial npm lockfile and generated C/metadata must be produced by a real successful install/generate run and committed after review. Use `npm ci` thereafter. Do not handwrite generated artifacts. Validate grammar metadata discovery from each nested root. Native/Wasm equivalence, host versions and package layout remain prototype gates.
+The dependency-free lexical tests exercise the authored JavaScript regex spelling rules, not the generated parser or codec. The CLI is pinned to 0.25.10 and generation targets ABI 14. The initial npm lockfile and generated C/metadata must be produced by a real successful install/generate run and committed after review. Use `npm ci` thereafter. Do not handwrite generated artifacts. Validate grammar metadata discovery from each nested root. Native/Wasm equivalence, host versions and package layout remain prototype gates.
 
 This slice includes shared literal/record syntax, bracket heads, raw bodies, basic formatter heads, balanced notes and code listings. It deliberately omits full statements, precedence, qualified constructors, typed containers, slot/control grammar, comment/spacing edge cases, contextual names and recovery rules. Corpus trees are candidate assertions, not recorded execution output. Add malformed source cases after verifying the parser's recovery shapes. Query experiments cover HTML/CSS chunks and a literal Moth code listing. They do not group fragments per parent body, supply full guest inventories or implement Markdown. Full Moth Markdown and documentation Markdown highlighting require the next prototype.
 

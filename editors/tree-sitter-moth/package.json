@@ -8,7 +8,8 @@
   },
   "scripts": {
     "generate": "node scripts/grammar.cjs generate",
-    "test": "node scripts/grammar.cjs test"
+    "test": "node scripts/grammar.cjs test",
+    "test:lexical": "node --test tests/lexical.test.cjs"
   },
   "devDependencies": {
     "tree-sitter-cli": "0.25.10"
