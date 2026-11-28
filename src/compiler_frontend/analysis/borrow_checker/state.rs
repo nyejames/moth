@@ -184,8 +184,62 @@ impl AddressSet {
         self.definite
     }
 
+    pub(super) fn restrict_cells(
+        &mut self,
+        cells: impl IntoIterator<Item = CellId>,
+        complete: bool,
+        state: &BorrowState,
+    ) {
+        self.cells = SmallSet::from_iter(cells);
+        self.routes
+            .retain(|(target, _)| self.cells.as_slice().contains(target));
+        self.coverage = if complete {
+            Coverage::Complete
+        } else {
+            Coverage::Partial
+        };
+        self.all_candidates_known = complete;
+        self.definite = match self.cells.as_slice() {
+            [cell @ CellId::Slot(wrapper)] if complete && wrapper.age == WrapperAge::Current => {
+                Some(*cell)
+            }
+            [cell @ CellId::Projected(holder, FieldKey::Field(_) | FieldKey::Payload { .. })]
+                if complete && state.alloc_singular(*holder) =>
+            {
+                Some(*cell)
+            }
+            _ => None,
+        };
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn add_retained_dependencies(&mut self, dependencies: &[ReceiverDependency]) {
+        if dependencies.is_empty() {
+            return;
+        }
+        for &cell in self.cells.as_slice() {
+            match self
+                .routes
+                .binary_search_by_key(&cell, |(candidate, _)| *candidate)
+            {
+                Ok(index) => {
+                    let current = &mut self.routes[index].1;
+                    current.extend_from_slice(dependencies);
+                    current.sort_unstable();
+                    current.dedup();
+                }
+                Err(index) => self.routes.insert(index, (cell, dependencies.to_vec())),
+            }
+        }
+    }
+
     pub(super) fn retained_routes(&self) -> &[(CellId, DependencySet)] {
         &self.routes
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn into_retained_routes(self) -> CapturedRoutes {
+        self.routes
     }
 
     pub(super) fn captures_current(&self, local: usize, names: impl Fn(AllocId) -> bool) -> bool {
@@ -583,6 +637,48 @@ impl PublicationCarriers {
         );
     }
 
+    #[allow(dead_code)]
+    pub(super) fn append(&mut self, receipt: Self) {
+        fn append_rows(
+            target: &mut Vec<(CellId, ValueAlternatives)>,
+            source: Vec<(CellId, ValueAlternatives)>,
+        ) {
+            if target.is_empty() {
+                *target = source;
+                return;
+            }
+            for (cell, values) in source {
+                match target.binary_search_by_key(&cell, |row| row.0) {
+                    Ok(index) => {
+                        let existing = &mut target[index].1;
+                        existing.extend(values);
+                        existing.sort_unstable();
+                        existing.dedup();
+                    }
+                    Err(index) => target.insert(index, (cell, values)),
+                }
+            }
+        }
+        append_rows(&mut self.definite_old, receipt.definite_old);
+        append_rows(&mut self.introduced, receipt.introduced);
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn intersect(&mut self, other: &Self) {
+        let intersect = |rows: &mut Vec<(CellId, ValueAlternatives)>,
+                         other: &[(CellId, ValueAlternatives)]| {
+            rows.retain_mut(|(cell, values)| {
+                let Ok(index) = other.binary_search_by_key(cell, |(cell, _)| *cell) else {
+                    return false;
+                };
+                values.retain(|value| other[index].1.binary_search(value).is_ok());
+                !values.is_empty()
+            });
+        };
+        intersect(&mut self.definite_old, &other.definite_old);
+        intersect(&mut self.introduced, &other.introduced);
+    }
+
     fn add<'a>(
         rows: &mut Vec<(CellId, ValueAlternatives)>,
         cell: CellId,
@@ -750,6 +846,43 @@ impl TypedStore {
     pub(super) fn captures_slot(&self, local: usize) -> bool {
         matches!(self, Self::Write(write)
             if write.addresses.cells().contains(&CellId::Slot(WrapperId::current(local))))
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn without_kill(mut self) -> Self {
+        self.weaken();
+        self
+    }
+
+    pub(super) fn weaken(&mut self) {
+        if let Self::Write(write) = self {
+            write.replace = Replacement::May;
+            write.distinct_occurrence = false;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn captured_cells(&self) -> Option<&[CellId]> {
+        match self {
+            Self::Write(write) => Some(write.addresses.cells()),
+            Self::EraseFamily { .. } => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn captured_value(&self) -> Option<&CapturedValue> {
+        match self {
+            Self::Write(write) => Some(&write.value),
+            Self::EraseFamily { .. } => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn captured_address(&self) -> Option<&AddressSet> {
+        match self {
+            Self::Write(write) => Some(&write.addresses),
+            Self::EraseFamily { .. } => None,
+        }
     }
 
     pub(super) fn captures_current(&self, local: usize, names: &impl Fn(AllocId) -> bool) -> bool {

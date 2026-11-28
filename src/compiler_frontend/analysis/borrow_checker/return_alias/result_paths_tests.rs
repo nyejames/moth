@@ -1152,6 +1152,183 @@ caught |rows ~{{I32}}, child {I32}, ok Bool| -> I32:
 
 #[test]
 fn captured_option_payload_and_new_stored_subtree_keep_distinct_store_coordinates() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{
+        BorrowState, CapturedValue, Coverage, FieldKey, StoredValue, UNKNOWN_ORDER_KEY,
+    };
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+        EntryCapture, ExplicitMatchInput, match_typed_lane,
+    };
+    use crate::compiler_frontend::analysis::borrow_checker::{
+        engine::apply_captured_call_batch,
+        transfer::{CapturedCallBatch, CapturedDestination, EdgeTransferView, OperationView},
+    };
+    use crate::compiler_frontend::canonical_type_identity::{
+        CanonicalBuiltinType, CanonicalTypeIdentity,
+    };
+    use crate::compiler_frontend::datatypes::ids::TypeId;
+    use crate::compiler_frontend::public_call_summary::typed::{
+        CellPort, CellPost, Component, ExportPort, Lane, ObjectRef, PathAccess, PortId, Post,
+        Product, StorageKind, SupportId, ValueRef, ValueSource,
+    };
+
+    let mut state = BorrowState::new_uninitialized(6);
+    let [
+        option,
+        original,
+        previous_items,
+        new_items,
+        _result_slot,
+        original_items,
+    ] = std::array::from_fn(|index| {
+        state.initialize_parameter(index);
+        state.local_alloc_ids(index).0[0]
+    });
+    let replacement = state.call_site_id(
+        5,
+        false,
+        0,
+        false,
+        crate::compiler_frontend::hir::ids::BlockId(0),
+        &Default::default(),
+    );
+    let payload = CallField::Payload {
+        variant: 1,
+        field: 0,
+    };
+    let option_key = FieldKey::Payload {
+        variant: 1,
+        field: 0,
+    };
+    let items_key = FieldKey::Field(0);
+    let stored = |id| StoredValue { id, writable: true };
+    for (holder, key, value) in [
+        (option, option_key, original),
+        (original, items_key, original_items),
+        (replacement, items_key, original_items),
+    ] {
+        state.store_alloc_field(&[holder], key, &[stored(value)], true);
+    }
+    let mut old_payload = state.resolve_place_path(0, &[true; 6], [option_key]);
+    state.load_place_content(&mut old_payload, &[true; 6], false);
+    let captured_original = old_payload.content.unwrap().ids[0];
+    assert_eq!(captured_original, original);
+
+    let returned = ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }));
+    let value = |source| ValueRef {
+        source: ValueSource::Allocation(source),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    };
+    let entry = |port| ObjectRef::Entry(PortId(port));
+    let replace = |holder, field, source| {
+        (
+            CellPort::Edge(holder, field),
+            CellPost::Replace(vec![Some(value(source))]),
+        )
+    };
+    let post = Post {
+        cells: vec![
+            replace(entry(0), payload, returned.clone()),
+            replace(entry(1), CallField::Field(0), entry(2)),
+            replace(returned.clone(), CallField::Field(0), entry(3)),
+        ],
+        results: vec![(0, value(returned.clone()))],
+        retained: vec![(
+            returned.clone(),
+            StorageKind::Allocation,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range),
+        )],
+        ..Default::default()
+    };
+    let lane = Lane::Returning(
+        Product::new(vec![Component {
+            support: SupportId(0),
+            alternatives: vec![post],
+        }])
+        .unwrap(),
+    );
+    let capture = |id| EntryCapture {
+        ty: Some(TypeId(0)),
+        writable: Some(true),
+        value: CapturedValue::new(vec![stored(id)], Vec::new()),
+        allocation_coverage: Some(Coverage::Complete),
+        ..Default::default()
+    };
+    let mut matched = match_typed_lane(
+        &ExplicitMatchInput {
+            state: &state,
+            entries: &[
+                capture(option),
+                capture(captured_original),
+                capture(previous_items),
+                capture(new_items),
+            ],
+            retained: &[(returned, capture(replacement))],
+            uncertainty: &[],
+        },
+        &lane,
+    )
+    .unwrap();
+    let post = matched
+        .pop()
+        .unwrap()
+        .components
+        .pop()
+        .unwrap()
+        .alternatives
+        .pop()
+        .unwrap();
+    let operations = OperationView {
+        local_ids: &[
+            crate::compiler_frontend::hir::ids::LocalId(0),
+            crate::compiler_frontend::hir::ids::LocalId(1),
+            crate::compiler_frontend::hir::ids::LocalId(2),
+            crate::compiler_frontend::hir::ids::LocalId(3),
+            crate::compiler_frontend::hir::ids::LocalId(4),
+            crate::compiler_frontend::hir::ids::LocalId(5),
+        ],
+        local_indices: &Default::default(),
+        local_mutable: &[true; 6],
+        local_has_in_place_mutation_surface: &[true; 6],
+        block_successors: &Default::default(),
+        local_first_write_order: &[0; 6],
+        acyclic_entry_block: None,
+    };
+    apply_captured_call_batch(
+        EdgeTransferView {
+            operations,
+            observations: true,
+        },
+        CapturedCallBatch {
+            post,
+            destinations: vec![CapturedDestination::Define(4)],
+            member_reads: Default::default(),
+            checkpoints: Vec::new(),
+            detachment: None,
+        },
+        [],
+        UNKNOWN_ORDER_KEY,
+        &mut state,
+    )
+    .unwrap();
+    assert_eq!(state.local_alloc_ids(4).0, [replacement]);
+    let read = |local, path: &[FieldKey]| {
+        let mut place = state.resolve_place_path(local, &[true; 6], path.iter().copied());
+        state.load_place_content(&mut place, &[true; 6], false);
+        place.content.unwrap().ids
+    };
+    assert_eq!(read(0, &[option_key, items_key]), [new_items]);
+    assert_eq!(read(1, &[items_key]), [previous_items]);
+}
+
+#[test]
+fn captured_option_payload_and_replacement_keep_distinct_legacy_export_coordinates() {
     use super::Lane;
     use super::graph::{Cell, Graph, Origin, Owner, Site, Spec};
     use crate::compiler_frontend::datatypes::ids::TypeId;

@@ -12,6 +12,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{BorrowCheckError, Borro
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalReturnAlias, ExternalReturnSlot,
 };
+use crate::compiler_frontend::public_call_summary::typed::{Lane, TypedCallAllocationFacts};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess, PublicCallParameterSummary,
     PublicCallTransferEffect,
@@ -40,6 +41,39 @@ pub(in super::super) enum CallReturns<'a> {
     Summary(&'a FunctionReturnAliasSummary),
     External(&'a [ExternalReturnSlot]),
     Fresh,
+}
+
+/// The executable prefix is observed even when there is no continuation.
+/// Pending is not a settled proof of divergence.
+#[allow(dead_code)]
+pub(super) enum TypedContinuation<'a> {
+    Deferred,
+    NoContinuation,
+    Match(&'a Lane),
+}
+
+#[allow(dead_code)]
+pub(super) fn classify_typed_continuation<'a>(
+    facts: Option<&'a TypedCallAllocationFacts>,
+    terminal: bool,
+    error: bool,
+    mandatory: bool,
+    diagnostics: &BorrowDiagnostics<'_>,
+) -> Result<TypedContinuation<'a>, BorrowCheckError> {
+    let Some(facts) = facts else {
+        return if mandatory {
+            Err(diagnostics
+                .internal_error("Unsolved typed call reached mandatory borrow validation"))
+        } else {
+            Ok(TypedContinuation::Deferred)
+        };
+    };
+    let lane = facts.lane(error);
+    Ok(if terminal || !lane.can_return() {
+        TypedContinuation::NoContinuation
+    } else {
+        TypedContinuation::Match(lane)
+    })
 }
 
 /// Per-argument effect contract consumed by transfer.

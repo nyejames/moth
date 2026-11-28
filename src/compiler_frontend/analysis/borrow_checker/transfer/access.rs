@@ -38,6 +38,7 @@ pub(in super::super) mod conflicts;
 mod layer;
 mod move_decision;
 mod statement;
+pub(in crate::compiler_frontend::analysis::borrow_checker) use statement::call_results as typed_call;
 mod terminator;
 #[cfg(test)]
 mod tests;

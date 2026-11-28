@@ -22,10 +22,107 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::collect_structural_blocks;
+use crate::compiler_frontend::public_call_summary::typed::{
+    CellPort, Coverage, Footprint, Lane, ObjectRef, OutputPort, Predicate,
+};
 use crate::compiler_frontend::public_call_summary::{
     CallAllocationSource, CallField, CallLaneSummary, CallOutputPath, FunctionReturnAliasSummary,
     PublicCallParameterAccess,
 };
+
+#[allow(dead_code)]
+pub(super) fn typed_lane_has_opaque_stores(
+    lane: &Lane,
+    observe: impl FnMut(Predicate) -> Result<Option<bool>, InfrastructureFailure>,
+    mut represents_cell: impl FnMut(&CellPort) -> bool,
+) -> Result<bool, InfrastructureFailure> {
+    let caller_cell = |cell: &CellPort| match cell {
+        CellPort::Terminal(_) => true,
+        CellPort::Slot(wrapper) | CellPort::Edge(wrapper, _) => {
+            matches!(wrapper, ObjectRef::Entry(_))
+        }
+    };
+    let mut refused = false;
+    lane.visit_compatible(observe, |_, product| {
+        refused |= product
+            .components()
+            .iter()
+            .flat_map(|component| &component.alternatives)
+            .any(|post| {
+                post.bindings
+                    .iter()
+                    .any(|(wrapper, _)| matches!(wrapper, ObjectRef::Entry(_)))
+                    || post
+                        .cells
+                        .iter()
+                        .any(|(cell, _)| caller_cell(cell) && !represents_cell(cell))
+                    || post
+                        .families
+                        .iter()
+                        .any(|(family, _)| matches!(family.receiver, ObjectRef::Entry(_)))
+                    || match &post.coverage {
+                        Coverage::Complete => false,
+                        Coverage::Unresolved(Footprint::WritableReach(_)) => true,
+                        Coverage::Unresolved(Footprint::Locations(locations)) => {
+                            locations.iter().any(|location| match location {
+                                OutputPort::Result(_) => false,
+                                OutputPort::Binding(wrapper) => {
+                                    matches!(wrapper, ObjectRef::Entry(_))
+                                }
+                                OutputPort::Cell(cell) => caller_cell(cell),
+                                OutputPort::Family(family) => {
+                                    matches!(family.receiver, ObjectRef::Entry(_))
+                                }
+                            })
+                        }
+                    }
+            });
+        Ok(())
+    })?;
+    Ok(refused)
+}
+
+#[cfg(test)]
+#[test]
+fn typed_family_store_refusal_is_limited_to_selected_guard_and_outcome() {
+    use crate::compiler_frontend::public_call_summary::typed::{
+        Component, FamilyPort, FamilyPost, Guard, PortId, Post, Product, SupportId,
+        TypedCallAllocationFacts,
+    };
+    let receiver = PortId(0);
+    let writable = Predicate::Writable(receiver);
+    let product = Product::new(vec![Component {
+        support: SupportId(0),
+        alternatives: vec![Post {
+            families: vec![(
+                FamilyPort {
+                    receiver: ObjectRef::Entry(receiver),
+                    selector: CallField::Elem,
+                },
+                FamilyPost::ReplaceAll(Vec::new()),
+            )],
+            ..Default::default()
+        }],
+    }])
+    .unwrap();
+    let returning = Lane::Returning(Product::default());
+    let facts = TypedCallAllocationFacts {
+        success: Lane::guarded(Guard::new([(writable, true)]).unwrap(), product).union(&returning),
+        error: returning,
+        ..Default::default()
+    };
+    for (error, writable, expected) in [
+        (false, Some(true), true),
+        (false, Some(false), false),
+        (false, None, true),
+        (true, Some(true), false),
+    ] {
+        assert_eq!(
+            typed_lane_has_opaque_stores(facts.lane(error), |_| Ok(writable), |_| true).unwrap(),
+            expected
+        );
+    }
+}
 
 impl<'a> FunctionProblemBuilder<'a> {
     pub(super) fn call_effect(

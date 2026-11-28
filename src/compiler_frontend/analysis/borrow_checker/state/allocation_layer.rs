@@ -11,10 +11,10 @@
 
 use super::{
     AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, BoundaryBinding,
-    CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, FamilyMember, Init, LocalState,
-    OWN_SLOT, OrderKey, Origin, PublicationCarriers, Replacement, RootSet, SmallSet, StoreReceipt,
-    TypedStore, TypedWrite, ValueAlt, ValueAlternatives, ValueKind, WrapperAge, WrapperId,
-    remap_invoke_capture, remap_value_alternatives,
+    CapturedRoutes, CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, FamilyMember,
+    Init, LocalState, OWN_SLOT, OrderKey, Origin, PublicationCarriers, Replacement, RootSet,
+    SmallSet, StoreReceipt, TypedStore, TypedWrite, ValueAlt, ValueAlternatives, ValueKind,
+    WrapperAge, WrapperId, remap_invoke_capture, remap_value_alternatives,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::BlockId;
@@ -2378,6 +2378,13 @@ impl PlaceResolution {
             .then_some(owner)
     }
 
+    pub(in super::super) fn captured_origin(&self) -> Option<Origin> {
+        match self.projected_origins.as_slice() {
+            [origin] if self.address.definite().is_some() => Some(*origin),
+            _ => None,
+        }
+    }
+
     pub(in super::super) fn projected_holder_route(&self, actor: usize) -> Option<bool> {
         let mut matches = self
             .projected_origins
@@ -2389,7 +2396,7 @@ impl PlaceResolution {
 }
 
 /// One allocation stored into a holder field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in super::super) struct StoredValue {
     pub id: AllocId,
     pub writable: bool,
@@ -2648,6 +2655,57 @@ impl BorrowState {
         if let Some(row) = self.row_from_spec(local, spec) {
             self.put_binding_row(row);
         }
+    }
+
+    #[allow(dead_code)]
+    pub(in super::super) fn publish_captured_binding(
+        &mut self,
+        wrapper: WrapperId,
+        alts: SmallSet<BindingAlt>,
+        coverage: Coverage,
+        routes: CapturedRoutes,
+        replace: Replacement,
+        route_roots: Option<RootSet>,
+    ) -> PublicationCarriers {
+        let mut receipt = PublicationCarriers::default();
+        let cell = CellId::Slot(wrapper);
+        let exact = replace == Replacement::Must && wrapper.age == WrapperAge::Current;
+        let mut row = BindingRow {
+            wrapper,
+            alts,
+            coverage,
+            route_roots: route_roots.unwrap_or_else(|| RootSet::empty(self.locals.len())),
+            slot_roots: None,
+            routes,
+        };
+        if !exact {
+            if let Some(old) = self.binding_row(wrapper) {
+                row.union_row_alts(old);
+                row.route_roots.union_with(&old.route_roots);
+                row.slot_roots.clone_from(&old.slot_roots);
+                if old.coverage == Coverage::Partial {
+                    row.coverage = Coverage::Partial;
+                }
+            } else {
+                row.union_alts(Self::implicit_binding_alternatives(
+                    self.current_wrapper_init(wrapper),
+                ));
+            }
+        } else if !row.has_slot() {
+            receipt.record(cell, self.layer.contents(cell), cell, &[], true);
+            self.clear_slot_payload(wrapper);
+        }
+        self.invalidate_observations(&[cell], coverage);
+        if wrapper.age == WrapperAge::Current && wrapper.local < self.locals.len() {
+            let mut roots = row.route_roots.clone();
+            if !exact || row.has_slot() {
+                roots.union_with(&self.locals[wrapper.local].value_roots);
+            }
+            self.set_local_value_roots(wrapper.local, roots);
+            self.set_local_derivation(wrapper.local, RootSet::empty(self.locals.len()));
+        }
+        self.put_binding_row(row);
+        receipt
     }
 
     pub(in super::super) fn transition_slot_to_alias(
@@ -2911,8 +2969,16 @@ impl BorrowState {
         roots
     }
 
-    fn projected_cell_is_exact(&self, holder: AllocId, key: FieldKey) -> bool {
+    pub(in super::super) fn projected_cell_is_exact(&self, holder: AllocId, key: FieldKey) -> bool {
         matches!(key, FieldKey::Field(_) | FieldKey::Payload { .. }) && self.alloc_singular(holder)
+    }
+
+    pub(in super::super) fn has_captured_projection(&self, holder: AllocId, key: FieldKey) -> bool {
+        !self.layer.edges.group(holder, key).is_empty()
+            || !self
+                .layer
+                .contents(CellId::Projected(holder, key))
+                .is_empty()
     }
 
     fn slot_roots(&self, wrapper: WrapperId) -> &RootSet {
@@ -3753,6 +3819,14 @@ impl BorrowState {
                 alternatives: observed_alternatives(entry, addresses),
             };
         }
+        self.resolve_captured_allocs(addresses, Some(local))
+    }
+
+    pub(in super::super) fn resolve_captured_allocs(
+        &self,
+        addresses: &AddressSet,
+        actor: Option<usize>,
+    ) -> ResolvedPlace {
         let mut result = ResolvedPlace {
             ids: Vec::new(),
             views: Vec::new(),
@@ -3852,7 +3926,10 @@ impl BorrowState {
             }
             result.may_be_absent |= value.may_be_absent;
         }
-        if addresses.may_coverage() == Coverage::Partial && self.locals[local].init != Init::No {
+        if addresses.may_coverage() == Coverage::Partial
+            && let Some(local) = actor
+            && self.locals[local].init != Init::No
+        {
             let mut table = self.layer.table.borrow_mut();
             result.ids.extend(
                 self.locals[local]
@@ -5420,8 +5497,22 @@ impl BorrowState {
                 }
                 StoreReceipt::default()
             }
-            TypedStore::Write(write) => self.publish_write(write, order, retires),
+            TypedStore::Write(write) => self.publish_write(write, order, retires, None),
         }
+    }
+
+    #[allow(dead_code)]
+    pub(in super::super) fn publish_captured_store(
+        &mut self,
+        operation: &TypedStore,
+        order: OrderKey,
+    ) -> PublicationCarriers {
+        let mut carriers = PublicationCarriers::default();
+        let TypedStore::Write(write) = operation else {
+            unreachable!("whole-family effects are published with their final members");
+        };
+        self.publish_write(write, order, None, Some(&mut carriers));
+        carriers
     }
 
     fn publish_write(
@@ -5429,6 +5520,7 @@ impl BorrowState {
         write: &TypedWrite,
         order: OrderKey,
         retires: Option<&dyn Fn(usize) -> bool>,
+        mut carriers: Option<&mut PublicationCarriers>,
     ) -> StoreReceipt {
         let TypedWrite {
             addresses,
@@ -5482,6 +5574,16 @@ impl BorrowState {
         let replaced = if !alternatives.is_empty() || !self.layer.contents.is_empty() {
             let replaced = definite.and_then(|cell| self.layer.take_contents(cell));
             for &cell in cells.as_ref() {
+                if let Some(carriers) = carriers.as_deref_mut() {
+                    let old = if definite == Some(cell) {
+                        replaced
+                            .as_ref()
+                            .map_or(&[][..], |(_, values)| values.as_slice())
+                    } else {
+                        self.layer.contents(cell)
+                    };
+                    carriers.record(cell, old, cell, &alternatives, definite == Some(cell));
+                }
                 self.publish_cell_contents(
                     cell,
                     &values,

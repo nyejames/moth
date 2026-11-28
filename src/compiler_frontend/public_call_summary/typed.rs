@@ -5,8 +5,8 @@
 //! restricted: projection has already forgotten the correlations.
 
 use super::{
-    CallField, CallParameterPath, CallResultPath, PublicCallParameterAccess, allocation_error,
-    sorted_subset, strictly_sorted,
+    CallEndpoint, CallField, CallParameterPath, CallResultPath, PublicCallParameterAccess,
+    allocation_error, sorted_subset, strictly_sorted,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -519,6 +519,48 @@ impl Lane {
         }
     }
 
+    pub(crate) fn can_return(&self) -> bool {
+        !matches!(self, Self::Bottom)
+    }
+
+    /// A partial actual can admit both arms, but it cannot admit inconsistent
+    /// combinations of the same typed observations.
+    pub(crate) fn visit_compatible<E>(
+        &self,
+        mut observe: impl FnMut(Predicate) -> Result<Option<bool>, E>,
+        mut visit: impl FnMut(&[Literal], &Product) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.visit_arms(&mut Vec::new(), &mut observe, &mut visit)
+    }
+
+    fn visit_arms<E>(
+        &self,
+        path: &mut Vec<Literal>,
+        observe: &mut impl FnMut(Predicate) -> Result<Option<bool>, E>,
+        visit: &mut impl FnMut(&[Literal], &Product) -> Result<(), E>,
+    ) -> Result<(), E> {
+        match self {
+            Self::Bottom => Ok(()),
+            Self::Returning(product) => visit(path, product),
+            Self::Decision(test) => {
+                let observation = observe(test.predicate)?;
+                let implied = GuardFacts::under(path).meaning(test.predicate);
+                for (truth, arm) in [(false, &test.no), (true, &test.yes)] {
+                    if observation.is_some_and(|holds| holds != truth)
+                        || implied.is_some_and(|holds| holds != truth)
+                        || !arm.can_return()
+                    {
+                        continue;
+                    }
+                    path.push((test.predicate, truth));
+                    arm.visit_arms(path, observe, visit)?;
+                    path.pop();
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Align the least test before joining. Tests implied by earlier typed
     /// observations have one feasible arm; they are not arbitrary don't-cares.
     pub(crate) fn union(&self, other: &Self) -> Self {
@@ -708,7 +750,38 @@ pub(crate) struct Shape<'a> {
     pub error_slot: bool,
 }
 
+/// Layout lookup stays with the signature owner. In particular a private
+/// nominal's stable identity is not a substitute for its declaration layout.
+pub(crate) trait Layout {
+    type Type: Ord + Clone;
+
+    fn parameter(&self, index: usize) -> Option<CallEndpoint<Self::Type>>;
+    fn result(&self, error: bool, slot: usize) -> Option<CallEndpoint<Self::Type>>;
+    fn child(&self, ty: &Self::Type, selector: CallField) -> Option<CallEndpoint<Self::Type>>;
+    fn stable(&self, ty: &CanonicalTypeIdentity) -> Option<CallEndpoint<Self::Type>>;
+    fn children(&self, ty: &Self::Type, visit: &mut dyn FnMut(CallEndpoint<Self::Type>));
+}
+
+struct LayoutCheck<'a, L: Layout> {
+    layout: &'a L,
+    entries: Vec<CallEndpoint<L::Type>>,
+    ports: &'a [EntryPort],
+    error: bool,
+}
+
 impl TypedCallAllocationFacts {
+    pub(crate) fn lane(&self, error: bool) -> &Lane {
+        if error { &self.error } else { &self.success }
+    }
+
+    pub(crate) fn is_transfer_bottom(&self) -> bool {
+        self.may_retain.is_empty() && !self.success.can_return() && !self.error.can_return()
+    }
+
+    pub(crate) fn executed_may_retain(&self, parameter: usize) -> bool {
+        self.may_retain.binary_search(&parameter).is_ok()
+    }
+
     pub(crate) fn validate(&self, shape: &Shape<'_>) -> Result<(), InfrastructureFailure> {
         if !strictly_sorted(&self.may_retain)
             || self
@@ -742,6 +815,276 @@ impl TypedCallAllocationFacts {
             Ok(())
         } else {
             Err(allocation_error("typed call postconditions narrowed"))
+        }
+    }
+}
+
+impl TypedCallAllocationFacts {
+    pub(crate) fn validate_layout(
+        &self,
+        shape: &Shape<'_>,
+        layout: &impl Layout,
+    ) -> Result<(), InfrastructureFailure> {
+        self.validate(shape)?;
+        let mut check = LayoutCheck {
+            layout,
+            entries: Vec::with_capacity(shape.ports.len()),
+            ports: shape.ports,
+            error: false,
+        };
+        for port in shape.ports {
+            check.entries.push(
+                check.entry_type(port).ok_or_else(|| {
+                    allocation_error("typed entry port has no declaration endpoint")
+                })?,
+            );
+        }
+        check.lane(&self.success)?;
+        check.error = true;
+        check.lane(&self.error)
+    }
+}
+
+impl<L: Layout> LayoutCheck<'_, L> {
+    fn path(
+        &self,
+        mut endpoint: CallEndpoint<L::Type>,
+        path: &[CallField],
+    ) -> Option<CallEndpoint<L::Type>> {
+        for &selector in path {
+            endpoint = self.layout.child(&endpoint.ty, selector)?;
+        }
+        Some(endpoint)
+    }
+
+    fn entry_type(&self, port: &EntryPort) -> Option<CallEndpoint<L::Type>> {
+        match port {
+            EntryPort::Wrapper(parameter)
+            | EntryPort::Immediate(parameter)
+            | EntryPort::Terminal(parameter) => self.layout.parameter(*parameter),
+            EntryPort::Value { parameter, path } => {
+                self.path(self.layout.parameter(*parameter)?, path)
+            }
+            EntryPort::Edge(holder, selector) => {
+                let root = self.entry_type(self.ports.get(holder.0 as usize)?)?;
+                root.allocation.then_some(())?;
+                self.layout.child(&root.ty, *selector)
+            }
+        }
+    }
+
+    fn object(&self, object: &ObjectRef, post: &Post) -> Option<CallEndpoint<L::Type>> {
+        match object {
+            ObjectRef::Entry(port) => self.entry_type(&self.ports[port.0 as usize]),
+            _ => {
+                let index = post
+                    .retained
+                    .binary_search_by(|(key, _, _)| key.cmp(object))
+                    .ok()?;
+                self.layout.stable(&post.retained[index].2)
+            }
+        }
+    }
+
+    fn cell(&self, cell: &CellPort, post: &Post) -> Option<CallEndpoint<L::Type>> {
+        match cell {
+            CellPort::Slot(wrapper) => self.object(wrapper, post),
+            CellPort::Terminal(port) => self.entry_type(&self.ports[port.0 as usize]),
+            CellPort::Edge(holder, selector) => self.field(holder, *selector, post),
+        }
+    }
+
+    fn field(
+        &self,
+        holder: &ObjectRef,
+        selector: CallField,
+        post: &Post,
+    ) -> Option<CallEndpoint<L::Type>> {
+        let holder = self.object(holder, post)?;
+        holder.allocation.then_some(())?;
+        self.layout.child(&holder.ty, selector)
+    }
+
+    fn bound(&self, bound: &ReachBound, endpoint: impl Fn(&CallEndpoint<L::Type>) -> bool) -> bool {
+        let mut remaining = BTreeSet::new();
+        for ty in &bound.types {
+            let Some(resolved) = self.layout.stable(ty).filter(&endpoint) else {
+                return false;
+            };
+            remaining.insert(resolved.ty);
+        }
+        let mut pending: Vec<_> = bound
+            .roots
+            .iter()
+            .filter_map(|port| {
+                let root = &self.entries[port.0 as usize];
+                (bound.region != ReachKind::Referent || root.allocation).then(|| root.ty.clone())
+            })
+            .collect();
+        let mut visited = BTreeSet::new();
+        while let Some(ty) = pending.pop() {
+            remaining.remove(&ty);
+            if remaining.is_empty() {
+                return true;
+            }
+            if bound.region != ReachKind::Cell && !visited.contains(&ty) {
+                self.layout
+                    .children(&ty, &mut |child| pending.push(child.ty));
+                visited.insert(ty);
+            }
+        }
+        false
+    }
+
+    fn dependencies(&self, dependencies: &[ReceiverDependency], post: &Post) -> bool {
+        dependencies.iter().all(|dependency| match dependency {
+            ReceiverDependency::Known(receivers) => receivers.iter().all(|receiver| {
+                self.object(receiver, post)
+                    .is_some_and(|endpoint| endpoint.allocation)
+            }),
+            ReceiverDependency::Unresolved(bound) => self.bound(bound, |ty| ty.allocation),
+        })
+    }
+
+    fn value(&self, value: &ValueRef, target: &CallEndpoint<L::Type>, post: &Post) -> bool {
+        let source = match &value.source {
+            ValueSource::Allocation(reference) => {
+                target.allocation
+                    && self
+                        .object(reference, post)
+                        .is_some_and(|source| source.ty == target.ty)
+            }
+            ValueSource::Scalar(source) => {
+                !target.allocation
+                    && match source {
+                        ScalarSource::Independent => true,
+                        ScalarSource::EntryValue(port) => {
+                            self.entries[port.0 as usize].ty == target.ty
+                        }
+                        ScalarSource::Unresolved(ScalarSourceBound::Values(ports)) => ports
+                            .iter()
+                            .all(|port| self.entries[port.0 as usize].ty == target.ty),
+                        ScalarSource::Unresolved(ScalarSourceBound::Reach(bound)) => {
+                            self.bound(bound, |source| source.ty == target.ty)
+                        }
+                    }
+            }
+        };
+        source && self.dependencies(&value.dependencies, post)
+    }
+
+    fn retained(&self, post: &Post) -> bool {
+        post.retained.iter().all(|(object, kind, stable)| {
+            let Some(ty) = self.layout.stable(stable) else {
+                return false;
+            };
+            let expected = match object {
+                ObjectRef::Exact(ExportPort::Result(path)) => self
+                    .layout
+                    .result(self.error, path.slot)
+                    .and_then(|root| self.path(root, &path.path)),
+                ObjectRef::Exact(
+                    ExportPort::Binding(parameter) | ExportPort::PrivateTerminal(parameter),
+                ) => self.layout.parameter(*parameter),
+                ObjectRef::Exact(ExportPort::Cell(path)) => self
+                    .layout
+                    .parameter(path.index)
+                    .and_then(|root| self.path(root, &path.path)),
+                ObjectRef::Family(..) => return *kind == StorageKind::Wrapper || ty.allocation,
+                ObjectRef::Entry(_) => return false,
+            };
+            (*kind == StorageKind::Wrapper || ty.allocation)
+                && expected.is_some_and(|expected| expected.ty == ty.ty)
+        })
+    }
+
+    fn post(&self, post: &Post) -> bool {
+        self.retained(post)
+            && post.bindings.iter().all(|(wrapper, edit)| {
+                let Some(target) = self.object(wrapper, post) else {
+                    return false;
+                };
+                let (source, route) = match edit {
+                    BindingPost::OwnSlot => return true,
+                    BindingPost::Link(wrapper, route) => (self.object(wrapper, post), route),
+                    BindingPost::Projected(cell, route) => (self.cell(cell, post), route),
+                };
+                source.is_some_and(|source| source.ty == target.ty)
+                    && self.dependencies(&route.dependencies, post)
+            })
+            && post.cells.iter().all(|(target, edit)| {
+                self.cell(target, post).is_some_and(|target| {
+                    let (CellPost::Replace(values) | CellPost::WeakJoin(values)) = edit;
+                    values
+                        .iter()
+                        .flatten()
+                        .all(|value| self.value(value, &target, post))
+                })
+            })
+            && post.families.iter().all(|(family, edit)| {
+                self.field(&family.receiver, family.selector, post)
+                    .is_some_and(|target| {
+                        let (FamilyPost::Extend(members) | FamilyPost::ReplaceAll(members)) = edit;
+                        members.iter().all(|(member, occurrence)| {
+                            self.value(member, &target, post)
+                                && (*occurrence == Occurrence::MaybeMany
+                                    || !matches!(
+                                        member.source,
+                                        ValueSource::Allocation(ObjectRef::Family(..))
+                                    ))
+                        })
+                    })
+            })
+            && post.results.iter().all(|(slot, value)| {
+                self.layout
+                    .result(self.error, *slot)
+                    .is_some_and(|target| self.value(value, &target, post))
+            })
+            && match &post.coverage {
+                Coverage::Complete => true,
+                Coverage::Unresolved(Footprint::WritableReach(bound)) => {
+                    self.bound(bound, |_| true)
+                }
+                Coverage::Unresolved(Footprint::Locations(locations)) => {
+                    locations.iter().all(|location| {
+                        match location {
+                            OutputPort::Binding(wrapper) => self.object(wrapper, post),
+                            OutputPort::Cell(cell) => self.cell(cell, post),
+                            OutputPort::Family(family) => {
+                                self.field(&family.receiver, family.selector, post)
+                            }
+                            OutputPort::Result(slot) => self.layout.result(self.error, *slot),
+                        }
+                        .is_some()
+                    })
+                }
+            }
+    }
+
+    fn lane(&self, lane: &Lane) -> Result<(), InfrastructureFailure> {
+        let valid = match lane {
+            Lane::Bottom => true,
+            Lane::Decision(test) => {
+                if let Predicate::Equal(kind, left, right) = test.predicate {
+                    let left = &self.entries[left.0 as usize];
+                    let right = &self.entries[right.0 as usize];
+                    if left.ty != right.ty || kind == IdentityKind::Allocation && !left.allocation {
+                        return Err(allocation_error("incompatible endpoints in typed guard"));
+                    }
+                }
+                self.lane(&test.no)?;
+                return self.lane(&test.yes);
+            }
+            Lane::Returning(product) => product
+                .components()
+                .iter()
+                .flat_map(|component| &component.alternatives)
+                .all(|post| self.post(post)),
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(allocation_error("incompatible typed call layout"))
         }
     }
 }
@@ -1433,7 +1776,9 @@ impl Shape<'_> {
                             object(source, StorageKind::Wrapper) && retained_access(route)
                         }
                         BindingPost::Projected(target, route) => {
-                            cell(target, false) && retained_access(route)
+                            !matches!(target, CellPort::Slot(_))
+                                && cell(target, false)
+                                && retained_access(route)
                         }
                     }
             })

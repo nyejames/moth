@@ -13,6 +13,421 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::LoopStepFailureCause;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 
+use super::apply_captured_call_batch;
+use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+    CapturedCallBatch, CapturedDestination, CapturedDetachment,
+    typed_call::{CapturedEdit, CapturedPost, CapturedResult, CapturedUncertainty},
+};
+
+fn call_batch(post: CapturedPost, destinations: Vec<CapturedDestination>) -> CapturedCallBatch {
+    CapturedCallBatch {
+        post,
+        destinations,
+        member_reads: Default::default(),
+        checkpoints: Vec::new(),
+        detachment: None,
+    }
+}
+
+#[test]
+fn typed_invoke_retires_both_outcomes_and_rebases_retained_entry_cell() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{BindingSpec, SmallSet};
+    let (layout, _) = invoke_fixture(5);
+    let mut predecessor = BorrowState::new_uninitialized(5);
+    for index in 0..5 {
+        predecessor.initialize_parameter(index);
+    }
+    let receiver = predecessor.local_alloc_ids(0).0[0];
+    let old_value = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(receiver),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let old_slot = CellId::Slot(WrapperId::current(1));
+    predecessor.publish_store(
+        &TypedStore::replace_cells(
+            AddressSet::from_cells([old_slot], Coverage::Complete).with_singleton_proof(),
+            CapturedValue {
+                alternatives: vec![old_value.clone()],
+                ..Default::default()
+            },
+        )
+        .with_explicit_slot_payload(),
+        0,
+        None,
+    );
+    predecessor.initialize_entry_binding(
+        3,
+        BindingSpec::Link {
+            source: WrapperId::current(1),
+            writable: false,
+        },
+    );
+
+    for result in [1, 2] {
+        let mut edge = predecessor.clone();
+        let target = CellId::Projected(receiver, FieldKey::Field(9));
+        let write = TypedStore::replace_cells(
+            AddressSet::from_cells([target], Coverage::Complete).with_singleton_proof(),
+            CapturedValue {
+                alternatives: edge.value_cell(old_slot).to_vec(),
+                ..Default::default()
+            },
+        );
+        let post = CapturedPost {
+            edits: vec![CapturedEdit::Cell(write)],
+            results: vec![CapturedResult {
+                slot: 0,
+                value: CapturedValue {
+                    alternatives: vec![ValueAlt::plain(ValueKind::Scalar)],
+                    ..Default::default()
+                },
+                roots: None,
+                derivation: None,
+            }],
+            ..Default::default()
+        };
+        apply_captured_call_batch(
+            (&layout).into(),
+            call_batch(post, vec![CapturedDestination::Define(result)]),
+            [1, 2],
+            1,
+            &mut edge,
+        )
+        .unwrap();
+
+        let held = edge.resolve_cells(3);
+        assert_eq!(held.cells().len(), 1);
+        assert_ne!(held.cells()[0], old_slot);
+        assert_eq!(
+            edge.value_cell(held.cells()[0]),
+            std::slice::from_ref(&old_value)
+        );
+        assert_eq!(edge.value_cell(target), std::slice::from_ref(&old_value));
+        assert_eq!(
+            edge.value_cell(CellId::Slot(WrapperId::current(result))),
+            &[ValueAlt::plain(ValueKind::Scalar)]
+        );
+        assert_eq!(
+            edge.binding_mode(if result == 1 { 2 } else { 1 }),
+            LocalMode::UNINIT
+        );
+    }
+}
+
+#[test]
+fn typed_receiving_preserves_each_selected_write_result_tuple() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::SmallSet;
+    let (layout, _) = invoke_fixture(3);
+    let mut predecessor = BorrowState::new_uninitialized(3);
+    predecessor.initialize_parameter(0);
+    let holder = predecessor.local_alloc_ids(0).0[0];
+    let field = CellId::Projected(holder, FieldKey::Field(0));
+    let receiver = CellId::Slot(WrapperId::current(1));
+    let plain = ValueAlt::plain(ValueKind::Scalar);
+    let dependent = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(holder),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let capture = |value: &ValueAlt| CapturedValue {
+        alternatives: vec![value.clone()],
+        ..Default::default()
+    };
+    for (stored, returned) in [(&dependent, &plain), (&plain, &dependent)] {
+        let post = CapturedPost {
+            edits: vec![CapturedEdit::Cell(TypedStore::replace_cells(
+                AddressSet::from_cells([field], Coverage::Complete).with_singleton_proof(),
+                capture(stored),
+            ))],
+            results: vec![CapturedResult {
+                slot: 0,
+                value: capture(returned),
+                roots: None,
+                derivation: None,
+            }],
+            ..Default::default()
+        };
+        let mut edge = predecessor.clone();
+        apply_captured_call_batch(
+            (&layout).into(),
+            call_batch(post, vec![CapturedDestination::Define(1)]),
+            [1, 2],
+            1,
+            &mut edge,
+        )
+        .unwrap();
+        assert_eq!(edge.value_cell(field), std::slice::from_ref(stored));
+        assert_eq!(edge.value_cell(receiver), std::slice::from_ref(returned));
+    }
+}
+
+#[test]
+fn typed_strong_write_kills_old_carrier_but_unresolved_suffix_preserves_it() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::SmallSet;
+    let (layout, _) = invoke_fixture(1);
+    let mut predecessor = BorrowState::new_uninitialized(1);
+    predecessor.initialize_parameter(0);
+    let holder = predecessor.local_alloc_ids(0).0[0];
+    let cell = CellId::Projected(holder, FieldKey::Field(3));
+    let old = ValueAlt {
+        kind: ValueKind::Scalar,
+        deps: vec![ReceiverDependency {
+            entries: SmallSet::One(holder),
+            coverage: Coverage::Complete,
+        }],
+    };
+    let store = |value: ValueAlt| {
+        TypedStore::replace_cells(
+            AddressSet::from_cells([cell], Coverage::Complete).with_singleton_proof(),
+            CapturedValue {
+                alternatives: vec![value],
+                ..Default::default()
+            },
+        )
+    };
+    predecessor.publish_store(&store(old.clone()), 0, None);
+    let plain = ValueAlt::plain(ValueKind::Scalar);
+    for weak in [false, true] {
+        let mut edge = predecessor.clone();
+        let mut post = CapturedPost::default();
+        let edit = CapturedEdit::Cell(store(plain.clone()));
+        if weak {
+            post.uncertainty = Some(CapturedUncertainty {
+                edits: vec![edit],
+                ..Default::default()
+            });
+        } else {
+            post.edits.push(edit);
+        }
+        apply_captured_call_batch(
+            (&layout).into(),
+            call_batch(post, Vec::new()),
+            [],
+            1,
+            &mut edge,
+        )
+        .unwrap();
+        assert!(edge.value_cell(cell).contains(&plain));
+        assert_eq!(edge.value_cell(cell).contains(&old), weak);
+    }
+}
+
+#[test]
+fn mixed_lane_unknown_starts_at_its_own_prefix() {
+    let (layout, _) = invoke_fixture(5);
+    let mut predecessor = BorrowState::new_uninitialized(5);
+    for index in 0..5 {
+        predecessor.initialize_parameter(index);
+    }
+    let [holder, old, success, error, suffix] =
+        std::array::from_fn(|index| predecessor.local_alloc_ids(index).0[0]);
+    let inside = FieldKey::Field(0);
+    let outside = FieldKey::Field(1);
+    let stored = |id| StoredValue { id, writable: true };
+    predecessor.store_alloc_field(&[holder], inside, &[stored(old)], true);
+    predecessor.store_alloc_field(&[holder], outside, &[stored(old)], true);
+    let replace = |key, id| {
+        CapturedEdit::Cell(TypedStore::replace_cells(
+            AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete)
+                .with_singleton_proof(),
+            CapturedValue::new(vec![stored(id)], Vec::new()),
+        ))
+    };
+
+    for order in [[success, error], [error, success]] {
+        for prefix in order {
+            let mut edge = predecessor.clone();
+            let post = CapturedPost {
+                edits: vec![replace(inside, prefix), replace(outside, prefix)],
+                uncertainty: Some(CapturedUncertainty {
+                    edits: vec![replace(inside, suffix)],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            apply_captured_call_batch(
+                (&layout).into(),
+                call_batch(post, Vec::new()),
+                [],
+                1,
+                &mut edge,
+            )
+            .unwrap();
+            assert_eq!(
+                edge.resolve_alloc_path(0, &[true; 5], [outside]).ids,
+                [prefix]
+            );
+            let values = edge.resolve_alloc_path(0, &[true; 5], [inside]).ids;
+            assert_eq!(values.len(), 2);
+            assert!(values.contains(&prefix) && values.contains(&suffix));
+        }
+    }
+}
+
+#[test]
+fn typed_removal_reads_entry_member_and_detaches_after_receiving() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{
+        FamilyMember, Replacement, SmallSet,
+    };
+    let (layout, _) = invoke_fixture(5);
+    let mut state = BorrowState::new_uninitialized(5);
+    for index in 0..5 {
+        state.initialize_parameter(index);
+    }
+    let holder = state.local_alloc_ids(0).0[0];
+    let item_id = state.local_alloc_ids(3).0[0];
+    let loan = state.local_alloc_ids(4).0[0];
+    let item = StoredValue {
+        id: item_id,
+        writable: true,
+    };
+    let captured = CapturedValue {
+        values: vec![item],
+        alternatives: vec![ValueAlt {
+            kind: ValueKind::Allocation(item),
+            deps: vec![ReceiverDependency {
+                entries: SmallSet::One(loan),
+                coverage: Coverage::Complete,
+            }],
+        }],
+        ..Default::default()
+    };
+    state.publish_family_members(
+        &[holder],
+        Coverage::Complete,
+        FieldKey::Elem,
+        Replacement::Must,
+        &[FamilyMember {
+            value: captured.clone(),
+            at_most_once: true,
+        }],
+    );
+    let mut batch = call_batch(
+        CapturedPost {
+            results: vec![CapturedResult {
+                slot: 0,
+                value: captured,
+                roots: None,
+                derivation: None,
+            }],
+            ..Default::default()
+        },
+        vec![CapturedDestination::Define(1)],
+    );
+    batch.member_reads.insert(Carrier::Cell(
+        CellId::Projected(holder, FieldKey::Elem),
+        CarrierValue::Allocation(item_id),
+        vec![ReceiverDependency {
+            entries: SmallSet::One(loan),
+            coverage: Coverage::Complete,
+        }],
+    ));
+    batch.detachment = Some(CapturedDetachment {
+        holders: vec![holder],
+        map: false,
+        result: Some(0),
+    });
+    let observations =
+        apply_captured_call_batch((&layout).into(), batch, [1, 2], 1, &mut state).unwrap();
+    assert!(observations.tail.upward_reads.iter().chain(
+        observations.splits.iter().flat_map(|(segment, _)| segment.upward_reads.iter())
+    ).any(|carrier| matches!(carrier, Carrier::Cell(CellId::Projected(id, FieldKey::Elem), _, _) if *id == holder)));
+    assert_eq!(state.local_alloc_ids(1).0, [item_id]);
+    assert_eq!(state.detached_holders(1).collect::<Vec<_>>(), [holder]);
+    assert!(
+        state
+            .resolve_alloc_path(0, &[true; 5], [FieldKey::Elem])
+            .ids
+            .is_empty()
+    );
+}
+
+#[test]
+fn typed_receive_uses_predecessor_address_and_follows_callee_writes() {
+    use crate::compiler_frontend::analysis::borrow_checker::state::{BindingSpec, Replacement};
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+        BindingEdit, CapturedBinding,
+    };
+    let (layout, _) = invoke_fixture(5);
+    let mut state = BorrowState::new_uninitialized(5);
+    for local in 0..5 {
+        state.initialize_parameter(local);
+    }
+    let holder = state.local_alloc_ids(0).0[0];
+    let initial = state.local_alloc_ids(2).0[0];
+    let callee = state.local_alloc_ids(3).0[0];
+    let received = state.local_alloc_ids(4).0[0];
+    let first = FieldKey::Field(0);
+    let second = FieldKey::Field(1);
+    let address = |key| {
+        AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete)
+            .with_singleton_proof()
+    };
+    let stored = |id| StoredValue { id, writable: true };
+    let capture = |id| CapturedValue::new(vec![stored(id)], Vec::new());
+    state.store_alloc_field(&[holder], first, &[stored(initial)], true);
+    state.store_alloc_field(&[holder], second, &[stored(initial)], true);
+    state.initialize_entry_binding(
+        1,
+        BindingSpec::Alias {
+            addresses: address(first),
+            route_roots: RootSet::empty(5),
+        },
+    );
+    let update = CapturedDestination::Update {
+        actor: 1,
+        address: state.resolve_place_path(1, &[true; 5], []).address,
+    };
+    let post = CapturedPost {
+        bindings: vec![CapturedBinding {
+            target: WrapperId::current(1),
+            update: BindingEdit::Projected {
+                addresses: address(second),
+                writable: true,
+                origin: None,
+            },
+            replace: Replacement::Must,
+            roots: None,
+        }],
+        edits: vec![CapturedEdit::Cell(TypedStore::replace_cells(
+            address(first),
+            capture(callee),
+        ))],
+        results: vec![CapturedResult {
+            slot: 0,
+            value: capture(received),
+            roots: None,
+            derivation: None,
+        }],
+        ..Default::default()
+    };
+    apply_captured_call_batch(
+        (&layout).into(),
+        call_batch(post, vec![update]),
+        [],
+        1,
+        &mut state,
+    )
+    .unwrap();
+    assert_eq!(
+        state.resolve_cells(1).cells(),
+        &[CellId::Projected(holder, second)]
+    );
+    assert_eq!(
+        state.resolve_alloc_path(0, &[true; 5], [first]).ids,
+        [received]
+    );
+    assert_eq!(
+        state.resolve_alloc_path(0, &[true; 5], [second]).ids,
+        [initial]
+    );
+}
+
 fn invoke_fixture(local_count: usize) -> (FunctionLayout, HirTerminator) {
     let layout = FunctionLayout::new(FunctionLayoutInputs {
         local_ids: (0..local_count as u32).map(LocalId).collect(),

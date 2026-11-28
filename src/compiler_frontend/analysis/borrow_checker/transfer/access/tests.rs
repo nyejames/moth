@@ -5,8 +5,8 @@ use super::{AccessFootprint, PlaceUse};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, EntryFamilies,
-    FieldKey, LocalState, ReceiverDependency, Replacement, ResolvedPlace, RootSet, StoredValue,
-    TypedStore, UNKNOWN_ORDER_KEY, ValueAlt, ValueKind, WrapperAge, WrapperId,
+    FieldKey, LocalState, ReceiverDependency, Replacement, ResolvedPlace, RootSet, SmallSet,
+    StoredValue, TypedStore, UNKNOWN_ORDER_KEY, ValueAlt, ValueKind, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -18,6 +18,951 @@ use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
+
+use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+    CapturedEdit, CapturedPost, EntryCapture, ExplicitMatchInput, MatchInput, match_typed_lane,
+};
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::public_call_summary::{CallField, CallResultPath, typed};
+
+fn typed_test_lane(posts: Vec<typed::Post>) -> typed::Lane {
+    typed::Lane::Returning(typed_test_product(posts))
+}
+
+fn typed_test_product(alternatives: Vec<typed::Post>) -> typed::Product {
+    typed::Product::new(vec![typed::Component {
+        support: typed::SupportId(0),
+        alternatives,
+    }])
+    .unwrap()
+}
+
+fn typed_test_allocation(id: AllocId, coverage: Coverage) -> EntryCapture {
+    EntryCapture {
+        ty: Some(TypeId(0)),
+        value: CapturedValue::new(vec![StoredValue { id, writable: true }], Vec::new()),
+        allocation_coverage: Some(coverage),
+        writable: Some(true),
+        ..Default::default()
+    }
+}
+
+fn typed_test_value(source: typed::ValueSource) -> typed::ValueRef {
+    typed::ValueRef {
+        source,
+        access: typed::PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: Vec::new(),
+    }
+}
+
+fn typed_test_input<'a>(
+    state: &'a BorrowState,
+    entries: &'a [EntryCapture],
+) -> ExplicitMatchInput<'a> {
+    ExplicitMatchInput {
+        state,
+        entries,
+        retained: &[],
+        uncertainty: &[],
+    }
+}
+
+fn typed_test_post(input: &impl MatchInput, lane: &typed::Lane) -> CapturedPost {
+    match_typed_lane(input, lane)
+        .unwrap()
+        .pop()
+        .unwrap()
+        .components
+        .pop()
+        .unwrap()
+        .alternatives
+        .pop()
+        .unwrap()
+}
+
+#[test]
+fn typed_matcher_selects_equal_distinct_or_partial_predecessor_observations() {
+    use typed::{
+        CellPort, CellPost, Guard, IdentityKind, ObjectRef, Permission, PortId, Predicate,
+        ScalarSource, ValueSource,
+    };
+    let (state, [first, second]) = parameter_allocations::<2>();
+    let equality = Predicate::Equal(IdentityKind::Allocation, PortId(0), PortId(1));
+    let replace = |port| {
+        (
+            CellPort::Edge(ObjectRef::Entry(PortId(port)), CallField::Field(0)),
+            CellPost::Replace(vec![Some(typed_test_value(ValueSource::Scalar(
+                ScalarSource::Independent,
+            )))]),
+        )
+    };
+    let mut read_only = typed_test_value(ValueSource::Allocation(ObjectRef::Entry(PortId(1))));
+    read_only.access.restriction = Some(Permission::ReadOnly);
+    let product = |equal| {
+        typed_test_product(vec![typed::Post {
+            cells: if equal {
+                vec![replace(1)]
+            } else {
+                vec![replace(0), replace(1)]
+            },
+            results: vec![(
+                0,
+                if equal {
+                    read_only.clone()
+                } else {
+                    typed_test_value(ValueSource::Allocation(ObjectRef::Entry(PortId(1))))
+                },
+            )],
+            ..Default::default()
+        }])
+    };
+    let lane =
+        typed::Lane::guarded(Guard::new(vec![(equality, true)]).unwrap(), product(true)).union(
+            &typed::Lane::guarded(Guard::new(vec![(equality, false)]).unwrap(), product(false)),
+        );
+    let select = |second, coverage| {
+        match_typed_lane(
+            &typed_test_input(
+                &state,
+                &[
+                    typed_test_allocation(first, Coverage::Complete),
+                    typed_test_allocation(second, coverage),
+                ],
+            ),
+            &lane,
+        )
+        .unwrap()
+    };
+    let equal = select(first, Coverage::Complete);
+    let distinct = select(second, Coverage::Complete);
+    let partial = select(second, Coverage::Partial);
+    assert_eq!(equal.len(), 1);
+    let equal = &equal[0].components[0].alternatives[0];
+    assert_eq!(equal.edits.len(), 1);
+    assert!(equal.results[0].value.readonly());
+    assert_eq!(distinct.len(), 1);
+    let distinct = &distinct[0].components[0].alternatives[0];
+    assert_eq!(distinct.edits.len(), 2);
+    assert!(!distinct.results[0].value.readonly());
+    assert_eq!(partial.len(), 2);
+
+    let colliding = typed::Lane::Returning(product(false));
+    assert!(
+        match_typed_lane(
+            &typed_test_input(
+                &state,
+                &[
+                    typed_test_allocation(first, Coverage::Complete),
+                    typed_test_allocation(first, Coverage::Complete),
+                ],
+            ),
+            &colliding
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_matcher_rejects_infeasible_triangle_and_captures_its_feasible_edits() {
+    use typed::{CellPort, CellPost, Guard, IdentityKind, ObjectRef, PortId, Predicate};
+    let (state, [left, right]) = parameter_allocations::<2>();
+    let equality = |a, b| Predicate::Equal(IdentityKind::Allocation, PortId(a), PortId(b));
+    let product = |field| {
+        typed_test_product(vec![typed::Post {
+            cells: vec![(
+                CellPort::Edge(ObjectRef::Entry(PortId(0)), CallField::Field(field)),
+                CellPost::Replace(vec![None]),
+            )],
+            ..Default::default()
+        }])
+    };
+    let infeasible = Guard::new(vec![(equality(0, 1), true), (equality(0, 2), true)]).unwrap();
+    let feasible = Guard::new(vec![(equality(0, 1), true), (equality(0, 2), false)]).unwrap();
+    let lane = typed::Lane::guarded(infeasible, product(1))
+        .union(&typed::Lane::guarded(feasible, product(0)));
+    let mut a = typed_test_allocation(left, Coverage::Complete);
+    a.value = CapturedValue::new(
+        vec![
+            StoredValue {
+                id: left,
+                writable: true,
+            },
+            StoredValue {
+                id: right,
+                writable: true,
+            },
+        ],
+        Vec::new(),
+    );
+    let rows = match_typed_lane(
+        &typed_test_input(
+            &state,
+            &[
+                a,
+                typed_test_allocation(left, Coverage::Complete),
+                typed_test_allocation(right, Coverage::Complete),
+            ],
+        ),
+        &lane,
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].guard.iter().any(|(predicate, truth)| {
+        matches!(predicate, Predicate::Equal(IdentityKind::Allocation, _, _)) && !truth
+    }));
+    let [CapturedEdit::Cell(write)] = rows[0].components[0].alternatives[0].edits.as_slice() else {
+        panic!("the selected presentation must capture a single edit");
+    };
+    assert_eq!(
+        write.captured_cells().unwrap(),
+        [CellId::Projected(left, FieldKey::Field(0))]
+    );
+}
+
+#[test]
+fn collapsed_elements_do_not_prove_a_guarded_cell_equality() {
+    use typed::{Guard, IdentityKind, PortId, Predicate, ScalarSource, ValueSource};
+    let (state, [holder]) = parameter_allocations::<1>();
+    let cell = CellId::Projected(holder, FieldKey::Elem);
+    let port = EntryCapture {
+        address: Some(AddressSet::from_cells([cell], Coverage::Complete)),
+        ..Default::default()
+    };
+    let equal = Predicate::Equal(IdentityKind::Cell, PortId(0), PortId(1));
+    let product = |slot| {
+        typed_test_product(vec![typed::Post {
+            results: vec![(
+                slot,
+                typed_test_value(ValueSource::Scalar(ScalarSource::Independent)),
+            )],
+            ..Default::default()
+        }])
+    };
+    let lane = typed::Lane::guarded(Guard::new(vec![(equal, false)]).unwrap(), product(0)).union(
+        &typed::Lane::guarded(Guard::new(vec![(equal, true)]).unwrap(), product(1)),
+    );
+    let rows = match_typed_lane(&typed_test_input(&state, &[port.clone(), port]), &lane).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|row| row.guard.contains(&(equal, false))));
+    assert!(rows.iter().any(|row| row.guard.contains(&(equal, true))));
+}
+
+#[test]
+fn typed_matcher_rejects_exact_and_partial_write_collisions_in_both_orders() {
+    use typed::{CellPort, CellPost, PortId};
+    let (state, [left, right]) = parameter_allocations::<2>();
+    let target = |holder| CellId::Projected(holder, FieldKey::Field(0));
+    let exact = EntryCapture {
+        address: Some(
+            AddressSet::from_cells([target(left)], Coverage::Complete).with_singleton_proof(),
+        ),
+        ..Default::default()
+    };
+    let partial = EntryCapture {
+        address: Some(AddressSet::from_cells(
+            [target(left), target(right)],
+            Coverage::Partial,
+        )),
+        ..Default::default()
+    };
+    let lane = typed_test_lane(vec![typed::Post {
+        cells: (0..2)
+            .map(|port| {
+                (
+                    CellPort::Terminal(PortId(port)),
+                    CellPost::Replace(vec![None]),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    }]);
+    for entries in [[exact.clone(), partial.clone()], [partial, exact]] {
+        assert!(match_typed_lane(&typed_test_input(&state, &entries), &lane).is_err());
+    }
+}
+
+#[test]
+fn typed_matcher_weakens_may_sharing_writes_across_supports() {
+    use typed::{CellPort, CellPost, ObjectRef, PortId};
+    let (mut state, [root]) = parameter_allocations::<1>();
+    let view = state.call_view_id(3, false, 1);
+    state.relate_views(root, view, true);
+    assert!(state.alloc_paths_may_share(&[root], &[], &[view], &[]));
+    let lane = typed::Lane::Returning(
+        typed::Product::new(
+            (0..2)
+                .map(|port| typed::Component {
+                    support: typed::SupportId(port),
+                    alternatives: vec![typed::Post {
+                        cells: vec![(
+                            CellPort::Edge(ObjectRef::Entry(PortId(port)), CallField::Field(0)),
+                            CellPost::Replace(vec![None]),
+                        )],
+                        ..Default::default()
+                    }],
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let strata = match_typed_lane(
+        &typed_test_input(
+            &state,
+            &[
+                typed_test_allocation(root, Coverage::Complete),
+                typed_test_allocation(view, Coverage::Complete),
+            ],
+        ),
+        &lane,
+    )
+    .unwrap();
+    assert_eq!(strata[0].components.len(), 2);
+}
+
+#[test]
+fn typed_link_keeps_partial_wrapper_coverage_and_canonical_occurrence() {
+    use crate::compiler_frontend::analysis::borrow_checker::{
+        state::Origin, transfer::typed_call::BindingEdit,
+    };
+    use typed::{BindingPost, Derivation, ObjectRef, PathAccess, PortId, RetainedRoute};
+    let (state, [_]) = parameter_allocations::<1>();
+    let target = WrapperId::current(0);
+    let source = WrapperId::current(1);
+    let origin = Origin {
+        wrapper: source,
+        owner: Some(target),
+        isolated: true,
+    };
+    let entries = [
+        EntryCapture {
+            wrappers: SmallSet::One(target),
+            wrapper_coverage: Some(Coverage::Complete),
+            ..Default::default()
+        },
+        EntryCapture {
+            wrappers: SmallSet::One(source),
+            wrapper_coverage: Some(Coverage::Partial),
+            origin: Some(origin),
+            writable: Some(true),
+            ..Default::default()
+        },
+    ];
+    let lane = typed_test_lane(vec![typed::Post {
+        bindings: vec![(
+            ObjectRef::Entry(PortId(0)),
+            BindingPost::Link(
+                ObjectRef::Entry(PortId(1)),
+                RetainedRoute {
+                    access: PathAccess {
+                        restriction: None,
+                        derived_from: Some(Derivation::Entry(PortId(1))),
+                    },
+                    dependencies: Vec::new(),
+                },
+            ),
+        )],
+        ..Default::default()
+    }]);
+    let row = typed_test_post(&typed_test_input(&state, &entries), &lane);
+    assert!(matches!(
+        &row.bindings[0].update,
+        BindingEdit::Link { coverage: Coverage::Partial, origin: Some(actual), .. } if *actual == origin
+    ));
+}
+
+#[test]
+fn typed_matcher_rejects_unresolved_edits_outside_the_selected_bound() {
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::CapturedUncertainty;
+    use typed::{CellPort, Footprint, ObjectRef, OutputPort, PortId};
+    let (state, [holder]) = parameter_allocations::<1>();
+    let target = CellPort::Edge(ObjectRef::Entry(PortId(0)), CallField::Field(0));
+    let footprint = Footprint::Locations(vec![OutputPort::Cell(target)]);
+    let lane = typed_test_lane(vec![typed::Post {
+        coverage: typed::Coverage::Unresolved(footprint.clone()),
+        ..Default::default()
+    }]);
+    for field in [0, 1] {
+        let address = AddressSet::from_cells(
+            [CellId::Projected(holder, FieldKey::Field(field))],
+            Coverage::Complete,
+        )
+        .with_singleton_proof();
+        let suffix = CapturedUncertainty {
+            edits: vec![CapturedEdit::Cell(TypedStore::replace_cells(
+                address,
+                CapturedValue {
+                    alternatives: vec![ValueAlt::plain(ValueKind::Unknown)],
+                    ..Default::default()
+                },
+            ))],
+            ..Default::default()
+        };
+        let entries = [typed_test_allocation(holder, Coverage::Complete)];
+        let input = ExplicitMatchInput {
+            uncertainty: &[(footprint.clone(), suffix)],
+            ..typed_test_input(&state, &entries)
+        };
+        assert_eq!(match_typed_lane(&input, &lane).is_ok(), field == 0);
+    }
+}
+
+#[test]
+fn writable_reach_materialises_after_prefix_and_refuses_injected_writes() {
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::typed_call::{
+        CapturedUncertainty, ReachLayout, ReachType,
+    };
+    use crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType;
+    use std::rc::Rc;
+    use typed::{
+        CellPort, CellPost, Footprint, ObjectRef, PortId, ReachBound, ReachKind, ValueSource,
+    };
+    struct Input<'a> {
+        captures: ExplicitMatchInput<'a>,
+        layout: &'a Rc<ReachLayout>,
+    }
+    impl MatchInput for Input<'_> {
+        fn state(&self) -> &BorrowState {
+            self.captures.state
+        }
+        fn entry(&self, port: PortId) -> Option<&EntryCapture> {
+            self.captures.entry(port)
+        }
+        fn entry_count(&self) -> usize {
+            self.captures.entry_count()
+        }
+        fn retained(&self, object: &ObjectRef) -> Option<&EntryCapture> {
+            self.captures.retained(object)
+        }
+        fn field(&self, ty: TypeId, selector: CallField) -> Option<FieldKey> {
+            self.captures.field(ty, selector)
+        }
+        fn uncertain_effects(&self, footprint: &Footprint) -> Option<&CapturedUncertainty> {
+            self.captures.uncertain_effects(footprint)
+        }
+        fn reach_layout(&self) -> Option<&Rc<ReachLayout>> {
+            Some(self.layout)
+        }
+        fn field_value_type(&self, holder: TypeId, field: CallField) -> Option<TypeId> {
+            let key = self.field(holder, field)?;
+            self.layout
+                .types
+                .get(&holder)?
+                .children
+                .iter()
+                .find_map(|&(field, ty)| (field == key).then_some(ty))
+        }
+        fn allocation_type(&self, id: AllocId) -> Option<TypeId> {
+            self.captures.entries.iter().find_map(|entry| {
+                entry
+                    .value
+                    .values
+                    .iter()
+                    .any(|value| value.id == id)
+                    .then_some(entry.ty)
+                    .flatten()
+            })
+        }
+    }
+    let (mut state, [root, original, replacement, outside]) = parameter_allocations::<4>();
+    let edge = FieldKey::Field(0);
+    let inside = FieldKey::Field(1);
+    let stored = |id| StoredValue { id, writable: true };
+    state.store_alloc_field(&[root], edge, &[stored(original)], true);
+    let scalar = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
+    let layout = Rc::new(ReachLayout {
+        types: [
+            (
+                TypeId(0),
+                ReachType {
+                    identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range),
+                    allocation: true,
+                    children: vec![(edge, TypeId(1))],
+                },
+            ),
+            (
+                TypeId(1),
+                ReachType {
+                    identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                    allocation: true,
+                    children: vec![(inside, TypeId(2))],
+                },
+            ),
+            (
+                TypeId(2),
+                ReachType {
+                    identity: scalar.clone(),
+                    allocation: false,
+                    children: Vec::new(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        local_mutable: vec![true; 4],
+        error: false,
+        scope: 1,
+    });
+    let mut replacement_capture = typed_test_allocation(replacement, Coverage::Complete);
+    replacement_capture.ty = Some(TypeId(1));
+    let dep = ReceiverDependency {
+        entries: SmallSet::One(outside),
+        coverage: Coverage::Complete,
+    };
+    let entries = [
+        typed_test_allocation(root, Coverage::Complete),
+        replacement_capture,
+        EntryCapture {
+            ty: Some(TypeId(2)),
+            value: CapturedValue {
+                alternatives: vec![ValueAlt {
+                    kind: ValueKind::Scalar,
+                    deps: vec![dep],
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    let bound = Footprint::WritableReach(ReachBound {
+        roots: vec![PortId(0)],
+        region: ReachKind::Referent,
+        types: vec![scalar],
+    });
+    let root_field = CellPort::Edge(ObjectRef::Entry(PortId(0)), CallField::Field(0));
+    let lane = typed_test_lane(vec![typed::Post {
+        cells: vec![(
+            root_field.clone(),
+            CellPost::Replace(vec![Some(typed_test_value(ValueSource::Allocation(
+                ObjectRef::Entry(PortId(1)),
+            )))]),
+        )],
+        coverage: typed::Coverage::Unresolved(bound.clone()),
+        ..Default::default()
+    }]);
+    let suffix = |holder, key, value| CapturedUncertainty {
+        edits: vec![CapturedEdit::Cell(TypedStore::write_cells(
+            AddressSet::from_cells([CellId::Projected(holder, key)], Coverage::Complete),
+            value,
+        ))],
+        ..Default::default()
+    };
+    let injected = [(bound, suffix(outside, inside, entries[2].value.clone()))];
+    let input = |uncertainty| Input {
+        captures: ExplicitMatchInput {
+            uncertainty,
+            ..typed_test_input(&state, &entries)
+        },
+        layout: &layout,
+    };
+    assert!(match_typed_lane(&input(&injected), &lane).is_err());
+    let locations = Footprint::Locations(vec![typed::OutputPort::Cell(root_field)]);
+    let graph_lane = typed_test_lane(vec![typed::Post {
+        coverage: typed::Coverage::Unresolved(locations.clone()),
+        ..Default::default()
+    }]);
+    for (value, accept) in [(root, false), (replacement, true)] {
+        let injected = [(
+            locations.clone(),
+            suffix(
+                root,
+                edge,
+                CapturedValue::new(vec![stored(value)], Vec::new()),
+            ),
+        )];
+        assert_eq!(
+            match_typed_lane(
+                &Input {
+                    captures: ExplicitMatchInput {
+                        uncertainty: &injected,
+                        ..typed_test_input(&state, &entries)
+                    },
+                    layout: &layout,
+                },
+                &graph_lane
+            )
+            .is_ok(),
+            accept
+        );
+    }
+    let mut partial = entries.clone();
+    partial[0].allocation_coverage = Some(Coverage::Partial);
+    let partial_input = Input {
+        captures: typed_test_input(&state, &partial),
+        layout: &layout,
+    };
+    let partial_reach = typed_test_lane(vec![typed::Post {
+        coverage: typed::Coverage::Unresolved(injected[0].0.clone()),
+        ..Default::default()
+    }]);
+    let mut locations_state = state.clone();
+    typed_test_post(&partial_input, &graph_lane).apply(&mut locations_state, 5);
+    let targets = locations_state
+        .resolve_alloc_path(0, &[true; 4], [edge])
+        .ids;
+    assert!(
+        targets.contains(&original)
+            && targets.contains(&replacement)
+            && !targets.contains(&outside)
+    );
+    let mut reach_state = state.clone();
+    typed_test_post(&partial_input, &partial_reach).apply(&mut reach_state, 5);
+    let graph = |id| ResolvedPlace::from_values(&[stored(id)], Vec::new());
+    assert!(
+        reach_state
+            .capture_scalar_projection(&graph(original), inside)
+            .alternatives
+            .iter()
+            .any(|alt| !alt.deps.is_empty())
+    );
+    assert!(
+        reach_state
+            .capture_scalar_projection(&graph(outside), inside)
+            .alternatives
+            .iter()
+            .all(|alt| alt.deps.is_empty())
+    );
+    typed_test_post(&input(&[]), &lane).apply(&mut state, 5);
+    let touched = |id| {
+        let graph = graph(id);
+        state
+            .capture_scalar_projection(&graph, inside)
+            .alternatives
+            .iter()
+            .any(|alt| !alt.deps.is_empty())
+    };
+    assert!(touched(replacement));
+    assert!(!touched(original));
+    assert!(!touched(outside));
+}
+
+#[test]
+fn typed_scalar_matcher_expresses_all_seven_receiver_dependency_probes() {
+    use super::conflicts::record_call_observations;
+    use crate::compiler_frontend::analysis::borrow_checker::engine::apply_captured_call_batch;
+    use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+        CapturedCallBatch, CapturedDestination, EdgeTransferView, OperationView,
+        facts::{AccessReservation, StatementAccessTracker, ValueObservations},
+    };
+    use crate::compiler_frontend::canonical_type_identity::ModulePrivateNominalIdentity;
+    use crate::compiler_frontend::hir::ids::LocalId;
+    use crate::compiler_frontend::public_call_summary::{CallEndpoint, PublicCallParameterAccess};
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, OriginTypeCategory, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+    use typed::{
+        CellPort, CellPost, EntryPort, ExportPort, Layout, ObjectRef, PortId, ScalarSource,
+        ValueSource,
+    };
+
+    struct ProbeLayout<'a> {
+        parameters: &'a [TypeId],
+        result: Option<TypeId>,
+        saved: &'a CanonicalTypeIdentity,
+    }
+    const SCALAR: TypeId = TypeId(0);
+    const SAVED: TypeId = TypeId(1);
+    fn endpoint(ty: TypeId) -> CallEndpoint<TypeId> {
+        CallEndpoint {
+            ty,
+            allocation: ty == SAVED,
+        }
+    }
+    impl Layout for ProbeLayout<'_> {
+        type Type = TypeId;
+        fn parameter(&self, index: usize) -> Option<CallEndpoint<TypeId>> {
+            self.parameters.get(index).copied().map(endpoint)
+        }
+        fn result(&self, error: bool, slot: usize) -> Option<CallEndpoint<TypeId>> {
+            if error || slot != 0 {
+                return None;
+            }
+            self.result.map(endpoint)
+        }
+        fn child(&self, ty: &TypeId, field: CallField) -> Option<CallEndpoint<TypeId>> {
+            (*ty == SAVED && matches!(field, CallField::Field(0 | 1))).then(|| endpoint(SCALAR))
+        }
+        fn stable(&self, ty: &CanonicalTypeIdentity) -> Option<CallEndpoint<TypeId>> {
+            (ty == self.saved).then(|| endpoint(SAVED))
+        }
+        fn children(&self, ty: &TypeId, visit: &mut dyn FnMut(CallEndpoint<TypeId>)) {
+            if *ty == SAVED {
+                visit(endpoint(SCALAR));
+                visit(endpoint(SCALAR));
+            }
+        }
+    }
+    let saved = CanonicalTypeIdentity::ModulePrivateNominal(ModulePrivateNominalIdentity::new(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("i3"),
+            "probe".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "Saved".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+    let locals = [LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(4)];
+    let indices = locals
+        .into_iter()
+        .enumerate()
+        .map(|(index, local)| (local, index))
+        .collect();
+    let operations = OperationView {
+        local_ids: &locals,
+        local_indices: &indices,
+        local_mutable: &[true; 5],
+        local_has_in_place_mutation_surface: &[true, false, false, true, false],
+        block_successors: &Default::default(),
+        local_first_write_order: &[0; 5],
+        acyclic_entry_block: None,
+    };
+    let view = EdgeTransferView {
+        operations,
+        observations: true,
+    };
+    let value_path = |parameter, fields: &[CallField]| EntryPort::Value {
+        parameter,
+        path: fields.into(),
+    };
+    let scalar = |source| typed_test_value(ValueSource::Scalar(source));
+    let pack = ObjectRef::Exact(ExportPort::Result(CallResultPath {
+        slot: 0,
+        path: Vec::new(),
+    }));
+    let run = |state: &mut BorrowState,
+               post: typed::Post,
+               ports: &[EntryPort],
+               args: &[(usize, TypeId, PublicCallParameterAccess)],
+               result: Option<(usize, TypeId)>,
+               retained: &[(ObjectRef, EntryCapture)]| {
+        let parameters: Vec<_> = args.iter().map(|arg| arg.1).collect();
+        let access: Vec<_> = args.iter().map(|arg| arg.2).collect();
+        let layout = ProbeLayout {
+            parameters: &parameters,
+            result: result.map(|(_, ty)| ty),
+            saved: &saved,
+        };
+        let facts = typed::TypedCallAllocationFacts {
+            success: typed_test_lane(vec![post]),
+            ..Default::default()
+        };
+        facts
+            .validate_layout(
+                &typed::Shape {
+                    parameters: &access,
+                    ports,
+                    support_count: 1,
+                    success_slots: Some(usize::from(result.is_some())),
+                    error_slot: false,
+                },
+                &layout,
+            )
+            .unwrap();
+        let actuals: Vec<_> = args.iter().map(|arg| (arg.0, arg.1)).collect();
+        let entries = super::statement::call_results::capture_local_value_ports(
+            state,
+            operations.local_mutable,
+            ports,
+            &actuals,
+            |ty, field| {
+                layout.child(&ty, field).map(|child| match field {
+                    CallField::Field(field) => (FieldKey::Field(field), child.ty),
+                    _ => unreachable!(),
+                })
+            },
+            |ty| ty != SCALAR,
+        )
+        .unwrap();
+        let post = typed_test_post(
+            &ExplicitMatchInput {
+                retained,
+                ..typed_test_input(state, &entries)
+            },
+            &facts.success,
+        );
+        let destinations = result
+            .into_iter()
+            .map(|(local, _)| CapturedDestination::Define(local))
+            .collect();
+        apply_captured_call_batch(
+            view,
+            CapturedCallBatch {
+                post,
+                destinations,
+                member_reads: Default::default(),
+                checkpoints: Vec::new(),
+                detachment: None,
+            },
+            [],
+            5,
+            state,
+        )
+        .unwrap();
+    };
+    let shared = PublicCallParameterAccess::Shared;
+    let mutable = PublicCallParameterAccess::Mutable;
+    for (probe, reject) in [
+        ("fresh_unrelated", false),
+        ("fresh_length", false),
+        ("call_scalar_field_independent", false),
+        ("pack_count_arg", false),
+        ("call_scalar_field", true),
+        ("call_scalar_store", true),
+        ("pack_then_extract", true),
+    ] {
+        for (lookup_success, live) in [(true, true), (false, true), (true, false)] {
+            let mut state = BorrowState::new_uninitialized(5);
+            for local in [0, 1, 2] {
+                state.initialize_parameter(local);
+            }
+            let scores = state.local_alloc_ids(0).0[0];
+            let fresh =
+                state.call_site_id(5, false, 0, false, BlockId(0), operations.block_successors);
+            let dependency = ReceiverDependency {
+                entries: SmallSet::One(scores),
+                coverage: Coverage::Complete,
+            };
+            let score = ValueAlt {
+                kind: ValueKind::Scalar,
+                deps: lookup_success.then_some(dependency).into_iter().collect(),
+            };
+            let score_slot = CellId::Slot(WrapperId::current(1));
+            state.publish_store(
+                &TypedStore::replace_cells(
+                    AddressSet::from_cells([score_slot], Coverage::Complete).with_singleton_proof(),
+                    CapturedValue {
+                        alternatives: vec![score],
+                        ..Default::default()
+                    },
+                )
+                .with_explicit_slot_payload(),
+                UNKNOWN_ORDER_KEY,
+                None,
+            );
+            let mut read_local = 4;
+            let mut read_key = None;
+            if matches!(probe, "fresh_unrelated" | "fresh_length") {
+                run(
+                    &mut state,
+                    typed::Post {
+                        results: vec![(0, scalar(ScalarSource::Independent))],
+                        ..Default::default()
+                    },
+                    &[value_path(0, &[])],
+                    &[(1, SCALAR, shared)],
+                    Some((4, SCALAR)),
+                    &[],
+                );
+            } else if probe == "call_scalar_store" {
+                state.initialize_parameter(3);
+                read_local = 3;
+                read_key = Some(FieldKey::Field(0));
+                run(
+                    &mut state,
+                    typed::Post {
+                        cells: vec![(
+                            CellPort::Edge(ObjectRef::Entry(PortId(0)), CallField::Field(0)),
+                            CellPost::Replace(vec![Some(scalar(ScalarSource::EntryValue(
+                                PortId(1),
+                            )))]),
+                        )],
+                        ..Default::default()
+                    },
+                    &[value_path(0, &[]), value_path(1, &[])],
+                    &[(3, SAVED, mutable), (1, SCALAR, shared)],
+                    None,
+                    &[],
+                );
+            } else {
+                let takes_count = probe == "pack_count_arg";
+                let count = if takes_count {
+                    ScalarSource::EntryValue(PortId(1))
+                } else {
+                    ScalarSource::Independent
+                };
+                let mut retained = typed_test_allocation(fresh, Coverage::Complete);
+                retained.ty = Some(SAVED);
+                let args = [(1, SCALAR, shared), (2, SCALAR, shared)];
+                let ports = [value_path(0, &[]), value_path(1, &[])];
+                let width = if takes_count { 2 } else { 1 };
+                run(
+                    &mut state,
+                    typed::Post {
+                        cells: vec![
+                            (
+                                CellPort::Edge(pack.clone(), CallField::Field(0)),
+                                CellPost::Replace(vec![Some(scalar(ScalarSource::EntryValue(
+                                    PortId(0),
+                                )))]),
+                            ),
+                            (
+                                CellPort::Edge(pack.clone(), CallField::Field(1)),
+                                CellPost::Replace(vec![Some(scalar(count))]),
+                            ),
+                        ],
+                        results: vec![(0, typed_test_value(ValueSource::Allocation(pack.clone())))],
+                        retained: vec![(
+                            pack.clone(),
+                            typed::StorageKind::Allocation,
+                            saved.clone(),
+                        )],
+                        ..Default::default()
+                    },
+                    &ports[..width],
+                    &args[..width],
+                    Some((3, SAVED)),
+                    &[(pack.clone(), retained)],
+                );
+                assert_eq!(state.local_alloc_ids(3).0, [fresh], "{probe}");
+                if probe == "pack_then_extract" {
+                    run(
+                        &mut state,
+                        typed::Post {
+                            results: vec![(0, scalar(ScalarSource::EntryValue(PortId(0))))],
+                            ..Default::default()
+                        },
+                        &[value_path(0, &[CallField::Field(0)])],
+                        &[(3, SAVED, shared)],
+                        Some((4, SCALAR)),
+                        &[],
+                    );
+                } else {
+                    read_local = 3;
+                    read_key = Some(FieldKey::Field(if reject { 0 } else { 1 }));
+                }
+            }
+            let mut tracker = StatementAccessTracker::new(5);
+            tracker.reserve(AccessReservation {
+                footprint: graph_access(scores, Vec::new(), PlaceUse::WriteEntries),
+                actor: Some(0),
+                span: None,
+            });
+            let mut observation = ValueObservations::default();
+            let checkpoints =
+                record_call_observations(&mut observation, &state, &tracker, 0, None, false, true);
+            if live {
+                let read = state.resolve_place_path(read_local, operations.local_mutable, read_key);
+                observation
+                    .tail
+                    .observe(&state, &footprint(&read, PlaceUse::Read), true, None);
+            }
+            let conflicts = checkpoints.iter().any(|checkpoint| {
+                checkpoint
+                    .candidates
+                    .iter()
+                    .any(|carrier| observation.tail.upward_reads.contains(carrier))
+            });
+            assert_eq!(
+                conflicts,
+                reject && lookup_success && live,
+                "{probe}: {lookup_success}/{live}"
+            );
+        }
+    }
+}
 
 fn check_source(source: &str) -> Result<(), BorrowCheckError> {
     let (ast, mut paths, mut strings) = parse_single_file_ast(source);

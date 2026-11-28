@@ -23,6 +23,9 @@ use super::super::public_call_summary::typed::{
     ScalarSource, ScalarSourceBound, Shape, StorageKind, SupportId, TypedCallAllocationFacts,
     ValueRef, ValueSource,
 };
+use super::super::public_call_summary::{
+    same_typed_allocation_transfer_as, validate_typed_allocation_transition,
+};
 
 fn scalar(source: ScalarSource) -> ValueRef {
     ValueRef {
@@ -204,6 +207,174 @@ fn typed_shape_requires_explicit_scalar_results_and_monotone_executed_facts() {
         .validate(&shape)
         .is_err()
     );
+}
+
+#[test]
+fn typed_retention_only_widening_notifies_callers_without_a_lane() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[],
+        support_count: 0,
+        success_slots: None,
+        error_slot: false,
+    };
+    let bottom = TypedCallAllocationFacts::default();
+    let retaining = TypedCallAllocationFacts {
+        may_retain: vec![0],
+        ..bottom.clone()
+    };
+    assert!(same_typed_allocation_transfer_as(None, Some(&bottom)));
+    assert!(!same_typed_allocation_transfer_as(None, Some(&retaining)));
+    assert!(!same_typed_allocation_transfer_as(
+        Some(&bottom),
+        Some(&retaining)
+    ));
+    assert!(same_typed_allocation_transfer_as(
+        Some(&retaining),
+        Some(&retaining)
+    ));
+    assert!(retaining.executed_may_retain(0));
+    assert!(!retaining.lane(false).can_return());
+    assert!(!retaining.lane(true).can_return());
+    assert_eq!(
+        validate_typed_allocation_transition(Some(&bottom), Some(&retaining), &shape).unwrap(),
+        PublicCallSummaryTransition::Widened
+    );
+    assert!(validate_typed_allocation_transition(Some(&retaining), Some(&bottom), &shape).is_err());
+    assert!(validate_typed_allocation_transition(Some(&bottom), None, &shape).is_err());
+}
+
+#[test]
+fn typed_layout_checks_scalar_selectors_occurrence_and_reach_bounds() {
+    use super::super::canonical_type_identity::{
+        CanonicalBuiltinType as Builtin, CanonicalTypeIdentity as Type,
+    };
+    use super::super::public_call_summary::CallEndpoint;
+    use super::super::public_call_summary::typed::{FamilyPort, FamilyPost, Layout, Occurrence};
+    let boolean = || Type::Builtin(Builtin::Bool);
+    let string = || Type::Builtin(Builtin::String);
+    struct FixtureLayout(Type);
+    impl Layout for FixtureLayout {
+        type Type = Type;
+        fn parameter(&self, _: usize) -> Option<CallEndpoint<Type>> {
+            self.stable(&self.0)
+        }
+        fn result(&self, _: bool, _: usize) -> Option<CallEndpoint<Type>> {
+            self.stable(&Type::Builtin(Builtin::Bool))
+        }
+        fn child(&self, ty: &Type, selector: CallField) -> Option<CallEndpoint<Type>> {
+            let Type::OrderedMap { key, value } = ty else {
+                return None;
+            };
+            self.stable(match selector {
+                CallField::MapKey => key,
+                CallField::Elem => value,
+                _ => return None,
+            })
+        }
+        fn stable(&self, ty: &Type) -> Option<CallEndpoint<Type>> {
+            Some(CallEndpoint {
+                ty: ty.clone(),
+                allocation: matches!(ty, Type::OrderedMap { .. } | Type::Builtin(Builtin::String)),
+            })
+        }
+        fn children(&self, ty: &Type, visit: &mut dyn FnMut(CallEndpoint<Type>)) {
+            for selector in [CallField::MapKey, CallField::Elem] {
+                if let Some(child) = self.child(ty, selector) {
+                    visit(child);
+                }
+            }
+        }
+    }
+    let map = Type::OrderedMap {
+        key: Box::new(string()),
+        value: Box::new(boolean()),
+    };
+    let layout = FixtureLayout(map);
+    let path = |fields: &[CallField]| EntryPort::Value {
+        parameter: 0,
+        path: fields.into(),
+    };
+    let ports = [
+        path(&[]),
+        path(&[CallField::Elem]),
+        path(&[CallField::MapKey]),
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(1),
+        error_slot: false,
+    };
+    let receiver = ObjectRef::Entry(PortId(0));
+    let facts = |post| TypedCallAllocationFacts {
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        ),
+        ..Default::default()
+    };
+    let mut post = Post {
+        results: vec![(0, scalar(ScalarSource::EntryValue(PortId(1))))],
+        coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+            roots: vec![PortId(0)],
+            region: ReachKind::EntryStructure,
+            types: vec![boolean()],
+        })),
+        ..Default::default()
+    };
+    assert!(facts(post.clone()).validate_layout(&shape, &layout).is_ok());
+    post.results[0].1 = scalar(ScalarSource::EntryValue(PortId(2)));
+    assert!(
+        facts(post.clone())
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+    post.results[0].1 = scalar(ScalarSource::Independent);
+    let Coverage::Unresolved(Footprint::WritableReach(bound)) = &mut post.coverage else {
+        unreachable!()
+    };
+    bound.types = vec![Type::Builtin(Builtin::Char)];
+    assert!(
+        facts(post.clone())
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+
+    post.coverage = Coverage::Complete;
+    let family = ObjectRef::Family(StorageKind::Allocation, string());
+    post.retained = vec![(family.clone(), StorageKind::Allocation, string())];
+    post.families = vec![(
+        FamilyPort {
+            receiver,
+            selector: CallField::MapKey,
+        },
+        FamilyPost::ReplaceAll(vec![(
+            ValueRef {
+                source: ValueSource::Allocation(family),
+                access: PathAccess {
+                    restriction: None,
+                    derived_from: None,
+                },
+                dependencies: Vec::new(),
+            },
+            Occurrence::AtMostOnce,
+        )]),
+    )];
+    assert!(
+        facts(post.clone())
+            .validate_layout(&shape, &layout)
+            .is_err()
+    );
+    let FamilyPost::ReplaceAll(members) = &mut post.families[0].1 else {
+        unreachable!()
+    };
+    members[0].1 = Occurrence::MaybeMany;
+    assert!(facts(post).validate_layout(&shape, &layout).is_ok());
 }
 
 #[test]

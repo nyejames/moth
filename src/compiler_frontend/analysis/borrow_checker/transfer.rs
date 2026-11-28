@@ -37,6 +37,8 @@ use crate::compiler_frontend::semantic_identity::{
 use rustc_hash::FxHashMap;
 
 pub(super) use access::call_member_result;
+
+pub(super) use access::typed_call;
 use access::{
     AggregateTransferContext, CallTransferContext, transfer_aggregate_expression_ownership,
     transfer_statement, transfer_statement_operation, transfer_terminator,
@@ -230,6 +232,34 @@ pub(super) enum InvokeLayerOp {
 pub(super) enum InvokeLane {
     Success,
     Error,
+}
+
+/// Evaluation fixes the address of an update; a definition instead creates
+/// a new slot whose incoming value can still name predecessor storage.
+#[allow(dead_code)]
+pub(super) enum CapturedDestination {
+    Define(usize),
+    Update {
+        actor: usize,
+        address: super::state::AddressSet,
+    },
+}
+
+#[allow(dead_code)]
+pub(super) struct CapturedDetachment {
+    pub holders: Vec<AllocId>,
+    pub map: bool,
+    /// The result ordinal, not the actor spelling of the receiving place.
+    pub result: Option<usize>,
+}
+
+#[allow(dead_code)]
+pub(super) struct CapturedCallBatch {
+    pub post: typed_call::CapturedPost,
+    pub destinations: Vec<CapturedDestination>,
+    pub member_reads: Demand,
+    pub checkpoints: Vec<ObservationCheckpoint>,
+    pub detachment: Option<CapturedDetachment>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

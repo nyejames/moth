@@ -73,6 +73,36 @@ impl FunctionReturnAliasSummary {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn same_typed_allocation_transfer_as(
+    previous: Option<&typed::TypedCallAllocationFacts>,
+    next: Option<&typed::TypedCallAllocationFacts>,
+) -> bool {
+    match (previous, next) {
+        (None, Some(facts)) | (Some(facts), None) => facts.is_transfer_bottom(),
+        _ => previous == next,
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn validate_typed_allocation_transition(
+    previous: Option<&typed::TypedCallAllocationFacts>,
+    next: Option<&typed::TypedCallAllocationFacts>,
+    shape: &typed::Shape<'_>,
+) -> Result<PublicCallSummaryTransition, InfrastructureFailure> {
+    match (previous, next) {
+        (Some(previous), Some(next)) => previous.validate_transition(next, shape)?,
+        (None, Some(next)) => next.validate(shape)?,
+        (Some(_), None) => return Err(allocation_error("solved typed call became pending")),
+        (None, None) => {}
+    }
+    Ok(if previous == next {
+        PublicCallSummaryTransition::Unchanged
+    } else {
+        PublicCallSummaryTransition::Widened
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CallAllocationFacts {
     pub success: CallLaneSummary,
@@ -696,6 +726,25 @@ pub(crate) enum CallPathType<T> {
     Unavailable,
 }
 
+/// A typed endpoint may be a scalar cell or an allocation. Unavailable provider
+/// layouts are not evidence for either classification.
+pub(crate) struct CallEndpoint<T> {
+    pub ty: T,
+    pub allocation: bool,
+}
+
+#[allow(dead_code)]
+impl CallEndpoint<TypeId> {
+    pub(crate) fn hir(ty: TypeId, types: &TypeEnvironment) -> Option<Self> {
+        Some(Self {
+            ty,
+            allocation: classify_hir_type(ty, types)
+                .ok()?
+                .has_in_place_mutation_surface(),
+        })
+    }
+}
+
 impl CallPathType<TypeId> {
     /// The terminal path must be eligible for tracking as an allocation, not just well-typed.
     pub(crate) fn hir_allocation(ty: TypeId, types: &TypeEnvironment) -> Option<Self> {
@@ -802,7 +851,7 @@ pub(crate) fn validate_public_call_allocation_layout<T: Eq>(
     Ok(())
 }
 
-fn allocation_error(message: impl std::fmt::Display) -> InfrastructureFailure {
+pub(crate) fn allocation_error(message: impl std::fmt::Display) -> InfrastructureFailure {
     InfrastructureFailure::internal(
         CompilerStage::AstConstruction,
         format!("public call summary allocation facts: {message}"),

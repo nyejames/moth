@@ -27,9 +27,13 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX;
+use crate::compiler_frontend::public_call_summary::typed::{
+    Layout, Shape, TypedCallAllocationFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
-    CallField, CallParameterPath, CallPathType, PublicCallParameterAccess, PublicCallSummary,
-    validate_public_call_allocation_layout, validate_public_call_parameter_contract,
+    CallEndpoint, CallField, CallParameterPath, CallPathType, PublicCallParameterAccess,
+    PublicCallSummary, validate_public_call_allocation_layout,
+    validate_public_call_parameter_contract,
 };
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
@@ -888,7 +892,223 @@ struct CallSignature<'a> {
     returns: &'a PublicCallableReturnContract,
 }
 
+#[allow(dead_code)]
+struct TypedSignatureLayout<'a, 'decl, F> {
+    signature: &'a CallSignature<'decl>,
+    layouts: &'a CallPathLayouts<'decl>,
+    builtin_error: bool,
+    private_layout: F,
+}
+
+type StableChildren<'a> = &'a [(CallField, CanonicalTypeIdentity)];
+
+impl<'a, 'decl, F> Layout for TypedSignatureLayout<'a, 'decl, F>
+where
+    F: Fn(&CanonicalTypeIdentity) -> Option<StableChildren<'decl>>,
+{
+    type Type = CanonicalTypeIdentity;
+
+    fn parameter(&self, index: usize) -> Option<CallEndpoint<Self::Type>> {
+        self.stable(&self.signature.parameters.get(index)?.type_identity)
+    }
+
+    fn result(&self, error_lane: bool, slot: usize) -> Option<CallEndpoint<Self::Type>> {
+        let PublicCallableReturnContract::Returns { success, error } = self.signature.returns
+        else {
+            return None;
+        };
+        if error_lane {
+            (slot == 0).then_some(())?;
+            if let Some(error) = error {
+                self.stable(error)
+            } else {
+                self.builtin_error.then(|| {
+                    known_endpoint(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error))
+                })
+            }
+        } else {
+            self.stable(&success.get(slot)?.type_identity)
+        }
+    }
+
+    fn child(&self, ty: &Self::Type, selector: CallField) -> Option<CallEndpoint<Self::Type>> {
+        if matches!(
+            ty,
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+                | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
+        ) {
+            let rows = (self.private_layout)(ty)?;
+            return self.stable(&rows.iter().find(|(field, _)| *field == selector)?.1);
+        }
+        match canonical_path_type(ty, &mut std::iter::once(&selector), self.layouts, None)? {
+            CallPathType::Known(child) => self.stable(&child),
+            CallPathType::Unavailable => None,
+        }
+    }
+
+    fn stable(&self, ty: &Self::Type) -> Option<CallEndpoint<Self::Type>> {
+        if matches!(
+            ty,
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+                | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
+        ) {
+            (self.private_layout)(ty)?;
+        }
+        Some(known_endpoint(ty.clone()))
+    }
+
+    fn children(&self, ty: &Self::Type, visit: &mut dyn FnMut(CallEndpoint<Self::Type>)) {
+        let mut emit = |selector| {
+            if let Some(child) = self.child(ty, selector) {
+                visit(child);
+            }
+        };
+        match ty {
+            CanonicalTypeIdentity::Collection { .. } => emit(CallField::Elem),
+            CanonicalTypeIdentity::OrderedMap { .. } => {
+                emit(CallField::MapKey);
+                emit(CallField::Elem);
+            }
+            CanonicalTypeIdentity::Option(_) => emit(CallField::Payload {
+                variant: OPTION_SOME_VARIANT_INDEX as u32,
+                field: 0,
+            }),
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error) => {
+                for ordinal in 0.. {
+                    if builtin_error_field_type(ordinal).is_none() {
+                        break;
+                    }
+                    emit(CallField::Field(ordinal));
+                }
+            }
+            CanonicalTypeIdentity::SourceNominal(origin)
+            | CanonicalTypeIdentity::GenericInstance { base: origin, .. } => {
+                match self.layouts.get(origin) {
+                    Some(PublicDeclarationSemantics::Struct(structure)) => {
+                        for ordinal in 0..structure.fields.len() {
+                            emit(CallField::Field(ordinal as u32));
+                        }
+                    }
+                    Some(PublicDeclarationSemantics::Choice(choice)) => {
+                        for (variant, layout) in choice.variants.iter().enumerate() {
+                            for field in 0..layout.payload_fields.len() {
+                                emit(CallField::Payload {
+                                    variant: variant as u32,
+                                    field: field as u32,
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            CanonicalTypeIdentity::ModulePrivateNominal(_)
+            | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. } => {
+                if let Some(rows) = (self.private_layout)(ty) {
+                    for (selector, _) in rows {
+                        emit(*selector);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn known_endpoint(ty: CanonicalTypeIdentity) -> CallEndpoint<CanonicalTypeIdentity> {
+    CallEndpoint {
+        allocation: has_canonical_allocation_surface(&ty),
+        ty,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn typed_signature_resolves_a_private_field_only_with_its_stable_layout() {
+    use crate::compiler_frontend::canonical_type_identity::ModulePrivateNominalIdentity;
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+    let private = CanonicalTypeIdentity::ModulePrivateNominal(ModulePrivateNominalIdentity::new(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("typed-layout"),
+            "entry".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "InternalTerminal".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+    let signature = CallSignature {
+        parameters: &[],
+        returns: &PublicCallableReturnContract::Never,
+    };
+    let layouts = CallPathLayouts::default();
+    let ty = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
+    let rows = [(CallField::Field(0), ty.clone())];
+    let with_private = TypedSignatureLayout {
+        signature: &signature,
+        layouts: &layouts,
+        builtin_error: false,
+        private_layout: |identity: &CanonicalTypeIdentity| {
+            (identity == &private).then_some(rows.as_slice())
+        },
+    };
+    let without_private = TypedSignatureLayout {
+        signature: &signature,
+        layouts: &layouts,
+        builtin_error: false,
+        private_layout: |_: &CanonicalTypeIdentity| None,
+    };
+    assert!(
+        without_private
+            .child(&private, CallField::Field(0))
+            .is_none()
+    );
+    let field = with_private.child(&private, CallField::Field(0)).unwrap();
+    assert_eq!(field.ty, ty);
+    assert!(!field.allocation);
+    assert!(with_private.child(&private, CallField::Elem).is_none());
+}
+
 impl CallSignature<'_> {
+    #[allow(dead_code)]
+    fn validate_typed_allocation<'decl>(
+        &'decl self,
+        layouts: &CallPathLayouts<'decl>,
+        facts: &TypedCallAllocationFacts,
+        shape: &Shape<'_>,
+        builtin_error: bool,
+        private_layout: impl Fn(&CanonicalTypeIdentity) -> Option<StableChildren<'decl>>,
+    ) -> Result<(), InfrastructureFailure> {
+        let (success_slots, error_slot) = match self.returns {
+            PublicCallableReturnContract::Never => (None, false),
+            PublicCallableReturnContract::Returns { success, error } => {
+                (Some(success.len()), error.is_some() || builtin_error)
+            }
+        };
+        if !shape
+            .parameters
+            .iter()
+            .copied()
+            .eq(self.parameters.iter().map(|slot| slot.access))
+            || shape.success_slots != success_slots
+            || shape.error_slot != error_slot
+        {
+            return Err(publication_error(
+                "typed call shape disagrees with its declaration".to_owned(),
+            ));
+        }
+        facts.validate_layout(
+            shape,
+            &TypedSignatureLayout {
+                signature: self,
+                layouts,
+                builtin_error,
+                private_layout,
+            },
+        )
+    }
+
     fn validate_summary(
         &self,
         layouts: &CallPathLayouts<'_>,
@@ -957,8 +1177,10 @@ fn signature_path_type<'a, 'path>(
     layouts: &CallPathLayouts<'a>,
     allow_unavailable_layouts: bool,
 ) -> Option<CallPathType<Cow<'a, CanonicalTypeIdentity>>> {
-    canonical_path_type(root, path, layouts, None)
-        .filter(|path| allow_unavailable_layouts || matches!(path, CallPathType::Known(_)))
+    canonical_path_type(root, path, layouts, None).filter(|path| match path {
+        CallPathType::Known(ty) => has_canonical_allocation_surface(ty),
+        CallPathType::Unavailable => allow_unavailable_layouts,
+    })
 }
 
 /// A generic instance's arguments were authored in the enclosing layout's parameter scope.
@@ -977,9 +1199,6 @@ fn canonical_path_type<'a, 'path>(
 ) -> Option<CallPathType<Cow<'a, CanonicalTypeIdentity>>> {
     let (ty, arguments) = resolve_layout_argument(ty, arguments)?;
     let Some(&selector) = path.next() else {
-        if !has_canonical_allocation_surface(ty) {
-            return None;
-        }
         return instantiate_path_type(ty, arguments).map(CallPathType::Known);
     };
 
@@ -1002,7 +1221,8 @@ fn canonical_path_type<'a, 'path>(
         ) => {
             let field = builtin_error_field_type(ordinal)?;
             // The manifest's field types are builtins with no allocation-bearing children.
-            (path.next().is_none() && has_canonical_allocation_surface(&field))
+            path.next()
+                .is_none()
                 .then_some(CallPathType::Known(Cow::Owned(field)))
         }
         (CanonicalTypeIdentity::SourceNominal(origin), _) => {

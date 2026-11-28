@@ -5,22 +5,26 @@
 //! entrypoint easier to inspect without changing the borrow-analysis model.
 
 #[path = "call_results.rs"]
-mod call_results;
+pub(in crate::compiler_frontend::analysis::borrow_checker) mod call_results;
 
+use super::super::call_semantics::{TypedContinuation, classify_typed_continuation};
 use super::conflicts::{
     OperandAccessIndex, Overlap, check_call_access, overlap, record_call_observations,
 };
 use super::layer::needs_layer_store_capture;
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    AllocationRetirement, CapturedValue, Coverage, EntryFamilies, FieldKey, ReceiverDependency,
-    ResolvedPlace, RootSet, SmallSet, TypedStore, ValueAlt, ValueKind as PayloadKind, WrapperId,
+    AddressSet, AllocId, AllocationRetirement, CapturedValue, Coverage, EntryFamilies, FieldKey,
+    ReceiverDependency, ResolvedPlace, RootSet, SmallSet, TypedStore, ValueAlt,
+    ValueKind as PayloadKind, WrapperId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::call_semantics::CallReturns;
 use crate::compiler_frontend::analysis::borrow_checker::transfer::facts::{
     Demand, selected_members,
 };
-use crate::compiler_frontend::analysis::borrow_checker::transfer::{InvokeLane, InvokeLayerOp};
+use crate::compiler_frontend::analysis::borrow_checker::transfer::{
+    CapturedCallBatch, CapturedDestination, CapturedDetachment, InvokeLane, InvokeLayerOp,
+};
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
@@ -28,6 +32,252 @@ use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
+use crate::compiler_frontend::public_call_summary::typed::TypedCallAllocationFacts;
+
+#[cfg(test)]
+mod typed_argument_tests {
+    use super::*;
+    use crate::compiler_frontend::public_call_summary::typed::{
+        Component, Coverage as TypedCoverage, Footprint, Lane, OutputPort, Post, Product, SupportId,
+    };
+    use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+    use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
+
+    #[test]
+    fn pending_arguments_execute_without_settling_optional_transfer_or_a_lane() {
+        let (ast, mut paths, mut strings) = parse_single_file_ast("x = 1");
+        let packages = default_external_package_registry(&mut strings);
+        let (module, types) = lower_ast(ast, &mut strings, &mut paths, &packages).unwrap();
+        let context = BorrowTransferContext {
+            external_package_registry: &packages,
+            public_call_summaries: &Default::default(),
+            imported_call_summaries: &module.imported_call_summaries,
+            module_private_call_summaries: &module.module_private_call_summaries,
+            generated_call_summaries: &module.generated_call_summaries,
+            local_types: &Default::default(),
+            structs: &module.structs,
+            choices: &module.choices,
+            expressions: &module.expressions,
+            type_environment: &types,
+            diagnostics: BorrowDiagnostics::new(&module, &paths, &strings),
+        };
+        let view = OperationView {
+            local_ids: &[],
+            local_indices: &Default::default(),
+            local_mutable: &[],
+            local_has_in_place_mutation_surface: &[],
+            block_successors: &Default::default(),
+            local_first_write_order: &[],
+            acyclic_entry_block: None,
+        };
+        let args = [CallArgumentTransfer {
+            argument: HirValueId(0),
+            effect: ArgEffect::MayConsumeShared,
+        }];
+        let mut state = BorrowState::new_uninitialized(0);
+        let mut stats = BlockTransferStats::default();
+        let pending = None;
+        let bottom = TypedCallAllocationFacts {
+            may_retain: vec![0],
+            ..Default::default()
+        };
+        let unresolved = TypedCallAllocationFacts {
+            success: Lane::Returning(
+                Product::new(vec![Component {
+                    support: SupportId(0),
+                    alternatives: vec![Post {
+                        coverage: TypedCoverage::Unresolved(Footprint::Locations(vec![
+                            OutputPort::Result(0),
+                        ])),
+                        ..Default::default()
+                    }],
+                }])
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let mut executed = Vec::new();
+        {
+            let mut input = CallTransferContext::new(
+                &context,
+                view,
+                &mut state,
+                BlockId(0),
+                0,
+                None,
+                &mut stats,
+                None,
+            );
+            for facts in [pending, Some(&bottom), Some(&unresolved)] {
+                account_typed_call_arguments(
+                    &mut input,
+                    &mut CallActuals::new(&args),
+                    facts,
+                    CallStorage::User,
+                    true,
+                    |_| false,
+                    |argument, effect, retains| executed.push((argument, effect, retains)),
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(
+            executed,
+            [
+                (HirValueId(0), None, false),
+                (HirValueId(0), Some(ArgEffect::SharedBorrow), true),
+                (HirValueId(0), Some(ArgEffect::SharedBorrow), false),
+            ]
+        );
+        assert!(stats.invoke.is_empty() && stats.observations.is_empty() && !stats.diverges);
+        for terminal in [false, true] {
+            for error in [false, true] {
+                let classify = |facts, mandatory| {
+                    classify_typed_continuation(
+                        facts,
+                        terminal,
+                        error,
+                        mandatory,
+                        &context.diagnostics,
+                    )
+                };
+                assert!(matches!(
+                    classify(pending, false),
+                    Ok(TypedContinuation::Deferred)
+                ));
+                assert!(classify(pending, true).is_err());
+                assert!(matches!(
+                    classify(Some(&bottom), false),
+                    Ok(TypedContinuation::NoContinuation)
+                ));
+                let selected = classify(Some(&unresolved), true).unwrap();
+                if terminal || error {
+                    assert!(matches!(selected, TypedContinuation::NoContinuation));
+                } else {
+                    assert!(
+                        matches!(selected, TypedContinuation::Match(lane) if std::ptr::eq(lane, &unresolved.success))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn typed_lookup_captures_a_real_receiver_before_receiving() {
+        check_typed_lookup(false);
+        check_typed_lookup(true);
+    }
+
+    fn check_typed_lookup(copied: bool) {
+        use crate::compiler_frontend::analysis::borrow_checker::{
+            engine::apply_captured_call_batch, state::StoredValue, transfer::EdgeTransferView,
+        };
+        let source = if copied {
+            "items = {1}\nobserved = (copy items).get(0) catch then 0\n"
+        } else {
+            "items = {1}\nobserved = items.get(0) catch then 0\n"
+        };
+        let (ast, mut paths, mut strings) = parse_single_file_ast(source);
+        let packages = default_external_package_registry(&mut strings);
+        let (module, types) = lower_ast(ast, &mut strings, &mut paths, &packages).unwrap();
+        let (argument, receiver) = (0..module.expressions.expression_count())
+            .find_map(|index| {
+                let id = HirValueId(index as u32);
+                match &module.expressions.expression(id).kind {
+                    HirExpressionKind::Load(place) if !copied => Some((id, place.root)),
+                    HirExpressionKind::Copy(place) if copied => Some((id, place.root)),
+                    _ => None,
+                }
+            })
+            .expect("lookup has a receiver load");
+        let receiving = LocalId(u32::MAX);
+        let locals = [receiver, receiving];
+        let indices = [(receiver, 0), (receiving, 1)].into_iter().collect();
+        let view = OperationView {
+            local_ids: &locals,
+            local_indices: &indices,
+            local_mutable: &[true; 2],
+            local_has_in_place_mutation_surface: &[true, false],
+            block_successors: &Default::default(),
+            local_first_write_order: &[0, 3],
+            acyclic_entry_block: None,
+        };
+        let context = BorrowTransferContext {
+            external_package_registry: &packages,
+            public_call_summaries: &Default::default(),
+            imported_call_summaries: &module.imported_call_summaries,
+            module_private_call_summaries: &module.module_private_call_summaries,
+            generated_call_summaries: &module.generated_call_summaries,
+            local_types: &Default::default(),
+            structs: &module.structs,
+            choices: &module.choices,
+            expressions: &module.expressions,
+            type_environment: &types,
+            diagnostics: BorrowDiagnostics::new(&module, &paths, &strings),
+        };
+        let mut state = BorrowState::new_uninitialized(2);
+        state.initialize_parameter(0);
+        let mut derived = RootSet::empty(2);
+        derived.insert(0);
+        state.mark_slot_derivation(0, derived);
+        let holder = state.local_alloc_ids(0).0[0];
+        state.store_alloc_field(
+            &[holder],
+            FieldKey::Elem,
+            &[StoredValue {
+                id: holder,
+                writable: true,
+            }],
+            false,
+        );
+        let mut stats = BlockTransferStats::default();
+        let args = [CallArgumentTransfer {
+            argument,
+            effect: ArgEffect::SharedBorrow,
+        }];
+        let batch = capture_typed_builtin_element_batch(
+            &mut CallTransferContext::new(
+                &context,
+                view,
+                &mut state,
+                BlockId(0),
+                3,
+                None,
+                &mut stats,
+                None,
+            ),
+            &mut CallActuals::new(&args),
+            Some(HirLocalDestination::Define(receiving)),
+            CallStorage::Get,
+        )
+        .unwrap();
+        apply_captured_call_batch(
+            EdgeTransferView {
+                operations: view,
+                observations: true,
+            },
+            batch,
+            [],
+            3,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(state.effective_roots(1).contains(0), !copied);
+        assert_eq!(state.derived_roots_from_source(1).contains(0), !copied);
+        let result = state.resolve_captured_allocs(&state.resolve_cells(1), None);
+        let mut dependencies = result.alternatives.iter().flat_map(|alt| &alt.deps);
+        assert!(
+            dependencies
+                .clone()
+                .any(|dep| !dep.entries.as_slice().is_empty())
+        );
+        assert_eq!(
+            dependencies.any(|dep| dep.entries.as_slice().contains(&holder)),
+            !copied,
+        );
+    }
+}
 use crate::compiler_frontend::source::SourceSpan;
 use call_results::{CallActuals, CallLane, bind_result, call_result_ops, capture_graph_values};
 
@@ -661,31 +911,7 @@ fn transfer_call_arguments_and_result(
     let retains_success = results.clone().next().is_some() && success_lane.retains_result();
     let retains_error = error.is_some() && error_lane.retains_result();
     let mut actuals = CallActuals::new(args);
-    let mut plans = Vec::new();
-    if input.validation.is_some() {
-        plans.reserve(args.len());
-        for (arg_index, arg) in args.iter().enumerate() {
-            increment_frontend_counter(FrontendCounter::BorrowArgumentPlansScanned);
-            let argument = arg.argument;
-            let argument_location = input
-                .context
-                .diagnostics
-                .value_error_span(argument, input.location);
-
-            plans.push(plan_call_actual(
-                input,
-                &mut actuals,
-                arg_index,
-                arg,
-                argument_location,
-                storage,
-            )?);
-        }
-    }
-    // Index and copy-source reads evaluated the operands. They are not call loans.
-    if let Some(validation) = &mut input.validation {
-        validation.tracker.clear_reservations();
-    }
+    let plans = plan_executed_call_arguments(input, &mut actuals, storage)?;
 
     // Result provenance comes from the argument values, not from every root their evaluation
     // reads. `copy place` reads the source place but produces an independent graph, so a
@@ -716,13 +942,15 @@ fn transfer_call_arguments_and_result(
 
     check_call_arguments(
         input,
-        args,
         &mut actuals,
         plans,
         storage,
-        &arg_value_roots,
-        (success_lane, retains_success),
-        (error_lane, retains_error),
+        |arg_index| {
+            (retains_success && success_lane.may_retain(arg_index, &arg_value_roots))
+                || (retains_error && error_lane.may_retain(arg_index, &arg_value_roots))
+                || success_lane.may_store(arg_index)
+                || (error.is_some() && error_lane.may_store(arg_index))
+        },
         error.is_some(),
     )?;
     if storage.reaches_children() && any_mutable {
@@ -738,43 +966,119 @@ fn transfer_call_arguments_and_result(
     publish_call_continuations(
         input,
         &mut actuals,
-        args,
-        results,
+        CallContinuations {
+            results,
+            error,
+            success_lane,
+            error_lane,
+        },
         &arg_value_roots,
         storage,
         result_transfer,
-        error,
-        success_lane,
-        error_lane,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+fn plan_executed_call_arguments(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    storage: CallStorage,
+) -> Result<Vec<Option<CallAccessPlan>>, BorrowCheckError> {
+    let mut plans = Vec::new();
+    if input.validation.is_some() {
+        let args = actuals.arguments();
+        plans.reserve(args.len());
+        for (index, arg) in args.iter().enumerate() {
+            increment_frontend_counter(FrontendCounter::BorrowArgumentPlansScanned);
+            let location = input
+                .context
+                .diagnostics
+                .value_error_span(arg.argument, input.location);
+            plans.push(plan_call_actual(
+                input, actuals, index, arg, location, storage,
+            )?);
+        }
+    }
+    // Index and copy-source reads evaluated the operands. They are not call loans.
+    if let Some(validation) = &mut input.validation {
+        validation.tracker.clear_reservations();
+    }
+    Ok(plans)
+}
+
+/// Record argument execution once, not once per feasible continuation. For a
+/// deferred call only operand evaluation is known; no optional transfer is final.
+#[allow(dead_code)]
+fn account_typed_call_arguments(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    facts: Option<&TypedCallAllocationFacts>,
+    storage: CallStorage,
+    on_edge: bool,
+    mut selected_retention: impl FnMut(usize) -> bool,
+    mut executed: impl FnMut(HirValueId, Option<ArgEffect>, bool),
+) -> Result<(), BorrowCheckError> {
+    let settled = classify_typed_continuation(
+        facts,
+        false,
+        false,
+        input.validation.is_some(),
+        &input.context.diagnostics,
+    )?;
+    let plans = plan_executed_call_arguments(input, actuals, storage)?;
+    let args = actuals.arguments();
+    for (index, arg) in args.iter().enumerate() {
+        let effect = (!matches!(settled, TypedContinuation::Deferred))
+            .then(|| fallback_call_argument_effect(arg.effect));
+        executed(
+            arg.argument,
+            effect,
+            facts.is_some_and(|facts| facts.executed_may_retain(index)),
+        );
+    }
+    if let Some(facts) = facts {
+        check_call_arguments(
+            input,
+            actuals,
+            plans,
+            storage,
+            |index| facts.executed_may_retain(index) || selected_retention(index),
+            on_edge,
+        )?;
+        if args.iter().any(CallArgumentTransfer::may_write) {
+            input.stats.mutable_call_sites += 1;
+            if storage.reaches_children() {
+                input.state.invalidate_detachments();
+            }
+        }
+    }
+    Ok(())
+}
+
+struct CallContinuations<'a, Results> {
+    results: Results,
+    error: Option<HirLocalDestination>,
+    success_lane: CallLane<'a>,
+    error_lane: CallLane<'a>,
+}
+
 fn publish_call_continuations(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
-    args: &[CallArgumentTransfer],
-    results: impl Iterator<Item = HirLocalDestination> + Clone,
+    continuations: CallContinuations<'_, impl Iterator<Item = HirLocalDestination> + Clone>,
     arg_value_roots: &[RootSet],
     storage: CallStorage,
     result_transfer: CallResultTransfer,
-    error: Option<HirLocalDestination>,
-    success_lane: CallLane<'_>,
-    error_lane: CallLane<'_>,
 ) -> Result<(), BorrowCheckError> {
     // Capture both lanes against entry storage before either lane installs stores or bindings.
     let mut member_reads = Demand::default();
-    let (mut success_ops, error_ops) = capture_call_continuations(
-        input,
-        actuals,
-        results.clone(),
-        args,
-        storage,
+    let (mut success_ops, error_ops) =
+        capture_call_continuations(input, actuals, &continuations, storage, &mut member_reads)?;
+    let CallContinuations {
+        results,
         error,
         success_lane,
         error_lane,
-        &mut member_reads,
-    )?;
+    } = continuations;
     let mut root_sources = Vec::new();
     let mut writes = Vec::new();
     if matches!(result_transfer, CallResultTransfer::Immediate) && !success_lane.unreachable() {
@@ -842,30 +1146,32 @@ fn publish_call_continuations(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn capture_call_continuations(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
-    mut results: impl Iterator<Item = HirLocalDestination> + Clone,
-    args: &[CallArgumentTransfer],
+    continuations: &CallContinuations<'_, impl Iterator<Item = HirLocalDestination> + Clone>,
     storage: CallStorage,
-    error: Option<HirLocalDestination>,
-    success_lane: CallLane<'_>,
-    error_lane: CallLane<'_>,
     member_reads: &mut Demand,
 ) -> Result<(Vec<InvokeLayerOp>, Vec<InvokeLayerOp>), BorrowCheckError> {
+    let CallContinuations {
+        results,
+        error,
+        success_lane,
+        error_lane,
+    } = continuations;
+    let mut results = results.clone();
     let success_ops = match storage {
         CallStorage::User | CallStorage::Native | CallStorage::Plain | CallStorage::Builtin => {
             call_result_ops(
                 input,
                 actuals,
                 results,
-                success_lane,
+                *success_lane,
                 InvokeLane::Success,
                 error.is_none(),
             )?
         }
-        CallStorage::Store(positions) => capture_builtin_store(input, actuals, args, positions)?,
+        CallStorage::Store(positions) => capture_builtin_store(input, actuals, positions)?,
         CallStorage::ClearMap => call_receiver_allocs(input, actuals)?
             .filter(|receiver| !receiver.ids.is_empty())
             .map_or_else(Vec::new, |receiver| {
@@ -887,8 +1193,8 @@ fn capture_call_continuations(
         call_result_ops(
             input,
             actuals,
-            error.into_iter(),
-            error_lane,
+            error.iter().copied(),
+            *error_lane,
             InvokeLane::Error,
             false,
         )?
@@ -898,20 +1204,16 @@ fn capture_call_continuations(
     Ok((success_ops, error_ops))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn check_call_arguments(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    args: &[CallArgumentTransfer],
     actuals: &mut CallActuals<'_>,
     mut plans: Vec<Option<CallAccessPlan>>,
     storage: CallStorage,
-    arg_value_roots: &[RootSet],
-    (success_lane, retains_success): (CallLane<'_>, bool),
-    (error_lane, retains_error): (CallLane<'_>, bool),
+    mut retains_argument: impl FnMut(usize) -> bool,
     on_edge: bool,
 ) -> Result<(), BorrowCheckError> {
     let mut operand_index = None;
-    for (arg_index, arg) in args.iter().take(plans.len()).enumerate() {
+    for (arg_index, arg) in actuals.arguments().iter().take(plans.len()).enumerate() {
         let Some(mut plan) = plans[arg_index].take() else {
             continue;
         };
@@ -919,11 +1221,7 @@ fn check_call_arguments(
             .context
             .diagnostics
             .value_error_span(arg.argument, input.location);
-        let retains_argument = (retains_success
-            && success_lane.may_retain(arg_index, arg_value_roots))
-            || (retains_error && error_lane.may_retain(arg_index, arg_value_roots))
-            || success_lane.may_store(arg_index)
-            || (on_edge && error_lane.may_store(arg_index));
+        let retains_argument = retains_argument(arg_index);
         let optional = matches!(
             arg.effect,
             ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
@@ -1041,7 +1339,6 @@ fn call_receiver_allocs(
 fn capture_builtin_store(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     actuals: &mut CallActuals<'_>,
-    args: &[CallArgumentTransfer],
     positions: &[(usize, FieldKey)],
 ) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
     let Some(holders) = call_receiver_allocs(input, actuals)? else {
@@ -1049,7 +1346,7 @@ fn capture_builtin_store(
     };
     let mut ops = Vec::new();
     for &(index, key) in positions {
-        let Some(argument) = args.get(index) else {
+        let Some(argument) = actuals.arguments().get(index) else {
             continue;
         };
         if !needs_layer_store_capture(
@@ -1073,6 +1370,12 @@ fn capture_builtin_store(
     Ok(ops)
 }
 
+#[derive(Default)]
+struct BuiltinElementCapture {
+    result: Option<CapturedValue>,
+    removal: Option<(Vec<AllocId>, bool)>,
+}
+
 /// Capture the element before removal and before a result can rebind the receiver.
 fn capture_builtin_element_result(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
@@ -1081,14 +1384,41 @@ fn capture_builtin_element_result(
     storage: CallStorage,
     deferred_reads: Option<&mut Demand>,
 ) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
+    let capture = capture_builtin_element(input, actuals, result, storage, deferred_reads, None)?;
+    let mut ops = Vec::new();
+    if let (Some(result), Some(value)) = (result, capture.result) {
+        bind_result(&mut ops, result, value);
+    }
+    if let Some((holders, map)) = capture.removal {
+        ops.push(InvokeLayerOp::Remove {
+            holders,
+            map,
+            result: result.map(HirLocalDestination::local),
+        });
+    }
+    Ok(ops)
+}
+
+fn capture_builtin_element(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    result: Option<HirLocalDestination>,
+    storage: CallStorage,
+    deferred_reads: Option<&mut Demand>,
+    receiver: Option<ResolvedPlace>,
+) -> Result<BuiltinElementCapture, BorrowCheckError> {
     let heap_result = result
         .and_then(|result| input.view.index_of(result.local()))
         .is_some_and(|index| input.view.local_has_in_place_mutation_surface[index]);
     if !heap_result && input.state.layer_is_empty() && !matches!(storage, CallStorage::Get) {
-        return Ok(Vec::new());
+        return Ok(BuiltinElementCapture::default());
     }
-    let Some(mut elements) = call_receiver_allocs(input, actuals)? else {
-        return Ok(Vec::new());
+    let elements = match receiver {
+        Some(value) => Some(value),
+        None => call_receiver_allocs(input, actuals)?,
+    };
+    let Some(mut elements) = elements else {
+        return Ok(BuiltinElementCapture::default());
     };
     if input.validation.is_some() && input.stats.observations.enabled {
         let reads = selected_members(input.state, &elements);
@@ -1105,66 +1435,162 @@ fn capture_builtin_element_result(
     } else {
         Vec::new()
     };
-    let mut ops = Vec::new();
     let lookup = matches!(storage, CallStorage::Get);
-    if let Some(result) =
-        result.filter(|_| lookup || heap_result || input.state.has_value_alternatives())
-    {
-        let dependency = lookup.then(|| ReceiverDependency {
-            entries: SmallSet::from_iter(elements.ids.iter().copied()),
-            coverage: elements.holder_coverage(),
-        });
-        let mut value = if heap_result {
-            input
-                .state
-                .step_resolved(&mut elements, FieldKey::Elem, input.view.local_mutable);
-            capture_graph_values(elements)
-        } else {
-            input
-                .state
-                .capture_scalar_projection(&elements, FieldKey::Elem)
-        };
-        let readonly = value.readonly() || lookup;
-        value.restrict_permission(readonly);
-        if let Some(dependency) = dependency {
-            // The selected value may inherit dependencies from both its holder and its payload.
-            value
-                .alternatives
-                .retain(|alt| !matches!(alt.kind, PayloadKind::Absent));
-            if value.alternatives.is_empty() {
-                if heap_result {
-                    value.alternatives.extend(
-                        value
-                            .values
-                            .iter()
-                            .copied()
-                            .map(|value| ValueAlt::plain(PayloadKind::Allocation(value))),
-                    );
-                }
+    let value =
+        if result.is_some_and(|_| lookup || heap_result || input.state.has_value_alternatives()) {
+            let dependency = lookup.then(|| ReceiverDependency {
+                entries: SmallSet::from_iter(elements.ids.iter().copied()),
+                coverage: elements.holder_coverage(),
+            });
+            let mut value = if heap_result {
+                input
+                    .state
+                    .step_resolved(&mut elements, FieldKey::Elem, input.view.local_mutable);
+                capture_graph_values(elements)
+            } else {
+                input
+                    .state
+                    .capture_scalar_projection(&elements, FieldKey::Elem)
+            };
+            let readonly = value.readonly() || lookup;
+            value.restrict_permission(readonly);
+            if let Some(dependency) = dependency {
+                // The selected value may inherit dependencies from both its holder and its payload.
+                value
+                    .alternatives
+                    .retain(|alt| !matches!(alt.kind, PayloadKind::Absent));
                 if value.alternatives.is_empty() {
-                    value.alternatives.push(ValueAlt::plain(if heap_result {
-                        PayloadKind::Unknown
-                    } else {
-                        PayloadKind::Scalar
-                    }));
+                    if heap_result {
+                        value.alternatives.extend(
+                            value
+                                .values
+                                .iter()
+                                .copied()
+                                .map(|value| ValueAlt::plain(PayloadKind::Allocation(value))),
+                        );
+                    }
+                    if value.alternatives.is_empty() {
+                        value.alternatives.push(ValueAlt::plain(if heap_result {
+                            PayloadKind::Unknown
+                        } else {
+                            PayloadKind::Scalar
+                        }));
+                    }
+                }
+                for alt in &mut value.alternatives {
+                    if let Err(index) = alt.deps.binary_search(&dependency) {
+                        alt.deps.insert(index, dependency.clone());
+                    }
                 }
             }
-            for alt in &mut value.alternatives {
-                if let Err(index) = alt.deps.binary_search(&dependency) {
-                    alt.deps.insert(index, dependency.clone());
-                }
-            }
+            Some(value)
+        } else {
+            None
+        };
+    let removal = match storage {
+        CallStorage::Remove { map } => Some((holders, map)),
+        _ => None,
+    };
+    Ok(BuiltinElementCapture {
+        result: value,
+        removal,
+    })
+}
+
+#[allow(dead_code)]
+fn capture_typed_builtin_element_batch(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    result: Option<HirLocalDestination>,
+    storage: CallStorage,
+) -> Result<CapturedCallBatch, BorrowCheckError> {
+    let mut member_reads = Demand::default();
+    let receiver = if actuals.entry_place(input, 0)?.is_none() {
+        Some(ResolvedPlace::from_capture(actuals.root(input, 0)?))
+    } else {
+        None
+    };
+    let capture = capture_builtin_element(
+        input,
+        actuals,
+        result,
+        storage,
+        Some(&mut member_reads),
+        receiver,
+    )?;
+    let mut post = call_results::CapturedPost::default();
+    let mut destinations = Vec::new();
+    let mut result_index = None;
+    if let Some(destination) = result {
+        let (roots, derivation) = if matches!(storage, CallStorage::Get) {
+            let receiver = actuals.expression(0).ok_or_else(|| {
+                input
+                    .context
+                    .diagnostics
+                    .internal_error("builtin lookup has no captured receiver")
+            })?;
+            let location = input
+                .context
+                .diagnostics
+                .value_error_span(receiver, input.location);
+            let roots = call_argument_value_roots(
+                input.context,
+                input.view,
+                input.validation.as_ref().map(|sink| sink.layout),
+                input.state,
+                receiver,
+                location,
+            )?;
+            let derivation = super::alias_derivation_roots_from_expression(
+                input.view,
+                input.state,
+                input.context.expressions,
+                receiver,
+            );
+            (
+                Some(roots),
+                Some(call_results::CapturedDerivation::Roots(derivation)),
+            )
+        } else {
+            (None, None)
+        };
+        let actor = call_result_index(input, destination.local())?;
+        result_index = Some(0);
+        let mut value = capture.result.unwrap_or_default();
+        if value.is_empty() {
+            value.alternatives.push(ValueAlt::plain(
+                if input.view.local_has_in_place_mutation_surface[actor] {
+                    PayloadKind::Unknown
+                } else {
+                    PayloadKind::Scalar
+                },
+            ));
         }
-        bind_result(&mut ops, result, value);
+        post.results.push(call_results::CapturedResult {
+            slot: 0,
+            value,
+            roots,
+            derivation,
+        });
+        destinations.push(match destination {
+            HirLocalDestination::Define(_) => CapturedDestination::Define(actor),
+            HirLocalDestination::Update(_) => CapturedDestination::Update {
+                actor,
+                address: capture_call_result_address(input, actor)?,
+            },
+        });
     }
-    if let CallStorage::Remove { map } = storage {
-        ops.push(InvokeLayerOp::Remove {
+    Ok(CapturedCallBatch {
+        post,
+        destinations,
+        member_reads,
+        checkpoints: Vec::new(),
+        detachment: capture.removal.map(|(holders, map)| CapturedDetachment {
             holders,
             map,
-            result: result.map(HirLocalDestination::local),
-        });
-    }
-    Ok(ops)
+            result: result_index,
+        }),
+    })
 }
 
 struct CallAccessPlan {
@@ -1586,24 +2012,7 @@ fn capture_call_result_write(
     ops: &mut Vec<InvokeLayerOp>,
 ) -> Result<CallResultWrite, BorrowCheckError> {
     let actor = call_result_index(input, result)?;
-    if let Some(validation) = &input.validation {
-        require_initialized_update_target(
-            validation.layout,
-            input.state,
-            actor,
-            &input.context.diagnostics,
-            input.location,
-        )?;
-    }
-    let resolved = input
-        .state
-        .resolve_place_path(actor, input.view.local_mutable, []);
-    if input.validation.is_some() {
-        let location = input.location;
-        let mut check = call_check_context(input, location, location, Some(actor));
-        check_local_update_access(&mut check, &resolved)?;
-    }
-    let addresses = resolved.address;
+    let addresses = capture_call_result_address(input, actor)?;
 
     // Bind carries the captured value for either call form. Immediate updates already
     // captured their receiving address, so move the payload out instead of applying Bind.
@@ -1627,6 +2036,30 @@ fn capture_call_result_write(
         store: TypedStore::receive_result(addresses, captured, actor, readonly)
             .with_slot_roots(value.value_roots),
     })
+}
+
+fn capture_call_result_address(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actor: usize,
+) -> Result<AddressSet, BorrowCheckError> {
+    if let Some(validation) = &input.validation {
+        require_initialized_update_target(
+            validation.layout,
+            input.state,
+            actor,
+            &input.context.diagnostics,
+            input.location,
+        )?;
+    }
+    let resolved = input
+        .state
+        .resolve_place_path(actor, input.view.local_mutable, []);
+    if input.validation.is_some() {
+        let location = input.location;
+        let mut check = call_check_context(input, location, location, Some(actor));
+        check_local_update_access(&mut check, &resolved)?;
+    }
+    Ok(resolved.address)
 }
 
 fn apply_immediate_call_operations(
