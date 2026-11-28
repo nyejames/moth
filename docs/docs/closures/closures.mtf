@@ -28,7 +28,8 @@ Omit the result arrow for zero values. Call a named helper when the work needs
 statements. A closure literal requires an immediate receiving signature, even
 if it captures nothing. You can't bind a bare literal to a local or return a
 callback on its own. V1 provides no general function type, callable trait or
-const closure.
+const closure. A callback signature can declare ordinary value parameters but
+cannot itself declare a callback parameter in V1.
 
 ### Capturing for the duration of a call
 

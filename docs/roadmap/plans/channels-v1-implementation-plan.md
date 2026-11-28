@@ -48,9 +48,9 @@ below remain proposals until the language, memory and runtime owners accept them
 
 | Owner | Decision and acceptance evidence |
 | --- | --- |
-| Language and memory | Confirm non-negative compile-time `I32` capacity, including zero, omitted, negative and unrepresentable cases. Set exact endpoint type positions, whether local aliasing is allowed and whether supplying the same endpoint to two formals acquires one or two obligations or is rejected. Start with constructor locals and scoped parameters only. Write expected results for forwarding, early close, partial argument evaluation and attempted escape through results, aggregates, messages or retained callback captures. |
+| Language and memory | Resolve the remaining `I32` versus `U32` capacity type decision. Capacity is non-negative and compile-time; cover zero, omitted, negative and unrepresentable cases. Set exact endpoint type positions, whether local aliasing is allowed and whether supplying the same endpoint to two formals acquires one or two obligations or is rejected. Start with constructor locals and scoped parameters only. Write expected results for forwarding, early close, partial argument evaluation and attempted escape through results, aggregates, messages or retained callback captures. |
 | Memory | Start dispatch arguments with scalars, independent graphs and proven transfers. Admit a scoped immutable loan only with a demonstrated use case and a production lifetime proof that covers joins, cancellation and retained children. Ordinary cross-task mutable loans and independent transfers from declared regions are excluded. Record allowed message types, including nominal wrappers for optional payloads and the rejection of top-level optional payloads. |
-| Language and compiler | Set operator binding and placement in call arguments and runtime templates, postfix and catch attachment, receive discard, direct receiver calls, mutable arguments and the eligibility of a `Never` target. Consume the migrated `if {` / `case ...:` / `else:` readiness grammar. Pin preparation order using guard/operand side effects and a preparation error. Review the baseline of evaluating each guard then its enabled operands in authored order, with non-suspending preparation and ordinary statement arm bodies. |
+| Language and compiler | Apply the canonical Channels operator and arm rules. Accept receive arguments and eligible runtime template expressions, apply postfix `?` to the received optional value and `catch` to a send, reject chained sends and Never dispatch. Pin the accepted guard-then-enabled-operands order with effects, a preparation error and non-suspending proof. Check direct receiver calls and ordinary mutable argument access. Consume the migrated `if {` / `case ...:` / `else:` grammar. |
 | Runtime and host | Write one turn-by-turn trace for immediate success, a waiting operation, child failure during join, cancellation racing commit and two simultaneously ready arms. Specify which operations yield, fairness between continuously ready arms/tasks and how a yielding guest gives the host a turn. For timer, browser event and asynchronous request completion, fix public names, exact types, host capability, registration lifetime, bounded ingress and overflow behaviour. |
 | Compiler, memory and backend | Compare explicit resumable frames with scheduler-driven JS generators on nested calls, deep recursion, synchronous cost, retained bytes and cancellation. Validate a portable suspend/return/resume mechanism with authored Wasm. Optional stack switching can be compared where available. Record the chosen continuation and versioned host handoff, supported target edges and measurements. |
 
@@ -70,8 +70,8 @@ Paths below `src/compiler_frontend/` are relative to that directory.
   child targets at the authored span.
 - [ ] Verify the syntax cutover retired the obsolete async-block path,
   deferred dispatch, diagnostic/render entries, `async_blocks` feature lane
-  and reserved `yield`/task spellings, keeping independent checked-block
-  coverage. `io.task.yield()` must resolve as an ordinary namespace call.
+  and obsolete bare-word task/checked spellings. Preserve the independent
+  `$checked` research boundary. `io.task.yield()` must resolve as an ordinary namespace call.
   Test ordinary identifiers and the rejection of retired task syntax.
 - [ ] In `ast/statements/multi_bind.rs` the annotation belongs to the individual
   target and the RHS normally starts with `ExpectedType::Infer`. For the exact

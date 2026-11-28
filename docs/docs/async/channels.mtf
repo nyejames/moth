@@ -12,7 +12,7 @@ A task is one resumable execution of ordinary Moth functions. Start a child task
     >> worker(writer)
 ]
 
-The caller evaluates the receiver and written arguments once in source order, including named arguments. Argument names determine which formal slot receives each captured value. Only after preparation succeeds does the caller establish the child's obligations and make it runnable. A failed argument starts no child. Spawning is a statement, not an expression producing a task handle. The child begins independently when scheduled. Its direct target has zero ordinary success slots. Use channels for results. A child may return builtin `Error!`. Map custom errors in an ordinary wrapper before dispatch.
+The caller evaluates the receiver and written arguments once in source order, including named arguments. Argument names determine which formal slot receives each captured value. Only after preparation succeeds does the caller establish the child's obligations and make it runnable. A failed argument starts no child. Spawning is a statement, not an expression producing a task handle. The child begins independently when scheduled. Its direct target has zero ordinary success slots. A Never-returning target (`-> !`) is invalid for V1 dispatch. Use channels for results. A child may return builtin `Error!`. Map custom errors in an ordinary wrapper before dispatch.
 
 Ordinary calls execute on the current task and can suspend transitively without annotations or call-site markers. Returning from an ordinary call means that invocation and its children have completed. The entry invocation also runs under a task-capable, builder-owned execution lifecycle. Purely synchronous code needs no task machinery when none is reachable.
 
@@ -34,7 +34,7 @@ A channel is unbuffered by default. Use the same constructor for bounded bufferi
     reader, writer Channel of String = Channel(capacity = 32)
 ]
 
-Capacity zero means rendezvous: a send completes when a receiver accepts it. Positive capacity bounds the number of queued messages. A full queue suspends a sender and an empty open queue suspends a receiver. Queued values are received in FIFO order. A negative or unrepresentable capacity is invalid. The implementation checkpoint must settle the exact I32 capacity receiving and failure contract. Its conservative starting point is a non-negative compile-time capacity. Allocation or resource exhaustion remains fatal, not a recoverable channel error. Unbounded queues are outside V1.
+Capacity zero means rendezvous: a send completes when a receiver accepts it. Positive capacity bounds the number of queued messages. A full queue suspends a sender and an empty open queue suspends a receiver. Queued values are received in FIFO order. The capacity is a non-negative compile-time value. A negative or unrepresentable capacity is invalid. The exact count type (`I32` or `U32`) remains open for the language owner to settle before implementation. Allocation or resource exhaustion remains fatal, not a recoverable channel error. Unbounded queues are outside V1.
 
 Multiple producers and consumers may use one channel. Every message is delivered to exactly one receiver, not broadcast. Directional endpoint parameters use the compiler-owned heads `ChannelReader of T` and `ChannelWriter of T`. They use exact carried-type identity and the existing generic inference rules. They are capabilities, not ordinary shared mutable queues. They need no `~` for communication. `~` retains its ordinary exclusive-access meaning.
 
@@ -52,7 +52,7 @@ The memory and compiler authorities must preserve this logical release behavior 
     message >> writer
 ]
 
-A send evaluates its operands once. It waits until the message can be accepted, or delivery fails. Successful acceptance is a single commit, either to the bounded queue or directly to a waiting receiver.
+A send is a statement with one send operator and evaluates its operands once. Chained sends are invalid. A trailing `catch` protects the complete send operation. It waits until the message can be accepted, or delivery fails. Successful acceptance is a single commit, either to the bounded queue or directly to a waiting receiver.
 
 Ordinary allocation graphs must be independently transferable. On success the sender relinquishes the graph and cannot subsequently use it or any alias into it. A scalar has ordinary value semantics. To retain a graph, send an independent `copy` or construct a fresh message instead.
 
@@ -75,7 +75,7 @@ A handler for a failed send can use its untransferred named message. A handler f
 
 Receive is a prefix value-producing operation, not a declaration operator. It returns `T?`: present when a message is delivered and `none` when the final sending endpoint has closed and all queued messages have been drained. A receive on an empty open channel waits. Normal closure is absence, not a recoverable error. Repeated receives after closure return `none`. Cancellation is distinct from closure and cannot silently appear as `none`.
 
-The ordinary binding, assignment, option inspection and postfix `?` rules apply. There is no second receive-binding spelling. Repeated option capture gives a natural way to drain a channel:
+The ordinary binding, assignment, option inspection and postfix `?` rules apply. A receive can occur in an ordinary call argument, such as `handle(<< reader)`, or an otherwise eligible runtime template expression. In `message = << reader?`, postfix `?` applies to the received optional value, as in `(<< reader)?`. A standalone receive may discard its result. There is no second receive-binding spelling. Repeated option capture gives a natural way to drain a channel:
 
 [codeblock, $code "moth":
     loop << reader is |message| {
@@ -99,7 +99,7 @@ An expressionless `if {` selects one channel operation. Use `if condition {` for
     }
 ]
 
-Each arm starts a logical line with `case` and offers one send or receive. A colon ends the operation and its optional Boolean guard. The body can start on that line or continue on later lines. The next arm at the same depth or the closing brace ends the body. A final `else:` supplies a fallback.
+A readiness block requires at least one `case`. Each arm starts a logical line with the reserved keyword `case` and offers one send or receive followed by a nonempty body. A final fallback may have an empty body. A colon ends the operation and its optional Boolean guard. The body can start on that line or continue on later lines. The next arm at the same depth or the closing brace ends the body. A final `else:` supplies a fallback.
 
 A winning receive binds its optional result in that arm's body. Write `case << reader:` to receive and discard it. A trailing `if` guard enables a candidate when its Bool is true. The guard reads existing bindings. The prospective receive binding first exists after its operation wins. A Boolean expression or value pattern alone cannot serve as a readiness arm.
 
@@ -114,7 +114,7 @@ Without `else:`, selection waits for an enabled operation. With `else:`, it take
 
 Selection arbitrates fairly among ready arms. A live reader becomes ready with `none` once the last writer releases its endpoint and the buffer drains. Handle or disable that arm in a repeated selection. Using a reader after `reader.close()` is an error. A live writer with no remaining receivers is ready with a failed send.
 
-Selection commits at most one operation. Readiness and commit form one scheduler transaction. Losing receive arms consume nothing and losing send arms transfer nothing. Registration, wake-up, cancellation and removal of losing operations must avoid lost wake-ups and double completion. Operand evaluation and error order remain explicit. The implementation checkpoint must confirm the exact staging of guards and operands. The baseline evaluates guards and enabled operands once in authored order, requires preparation not to suspend, commits only the winner and destroys unused fresh temporaries. Side effects performed in preparation are not undone. A selected failed send follows ordinary failure delivery and does not run its success arm.
+Selection commits at most one operation. Readiness and commit form one scheduler transaction. Losing receive arms consume nothing and losing send arms transfer nothing. Registration, wake-up, cancellation and removal of losing operations must avoid lost wake-ups and double completion. Operand evaluation and error order remain explicit. For each arm in authored order, evaluate its guard first (if present), then prepare its operands only if enabled. Evaluate each once. Preparation cannot suspend. A preparation failure follows ordinary failure delivery before commitment. Commit only the winner and destroy unused fresh temporaries. Side effects performed in preparation are not undone. A selected failed send follows ordinary failure delivery and does not run its success arm.
 
 ### Function-scoped concurrency
 
