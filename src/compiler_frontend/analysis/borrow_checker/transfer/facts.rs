@@ -38,6 +38,13 @@ impl PlaceUse {
     pub(super) fn touches_cell(self) -> bool {
         !matches!(self, Self::ReadEntries | Self::WriteEntries)
     }
+
+    pub(super) fn for_transfer_probe(self) -> Self {
+        match self.kind() {
+            AccessKind::Shared => Self::Mutate { deep: true },
+            AccessKind::Mutable => self,
+        }
+    }
 }
 
 /// Cell identities and graph alternatives stay separate, including when one is empty.
@@ -623,6 +630,15 @@ impl ValueFactBuffer {
     ) {
         let entry = self.entry_for_current_use(value_id);
         entry.roots.union_with(roots);
+        entry.current_use_transfer = entry.current_use_transfer.merge(status);
+    }
+
+    pub(super) fn record_optional_transfer_status(
+        &mut self,
+        value_id: HirValueId,
+        status: OptionalTransferStatus,
+    ) {
+        let entry = self.entry_for_current_use(value_id);
         entry.current_use_transfer = entry.current_use_transfer.merge(status);
     }
 

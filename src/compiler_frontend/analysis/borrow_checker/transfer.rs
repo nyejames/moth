@@ -41,7 +41,9 @@ use access::{
     AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
     transfer_terminator,
 };
-use facts::{Demand, ObservationCheckpoint, ValueFactBuffer, ValueObservations};
+use facts::{
+    Demand, ObservationCheckpoint, StatementAccessTracker, ValueFactBuffer, ValueObservations,
+};
 
 #[cfg(test)]
 #[path = "transfer/tests/value_fact_buffer_tests.rs"]
@@ -62,6 +64,51 @@ pub(super) struct BorrowTransferContext<'a> {
     pub expressions: &'a HirExpressionStore,
     pub type_environment: &'a TypeEnvironment,
     pub diagnostics: BorrowDiagnostics<'a>,
+}
+
+/// The storage queries use local indices, not validation's dense liveness tables.
+#[derive(Clone, Copy)]
+pub(super) struct OperationView<'a> {
+    pub local_ids: &'a [LocalId],
+    pub local_indices: &'a FxHashMap<LocalId, usize>,
+    pub local_mutable: &'a [bool],
+    pub local_has_in_place_mutation_surface: &'a [bool],
+    pub block_successors: &'a FxHashMap<BlockId, Vec<BlockId>>,
+    pub local_first_write_order: &'a [i32],
+    pub acyclic_entry_block: Option<BlockId>,
+}
+
+impl<'a> OperationView<'a> {
+    pub(super) fn from_layout(layout: &'a FunctionLayout) -> Self {
+        Self {
+            local_ids: &layout.local_ids,
+            local_indices: &layout.local_index_by_id,
+            local_mutable: &layout.local_mutable,
+            local_has_in_place_mutation_surface: &layout.local_has_in_place_mutation_surface,
+            block_successors: &layout.block_successors,
+            local_first_write_order: &layout.local_first_write_order,
+            acyclic_entry_block: layout.acyclic_entry_block,
+        }
+    }
+
+    pub(super) fn index_of(self, local: LocalId) -> Option<usize> {
+        self.local_indices.get(&local).copied()
+    }
+
+    pub(super) fn local_count(self) -> usize {
+        self.local_ids.len()
+    }
+}
+
+/// Only mandatory validation needs a borrow verdict, liveness or value facts.
+pub(in crate::compiler_frontend::analysis::borrow_checker::transfer) struct ValidationSink<
+    'a,
+    'tracker,
+    'facts,
+> {
+    pub layout: &'a FunctionLayout,
+    pub tracker: &'tracker mut StatementAccessTracker,
+    pub value_facts: &'facts mut ValueFactBuffer,
 }
 
 /// An allocation-layer effect captured before retiring a call's result bindings.
@@ -191,6 +238,8 @@ pub(super) fn transfer_block(
         stats.statements_analyzed += 1;
         if stats.diverges {
             stats.value_facts = value_fact_buffer.into_serialized(layout);
+            #[cfg(test)]
+            state.assert_allocation_incidence();
             return Ok(stats);
         }
     }
@@ -279,5 +328,7 @@ pub(super) fn transfer_block(
 
     value_fact_buffer.finish_use();
     stats.value_facts = value_fact_buffer.into_serialized(layout);
+    #[cfg(test)]
+    state.assert_allocation_incidence();
     Ok(stats)
 }

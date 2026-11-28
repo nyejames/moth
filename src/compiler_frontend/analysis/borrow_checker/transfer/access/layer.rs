@@ -25,28 +25,28 @@ pub(super) fn projection_key(projection: &HirProjection) -> FieldKey {
 
 /// Allocations `place` reaches, or `None` when its root is outside the layout.
 pub(super) fn resolve_place_allocs(
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     place: &HirPlace,
 ) -> Option<ResolvedPlace> {
-    let mut resolution = resolve_place(layout, state, expressions, place)?;
-    state.load_place_content(&mut resolution, &layout.local_mutable, false);
+    let mut resolution = resolve_place(view, state, expressions, place)?;
+    state.load_place_content(&mut resolution, view.local_mutable, false);
     let mut content = resolution.content?;
-    state.mark_alloc_provenance_readonly(&layout.local_mutable, &mut content);
+    state.mark_alloc_provenance_readonly(view.local_mutable, &mut content);
     Some(content)
 }
 
 pub(super) fn resolve_place(
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     place: &HirPlace,
 ) -> Option<PlaceResolution> {
     Some(
         state.resolve_place_path(
-            layout.index_of(place.root)?,
-            &layout.local_mutable,
+            view.index_of(place.root)?,
+            view.local_mutable,
             expressions
                 .projections(place.projections)
                 .iter()
@@ -64,14 +64,14 @@ impl CapturedValue {
 }
 
 pub(super) fn stored_allocations(
-    layout: &FunctionLayout,
+    local_mutable: &[bool],
     state: &BorrowState,
     resolved: ResolvedPlace,
     source_writable: bool,
 ) -> CapturedValue {
     let readonly = !source_writable || resolved.readonly;
     let mut value = CapturedValue {
-        values: stored_allocation_values(layout, state, &resolved, source_writable),
+        values: stored_allocation_values(local_mutable, state, &resolved, source_writable),
         views: resolved.views,
         alternatives: resolved.alternatives,
     };
@@ -80,7 +80,7 @@ pub(super) fn stored_allocations(
 }
 
 pub(super) fn stored_allocation_values(
-    layout: &FunctionLayout,
+    local_mutable: &[bool],
     state: &BorrowState,
     resolved: &ResolvedPlace,
     source_writable: bool,
@@ -94,73 +94,47 @@ pub(super) fn stored_allocation_values(
                 && !resolved.readonly
                 && state
                     .alloc_origin_local(id)
-                    .is_none_or(|origin| layout.local_mutable[origin]),
+                    .is_none_or(|origin| local_mutable[origin]),
         })
         .collect()
 }
 
-pub(super) fn capture_projected_binding(
-    check: &mut AccessCheckContext<'_, '_>,
-    place: &HirPlace,
-    writable: bool,
-    roots: &RootSet,
-    heap: bool,
-    capture_payload: bool,
-) -> Result<(BindingSpec, Option<CapturedValue>), BorrowCheckError> {
-    let mut resolved = resolve_place(check.layout, check.state, check.context.expressions, place)
-        .expect("a projected source has a holder and final selector");
+pub(super) fn isolated_projected_binding(state: &BorrowState, resolved: &PlaceResolution) -> bool {
     let (holders, _) = resolved.final_projection().expect("projected source");
     let source = resolved.route.local;
-    let isolated = check.state.binding_mode(source) == LocalMode::SLOT
-        && check.state.binding(source).value_roots().is_empty()
-        && !check.state.has_layer_binding(source)
+    state.binding_mode(source) == LocalMode::SLOT
+        && state.binding(source).value_roots().is_empty()
+        && !state.has_layer_binding(source)
         && resolved.address.definite().is_some()
         && matches!(holders.ids.as_slice(), [holder] if
-            check.state.alloc_origin_local(*holder) == Some(source));
-    let readonly_source = resolved.permission.wrapper_readonly_source.or_else(|| {
-        resolved
-            .permission
-            .holder_readonly
-            .then_some(resolved.permission.holder_readonly_source.unwrap_or(source))
-    });
-    if writable && let Some(origin) = readonly_source {
-        return Err(immutable_cell_error(check, origin));
-    }
-    if capture_payload || writable && heap {
-        check
-            .state
-            .load_place_content(&mut resolved, &check.layout.local_mutable, !heap);
-    }
-    if writable {
-        check_access(
-            check,
-            roots,
-            footprint(&resolved, PlaceUse::Acquire),
-            Some(&resolved),
-            STORE_ACCESS,
-        )?;
-    } else if check.stats.observations.enabled {
-        check.stats.observations.tail.observe(
-            check.state,
-            &footprint(&resolved, PlaceUse::Acquire),
-            false,
-            Some(source),
-        );
-    }
-    let mut route_roots = check.state.binding(source).attribution_roots();
-    route_roots.union_with(&check.state.effective_roots(source));
+            state.alloc_origin_local(*holder) == Some(source))
+}
+
+pub(super) fn capture_projected_binding(
+    state: &BorrowState,
+    local_mutable: &[bool],
+    mut resolved: PlaceResolution,
+    writable: bool,
+    capture_payload: bool,
+    isolated: bool,
+) -> (BindingSpec, Option<CapturedValue>) {
+    let source = resolved.route.local;
+    let readonly_source = readonly_cell_origin(&resolved);
+    let mut route_roots = state.binding(source).attribution_roots();
+    route_roots.union_with(&state.effective_roots(source));
     let owner = resolved.projection_owner();
     let payload = capture_payload.then(|| {
         stored_allocations(
-            check.layout,
-            check.state,
+            local_mutable,
+            state,
             resolved
                 .content
+                .take()
                 .expect("projected capture requests content"),
             readonly_source.is_none(),
         )
     });
-    Ok((
+    (
         BindingSpec::Projected {
             addresses: resolved.address,
             origin: WrapperId::current(source),
@@ -170,7 +144,7 @@ pub(super) fn capture_projected_binding(
             route_roots,
         },
         payload,
-    ))
+    )
 }
 
 pub(super) fn check_shared_place_access(
@@ -179,7 +153,12 @@ pub(super) fn check_shared_place_access(
     roots: &mut RootSet,
     heap: bool,
 ) -> Result<(), BorrowCheckError> {
-    let mut resolution = resolve_place(check.layout, check.state, check.context.expressions, place);
+    let mut resolution = resolve_place(
+        OperationView::from_layout(check.layout),
+        check.state,
+        check.context.expressions,
+        place,
+    );
     if let Some(resolution) = &resolution {
         report_place_cells(check.state, &resolution.address, roots);
     }
@@ -291,7 +270,7 @@ fn needs_allocation_facts(
 /// Shared inputs for building allocation ids of values.
 pub(super) struct LayerValueContext<'a, 'module> {
     pub context: &'a BorrowTransferContext<'module>,
-    pub layout: &'a FunctionLayout,
+    pub view: OperationView<'a>,
     pub block_id: BlockId,
 }
 
@@ -331,12 +310,16 @@ pub(super) fn stored_values(
             if resolved.ids.is_empty() {
                 return Ok(CapturedValue::default());
             }
-            state.step_resolved(&mut resolved, key, &values.layout.local_mutable);
-            Ok(stored_allocations(values.layout, state, resolved, true))
+            state.step_resolved(&mut resolved, key, values.view.local_mutable);
+            Ok(stored_allocations(
+                values.view.local_mutable,
+                state,
+                resolved,
+                true,
+            ))
         }
         HirExpressionKind::Copy(place) if heap && state.has_alloc_edges() => {
-            let Some(source) =
-                resolve_place_allocs(values.layout, state, context.expressions, place)
+            let Some(source) = resolve_place_allocs(values.view, state, context.expressions, place)
             else {
                 return Ok(CapturedValue::default());
             };
@@ -355,7 +338,7 @@ pub(super) fn stored_values(
             let site = state.site_id(
                 expression_id.0,
                 values.block_id,
-                &values.layout.block_successors,
+                values.view.block_successors,
             );
             capture_construction(values, state, expression_id)?.apply(state, site);
             Ok(CapturedValue::fresh(site))
@@ -363,7 +346,7 @@ pub(super) fn stored_values(
         _ if heap && explicit_fresh => Ok(CapturedValue::fresh(state.site_id(
             expression_id.0,
             values.block_id,
-            &values.layout.block_successors,
+            values.view.block_successors,
         ))),
         _ => Ok(CapturedValue::default()),
     }
@@ -376,11 +359,7 @@ pub(super) fn capture_copy(
     source: Option<&ResolvedPlace>,
     explicit_fresh: bool,
 ) -> CapturedValue {
-    let site = state.site_id(
-        expression.0,
-        values.block_id,
-        &values.layout.block_successors,
-    );
+    let site = state.site_id(expression.0, values.block_id, values.view.block_successors);
     let copied = source.map_or_else(Vec::new, |source| state.copy_alloc_graph(source, site));
     if copied.is_empty() && explicit_fresh {
         return CapturedValue::fresh(site);
@@ -400,13 +379,13 @@ fn stored_place(
     place: &HirPlace,
     scalar: bool,
 ) -> CapturedValue {
-    let Some(mut resolved) = resolve_place(values.layout, state, values.context.expressions, place)
+    let Some(mut resolved) = resolve_place(values.view, state, values.context.expressions, place)
     else {
         return CapturedValue::default();
     };
-    state.load_place_content(&mut resolved, &values.layout.local_mutable, scalar);
+    state.load_place_content(&mut resolved, values.view.local_mutable, scalar);
     let captured = stored_allocations(
-        values.layout,
+        values.view.local_mutable,
         state,
         resolved.content.expect("stored place requests content"),
         resolved.permission.wrapper_readonly_source.is_none(),
@@ -601,7 +580,7 @@ impl CapturedDetachments {
         if state.layer_is_empty() || expression.value_kind == ValueKind::Const {
             return Self::default();
         }
-        let Some(source) = values.layout.index_of(place.root) else {
+        let Some(source) = values.view.index_of(place.root) else {
             return Self::default();
         };
         Self(state.detached_holders(source).collect())
@@ -649,19 +628,22 @@ pub(super) fn capture_slot_value(
     Ok(capture)
 }
 
-pub(super) fn check_cell_permission(
-    check: &AccessCheckContext<'_, '_>,
-    resolved: &PlaceResolution,
-) -> Result<(), BorrowCheckError> {
+fn readonly_cell_origin(resolved: &PlaceResolution) -> Option<usize> {
     let permission = resolved.permission;
-    let origin = permission.wrapper_readonly_source.or_else(|| {
+    permission.wrapper_readonly_source.or_else(|| {
         permission.holder_readonly.then_some(
             permission
                 .holder_readonly_source
                 .unwrap_or(resolved.route.local),
         )
-    });
-    if let Some(origin) = origin {
+    })
+}
+
+pub(super) fn check_cell_permission(
+    check: &AccessCheckContext<'_, '_>,
+    resolved: &PlaceResolution,
+) -> Result<(), BorrowCheckError> {
+    if let Some(origin) = readonly_cell_origin(resolved) {
         return Err(immutable_cell_error(check, origin));
     }
     Ok(())

@@ -1,12 +1,12 @@
 //! Source and state regressions for writes through the sparse allocation layer.
 
-use super::PlaceUse;
-use super::conflicts::{Overlap, footprint, overlap};
+use super::conflicts::{OperandAccessIndex, Overlap, footprint, overlap};
+use super::{AccessFootprint, PlaceUse};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocId, BindingSpec, BorrowState, CapturedValue, CellId, Coverage, EntryFamilies,
-    FieldKey, LocalState, ReceiverDependency, Replacement, RootSet, StoredValue, TypedStore,
-    UNKNOWN_ORDER_KEY, ValueAlt, ValueKind, WrapperAge, WrapperId,
+    FieldKey, LocalState, ReceiverDependency, Replacement, ResolvedPlace, RootSet, StoredValue,
+    TypedStore, UNKNOWN_ORDER_KEY, ValueAlt, ValueKind, WrapperAge, WrapperId,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -26,6 +26,390 @@ fn check_source(source: &str) -> Result<(), BorrowCheckError> {
         lower_ast(ast, &mut strings, &mut paths, &registry).expect("fixture source should lower");
     validate_hir_module(&module, &types, &registry).expect("fixture HIR should validate");
     run_borrow_checker_with_types(&module, &types, &registry, &paths, &strings).map(|_| ())
+}
+
+fn parameter_allocations<const N: usize>() -> (BorrowState, [AllocId; N]) {
+    let mut state = BorrowState::new_uninitialized(N);
+    let ids = std::array::from_fn(|local| {
+        state.initialize_parameter(local);
+        state.local_alloc_ids(local).0[0]
+    });
+    (state, ids)
+}
+
+fn graph_access(id: AllocId, views: Vec<AllocId>, usage: PlaceUse) -> AccessFootprint {
+    let mut access = AccessFootprint::cells(AddressSet::from_cells([], Coverage::Complete), usage);
+    access.content = Some(ResolvedPlace::from_values(
+        &[StoredValue { id, writable: true }],
+        views,
+    ));
+    access
+}
+
+fn projected_replacement(holder: AllocId, field: FieldKey) -> AccessFootprint {
+    AccessFootprint::cells(
+        AddressSet::from_cells([CellId::Projected(holder, field)], Coverage::Complete),
+        PlaceUse::Replace,
+    )
+}
+
+#[test]
+fn indexed_call_operands_match_full_scan_with_sharing_and_reach() {
+    let (mut state, [root, first, second, third, member, detached, disjoint]) =
+        parameter_allocations::<7>();
+    let field = FieldKey::Field(0);
+    let lazy = state.alloc_child(root, field);
+    let grandchild = state.alloc_child(detached, field);
+    state.add_alloc_edge(
+        lazy,
+        field,
+        StoredValue {
+            id: detached,
+            writable: true,
+        },
+    );
+    state.add_view_member(first, member);
+    state.add_view_member(second, member);
+    state.relate_views(second, third, true);
+    state.relate_views(first, third, false);
+
+    let mut partial = AccessFootprint::cells(
+        AddressSet::from_cells([], Coverage::Partial),
+        PlaceUse::Replace,
+    );
+    let mut content = ResolvedPlace::from_values(&[], Vec::new());
+    content.coverage = Coverage::Partial;
+    partial.content = Some(content);
+    let accesses = [
+        graph_access(root, vec![], PlaceUse::Read),
+        graph_access(first, vec![first], PlaceUse::Read),
+        graph_access(second, vec![second], PlaceUse::Read),
+        graph_access(third, vec![third], PlaceUse::Read),
+        graph_access(lazy, vec![], PlaceUse::Read),
+        graph_access(grandchild, vec![], PlaceUse::Read),
+        projected_replacement(grandchild, field),
+        projected_replacement(disjoint, field),
+        projected_replacement(first, field),
+        projected_replacement(second, field),
+        partial,
+    ];
+    let mut probes = OperandAccessIndex::new(accesses.len(), accesses.iter().enumerate());
+    for (position, access) in accesses.iter().enumerate() {
+        let probe = AccessFootprint {
+            address: access.address.clone(),
+            traversal: access.traversal.clone(),
+            traversal_coverage: access.traversal_coverage,
+            content: access.content.clone(),
+            usage: access.usage.for_transfer_probe(),
+        };
+        let expected: Vec<_> = (position + 1..accesses.len())
+            .filter(|&other| overlap(&state, &probe, &accesses[other]) != Overlap::No)
+            .collect();
+        let mut actual = Vec::new();
+        probes.any_later(&state, position, &probe, |other| {
+            if overlap(&state, &probe, &accesses[other]) != Overlap::No {
+                actual.push(other);
+            }
+            false
+        });
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "argument {position}");
+    }
+    let mut indexed = OperandAccessIndex::new(accesses.len(), accesses.iter().enumerate());
+    let mut examined = Vec::new();
+    indexed.any_later(&state, 0, &accesses[0], |other| {
+        examined.push(other);
+        false
+    });
+    assert!(examined.contains(&4) && examined.contains(&5) && examined.contains(&6));
+    assert!(
+        !examined.contains(&7),
+        "an unrelated holder with the same selector"
+    );
+}
+
+#[test]
+fn optional_operand_index_does_not_expand_unrelated_or_repeated_roots() {
+    for width in [16, 64] {
+        let (mut state, [broad, unrelated, separate]) = parameter_allocations::<3>();
+        let field = FieldKey::Field(0);
+        for slot in 0..width {
+            let key = FieldKey::Field(slot as u32);
+            for root in [broad, unrelated] {
+                let id = state.alloc_child(root, key);
+                state.add_alloc_edge(root, key, StoredValue { id, writable: true });
+            }
+        }
+        let read = graph_access(broad, vec![], PlaceUse::Read);
+        let write = graph_access(broad, vec![], PlaceUse::Mutate { deep: true });
+        let other = graph_access(separate, vec![], PlaceUse::Mutate { deep: true });
+        let mut index =
+            OperandAccessIndex::new(width + 1, (1..=width).map(|position| (position, &read)));
+        let mut exact_checks = 0;
+        assert!(index.any_later(&state, 0, &write, |other| {
+            exact_checks += 1;
+            other == 1 && overlap(&state, &write, &read) != Overlap::No
+        }));
+        assert_eq!(exact_checks, 1);
+        assert_eq!(
+            index.reach_work(),
+            (1, false),
+            "direct identity must avoid reach expansion"
+        );
+
+        let mut index =
+            OperandAccessIndex::new(width + 1, (1..=width).map(|position| (position, &read)));
+        assert!(!index.any_later(&state, 0, &other, |_| panic!(
+            "unrelated deep root was posted"
+        )));
+        assert_eq!(
+            index.reach_work(),
+            (1, true),
+            "only captured operand roots are posted"
+        );
+
+        let first = projected_replacement(unrelated, field);
+        let second = projected_replacement(unrelated, FieldKey::Field(1));
+        let mut index = OperandAccessIndex::new(2, [(1, &second)].into_iter());
+        assert!(!index.any_later(&state, 0, &first, |_| panic!(
+            "different selectors were posted"
+        )));
+        assert_eq!(
+            index.reach_work(),
+            (1, false),
+            "projected scalar cells do not expand allocation reach"
+        );
+    }
+}
+
+#[test]
+fn allocation_incidence_tracks_store_rekey_join_and_narrow() {
+    let (mut state, [root, first, second]) = parameter_allocations::<3>();
+    let field = FieldKey::Field(0);
+    let holder = state.alloc_child(root, field);
+    let address = || {
+        AddressSet::from_cells([CellId::Projected(holder, field)], Coverage::Complete)
+            .with_singleton_proof()
+    };
+    state.publish_store(
+        &TypedStore::replace_cells(address(), writable_value(first)),
+        0,
+        None,
+    );
+    state.relate_views(root, second, true);
+    state.assert_allocation_incidence();
+    let mut other = state.clone();
+    other.publish_store(
+        &TypedStore::replace_cells(address(), writable_value(second)),
+        1,
+        None,
+    );
+    other.assert_allocation_incidence();
+    assert!(state.join_in_place(&other));
+    state.assert_allocation_incidence();
+    let _ = state.retire_slot_value(0, 2);
+    state.assert_allocation_incidence();
+    state.kill_invisible(&roots(3, &[1]));
+    state.assert_allocation_incidence();
+}
+
+#[test]
+fn allocation_incidence_join_tracks_groups_missing_from_either_predecessor() {
+    let (entry, [root, target, view]) = parameter_allocations::<3>();
+    let field = FieldKey::Field(0);
+    let empty = FieldKey::Field(1);
+    let holder = entry.alloc_child(root, field);
+    let lazy = entry.alloc_child(holder, empty);
+    let mut left = entry.clone();
+    left.store_alloc_field_with_views(&[holder], empty, &[], &[], true, true);
+    let mut right = entry;
+    right.add_alloc_edge(
+        holder,
+        field,
+        StoredValue {
+            id: target,
+            writable: true,
+        },
+    );
+    right.relate_views(root, view, true);
+    assert!(!left.alloc_reaches_typed(&[root], lazy, true, false));
+    assert!(!left.alloc_reaches_typed(&[root], target, true, false));
+    let mut merged = left.clone();
+    assert!(merged.join_in_place(&right));
+    assert!(right.join_in_place(&left));
+    for state in [&merged, &right] {
+        state.assert_allocation_incidence();
+        assert!(state.alloc_reaches_typed(&[root], lazy, true, false));
+        assert!(state.alloc_reaches_typed(&[root], target, true, false));
+        assert!(state.alloc_paths_may_share(&[root], &[], &[view], &[]));
+    }
+    assert_eq!(merged, right);
+}
+
+#[test]
+fn indexed_reach_matches_full_scan_on_small_states_and_joins() {
+    let mut seed = 0x71f3_a5c9u32;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as usize
+    };
+    for _ in 0..24 {
+        let (entry, parameters) = parameter_allocations::<4>();
+        let mut ids = Vec::with_capacity(12);
+        ids.extend(parameters);
+        for index in 0..8 {
+            ids.push(entry.alloc_child(ids[index], FieldKey::Field((index % 2) as u32)));
+        }
+        let mut arm = |mut state: BorrowState| {
+            for _ in 0..12 {
+                let holder = ids[next() % ids.len()];
+                let target = ids[next() % ids.len()];
+                let key = FieldKey::Field((next() % 3) as u32);
+                let value = StoredValue {
+                    id: target,
+                    writable: next() & 1 != 0,
+                };
+                let values = [value];
+                let values = if next() % 5 == 0 {
+                    &[][..]
+                } else {
+                    &values[..]
+                };
+                state.store_alloc_field_with_views(&[holder], key, values, &[], true, true);
+            }
+            state
+        };
+        let mut left = arm(entry.clone());
+        let mut right = arm(entry);
+        // Pair widening can also introduce a new reverse posting on join.
+        left.relate_views(ids[0], ids[1], false);
+        right.relate_views(ids[0], ids[1], true);
+        let mut joined_left = left.clone();
+        let mut joined_right = right.clone();
+        assert!(joined_left.join_in_place(&right));
+        joined_right.join_in_place(&left);
+        assert_eq!(joined_left, joined_right);
+        for state in [&left, &right, &joined_left, &joined_right] {
+            state.assert_allocation_incidence();
+            for &source in &ids {
+                for &target in &ids {
+                    for writable in [false, true] {
+                        assert_eq!(
+                            state.alloc_reaches_typed(&[source], target, true, writable),
+                            state.full_scan_typed_reach_for_test(&[source], target, writable),
+                            "source {source:?}, target {target:?}, writable {writable}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn operand_reach_counter_growth_is_linear_for_shared_tails_and_nested_holders() {
+    use crate::compiler_frontend::instrumentation::{
+        FrontendCounter, capture_counters_for_test, frontend_counter_test_values, lock_counter_test,
+    };
+
+    let _guard = lock_counter_test();
+    let _capture = capture_counters_for_test();
+    let row_count = |counter| frontend_counter_test_values(&[counter])[0];
+    let query = |width| {
+        let mut state = BorrowState::new_uninitialized(2 * width + 1);
+        let mut ids = Vec::new();
+        for local in 0..2 * width + 1 {
+            state.initialize_parameter(local);
+            ids.push(state.local_alloc_ids(local).0[0]);
+        }
+        let field = FieldKey::Field(0);
+        for &root in &ids[..width] {
+            state.add_alloc_edge(
+                root,
+                field,
+                StoredValue {
+                    id: ids[width],
+                    writable: true,
+                },
+            );
+        }
+        for pair in ids[width..].windows(2) {
+            state.add_alloc_edge(
+                pair[0],
+                field,
+                StoredValue {
+                    id: pair[1],
+                    writable: true,
+                },
+            );
+        }
+        let later: Vec<_> = ids[..width]
+            .iter()
+            .map(|&root| graph_access(root, vec![], PlaceUse::Read))
+            .collect();
+        let probe = graph_access(ids[2 * width], vec![], PlaceUse::Mutate { deep: false });
+        let index = || {
+            OperandAccessIndex::new(
+                width + 1,
+                later.iter().enumerate().map(|(i, access)| (i + 1, access)),
+            )
+        };
+        let counter = FrontendCounter::BorrowOperandReachRows;
+        let before = row_count(counter);
+        let mut exact = 0;
+        let overlap_before = row_count(FrontendCounter::BorrowOverlapCalls);
+        assert!(index().any_later(&state, 0, &probe, |other| {
+            exact += 1;
+            overlap(&state, &probe, &later[other - 1]) == Overlap::Yes
+        }));
+        assert_eq!(exact, 1);
+        assert_eq!(
+            row_count(FrontendCounter::BorrowOverlapCalls) - overlap_before,
+            1
+        );
+        let short_circuit_rows = row_count(counter) - before;
+        exact = 0;
+        let before = row_count(counter);
+        assert!(!index().any_later(&state, 0, &probe, |_| {
+            exact += 1;
+            false
+        }));
+        assert_eq!(exact, width);
+        [short_circuit_rows, row_count(counter) - before]
+    };
+    let maintain = |width| {
+        let (mut state, [root, target]) = parameter_allocations::<2>();
+        let mut holders = Vec::new();
+        let mut parent = root;
+        for _ in 0..width {
+            parent = state.alloc_child(parent, FieldKey::Field(0));
+            holders.push(parent);
+        }
+        let counter = FrontendCounter::BorrowReachIndexMaintenanceRows;
+        let before = row_count(counter);
+        for holder in holders.into_iter().rev() {
+            state.add_alloc_edge(
+                holder,
+                FieldKey::Field(1),
+                StoredValue {
+                    id: target,
+                    writable: true,
+                },
+            );
+        }
+        state.assert_allocation_incidence();
+        row_count(counter) - before
+    };
+    let [tail_small, tail_large] = [16, 64].map(query);
+    let [nested_small, nested_large] = [16, 64].map(maintain);
+    for (small, large) in tail_small.into_iter().zip(tail_large) {
+        assert!(small >= 16 && large >= 64 && large <= 5 * small);
+    }
+    assert!(nested_small >= 16 && nested_large >= 64 && nested_large <= 5 * nested_small);
+    assert!(nested_large <= 4 * 64);
 }
 
 fn check_rejection(source: &str, access: &str, reason: InvalidMutableAccessReason) {
@@ -1884,6 +2268,38 @@ probe |rows ~{Holder}| -> I32:\n\
     let rows = layout.index_of(probe.params[0]).unwrap();
     state.initialize_parameter(rows);
     let block = checker.block_by_id_or_error(probe.entry, probe.id).unwrap();
+    let mut capture_only = state.clone();
+    let mut stats = super::BlockTransferStats::default();
+    let (statement, target, args, results) = block
+        .statements
+        .iter()
+        .find_map(|statement| match &statement.kind {
+            crate::compiler_frontend::hir::statements::HirStatementKind::Call {
+                target: target @ crate::compiler_frontend::external_packages::CallTarget::Local(_),
+                args,
+                results,
+            } => Some((statement, target, *args, results)),
+            _ => None,
+        })
+        .expect("the authored fill call");
+    super::statement::transfer_immediate_call(
+        &mut super::statement::CallTransferContext::new(
+            &context,
+            super::OperationView::from_layout(&layout),
+            &mut capture_only,
+            block.id,
+            layout.statement_order_or_unknown(statement.id),
+            None,
+            &mut stats,
+            None,
+        ),
+        target,
+        context.expressions.values(args),
+        results,
+    )
+    .expect("capture and publish the append without a validation sink");
+    assert_eq!(stats.conflicts_checked, 0);
+    assert!(stats.statement_facts.is_empty());
     transfer_block(&context, &layout, block, &mut state).expect("transfer the authored append");
     let (root_ids, _) = state.local_alloc_ids(rows);
     let [holder] = root_ids.as_slice() else {
@@ -1893,6 +2309,12 @@ probe |rows ~{Holder}| -> I32:\n\
     let values = state
         .resolve_alloc_path(rows, &layout.local_mutable, [FieldKey::Elem])
         .ids;
+    assert_eq!(
+        capture_only
+            .resolve_alloc_path(rows, &layout.local_mutable, [FieldKey::Elem])
+            .ids,
+        values,
+    );
     let appended: Vec<_> = values
         .into_iter()
         .filter(|&id| id != original_element)

@@ -146,6 +146,16 @@ pub(crate) enum FrontendCounter {
     BorrowIndexCompatibilityCandidates,
     BorrowIndexSupportCandidates,
     BorrowIndexReverseVisits,
+    BorrowArgumentPlansScanned,
+    BorrowOptionalTransferCandidatesBeforeEligibility,
+    BorrowOptionalTransferCandidatesAfterEligibility,
+    BorrowOverlapCalls,
+    BorrowOperandIndexKeys,
+    BorrowOperandPostingRows,
+    BorrowOperandSharingRows,
+    BorrowOperandReachRows,
+    BorrowReachIndexMaintenanceRows,
+    BorrowOptionalTransferOverlapCalls,
     ConvergenceInitialBaseBorrowPasses,
     ConvergenceBaseBorrowPasses,
     ConvergenceGeneratedSidecarBorrowPasses,
@@ -425,6 +435,17 @@ mod detailed {
     static BORROW_INDEX_COMPATIBILITY_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
     static BORROW_INDEX_SUPPORT_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
     static BORROW_INDEX_REVERSE_VISITS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_ARGUMENT_PLANS_SCANNED: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPTIONAL_TRANSFER_CANDIDATES_BEFORE_ELIGIBILITY: AtomicUsize =
+        AtomicUsize::new(0);
+    static BORROW_OPTIONAL_TRANSFER_CANDIDATES_AFTER_ELIGIBILITY: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OVERLAP_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPERAND_INDEX_KEYS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPERAND_POSTING_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPERAND_SHARING_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPERAND_REACH_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_REACH_INDEX_MAINTENANCE_ROWS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_OPTIONAL_TRANSFER_OVERLAP_CALLS: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_INITIAL_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
@@ -689,6 +710,16 @@ mod detailed {
             FrontendCounter::BorrowIndexCompatibilityCandidates,
             FrontendCounter::BorrowIndexSupportCandidates,
             FrontendCounter::BorrowIndexReverseVisits,
+            FrontendCounter::BorrowArgumentPlansScanned,
+            FrontendCounter::BorrowOptionalTransferCandidatesBeforeEligibility,
+            FrontendCounter::BorrowOptionalTransferCandidatesAfterEligibility,
+            FrontendCounter::BorrowOverlapCalls,
+            FrontendCounter::BorrowOperandIndexKeys,
+            FrontendCounter::BorrowOperandPostingRows,
+            FrontendCounter::BorrowOperandSharingRows,
+            FrontendCounter::BorrowOperandReachRows,
+            FrontendCounter::BorrowReachIndexMaintenanceRows,
+            FrontendCounter::BorrowOptionalTransferOverlapCalls,
             FrontendCounter::ConvergenceInitialBaseBorrowPasses,
             FrontendCounter::ConvergenceBaseBorrowPasses,
             FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
@@ -986,6 +1017,24 @@ mod detailed {
             }
             FrontendCounter::BorrowIndexSupportCandidates => &BORROW_INDEX_SUPPORT_CANDIDATES,
             FrontendCounter::BorrowIndexReverseVisits => &BORROW_INDEX_REVERSE_VISITS,
+            FrontendCounter::BorrowArgumentPlansScanned => &BORROW_ARGUMENT_PLANS_SCANNED,
+            FrontendCounter::BorrowOptionalTransferCandidatesBeforeEligibility => {
+                &BORROW_OPTIONAL_TRANSFER_CANDIDATES_BEFORE_ELIGIBILITY
+            }
+            FrontendCounter::BorrowOptionalTransferCandidatesAfterEligibility => {
+                &BORROW_OPTIONAL_TRANSFER_CANDIDATES_AFTER_ELIGIBILITY
+            }
+            FrontendCounter::BorrowOverlapCalls => &BORROW_OVERLAP_CALLS,
+            FrontendCounter::BorrowOperandIndexKeys => &BORROW_OPERAND_INDEX_KEYS,
+            FrontendCounter::BorrowOperandPostingRows => &BORROW_OPERAND_POSTING_ROWS,
+            FrontendCounter::BorrowOperandSharingRows => &BORROW_OPERAND_SHARING_ROWS,
+            FrontendCounter::BorrowOperandReachRows => &BORROW_OPERAND_REACH_ROWS,
+            FrontendCounter::BorrowReachIndexMaintenanceRows => {
+                &BORROW_REACH_INDEX_MAINTENANCE_ROWS
+            }
+            FrontendCounter::BorrowOptionalTransferOverlapCalls => {
+                &BORROW_OPTIONAL_TRANSFER_OVERLAP_CALLS
+            }
 
             FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
                 &CONVERGENCE_INITIAL_BASE_BORROW_PASSES
@@ -1403,6 +1452,24 @@ mod detailed {
             }
             FrontendCounter::BorrowIndexSupportCandidates => "borrow_index_support_candidates",
             FrontendCounter::BorrowIndexReverseVisits => "borrow_index_reverse_visits",
+            FrontendCounter::BorrowArgumentPlansScanned => "borrow_argument_plans_scanned",
+            FrontendCounter::BorrowOptionalTransferCandidatesBeforeEligibility => {
+                "borrow_optional_transfer_candidates_before_eligibility"
+            }
+            FrontendCounter::BorrowOptionalTransferCandidatesAfterEligibility => {
+                "borrow_optional_transfer_candidates_after_eligibility"
+            }
+            FrontendCounter::BorrowOverlapCalls => "borrow_overlap_calls",
+            FrontendCounter::BorrowOperandIndexKeys => "borrow_operand_index_keys",
+            FrontendCounter::BorrowOperandPostingRows => "borrow_operand_posting_rows",
+            FrontendCounter::BorrowOperandSharingRows => "borrow_operand_sharing_rows",
+            FrontendCounter::BorrowOperandReachRows => "borrow_operand_reach_rows",
+            FrontendCounter::BorrowReachIndexMaintenanceRows => {
+                "borrow_reach_index_maintenance_rows"
+            }
+            FrontendCounter::BorrowOptionalTransferOverlapCalls => {
+                "borrow_optional_transfer_overlap_calls"
+            }
 
             FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
                 "convergence_initial_base_borrow_passes"

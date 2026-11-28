@@ -473,7 +473,7 @@ fn direct_result_ops(
             .internal_error("Argument and output allocation types differ at call site"));
     }
     let index = input
-        .layout
+        .view
         .index_of(dest.local())
         .expect("result type lookup checked layout");
     if allow_plain_roots
@@ -498,13 +498,13 @@ fn result_type(
     dest: HirLocalDestination,
 ) -> Result<Option<TypeId>, BorrowCheckError> {
     let local = dest.local();
-    let index = input.layout.index_of(local).ok_or_else(|| {
+    let index = input.view.index_of(local).ok_or_else(|| {
         input
             .context
             .diagnostics
             .internal_error("Missing HIR call result local")
     })?;
-    if !input.layout.local_has_in_place_mutation_surface[index] {
+    if !input.view.local_has_in_place_mutation_surface[index] {
         return Ok(None);
     }
     input
@@ -551,12 +551,12 @@ fn preserves_plain_roots(
     let HirExpressionKind::Load(place) = &expression.kind else {
         return Ok(false);
     };
-    let Some(source) = input.layout.index_of(place.root) else {
+    let Some(source) = input.view.index_of(place.root) else {
         return Ok(false);
     };
     if !place.projections.is_empty()
         || expression.value_kind == ValueKind::Const
-        || !input.layout.local_mutable[source]
+        || !input.view.local_mutable[source]
     {
         return Ok(false);
     }
@@ -565,7 +565,7 @@ fn preserves_plain_roots(
     };
     input
         .state
-        .load_place_content(place, &input.layout.local_mutable, false);
+        .load_place_content(place, input.view.local_mutable, false);
     let content = place
         .content
         .as_ref()
@@ -576,7 +576,7 @@ fn preserves_plain_roots(
             input
                 .state
                 .alloc_origin_local(id)
-                .is_none_or(|origin| origin != destination && input.layout.local_mutable[origin])
+                .is_none_or(|origin| origin != destination && input.view.local_mutable[origin])
         }))
 }
 
@@ -612,7 +612,7 @@ impl<'a> CallActuals<'a> {
     ) {
         self.derivations.extend(self.args.iter().map(|arg| {
             super::alias_derivation_roots_from_expression(
-                input.layout,
+                input.view,
                 input.state,
                 input.context.expressions,
                 arg.argument,
@@ -641,7 +641,7 @@ impl<'a> CallActuals<'a> {
         let argument = self.argument(input, index)?.argument;
         Ok(self.entries[index].get_or_insert_with(|| {
             let expressions = input.context.expressions;
-            let resolve = |place| resolve_place(input.layout, input.state, expressions, place);
+            let resolve = |place| resolve_place(input.view, input.state, expressions, place);
             let (place, is_copy) = match &expressions.expression(argument).kind {
                 HirExpressionKind::Load(place) => (resolve(place), false),
                 HirExpressionKind::Copy(place) => (resolve(place), true),
@@ -691,14 +691,14 @@ impl<'a> CallActuals<'a> {
             {
                 input
                     .state
-                    .load_place_content(place, &input.layout.local_mutable, !heap);
+                    .load_place_content(place, input.view.local_mutable, !heap);
                 let content = place
                     .content
                     .as_ref()
                     .expect("captured place requests content");
                 let captured = CapturedValue {
                     values: stored_allocation_values(
-                        input.layout,
+                        input.view.local_mutable,
                         input.state,
                         content,
                         place.permission.wrapper_readonly_source.is_none(),
@@ -718,7 +718,7 @@ impl<'a> CallActuals<'a> {
                 let source = if input.state.has_alloc_edges() {
                     input
                         .state
-                        .load_place_content(source, &input.layout.local_mutable, false);
+                        .load_place_content(source, input.view.local_mutable, false);
                     source.content.as_ref()
                 } else {
                     None
@@ -726,7 +726,7 @@ impl<'a> CallActuals<'a> {
                 capture_copy(
                     &LayerValueContext {
                         context: input.context,
-                        layout: input.layout,
+                        view: input.view,
                         block_id: input.block_id,
                     },
                     input.state,
@@ -738,7 +738,7 @@ impl<'a> CallActuals<'a> {
                 stored_values(
                     &LayerValueContext {
                         context: input.context,
-                        layout: input.layout,
+                        view: input.view,
                         block_id: input.block_id,
                     },
                     input.state,
@@ -1022,7 +1022,7 @@ fn instantiate_lane(
                     site,
                     nonsingular,
                     input.block_id,
-                    &input.layout.block_successors,
+                    input.view.block_successors,
                 );
                 node.add_fresh(id, true);
             }
@@ -1067,7 +1067,7 @@ fn instantiate_lane(
                 (facts.sources.len() + facts.stores.len() + ordinal) as u32,
                 nodes[left].nonsingular || nodes[right].nonsingular,
                 input.block_id,
-                &input.layout.block_successors,
+                input.view.block_successors,
             );
             for index in [left, right] {
                 let node = &mut nodes[index];
@@ -1081,7 +1081,7 @@ fn instantiate_lane(
     let correlate = nodes.len() > 1
         && !input
             .state
-            .block_may_repeat(input.block_id, &input.layout.block_successors);
+            .block_may_repeat(input.block_id, input.view.block_successors);
     let mut inverse = FxHashMap::<AllocId, Vec<usize>>::default();
     for (index, node) in nodes.iter_mut().enumerate() {
         node.values
@@ -1340,10 +1340,10 @@ fn step_graph(
 ) {
     input
         .state
-        .step_resolved(graph, key, &input.layout.local_mutable);
+        .step_resolved(graph, key, input.view.local_mutable);
     input
         .state
-        .mark_alloc_provenance_readonly(&input.layout.local_mutable, graph);
+        .mark_alloc_provenance_readonly(input.view.local_mutable, graph);
 }
 
 pub(super) fn capture_graph_values(place: ResolvedPlace) -> CapturedValue {

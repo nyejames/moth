@@ -18,15 +18,23 @@ use super::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::ops::{ControlFlow, Deref};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(in super::super) struct AllocId(u32);
 
 impl AllocId {
+    pub(in super::super) const MIN: Self = Self(0);
+    pub(in super::super) const MAX: Self = Self(u32::MAX);
+
     /// Marker held by a (holder, field) group that is known to hold nothing.
     const EMPTY: AllocId = AllocId(u32::MAX);
 }
@@ -244,6 +252,225 @@ impl ResolvedCells {
     }
 }
 
+/// Explicit rows own storage facts. The indices contain only direct links.
+#[derive(Debug, Default)]
+struct EdgeRows {
+    rows: Vec<Edge>,
+    children: BTreeSet<(AllocId, AllocId)>,
+    incoming: BTreeSet<(AllocId, AllocId, FieldKey)>,
+}
+
+impl Clone for EdgeRows {
+    fn clone(&self) -> Self {
+        add_frontend_counter(
+            FrontendCounter::BorrowReachIndexMaintenanceRows,
+            self.children.len() + self.incoming.len(),
+        );
+        Self {
+            rows: self.rows.clone(),
+            children: self.children.clone(),
+            incoming: self.incoming.clone(),
+        }
+    }
+}
+
+impl Deref for EdgeRows {
+    type Target = [Edge];
+
+    fn deref(&self) -> &[Edge] {
+        &self.rows
+    }
+}
+
+impl EdgeRows {
+    fn for_holder(&self, id: AllocId) -> &[Edge] {
+        let start = self.rows.partition_point(|edge| edge.holder < id);
+        let len = self.rows[start..].partition_point(|edge| edge.holder == id);
+        &self.rows[start..start + len]
+    }
+
+    fn group_range(&self, holder: AllocId, key: FieldKey) -> std::ops::Range<usize> {
+        let start = self
+            .rows
+            .partition_point(|edge| (edge.holder, edge.key) < (holder, key));
+        let len =
+            self.rows[start..].partition_point(|edge| (edge.holder, edge.key) == (holder, key));
+        start..start + len
+    }
+
+    fn group(&self, holder: AllocId, key: FieldKey) -> &[Edge] {
+        &self.rows[self.group_range(holder, key)]
+    }
+
+    fn has_outgoing(&self, holder: AllocId) -> bool {
+        !self.for_holder(holder).is_empty() || self.children_of(holder).next().is_some()
+    }
+
+    fn children_of(&self, parent: AllocId) -> impl Iterator<Item = AllocId> + '_ {
+        self.children
+            .range((parent, AllocId(0))..=(parent, AllocId::EMPTY))
+            .map(|&(_, child)| child)
+    }
+
+    fn index_edge(&mut self, table: &AllocTable, edge: Edge) {
+        increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+        if edge.held != AllocId::EMPTY {
+            self.incoming.insert((edge.held, edge.holder, edge.key));
+        }
+        let mut current = edge.holder;
+        while let Some((parent, _)) = table.parent(current) {
+            increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+            // An existing link also proves that its whole prefix has already been indexed.
+            if !self.children.insert((parent, current)) {
+                break;
+            }
+            current = parent;
+        }
+    }
+
+    fn prune_path(&mut self, table: &AllocTable, mut holder: AllocId) {
+        while let Some((parent, _)) = table.parent(holder) {
+            increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+            if self.has_outgoing(holder) {
+                break;
+            }
+            self.children.remove(&(parent, holder));
+            holder = parent;
+        }
+    }
+
+    fn insert(&mut self, table: &RefCell<AllocTable>, edge: Edge, distinct_occurrence: bool) {
+        match self
+            .rows
+            .binary_search_by_key(&edge.sort_key(), Edge::sort_key)
+        {
+            Ok(position) => {
+                let existing = &mut self.rows[position];
+                existing.writable &= edge.writable;
+                // A copied graph fact describes the same already-counted occurrence.
+                existing.single &= edge.single && !distinct_occurrence;
+            }
+            Err(position) => {
+                self.index_edge(&table.borrow(), edge);
+                self.rows.insert(position, edge);
+            }
+        }
+    }
+
+    fn remove_group(
+        &mut self,
+        table: &RefCell<AllocTable>,
+        holder: AllocId,
+        key: FieldKey,
+        empty_only: bool,
+    ) {
+        let std::ops::Range { start, end } = self.group_range(holder, key);
+        let start = if empty_only {
+            start + self.rows[start..end].partition_point(|e| e.held != AllocId::EMPTY)
+        } else {
+            start
+        };
+        if start != end {
+            add_frontend_counter(
+                FrontendCounter::BorrowReachIndexMaintenanceRows,
+                end - start,
+            );
+            for edge in self.rows.drain(start..end) {
+                if edge.held != AllocId::EMPTY {
+                    self.incoming.remove(&(edge.held, edge.holder, edge.key));
+                }
+            }
+            self.prune_path(&table.borrow(), holder);
+        }
+    }
+
+    fn edit(
+        &mut self,
+        table: &mut AllocTable,
+        update: impl FnOnce(&mut Vec<Edge>, &mut AllocTable),
+    ) {
+        update(&mut self.rows, table);
+        self.reindex(table);
+    }
+
+    fn reindex(&mut self, table: &AllocTable) {
+        add_frontend_counter(
+            FrontendCounter::BorrowReachIndexMaintenanceRows,
+            self.children.len() + self.incoming.len(),
+        );
+        self.children.clear();
+        self.incoming.clear();
+        for index in 0..self.rows.len() {
+            self.index_edge(table, self.rows[index]);
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SharingPairs {
+    rows: Vec<(AllocId, AllocId, bool)>,
+    positive_by_right: BTreeSet<(AllocId, AllocId)>,
+}
+
+impl Clone for SharingPairs {
+    fn clone(&self) -> Self {
+        add_frontend_counter(
+            FrontendCounter::BorrowReachIndexMaintenanceRows,
+            self.positive_by_right.len(),
+        );
+        Self {
+            rows: self.rows.clone(),
+            positive_by_right: self.positive_by_right.clone(),
+        }
+    }
+}
+
+impl PartialEq for SharingPairs {
+    fn eq(&self, other: &Self) -> bool {
+        self.rows == other.rows
+    }
+}
+
+impl Eq for SharingPairs {}
+
+impl Deref for SharingPairs {
+    type Target = [(AllocId, AllocId, bool)];
+
+    fn deref(&self) -> &Self::Target {
+        &self.rows
+    }
+}
+
+impl SharingPairs {
+    fn union(&mut self, left: AllocId, right: AllocId, may_share: bool) {
+        let (left, right) = ordered_pair(left, right);
+        match self
+            .rows
+            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
+        {
+            Ok(index) => self.rows[index].2 |= may_share,
+            Err(index) => self.rows.insert(index, (left, right, may_share)),
+        }
+        if may_share && left != right {
+            increment_frontend_counter(FrontendCounter::BorrowReachIndexMaintenanceRows);
+            self.positive_by_right.insert((right, left));
+        }
+    }
+
+    fn edit(&mut self, update: impl FnOnce(&mut Vec<(AllocId, AllocId, bool)>)) {
+        update(&mut self.rows);
+        add_frontend_counter(
+            FrontendCounter::BorrowReachIndexMaintenanceRows,
+            self.positive_by_right.len() + self.rows.len(),
+        );
+        self.positive_by_right.clear();
+        self.positive_by_right
+            .extend(self.rows.iter().filter_map(|&(left, right, positive)| {
+                (positive && left != right).then_some((right, left))
+            }));
+    }
+}
+
 /// A view names an occurrence, not a new allocation. Its members give ordinary provenance,
 /// while a projection can name a new occurrence even when both paths have the same members.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -251,7 +478,7 @@ struct SharingLayer {
     members: Vec<(AllocId, AllocId)>,
     projections: Vec<(AllocId, FieldKey, AllocId)>,
     bindings: Vec<(WrapperId, AllocId)>,
-    pairs: Vec<(AllocId, AllocId, bool)>,
+    pairs: SharingPairs,
 }
 
 impl SharingLayer {
@@ -296,17 +523,6 @@ impl SharingLayer {
             .map(|index| self.pairs[index].2)
     }
 
-    fn union_pair(&mut self, left: AllocId, right: AllocId, may_share: bool) {
-        let (left, right) = ordered_pair(left, right);
-        match self
-            .pairs
-            .binary_search_by_key(&(left, right), |&(a, b, _)| (a, b))
-        {
-            Ok(index) => self.pairs[index].2 |= may_share,
-            Err(index) => self.pairs.insert(index, (left, right, may_share)),
-        }
-    }
-
     fn is_empty(&self) -> bool {
         self.members.is_empty()
             && self.projections.is_empty()
@@ -342,7 +558,7 @@ fn slot_group<T>(
 #[derive(Debug, Clone)]
 pub(in super::super) struct AllocationLayer {
     table: Rc<RefCell<AllocTable>>,
-    edges: Vec<Edge>,
+    edges: EdgeRows,
     /// A missing current slot payload is described by its ordinary value roots.
     bound: Vec<(WrapperId, AllocId, bool)>,
     /// Exceptional contents, by cell; dependency-free allocation edges stay compact.
@@ -357,7 +573,7 @@ pub(in super::super) struct AllocationLayer {
 
 impl PartialEq for AllocationLayer {
     fn eq(&self, other: &Self) -> bool {
-        self.edges == other.edges
+        self.edges.rows == other.edges.rows
             && self.bound == other.bound
             && self.contents == other.contents
             && self.wrappers == other.wrappers
@@ -373,7 +589,7 @@ impl AllocationLayer {
     pub(super) fn new() -> Self {
         Self {
             table: Rc::new(RefCell::new(AllocTable::default())),
-            edges: Vec::new(),
+            edges: EdgeRows::default(),
             bound: Vec::new(),
             contents: Vec::new(),
             wrappers: Vec::new(),
@@ -424,18 +640,6 @@ impl AllocationLayer {
         }
     }
 
-    fn group(&self, holder: AllocId, key: FieldKey) -> &[Edge] {
-        let start = self
-            .edges
-            .partition_point(|edge| (edge.holder, edge.key) < (holder, key));
-        let end = start
-            + self.edges[start..]
-                .iter()
-                .take_while(|edge| edge.holder == holder && edge.key == key)
-                .count();
-        &self.edges[start..end]
-    }
-
     fn project_views(
         &self,
         table: &mut AllocTable,
@@ -480,7 +684,7 @@ impl AllocationLayer {
         key: FieldKey,
         ids: &mut Vec<AllocId>,
     ) {
-        let group = self.group(holder, key);
+        let group = self.edges.group(holder, key);
         if group.is_empty() {
             ids.push(table.child(holder, key));
         } else {
@@ -541,19 +745,7 @@ impl AllocationLayer {
     }
 
     fn insert_edge(&mut self, edge: Edge, distinct_occurrence: bool) {
-        match self
-            .edges
-            .binary_search_by(|probe| probe.sort_key().cmp(&edge.sort_key()))
-        {
-            Ok(position) => {
-                let existing = &mut self.edges[position];
-                existing.writable &= edge.writable;
-                // Two stores may leave a duplicate behind after removal. A copied
-                // graph fact instead describes the same already-counted occurrences.
-                existing.single &= edge.single && !distinct_occurrence;
-            }
-            Err(position) => self.edges.insert(position, edge),
-        }
+        self.edges.insert(&self.table, edge, distinct_occurrence);
     }
 
     /// Whether `descendant` is `ancestor` or a lazy descendant still held through every step.
@@ -573,19 +765,35 @@ impl AllocationLayer {
             if current == ancestor {
                 return true;
             }
-            let Some((parent, key)) = table.parent(current) else {
+            let Some(parent) = self.covered_parent(table, current, writable_only, false) else {
                 return false;
             };
-            let group = self.group(parent, key);
-            if !group.is_empty()
-                && !group
-                    .iter()
-                    .any(|edge| edge.held == current && (!writable_only || edge.writable))
-            {
-                return false;
-            }
             current = parent;
         }
+    }
+
+    fn covered_parent(
+        &self,
+        table: &AllocTable,
+        id: AllocId,
+        writable_only: bool,
+        count_incidence: bool,
+    ) -> Option<AllocId> {
+        if count_incidence {
+            increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+        }
+        let (parent, key) = table.parent(id)?;
+        let group = self.edges.group(parent, key);
+        (group.is_empty()
+            || group
+                .binary_search_by_key(&id, |edge| {
+                    if count_incidence {
+                        increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+                    }
+                    edge.held
+                })
+                .is_ok_and(|index| !writable_only || group[index].writable))
+        .then_some(parent)
     }
 
     /// Name a source node reached by a lazy path from the nodes already in this copy.
@@ -600,7 +808,7 @@ impl AllocationLayer {
             return Some(copy);
         }
         let (parent, key) = table.parent(id)?;
-        if !self.group(parent, key).is_empty() {
+        if !self.edges.group(parent, key).is_empty() {
             return None;
         }
         let copy_parent = self.copied_path(table, copies, site, parent)?;
@@ -661,7 +869,7 @@ impl AllocationLayer {
         let mut parents: Vec<_> = copies
             .keys()
             .filter_map(|&id| table.parent(id))
-            .filter_map(|(parent, key)| self.group(parent, key).is_empty().then_some(parent))
+            .filter_map(|(parent, key)| self.edges.group(parent, key).is_empty().then_some(parent))
             .collect();
         parents.sort_unstable();
         parents.dedup();
@@ -671,7 +879,7 @@ impl AllocationLayer {
         for (&source, &held) in &copies {
             if let Some((parent, key)) = table.parent(source)
                 && let Some(&holder) = copies.get(&parent)
-                && self.group(parent, key).is_empty()
+                && self.edges.group(parent, key).is_empty()
             {
                 copied.push(Edge {
                     holder,
@@ -753,7 +961,7 @@ impl AllocationLayer {
             // Include lazy ancestors of explicit holders and held allocations. A referenced
             // lazy child can share with another branch without ever having an explicit edge.
             for &source in &route.ids {
-                for edge in &self.edges {
+                for edge in self.edges.iter() {
                     for mut next in [edge.holder, edge.held] {
                         if next == AllocId::EMPTY || !self.covers(table, source, next) {
                             continue;
@@ -973,21 +1181,23 @@ impl AllocationLayer {
             }
             id
         };
-        for edge in &mut self.edges {
-            edge.holder = rename(edge.holder, &mut table);
-            edge.held = rename(edge.held, &mut table);
-            if edge.held != AllocId::EMPTY && !table.singular(edge.held) {
-                edge.single = false;
+        self.edges.edit(&mut table, |edges, table| {
+            for edge in edges.iter_mut() {
+                edge.holder = rename(edge.holder, table);
+                edge.held = rename(edge.held, table);
+                if edge.held != AllocId::EMPTY && !table.singular(edge.held) {
+                    edge.single = false;
+                }
             }
-        }
-        self.edges.sort_by_key(Edge::sort_key);
-        self.edges.dedup_by(|later, earlier| {
-            if later.sort_key() != earlier.sort_key() {
-                return false;
-            }
-            earlier.writable &= later.writable;
-            earlier.single = false;
-            true
+            edges.sort_by_key(Edge::sort_key);
+            edges.dedup_by(|later, earlier| {
+                if later.sort_key() != earlier.sort_key() {
+                    return false;
+                }
+                earlier.writable &= later.writable;
+                earlier.single = false;
+                true
+            });
         });
         for (_, id, _) in &mut self.bound {
             *id = rename(*id, &mut table);
@@ -1052,16 +1262,19 @@ impl AllocationLayer {
         }
         self.sharing.bindings.sort_unstable();
         self.sharing.bindings.dedup();
-        for (left, right, _) in &mut self.sharing.pairs {
-            (*left, *right) = ordered_pair(rename(*left, &mut table), rename(*right, &mut table));
-        }
-        self.sharing.pairs.sort_unstable();
-        self.sharing.pairs.dedup_by(|right, left| {
-            if (left.0, left.1) != (right.0, right.1) {
-                return false;
+        self.sharing.pairs.edit(|pairs| {
+            for (left, right, _) in pairs.iter_mut() {
+                (*left, *right) =
+                    ordered_pair(rename(*left, &mut table), rename(*right, &mut table));
             }
-            left.2 |= right.2;
-            true
+            pairs.sort_unstable();
+            pairs.dedup_by(|right, left| {
+                if (left.0, left.1) != (right.0, right.1) {
+                    return false;
+                }
+                left.2 |= right.2;
+                true
+            });
         });
     }
 }
@@ -1826,7 +2039,7 @@ impl BorrowState {
     }
 
     pub(in super::super) fn relate_views(&mut self, a: AllocId, b: AllocId, may_share: bool) {
-        self.layer.sharing.union_pair(a, b, may_share);
+        self.layer.sharing.pairs.union(a, b, may_share);
     }
 
     pub(in super::super) fn link_view(&mut self, holder: AllocId, key: FieldKey, held: AllocId) {
@@ -1859,6 +2072,233 @@ impl BorrowState {
         };
         left.iter()
             .any(|&a| right.iter().any(|&b| self.layer.views_may_share(a, b)))
+    }
+
+    pub(in super::super) fn visit_sharing_incidence(
+        &self,
+        id: AllocId,
+        mut each: impl FnMut((AllocId, AllocId)) -> std::ops::ControlFlow<()>,
+    ) -> std::ops::ControlFlow<()> {
+        each((id, id))?;
+        increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+        for member in self.layer.sharing.members(id) {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            each((member, member))?;
+        }
+        let pairs = &self.layer.sharing.pairs;
+        increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+        let start = pairs.partition_point(|&(left, _, _)| {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            left < id
+        });
+        for &(left, right, positive) in pairs[start..]
+            .iter()
+            .take_while(|&&(left, _, _)| left == id)
+        {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            if positive && left != right {
+                each((left, right))?;
+            }
+        }
+        for &(right, left) in pairs
+            .positive_by_right
+            .range((id, AllocId(0))..=(id, AllocId::EMPTY))
+        {
+            increment_frontend_counter(FrontendCounter::BorrowOperandSharingRows);
+            each((left, right))?;
+        }
+        std::ops::ControlFlow::Continue(())
+    }
+
+    // The call index adds paths to argument targets without enumerating the state's interner.
+    pub(in super::super) fn visit_operand_path(
+        &self,
+        mut id: AllocId,
+        mut add: impl FnMut(AllocId, AllocId) -> bool,
+    ) {
+        let table = self.layer.table.borrow();
+        loop {
+            increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+            let Some((parent, _)) = table.parent(id) else {
+                break;
+            };
+            if !add(parent, id) {
+                break;
+            }
+            id = parent;
+        }
+    }
+
+    pub(in super::super) fn operand_lazy_child(&self, child: AllocId) -> bool {
+        self.layer
+            .covered_parent(&self.layer.table.borrow(), child, false, true)
+            .is_some()
+    }
+
+    pub(in super::super) fn visit_operand_reach(
+        &self,
+        id: AllocId,
+        reverse: bool,
+        mut visit: impl FnMut(AllocId) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let table = self.layer.table.borrow();
+        if reverse {
+            if let Some(parent) = self.layer.covered_parent(&table, id, false, true) {
+                visit(parent)?;
+            }
+            increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+            for &(_, holder, _) in self.layer.edges.incoming.range(
+                (id, AllocId(0), FieldKey::Field(0))..=(id, AllocId::EMPTY, FieldKey::MapKey),
+            ) {
+                increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+                visit(holder)?;
+            }
+            ControlFlow::Continue(())
+        } else {
+            self.visit_forward_links(id, false, true, |next, explicit| {
+                if explicit
+                    || self
+                        .layer
+                        .covered_parent(&table, next, false, true)
+                        .is_some()
+                {
+                    visit(next)?;
+                }
+                ControlFlow::Continue(())
+            })
+        }
+    }
+
+    fn visit_forward_links(
+        &self,
+        id: AllocId,
+        writable_edges: bool,
+        count_incidence: bool,
+        mut push: impl FnMut(AllocId, bool) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        if count_incidence {
+            increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+        }
+        for edge in self.layer.edges.for_holder(id) {
+            if count_incidence {
+                increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+            }
+            if edge.held != AllocId::EMPTY && (!writable_edges || edge.writable) {
+                push(edge.held, true)?;
+            }
+        }
+        if count_incidence {
+            increment_frontend_counter(FrontendCounter::BorrowOperandReachRows);
+        }
+        for child in self.layer.edges.children_of(id) {
+            push(child, false)?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn walk_explicit_allocations(
+        &self,
+        from: &[AllocId],
+        writable_edges: bool,
+        writable_paths: bool,
+        mut visit: impl FnMut(&AllocTable, AllocId) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        if from.is_empty() {
+            return ControlFlow::Continue(());
+        }
+        let table = self.layer.table.borrow();
+        for &root in from {
+            visit(&table, root)?;
+        }
+        if self.layer.edges.is_empty() || !from.iter().any(|&id| self.layer.edges.has_outgoing(id))
+        {
+            return ControlFlow::Continue(());
+        }
+        // A holder can be visited through a lazy path before it is emitted as an explicit value.
+        let mut seen: FxHashMap<_, _> = from.iter().map(|&id| (id, true)).collect();
+        let mut pending = from.to_vec();
+        while let Some(id) = pending.pop() {
+            self.visit_forward_links(id, writable_edges, false, |next, explicit| {
+                if !explicit
+                    && self
+                        .layer
+                        .covered_parent(&table, next, writable_paths, false)
+                        .is_none()
+                {
+                    return ControlFlow::Continue(());
+                }
+                let emitted = seen.entry(next).or_insert_with(|| {
+                    pending.push(next);
+                    false
+                });
+                if explicit && !std::mem::replace(emitted, true) {
+                    visit(&table, next)?;
+                }
+                ControlFlow::Continue(())
+            })?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    #[cfg(test)]
+    pub(in super::super) fn assert_allocation_incidence(&self) {
+        let table = self.layer.table.borrow();
+        let mut children = BTreeSet::new();
+        let mut incoming = BTreeSet::new();
+        for edge in self.layer.edges.iter() {
+            if edge.held != AllocId::EMPTY {
+                incoming.insert((edge.held, edge.holder, edge.key));
+            }
+            let mut id = edge.holder;
+            while let Some((parent, _)) = table.parent(id) {
+                if !children.insert((parent, id)) {
+                    break;
+                }
+                id = parent;
+            }
+        }
+        assert_eq!(self.layer.edges.children, children);
+        assert_eq!(self.layer.edges.incoming, incoming);
+        let pairs = &self.layer.sharing.pairs;
+        let expected_pairs: BTreeSet<_> = pairs
+            .iter()
+            .filter_map(|&(left, right, shares)| (shares && left != right).then_some((right, left)))
+            .collect();
+        assert_eq!(pairs.positive_by_right, expected_pairs);
+    }
+
+    /// The pre-index traversal is an independent oracle over authoritative rows.
+    #[cfg(test)]
+    pub(in super::super) fn full_scan_typed_reach_for_test(
+        &self,
+        from: &[AllocId],
+        target: AllocId,
+        writable_only: bool,
+    ) -> bool {
+        let table = self.layer.table.borrow();
+        let covers = |from, target| {
+            self.layer
+                .covers_through(&table, from, target, writable_only)
+        };
+        let mut seen = FxHashSet::default();
+        let mut pending = from.to_vec();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if covers(id, target) {
+                return true;
+            }
+            for edge in self.layer.edges.iter() {
+                if edge.held != AllocId::EMPTY
+                    && (!writable_only || edge.writable)
+                    && covers(id, edge.holder)
+                {
+                    pending.push(edge.held);
+                }
+            }
+        }
+        false
     }
 
     pub(in super::super) fn block_may_repeat(
@@ -2283,6 +2723,7 @@ impl BorrowState {
                 CellId::Projected(holder, key)
                     if self
                         .layer
+                        .edges
                         .group(holder, key)
                         .iter()
                         .any(|edge| edge.held == AllocId::EMPTY) =>
@@ -2408,7 +2849,7 @@ impl BorrowState {
                         group.iter().cloned(),
                     );
                 } else {
-                    let edges = self.layer.group(holder, key);
+                    let edges = self.layer.edges.group(holder, key);
                     if edges.is_empty() {
                         let child = ValueAlt::plain(ValueKind::Allocation(StoredValue {
                             id: table.child(holder, key),
@@ -2449,7 +2890,7 @@ impl BorrowState {
         };
         let mut next = Vec::with_capacity(resolved.ids.len());
         for holder in resolved.ids.drain(..) {
-            let group = self.layer.group(holder, key);
+            let group = self.layer.edges.group(holder, key);
             if group.is_empty() {
                 next.push(table.child(holder, key));
                 continue;
@@ -2987,8 +3428,8 @@ impl BorrowState {
             if strong {
                 self.layer
                     .edges
-                    .retain(|edge| !(edge.holder == *holder && edge.key == key));
-            } else if self.layer.group(*holder, key).is_empty() {
+                    .remove_group(&self.layer.table, *holder, key, false);
+            } else if self.layer.edges.group(*holder, key).is_empty() {
                 let lazy = self.layer.table.borrow_mut().child(*holder, key);
                 self.layer.add_edge(Edge {
                     holder: *holder,
@@ -2999,9 +3440,9 @@ impl BorrowState {
                 });
             } else {
                 // A store into a known-empty group makes it non-empty.
-                self.layer.edges.retain(|edge| {
-                    !(edge.holder == *holder && edge.key == key && edge.held == AllocId::EMPTY)
-                });
+                self.layer
+                    .edges
+                    .remove_group(&self.layer.table, *holder, key, true);
             }
             for value in values {
                 let single = distinct_occurrence && self.alloc_singular(value.id);
@@ -3139,6 +3580,7 @@ impl BorrowState {
         if !tracked && !views.is_empty() {
             let previous: Vec<_> = self
                 .layer
+                .edges
                 .group(holder, key)
                 .iter()
                 .filter_map(|edge| (edge.held != AllocId::EMPTY).then_some(edge.held))
@@ -3289,7 +3731,7 @@ impl BorrowState {
     }
 
     pub(in super::super) fn alloc_group_is_explicit(&self, holder: AllocId, key: FieldKey) -> bool {
-        !self.layer.group(holder, key).is_empty()
+        !self.layer.edges.group(holder, key).is_empty()
             || !self
                 .layer
                 .contents(CellId::Projected(holder, key))
@@ -3668,7 +4110,7 @@ impl BorrowState {
             CellId::Slot(_) if scalar => vec![ValueAlt::plain(ValueKind::Scalar)],
             CellId::Slot(slot) => compact_alternatives(self.slot_values(slot)),
             CellId::Projected(holder, key) => {
-                let edges = self.layer.group(holder, key);
+                let edges = self.layer.edges.group(holder, key);
                 if edges.is_empty() {
                     if constructing {
                         Vec::new()
@@ -3853,7 +4295,7 @@ impl BorrowState {
         let [holder] = holders else {
             return StoreReceipt::default();
         };
-        let group = self.layer.group(*holder, FieldKey::Elem);
+        let group = self.layer.edges.group(*holder, FieldKey::Elem);
         if let [edge] = group
             && edge.single
             && edge.held != AllocId::EMPTY
@@ -3901,34 +4343,14 @@ impl BorrowState {
         writable_only: bool,
         matches: impl Fn(&AllocTable, AllocId) -> bool,
     ) -> bool {
-        if from.is_empty() {
-            return false;
-        }
-        let table = self.layer.table.borrow();
-        if self.layer.edges.is_empty() {
-            return from.iter().any(|&id| matches(&table, id));
-        }
-        let mut visited = FxHashSet::default();
-        let mut stack = from.to_vec();
-        while let Some(current) = stack.pop() {
-            if !visited.insert(current) {
-                continue;
+        self.walk_explicit_allocations(from, writable_only, writable_only, |table, id| {
+            if matches(table, id) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
             }
-            if matches(&table, current) {
-                return true;
-            }
-            for edge in &self.layer.edges {
-                if edge.held != AllocId::EMPTY
-                    && (!writable_only || edge.writable)
-                    && self
-                        .layer
-                        .covers_through(&table, current, edge.holder, writable_only)
-                {
-                    stack.push(edge.held);
-                }
-            }
-        }
-        false
+        })
+        .is_break()
     }
 
     /// An opaque result can observe a reachable child without a contract row naming that child.
@@ -3971,22 +4393,16 @@ impl BorrowState {
     }
 
     fn alloc_closure(&self, ids: &[AllocId], writable_only: bool) -> Vec<AllocId> {
-        let table = self.layer.table.borrow();
-        let mut seen: FxHashSet<AllocId> = ids.iter().copied().collect();
-        let mut stack = ids.to_vec();
+        let mut seeds = ids.len();
         let mut closure = Vec::new();
-        while let Some(current) = stack.pop() {
-            for edge in &self.layer.edges {
-                if (!writable_only || edge.writable)
-                    && edge.held != AllocId::EMPTY
-                    && self.layer.covers(&table, current, edge.holder)
-                    && seen.insert(edge.held)
-                {
-                    closure.push(edge.held);
-                    stack.push(edge.held);
-                }
+        let _ = self.walk_explicit_allocations(ids, writable_only, false, |_, id| {
+            if seeds == 0 {
+                closure.push(id);
+            } else {
+                seeds -= 1;
             }
-        }
+            ControlFlow::Continue(())
+        });
         closure
     }
 
@@ -4081,9 +4497,9 @@ impl BorrowState {
         let mut merged = Vec::with_capacity(self.layer.edges.len() + other.layer.edges.len());
         let mut table = self.layer.table.borrow_mut();
         for (source, opposite) in [(&self.layer, &other.layer), (&other.layer, &self.layer)] {
-            for edge in &source.edges {
+            for edge in source.edges.iter() {
                 merged.push(*edge);
-                if opposite.group(edge.holder, edge.key).is_empty() {
+                if opposite.edges.group(edge.holder, edge.key).is_empty() {
                     merged.push(Edge {
                         holder: edge.holder,
                         key: edge.key,
@@ -4104,8 +4520,13 @@ impl BorrowState {
             earlier.single &= later.single;
             true
         });
-        changed |= merged != self.layer.edges;
-        self.layer.edges = merged;
+        let edges_changed = merged != self.layer.edges.rows;
+        changed |= edges_changed;
+        if edges_changed {
+            self.layer
+                .edges
+                .edit(&mut self.layer.table.borrow_mut(), |rows, _| *rows = merged);
+        }
 
         let previous_len = self.layer.observations.len();
         self.layer.observations.retain_mut(|entry| {
@@ -4260,7 +4681,7 @@ impl BorrowState {
                     .projections
                     .extend(ids.into_iter().map(|id| (holder, key, id)));
             }
-            for &(a, b, shares) in &source.pairs {
+            for &(a, b, shares) in source.pairs.iter() {
                 let could_exist = |view| {
                     !matches!(table.base(view), AllocBase::CallView(..))
                         || opposite.members(view).next().is_some()
@@ -4269,7 +4690,7 @@ impl BorrowState {
                     || (could_exist(a)
                         && could_exist(b)
                         && opposite_state.layer.views_may_share(a, b));
-                sharing.union_pair(a, b, possible);
+                sharing.pairs.union(a, b, possible);
             }
         }
         sharing.members.sort_unstable();
@@ -4479,9 +4900,9 @@ impl BorrowState {
             sharing
                 .projections
                 .retain(|&(holder, _, _)| live_views.contains(&holder));
-            sharing
-                .pairs
-                .retain(|&(a, b, _)| live_views.contains(&a) && live_views.contains(&b));
+            sharing.pairs.edit(|pairs| {
+                pairs.retain(|&(a, b, _)| live_views.contains(&a) && live_views.contains(&b));
+            });
         }
         self.layer.contents.retain(|(cell, _)| match cell {
             CellId::Projected(holder, _) => reached
@@ -4491,11 +4912,15 @@ impl BorrowState {
         });
         drop(table);
         let mut index = 0;
-        self.layer.edges.retain(|_| {
-            let kept = keep[index];
-            index += 1;
-            kept
-        });
+        self.layer
+            .edges
+            .edit(&mut self.layer.table.borrow_mut(), |edges, _| {
+                edges.retain(|_| {
+                    let kept = keep[index];
+                    index += 1;
+                    kept
+                });
+            });
     }
 }
 

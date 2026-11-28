@@ -20,8 +20,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::OnceCell;
+use std::collections::BTreeSet;
+use std::ops::ControlFlow::{self, Break, Continue};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in super::super::super) enum Overlap {
@@ -128,6 +132,14 @@ impl<'a> GraphFootprint<'a> {
         })
     }
 
+    fn share_ids(self) -> &'a [AllocId] {
+        if self.views.is_empty() {
+            self.ids
+        } else {
+            self.views
+        }
+    }
+
     fn deep(self) -> bool {
         matches!(self.usage, PlaceUse::Read | PlaceUse::Mutate { deep: true })
     }
@@ -182,6 +194,551 @@ fn graph_overlap(state: &BorrowState, a: GraphFootprint<'_>, b: GraphFootprint<'
     Overlap::No
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum CellIncidence {
+    Slot(WrapperId),
+    Projected(FieldKey, (AllocId, AllocId)),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum OperandIncidence {
+    Address(CellIncidence),
+    Traversal(CellIncidence),
+    AddressPossible,
+    AddressPartial,
+    TraversalPossible,
+    TraversalPartial,
+    GraphShare((AllocId, AllocId)),
+    EntryReceiver(AllocId),
+    EntryEdit(AllocId),
+    GraphPossible,
+    GraphPartial,
+    ProjectedEdit,
+}
+
+impl OperandIncidence {
+    fn visit_matches(self, mut visit: impl FnMut(Self) -> ControlFlow<()>) -> ControlFlow<()> {
+        let mut each = |key| {
+            count_operand_key();
+            visit(key)
+        };
+        use OperandIncidence::*;
+        match self {
+            Address(cell) => {
+                each(Address(cell))?;
+                each(Traversal(cell))?;
+            }
+            Traversal(cell) => each(Address(cell))?,
+            AddressPossible => {
+                each(AddressPartial)?;
+                each(TraversalPartial)?;
+            }
+            AddressPartial => {
+                each(AddressPossible)?;
+                each(TraversalPossible)?;
+                each(GraphPossible)?;
+            }
+            TraversalPossible => each(AddressPartial)?,
+            TraversalPartial => each(AddressPossible)?,
+            GraphShare(_) => each(self)?,
+            EntryReceiver(id) => each(EntryEdit(id))?,
+            EntryEdit(id) => each(EntryReceiver(id))?,
+            GraphPossible => {
+                each(AddressPartial)?;
+                each(GraphPartial)?;
+            }
+            GraphPartial => {
+                each(ProjectedEdit)?;
+                each(GraphPossible)?;
+            }
+            ProjectedEdit => each(GraphPartial)?,
+        }
+        Continue(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum OperandGroup {
+    Cell(FieldKey, AllocId, bool),
+    Share(AllocId),
+    Reach(AllocId, ReachRole),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum ReachRole {
+    Deep,
+    Shallow,
+    Projected,
+}
+
+impl OperandGroup {
+    fn visit_keys(self, state: &BorrowState, mut visit: impl FnMut(OperandIncidence)) {
+        let mut each = |key| {
+            count_operand_key();
+            visit(key);
+            Continue(())
+        };
+        use OperandIncidence as K;
+        match self {
+            Self::Cell(field, id, traversal) => {
+                let _ = state.visit_sharing_incidence(id, |pair| {
+                    let cell = CellIncidence::Projected(field, pair);
+                    each(if traversal {
+                        K::Traversal(cell)
+                    } else {
+                        K::Address(cell)
+                    })
+                });
+            }
+            Self::Share(id) => {
+                let _ = state.visit_sharing_incidence(id, |pair| each(K::GraphShare(pair)));
+            }
+            Self::Reach(..) => unreachable!("reach uses direct graph links"),
+        }
+    }
+}
+
+/// Keeping root incidences separate from argument positions lets repeated operands share their
+/// expansion. Search-side matches are also cached by root and access role.
+#[derive(Default)]
+struct ExpandedOperands {
+    positions: FxHashMap<OperandGroup, SmallSet<usize>>,
+    by_key: Option<FxHashMap<OperandIncidence, SmallSet<OperandGroup>>>,
+    matches: FxHashMap<OperandGroup, Vec<OperandGroup>>,
+}
+
+impl ExpandedOperands {
+    fn any_later(
+        &mut self,
+        state: &BorrowState,
+        group: OperandGroup,
+        after: usize,
+        check: &mut impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        if self.positions.is_empty() {
+            return Continue(());
+        }
+        let by_key = self.by_key.get_or_insert_with(|| {
+            let mut by_key: FxHashMap<_, SmallSet<_>> = FxHashMap::default();
+            let mut owners: Vec<_> = self.positions.keys().copied().collect();
+            owners.sort_unstable();
+            for owner in owners {
+                owner.visit_keys(state, |key| {
+                    by_key.entry(key).or_insert(SmallSet::Empty).insert(owner);
+                });
+            }
+            by_key
+        });
+        let matches = self.matches.entry(group).or_insert_with(|| {
+            let mut matches = Vec::new();
+            let mut seen = FxHashSet::default();
+            group.visit_keys(state, |key| {
+                let _ = key.visit_matches(|key| {
+                    if let Some(groups) = by_key.get(&key) {
+                        for &owner in groups.as_slice() {
+                            count_operand_posting();
+                            if seen.insert(owner) {
+                                matches.push(owner);
+                            }
+                        }
+                    }
+                    Continue(())
+                });
+            });
+            matches.sort_unstable();
+            matches
+        });
+        for &owner in matches.iter() {
+            count_operand_posting();
+            visit_later_positions(self.positions[&owner].as_slice(), after, &mut *check)?;
+        }
+        Continue(())
+    }
+}
+
+fn count_operand_key() {
+    increment_frontend_counter(FrontendCounter::BorrowOperandIndexKeys);
+}
+
+fn count_operand_posting() {
+    increment_frontend_counter(FrontendCounter::BorrowOperandPostingRows);
+}
+
+fn visit_later_positions(
+    positions: &[usize],
+    after: usize,
+    mut check: impl FnMut(usize) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let start = positions.partition_point(|&index| {
+        count_operand_posting();
+        index <= after
+    });
+    for &index in &positions[start..] {
+        count_operand_posting();
+        check(index)?;
+    }
+    Continue(())
+}
+
+#[derive(Default)]
+struct OperandReach {
+    roots: FxHashMap<(AllocId, ReachRole), SmallSet<usize>>,
+    // Paths to captured operands can remain implicit in storage, even if other fields are explicit.
+    paths: Option<BTreeSet<(AllocId, AllocId)>>,
+    has_deep: bool,
+}
+
+#[derive(Default)]
+struct ReachWalk {
+    seen: FxHashSet<AllocId>,
+    pending: Vec<AllocId>,
+}
+
+impl ReachWalk {
+    fn push(&mut self, id: AllocId) -> bool {
+        let unseen = self.seen.insert(id);
+        if unseen {
+            self.pending.push(id);
+        }
+        unseen
+    }
+}
+
+impl OperandReach {
+    fn insert(&mut self, position: usize, root: AllocId, role: ReachRole) {
+        self.has_deep |= role == ReachRole::Deep;
+        self.roots
+            .entry((root, role))
+            .or_insert(SmallSet::Empty)
+            .insert(position);
+    }
+
+    fn check_root(
+        roots: &FxHashMap<(AllocId, ReachRole), SmallSet<usize>>,
+        id: AllocId,
+        roles: &[ReachRole],
+        after: usize,
+        check: &mut impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        for &role in roles {
+            count_operand_key();
+            if let Some(postings) = roots.get(&(id, role)) {
+                visit_later_positions(postings.as_slice(), after, &mut *check)?;
+            }
+        }
+        Continue(())
+    }
+
+    fn check_reverse(
+        &self,
+        state: &BorrowState,
+        root: AllocId,
+        walk: &mut ReachWalk,
+        after: usize,
+        check: &mut impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let mut discover = |id, walk: &mut ReachWalk| {
+            if walk.push(id) {
+                Self::check_root(&self.roots, id, &[ReachRole::Deep], after, check)?;
+            }
+            Continue(())
+        };
+        discover(root, walk)?;
+        while let Some(id) = walk.pending.pop() {
+            state.visit_operand_reach(id, true, |next| discover(next, walk))?;
+        }
+        Continue(())
+    }
+
+    fn any_later(
+        &mut self,
+        state: &BorrowState,
+        probe: &AccessFootprint,
+        after: usize,
+        check: &mut impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        if self.roots.is_empty() {
+            return Continue(());
+        }
+        let mut forward = ReachWalk::default();
+        let mut reverse = ReachWalk::default();
+        let roles = [ReachRole::Deep, ReachRole::Shallow, ReachRole::Projected];
+        OperandAccessIndex::visit_groups(probe, |group| {
+            if let OperandGroup::Reach(root, role) = group {
+                count_operand_key();
+                if role == ReachRole::Deep && forward.push(root) {
+                    Self::check_root(&self.roots, root, &roles, after, check)?;
+                }
+                if self.has_deep {
+                    self.check_reverse(state, root, &mut reverse, after, check)?;
+                }
+            }
+            Continue(())
+        })?;
+        while let Some(id) = forward.pending.pop() {
+            if self.has_deep {
+                // A reverse search at an intersection finds the later operands without
+                // expanding every later root or assigning its own copy of a shared tail.
+                self.check_reverse(state, id, &mut reverse, after, check)?;
+            }
+            state.visit_operand_reach(id, false, |next| {
+                if forward.push(next) {
+                    Self::check_root(&self.roots, next, &roles, after, check)?;
+                }
+                Continue(())
+            })?;
+        }
+        self.check_implicit_paths(state, forward, &roles, after, check)
+    }
+
+    fn check_implicit_paths(
+        &mut self,
+        state: &BorrowState,
+        walk: ReachWalk,
+        roles: &[ReachRole],
+        after: usize,
+        check: &mut impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let ReachWalk {
+            mut seen,
+            pending: mut lazy,
+        } = walk;
+        if seen.is_empty() {
+            return Continue(());
+        }
+
+        // Only paths to captured targets can add further destinations after walking
+        // the explicit graph. Build those postings once, and only if needed.
+        let paths = self.paths.get_or_insert_with(|| {
+            let mut paths = BTreeSet::new();
+            for &(root, _) in self.roots.keys() {
+                state.visit_operand_path(root, |parent, child| paths.insert((parent, child)));
+            }
+            paths
+        });
+        let push_children = |id, pending: &mut Vec<_>| {
+            pending.extend(
+                paths
+                    .range((id, AllocId::MIN)..=(id, AllocId::MAX))
+                    .map(|&(_, child)| child),
+            );
+        };
+        for &id in &seen {
+            push_children(id, &mut lazy);
+        }
+        while let Some(id) = lazy.pop() {
+            if !seen.insert(id) || !state.operand_lazy_child(id) {
+                continue;
+            }
+            Self::check_root(&self.roots, id, roles, after, check)?;
+            push_children(id, &mut lazy);
+        }
+        Continue(())
+    }
+}
+
+/// Exact identity and incomplete coverage can settle a query before any graph expansion.
+/// An indexed candidate is still checked by the same typed overlap predicate.
+pub(super) struct OperandAccessIndex {
+    postings: FxHashMap<OperandIncidence, SmallSet<usize>>,
+    sharing: ExpandedOperands,
+    reach: OperandReach,
+    seen: Vec<usize>,
+}
+
+impl OperandAccessIndex {
+    pub(super) fn new<'a>(
+        len: usize,
+        operands: impl Iterator<Item = (usize, &'a AccessFootprint)>,
+    ) -> Self {
+        let mut index = Self {
+            postings: FxHashMap::default(),
+            sharing: ExpandedOperands::default(),
+            reach: OperandReach::default(),
+            seen: vec![usize::MAX; len],
+        };
+        for (position, access) in operands {
+            let _ = Self::visit_direct(access, |key| {
+                index
+                    .postings
+                    .entry(key)
+                    .or_insert(SmallSet::Empty)
+                    .insert(position);
+                Continue(())
+            });
+            let _ = Self::visit_groups(access, |group| {
+                count_operand_key();
+                if let OperandGroup::Reach(root, role) = group {
+                    index.reach.insert(position, root, role);
+                } else {
+                    index
+                        .sharing
+                        .positions
+                        .entry(group)
+                        .or_insert(SmallSet::Empty)
+                        .insert(position);
+                }
+                Continue(())
+            });
+        }
+        index
+    }
+
+    pub(super) fn any_later(
+        &mut self,
+        state: &BorrowState,
+        after: usize,
+        probe: &AccessFootprint,
+        mut check: impl FnMut(usize) -> bool,
+    ) -> bool {
+        let seen = &mut self.seen;
+        let mut check = |index| {
+            if seen[index] != after {
+                seen[index] = after;
+                if check(index) {
+                    return Break(());
+                }
+            }
+            Continue(())
+        };
+        if Self::visit_direct(probe, |key| {
+            key.visit_matches(|key| {
+                if let Some(positions) = self.postings.get(&key) {
+                    visit_later_positions(positions.as_slice(), after, &mut check)?;
+                }
+                Continue(())
+            })
+        })
+        .is_break()
+        {
+            return true;
+        }
+        if Self::visit_groups(probe, |group| {
+            count_operand_key();
+            if matches!(group, OperandGroup::Reach(..)) {
+                return Continue(());
+            }
+            self.sharing.any_later(state, group, after, &mut check)
+        })
+        .is_break()
+        {
+            return true;
+        }
+        self.reach
+            .any_later(state, probe, after, &mut check)
+            .is_break()
+    }
+
+    #[cfg(test)]
+    pub(super) fn reach_work(&self) -> (usize, bool) {
+        (self.reach.roots.len(), self.reach.paths.is_some())
+    }
+
+    fn visit_direct(
+        access: &AccessFootprint,
+        mut visit: impl FnMut(OperandIncidence) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let mut each = |key| {
+            count_operand_key();
+            visit(key)
+        };
+        use OperandIncidence::*;
+        if let Some(graph) = GraphFootprint::of(access) {
+            for &id in graph.share_ids() {
+                each(GraphShare((id, id)))?;
+            }
+            if graph.coverage == Coverage::Partial {
+                each(GraphPartial)?;
+            }
+            if !graph.ids.is_empty() || graph.coverage == Coverage::Partial {
+                each(GraphPossible)?;
+            }
+            if matches!(access.usage, PlaceUse::ReadEntries | PlaceUse::WriteEntries) {
+                for &id in graph.ids {
+                    each(EntryReceiver(id))?;
+                }
+            }
+        }
+        for (cells, wrap, coverage, possible, partial) in [
+            (
+                access.address.cells(),
+                Address as fn(CellIncidence) -> OperandIncidence,
+                access.address.may_coverage(),
+                AddressPossible,
+                AddressPartial,
+            ),
+            (
+                access.traversal.as_slice(),
+                Traversal as fn(CellIncidence) -> OperandIncidence,
+                access.traversal_coverage,
+                TraversalPossible,
+                TraversalPartial,
+            ),
+        ] {
+            for &cell in cells {
+                let cell = match cell {
+                    CellId::Slot(slot) => CellIncidence::Slot(slot),
+                    CellId::Projected(holder, field) => {
+                        CellIncidence::Projected(field, (holder, holder))
+                    }
+                };
+                each(wrap(cell))?;
+            }
+            if coverage == Coverage::Partial {
+                each(partial)?;
+            }
+            if !cells.is_empty() || coverage == Coverage::Partial {
+                each(possible)?;
+            }
+        }
+        if writable(access) && access.usage.touches_cell() {
+            for &cell in access.address.cells() {
+                if let CellId::Projected(holder, field) = cell {
+                    each(ProjectedEdit)?;
+                    if touches_entries(field) {
+                        each(EntryEdit(holder))?;
+                    }
+                }
+            }
+        }
+        Continue(())
+    }
+
+    fn visit_groups(
+        access: &AccessFootprint,
+        mut each: impl FnMut(OperandGroup) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        use OperandGroup::*;
+        if let Some(graph) = GraphFootprint::of(access) {
+            for &id in graph.share_ids() {
+                each(Share(id))?;
+            }
+            let role = if graph.deep() {
+                ReachRole::Deep
+            } else {
+                ReachRole::Shallow
+            };
+            for &id in graph.ids {
+                each(Reach(id, role))?;
+            }
+        }
+        for &cell in access.address.cells() {
+            if let CellId::Projected(holder, field) = cell {
+                each(Cell(field, holder, false))?;
+                if writable(access) && access.usage.touches_cell() {
+                    each(Reach(holder, ReachRole::Projected))?;
+                }
+            }
+        }
+        for &cell in access.traversal.as_slice() {
+            if let CellId::Projected(holder, field) = cell {
+                each(Cell(field, holder, true))?;
+            }
+        }
+        Continue(())
+    }
+}
+
 pub(in super::super::super) fn overlap(
     state: &BorrowState,
     a: &AccessFootprint,
@@ -196,6 +753,7 @@ fn overlap_with_detachment(
     b: &AccessFootprint,
     detached: bool,
 ) -> Overlap {
+    increment_frontend_counter(FrontendCounter::BorrowOverlapCalls);
     if !writable(a) && !writable(b) {
         return Overlap::No;
     }
@@ -438,9 +996,7 @@ pub(super) fn probe_mutable_access(
     policy: MutableAccessPolicy,
 ) -> Result<Option<AccessFootprint>, BorrowCheckError> {
     let usage = reservation.usage;
-    if usage.kind() == AccessKind::Shared {
-        reservation.usage = PlaceUse::Mutate { deep: true };
-    }
+    reservation.usage = usage.for_transfer_probe();
     let result = validate_access(check, &reservation, source, policy);
     reservation.usage = usage;
     match result {

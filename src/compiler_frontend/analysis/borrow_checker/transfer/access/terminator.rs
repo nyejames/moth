@@ -20,6 +20,7 @@ pub(crate) fn transfer_terminator(
     let location = context.diagnostics.terminator_error_span(block_id);
     let conflicts_before = stats.conflicts_checked;
     let terminator_order = layout.terminator_order_or_unknown(block_id);
+    let view = OperationView::from_layout(layout);
 
     match terminator {
         // Jump argument passing is CFG plumbing, not a semantic read.
@@ -47,17 +48,20 @@ pub(crate) fn transfer_terminator(
 
         HirTerminator::Invoke { .. } => {
             super::statement::transfer_invoke(
-                &mut super::statement::CallTransferContext {
+                &mut super::statement::CallTransferContext::new(
                     context,
-                    layout,
+                    view,
                     state,
                     block_id,
-                    current_order: terminator_order,
-                    tracker: &mut tracker,
+                    terminator_order,
                     location,
                     stats,
-                    value_fact_buffer,
-                },
+                    Some(ValidationSink {
+                        layout,
+                        tracker: &mut tracker,
+                        value_facts: value_fact_buffer,
+                    }),
+                ),
                 terminator,
             )?;
         }
@@ -175,17 +179,20 @@ pub(crate) fn transfer_terminator(
         // no post-call state: the fixed-point driver never propagates this block's exit state.
         HirTerminator::NeverCall { target, args } => {
             super::statement::transfer_never_call(
-                &mut super::statement::CallTransferContext {
+                &mut super::statement::CallTransferContext::new(
                     context,
-                    layout,
+                    view,
                     state,
                     block_id,
-                    current_order: terminator_order,
-                    tracker: &mut tracker,
+                    terminator_order,
                     location,
                     stats,
-                    value_fact_buffer,
-                },
+                    Some(ValidationSink {
+                        layout,
+                        tracker: &mut tracker,
+                        value_facts: value_fact_buffer,
+                    }),
+                ),
                 target,
                 context.expressions.values(*args),
             )?;

@@ -1060,22 +1060,25 @@ impl InvokeLayerOp {
 
     pub(super) fn apply_owned(
         self,
-        layout: &FunctionLayout,
+        view: super::transfer::OperationView<'_>,
         state: &mut BorrowState,
     ) -> StoreReceipt {
+        let index_of = |local| view.index_of(local);
         match self {
-            Self::Bind { local, value } => Self::publish_bound_value(layout, state, local, value),
-            other => other.apply(layout, state, None),
+            Self::Bind { local, value } => {
+                Self::publish_bound_value(&index_of, state, local, value)
+            }
+            other => other.apply_with_indices(&index_of, state, None),
         }
     }
 
     fn publish_bound_value(
-        layout: &FunctionLayout,
+        index_of: &impl Fn(LocalId) -> Option<usize>,
         state: &mut BorrowState,
         local: LocalId,
         value: CapturedValue,
     ) -> StoreReceipt {
-        let Some(index) = layout.index_of(local) else {
+        let Some(index) = index_of(local) else {
             return StoreReceipt::default();
         };
         // The receiving place is resolved after retirement. Only the value uses entry IDs.
@@ -1087,6 +1090,15 @@ impl InvokeLayerOp {
     pub(super) fn apply(
         &self,
         layout: &FunctionLayout,
+        state: &mut BorrowState,
+        rebase: Option<(OrderKey, &dyn Fn(usize) -> bool)>,
+    ) -> StoreReceipt {
+        self.apply_with_indices(&|local| layout.index_of(local), state, rebase)
+    }
+
+    fn apply_with_indices(
+        &self,
+        index_of: &impl Fn(LocalId) -> Option<usize>,
         state: &mut BorrowState,
         rebase: Option<(OrderKey, &dyn Fn(usize) -> bool)>,
     ) -> StoreReceipt {
@@ -1131,18 +1143,14 @@ impl InvokeLayerOp {
                 result,
             } => {
                 let holders = remap_invoke_capture(holders, |id| remap_id(state, id));
-                return state.remove_alloc_element(
-                    &holders,
-                    *map,
-                    result.and_then(|local| layout.index_of(local)),
-                );
+                return state.remove_alloc_element(&holders, *map, result.and_then(index_of));
             }
             Self::Bind { local, value } => {
                 let mut value = value.clone();
                 if rebase.is_some() {
                     value.remap_allocations(|id| remap_id(state, id));
                 }
-                return Self::publish_bound_value(layout, state, *local, value);
+                return Self::publish_bound_value(index_of, state, *local, value);
             }
             Self::ViewMember { view, id } => {
                 state.add_view_member(remap_id(state, *view), remap_id(state, *id));

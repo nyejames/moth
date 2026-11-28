@@ -19,10 +19,20 @@ use crate::compiler_frontend::public_call_summary::{
 
 use super::BorrowTransferContext;
 
-#[derive(Debug, Clone)]
 pub(super) struct CallSemantics<'a> {
-    pub(super) arg_effects: Vec<ArgEffect>,
-    pub(super) returns: CallReturns<'a>,
+    call: BorrowedCall<'a>,
+    arg_len: usize,
+}
+
+impl<'a> CallSemantics<'a> {
+    pub(super) fn arg_effects(&self) -> impl ExactSizeIterator<Item = ArgEffect> + '_ {
+        let call = self.call;
+        (0..self.arg_len).map(move |index| call.arg_effect(index))
+    }
+
+    pub(super) fn returns(&self) -> CallReturns<'a> {
+        self.call.returns()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,10 +74,7 @@ pub(super) fn resolve_call_semantics<'a>(
         generated: context.generated_call_summaries,
     }
     .resolve(target, arg_len, &context.diagnostics)?;
-    Ok(CallSemantics {
-        arg_effects: (0..arg_len).map(|index| call.arg_effect(index)).collect(),
-        returns: call.returns(),
-    })
+    Ok(CallSemantics { call, arg_len })
 }
 
 pub(in super::super) struct CallSignatures<'a> {

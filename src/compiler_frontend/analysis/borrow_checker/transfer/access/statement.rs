@@ -7,7 +7,9 @@
 #[path = "call_results.rs"]
 mod call_results;
 
-use super::conflicts::{Overlap, check_call_access, overlap, record_call_observations};
+use super::conflicts::{
+    OperandAccessIndex, Overlap, check_call_access, overlap, record_call_observations,
+};
 use super::layer::needs_layer_store_capture;
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
@@ -38,414 +40,37 @@ pub(crate) fn transfer_statement(
     stats: &mut BlockTransferStats,
     value_fact_buffer: &mut ValueFactBuffer,
 ) -> Result<(), BorrowCheckError> {
-    // WHAT: transfer one statement at the block frontier.
-    // WHY: the fixed-point driver merges only block states, so statement effects must be exact.
     let mut tracker = StatementAccessTracker::new(layout.local_count());
     let conflicts_before = stats.conflicts_checked;
-    let statement_order = layout.statement_order_or_unknown(statement.id);
-
-    match &statement.kind {
-        HirStatementKind::Write { target, value } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let span = context.diagnostics.statement_error_span(statement);
-            let (target_place, is_definition) = match target {
-                HirWriteTarget::DefineLocal(local) => (HirPlace::local(*local), true),
-                HirWriteTarget::AssignPlace(place) => (*place, false),
-            };
-            let local_index = layout.index_of(target_place.root);
-            let pristine_definition = if is_definition {
-                first_definition_index(layout, state, block_id, statement_order, || local_index)
-            } else {
-                None
-            };
-            {
-                let mut read_env = SharedReadEnv {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    tracker: &mut tracker,
-                    location,
-                    current_order: statement_order,
-                    stats,
-                    value_fact_buffer,
-                };
-                record_shared_reads_in_place_indices(
-                    &mut read_env,
-                    &target_place,
-                    location,
-                    &mut RootSet::empty(layout.local_count()),
-                )?;
-            }
-            {
-                let mut read_env = SharedReadEnv {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    tracker: &mut tracker,
-                    location,
-                    current_order: statement_order,
-                    stats,
-                    value_fact_buffer,
-                };
-                record_assignment_value_reads(
-                    &mut read_env,
-                    &target_place,
-                    is_definition,
-                    *value,
-                    location,
-                )?;
-            }
-
-            transfer_assign_target(
-                &mut AssignTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    value_fact_buffer,
-                    location,
-                    span,
-                    stats,
-                },
-                &target_place,
-                *value,
-                is_definition,
-                local_index,
-                pristine_definition,
-            )?;
-        }
-
-        HirStatementKind::Call {
-            target,
-            args,
-            results,
-        } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let semantics = resolve_call_semantics(context, target, args.len())?;
-            let call_args = context
-                .expressions
-                .values(*args)
-                .iter()
-                .zip(semantics.arg_effects)
-                .map(|(argument, effect)| CallArgumentTransfer {
-                    argument: *argument,
-                    effect,
-                })
-                .collect::<Vec<_>>();
-            let result_transfer = CallResultTransfer::for_call_definition(
+    let order = layout.statement_order_or_unknown(statement.id);
+    let location = context.diagnostics.statement_error_span(statement);
+    transfer_statement_operation(
+        &mut CallTransferContext::new(
+            context,
+            OperationView::from_layout(layout),
+            state,
+            block_id,
+            order,
+            location,
+            stats,
+            Some(ValidationSink {
                 layout,
-                state,
-                block_id,
-                statement_order,
-                results,
-            );
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &call_args,
-                results.iter().copied(),
-                semantics.returns,
-                result_transfer,
-                CallStorage::for_target(target),
-            )?;
-        }
-
-        HirStatementKind::MapOp {
-            op,
-            receiver,
-            args,
-            result,
-        } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let mut call_args = Vec::with_capacity(args.len() + 1);
-            call_args.push(CallArgumentTransfer {
-                argument: *receiver,
-                effect: if op.requires_mutable_receiver() {
-                    ArgEffect::MutableBorrow
-                } else {
-                    ArgEffect::SharedBorrow
-                },
-            });
-            for (arg_index, arg) in context.expressions.values(*args).iter().enumerate() {
-                call_args.push(CallArgumentTransfer {
-                    argument: *arg,
-                    effect: map_argument_effect(*op, arg_index),
-                });
-            }
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &call_args,
-                result.iter().copied(),
-                CallReturns::Fresh,
-                CallResultTransfer::Immediate,
-                CallStorage::for_map_op(*op),
-            )?;
-        }
-
-        HirStatementKind::FormatFloat { source, result, .. }
-        | HirStatementKind::ValidateFloat { source, result, .. }
-        | HirStatementKind::FastStoreConversion { source, result, .. } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &[CallArgumentTransfer {
-                    argument: *source,
-                    effect: ArgEffect::SharedBorrow,
-                }],
-                std::iter::once(*result),
-                CallReturns::Fresh,
-                CallResultTransfer::Immediate,
-                CallStorage::Plain,
-            )?;
-        }
-
-        HirStatementKind::NumericOp {
-            operands, result, ..
-        } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let arguments = numeric_op_arguments(operands);
-            let call_args = arguments
-                .into_iter()
-                .map(|argument| CallArgumentTransfer {
-                    effect: ArgEffect::SharedBorrow,
-                    argument,
-                })
-                .collect::<Vec<_>>();
-
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &call_args,
-                std::iter::once(*result),
-                CallReturns::Fresh,
-                CallResultTransfer::Immediate,
-                CallStorage::Plain,
-            )?;
-        }
-
-        HirStatementKind::LoopStepFailure { result, .. } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &[],
-                std::iter::once(*result),
-                CallReturns::Fresh,
-                CallResultTransfer::Immediate,
-                CallStorage::Plain,
-            )?;
-        }
-
-        HirStatementKind::RangeCandidate {
-            current,
-            step,
-            end,
-            candidate_result,
-            in_range_result,
-            ..
-        } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            {
-                let mut read_env = SharedReadEnv {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    tracker: &mut tracker,
-                    location,
-                    current_order: statement_order,
-                    stats,
-                    value_fact_buffer,
-                };
-                for operand in [current, step, end] {
-                    record_shared_reads_in_expression(
-                        &mut read_env,
-                        *operand,
-                        location,
-                        &mut RootSet::empty(layout.local_count()),
-                    )?;
-                }
-            }
-
-            let mut result_transfer = CallTransferContext {
-                context,
-                layout,
-                state,
-                block_id,
-                current_order: statement_order,
                 tracker: &mut tracker,
-                location,
-                stats,
-                value_fact_buffer,
-            };
-            transfer_call_arguments_and_result(
-                &mut result_transfer,
-                &[],
-                [*candidate_result, *in_range_result].into_iter(),
-                CallReturns::Fresh,
-                CallResultTransfer::Immediate,
-                CallStorage::Plain,
-            )?;
-        }
+                value_facts: value_fact_buffer,
+            }),
+        ),
+        &statement.kind,
+    )?;
 
-        HirStatementKind::Expr(expression) => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: statement_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *expression,
-                location,
-                &mut RootSet::empty(layout.local_count()),
-            )?;
-        }
-
-        HirStatementKind::PushRuntimeFragment { value, .. } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: statement_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *value,
-                location,
-                &mut RootSet::empty(layout.local_count()),
-            )?;
-        }
-    }
-
-    // Aggregate literal children receive optional transfer analysis.
-    let mut aggregate_context = AggregateTransferContext {
-        diagnostics: &context.diagnostics,
-        expressions: context.expressions,
+    check_aggregate_transfers(
+        context,
+        layout,
+        state,
+        block_id,
+        statement,
+        order,
         value_fact_buffer,
-    };
-
-    match &statement.kind {
-        HirStatementKind::Write { value, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *value,
-                block_id,
-                statement_order,
-                context.diagnostics.statement_error_span(statement),
-                &mut aggregate_context,
-            )?;
-        }
-        HirStatementKind::Expr(expression) => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *expression,
-                block_id,
-                statement_order,
-                context.diagnostics.value_error_span(
-                    *expression,
-                    context.diagnostics.statement_error_span(statement),
-                ),
-                &mut aggregate_context,
-            )?;
-        }
-        HirStatementKind::PushRuntimeFragment { value, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *value,
-                block_id,
-                statement_order,
-                context
-                    .diagnostics
-                    .value_error_span(*value, context.diagnostics.statement_error_span(statement)),
-                &mut aggregate_context,
-            )?;
-        }
-        HirStatementKind::FormatFloat { source, .. }
-        | HirStatementKind::ValidateFloat { source, .. }
-        | HirStatementKind::FastStoreConversion { source, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *source,
-                block_id,
-                statement_order,
-                context
-                    .diagnostics
-                    .value_error_span(*source, context.diagnostics.statement_error_span(statement)),
-                &mut aggregate_context,
-            )?;
-        }
-        _ => {}
-    }
-
+    )?;
     let statement_fact = StatementBorrowFact {
         shared_roots: roots_to_local_ids(layout, &tracker.shared_roots),
         mutable_roots: roots_to_local_ids(layout, &tracker.mutable_roots),
@@ -455,6 +80,198 @@ pub(crate) fn transfer_statement(
     stats.statement_facts.push((statement.id, statement_fact));
     Ok(())
 }
+
+fn transfer_statement_operation(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    kind: &HirStatementKind,
+) -> Result<(), BorrowCheckError> {
+    let expressions = input.context.expressions;
+    match kind {
+        HirStatementKind::Write { target, value } => {
+            transfer_statement_write(input, target, *value)
+        }
+        HirStatementKind::Call {
+            target,
+            args,
+            results,
+        } => transfer_immediate_call(input, target, expressions.values(*args), results),
+        HirStatementKind::MapOp {
+            op,
+            receiver,
+            args,
+            result,
+        } => transfer_call_arguments_and_result(
+            input,
+            &map_call_arguments(*op, *receiver, expressions.values(*args)),
+            result.iter().copied(),
+            CallReturns::Fresh,
+            CallResultTransfer::Immediate,
+            CallStorage::for_map_op(*op),
+        ),
+        HirStatementKind::FormatFloat { source, result, .. }
+        | HirStatementKind::ValidateFloat { source, result, .. }
+        | HirStatementKind::FastStoreConversion { source, result, .. } => transfer_plain_operation(
+            input,
+            [*source],
+            std::iter::once(*result),
+            CallResultTransfer::Immediate,
+        ),
+        HirStatementKind::NumericOp {
+            operands, result, ..
+        } => {
+            let results = std::iter::once(*result);
+            let transfer = CallResultTransfer::Immediate;
+            match operands {
+                HirNumericOperands::Unary { operand } => {
+                    transfer_plain_operation(input, [*operand], results, transfer)
+                }
+                HirNumericOperands::Binary { left, right } => {
+                    transfer_plain_operation(input, [*left, *right], results, transfer)
+                }
+            }
+        }
+        HirStatementKind::LoopStepFailure { result, .. } => transfer_plain_operation(
+            input,
+            [],
+            std::iter::once(*result),
+            CallResultTransfer::Immediate,
+        ),
+        HirStatementKind::RangeCandidate {
+            current,
+            step,
+            end,
+            candidate_result,
+            in_range_result,
+            ..
+        } => {
+            read_statement_operands(input, [*current, *step, *end])?;
+            transfer_plain_operation(
+                input,
+                [],
+                [*candidate_result, *in_range_result].into_iter(),
+                CallResultTransfer::Immediate,
+            )
+        }
+        HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
+            read_statement_operands(input, [*value])
+        }
+    }
+}
+
+fn transfer_statement_write(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    target: &HirWriteTarget,
+    value: HirValueId,
+) -> Result<(), BorrowCheckError> {
+    let (place, is_definition) = match target {
+        HirWriteTarget::DefineLocal(local) => (HirPlace::local(*local), true),
+        HirWriteTarget::AssignPlace(place) => (*place, false),
+    };
+    let local = input.view.index_of(place.root);
+    let pristine_definition = if is_definition {
+        first_definition_index(
+            input.view,
+            input.state,
+            input.block_id,
+            input.current_order,
+            || local,
+        )
+    } else {
+        None
+    };
+    let location = input.location;
+    let local_count = input.view.local_count();
+    {
+        let mut reads = input.shared_read_env(location);
+        record_shared_reads_in_place_indices(
+            &mut reads,
+            &place,
+            location,
+            &mut RootSet::empty(local_count),
+        )?;
+        record_assignment_value_reads(&mut reads, &place, is_definition, value, location)?;
+    }
+
+    let validation = input
+        .validation
+        .as_mut()
+        .expect("statement writes always validate");
+    transfer_assign_target(
+        &mut AssignTransferContext {
+            context: input.context,
+            layout: validation.layout,
+            state: input.state,
+            block_id: input.block_id,
+            current_order: input.current_order,
+            tracker: validation.tracker,
+            value_fact_buffer: validation.value_facts,
+            location,
+            span: location,
+            stats: input.stats,
+        },
+        &place,
+        value,
+        is_definition,
+        local,
+        pristine_definition,
+    )
+}
+
+fn read_statement_operands(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    operands: impl IntoIterator<Item = HirValueId>,
+) -> Result<(), BorrowCheckError> {
+    let location = input.location;
+    let local_count = input.view.local_count();
+    let mut reads = input.shared_read_env(location);
+    for operand in operands {
+        record_shared_reads_in_expression(
+            &mut reads,
+            operand,
+            location,
+            &mut RootSet::empty(local_count),
+        )?;
+    }
+    Ok(())
+}
+
+fn check_aggregate_transfers(
+    context: &BorrowTransferContext<'_>,
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    block_id: BlockId,
+    statement: &HirStatement,
+    statement_order: i32,
+    value_fact_buffer: &mut ValueFactBuffer,
+) -> Result<(), BorrowCheckError> {
+    let location = || context.diagnostics.statement_error_span(statement);
+    let (value, span) = match &statement.kind {
+        HirStatementKind::Write { value, .. } => (*value, location()),
+        HirStatementKind::Expr(value)
+        | HirStatementKind::PushRuntimeFragment { value, .. }
+        | HirStatementKind::FormatFloat { source: value, .. }
+        | HirStatementKind::ValidateFloat { source: value, .. }
+        | HirStatementKind::FastStoreConversion { source: value, .. } => (
+            *value,
+            context.diagnostics.value_error_span(*value, location()),
+        ),
+        _ => return Ok(()),
+    };
+    transfer_aggregate_expression_ownership(
+        layout,
+        state,
+        value,
+        block_id,
+        statement_order,
+        span,
+        &mut AggregateTransferContext {
+            diagnostics: &context.diagnostics,
+            expressions: context.expressions,
+            value_fact_buffer,
+        },
+    )
+}
+
 /// Evaluate operation inputs before the outgoing edge retires the previous destinations.
 pub(super) fn transfer_invoke(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
@@ -478,43 +295,15 @@ pub(super) fn transfer_invoke(
         .copied()
         .map(HirLocalDestination::Define);
     match operation {
-        HirFallibleOperation::Call { target, args } => {
-            let semantics = resolve_call_semantics(context, target, args.len())?;
-            let arguments = context
-                .expressions
-                .values(*args)
-                .iter()
-                .zip(semantics.arg_effects)
-                .map(|(argument, effect)| CallArgumentTransfer {
-                    argument: *argument,
-                    effect,
-                })
-                .collect::<Vec<_>>();
-            transfer_call_arguments_and_result(
-                input,
-                &arguments,
-                results,
-                semantics.returns,
-                CallResultTransfer::Edge(*error_result),
-                CallStorage::for_target(target),
-            )
-        }
+        HirFallibleOperation::Call { target, args } => transfer_target_call(
+            input,
+            target,
+            context.expressions.values(*args),
+            results,
+            CallResultTransfer::Edge(*error_result),
+        ),
         HirFallibleOperation::MapOp { op, receiver, args } => {
-            let mut arguments = Vec::with_capacity(args.len() + 1);
-            arguments.push(CallArgumentTransfer {
-                argument: *receiver,
-                effect: if op.requires_mutable_receiver() {
-                    ArgEffect::MutableBorrow
-                } else {
-                    ArgEffect::SharedBorrow
-                },
-            });
-            for (index, argument) in context.expressions.values(*args).iter().enumerate() {
-                arguments.push(CallArgumentTransfer {
-                    argument: *argument,
-                    effect: map_argument_effect(*op, index),
-                });
-            }
+            let arguments = map_call_arguments(*op, *receiver, context.expressions.values(*args));
             transfer_call_arguments_and_result(
                 input,
                 &arguments,
@@ -525,46 +314,15 @@ pub(super) fn transfer_invoke(
             )
         }
         _ => {
-            // Builtin operations have at most two operands; keep their transfer inputs inline.
+            let transfer = CallResultTransfer::Edge(*error_result);
             let mut operands = operation.operands(context.expressions);
+            // Non-call operations have at most two operands and need no argument buffer.
             let Some(first) = operands.next() else {
-                return transfer_call_arguments_and_result(
-                    input,
-                    &[],
-                    results,
-                    CallReturns::Fresh,
-                    CallResultTransfer::Edge(*error_result),
-                    CallStorage::Plain,
-                );
+                return transfer_plain_operation(input, [], results, transfer);
             };
-            let first = CallArgumentTransfer {
-                argument: first,
-                effect: ArgEffect::SharedBorrow,
-            };
-            if let Some(second) = operands.next() {
-                transfer_call_arguments_and_result(
-                    input,
-                    &[
-                        first,
-                        CallArgumentTransfer {
-                            argument: second,
-                            effect: ArgEffect::SharedBorrow,
-                        },
-                    ],
-                    results,
-                    CallReturns::Fresh,
-                    CallResultTransfer::Edge(*error_result),
-                    CallStorage::Plain,
-                )
-            } else {
-                transfer_call_arguments_and_result(
-                    input,
-                    &[first],
-                    results,
-                    CallReturns::Fresh,
-                    CallResultTransfer::Edge(*error_result),
-                    CallStorage::Plain,
-                )
+            match operands.next() {
+                Some(second) => transfer_plain_operation(input, [first, second], results, transfer),
+                None => transfer_plain_operation(input, [first], results, transfer),
             }
         }
     }
@@ -581,21 +339,106 @@ pub(super) fn transfer_never_call(
     target: &CallTarget,
     args: &[HirValueId],
 ) -> Result<(), BorrowCheckError> {
+    transfer_target_call(
+        input,
+        target,
+        args,
+        std::iter::empty(),
+        CallResultTransfer::Diverges,
+    )
+}
+
+pub(super) fn transfer_immediate_call(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    target: &CallTarget,
+    args: &[HirValueId],
+    results: &[HirLocalDestination],
+) -> Result<(), BorrowCheckError> {
+    let result_transfer = CallResultTransfer::for_call_definition(
+        input.view,
+        input.state,
+        input.block_id,
+        input.current_order,
+        results,
+    );
+    transfer_target_call(
+        input,
+        target,
+        args,
+        results.iter().copied(),
+        result_transfer,
+    )
+}
+
+fn transfer_target_call(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    target: &CallTarget,
+    args: &[HirValueId],
+    results: impl Iterator<Item = HirLocalDestination> + Clone,
+    result_transfer: CallResultTransfer,
+) -> Result<(), BorrowCheckError> {
     let semantics = resolve_call_semantics(input.context, target, args.len())?;
-    let arguments = args
+    let arguments: Vec<_> = args
         .iter()
         .copied()
-        .zip(semantics.arg_effects)
+        .zip(semantics.arg_effects())
         .map(|(argument, effect)| CallArgumentTransfer { argument, effect })
-        .collect::<Vec<_>>();
+        .collect();
+    let returns = if matches!(result_transfer, CallResultTransfer::Diverges) {
+        CallReturns::Fresh
+    } else {
+        semantics.returns()
+    };
     transfer_call_arguments_and_result(
         input,
         &arguments,
-        std::iter::empty(),
-        CallReturns::Fresh,
-        CallResultTransfer::Diverges,
+        results,
+        returns,
+        result_transfer,
         CallStorage::for_target(target),
     )
+}
+
+fn transfer_plain_operation<const N: usize>(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    operands: [HirValueId; N],
+    results: impl Iterator<Item = HirLocalDestination> + Clone,
+    transfer: CallResultTransfer,
+) -> Result<(), BorrowCheckError> {
+    transfer_call_arguments_and_result(
+        input,
+        &operands.map(|argument| CallArgumentTransfer {
+            argument,
+            effect: ArgEffect::SharedBorrow,
+        }),
+        results,
+        CallReturns::Fresh,
+        transfer,
+        CallStorage::Plain,
+    )
+}
+
+fn map_call_arguments(
+    op: HirMapOp,
+    receiver: HirValueId,
+    args: &[HirValueId],
+) -> Vec<CallArgumentTransfer> {
+    let mut arguments = Vec::with_capacity(args.len() + 1);
+    arguments.push(CallArgumentTransfer {
+        argument: receiver,
+        effect: if op.requires_mutable_receiver() {
+            ArgEffect::MutableBorrow
+        } else {
+            ArgEffect::SharedBorrow
+        },
+    });
+    arguments.extend(args.iter().copied().enumerate().map(|(index, argument)| {
+        CallArgumentTransfer {
+            argument,
+            effect: map_argument_effect(op, index),
+        }
+    }));
+    arguments
 }
 
 pub(super) struct CallArgumentTransfer {
@@ -673,15 +516,59 @@ impl CallStorage {
 }
 
 pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
-    pub(super) context: &'a BorrowTransferContext<'module>,
-    pub(super) layout: &'a FunctionLayout,
-    pub(super) state: &'state mut BorrowState,
-    pub(super) block_id: BlockId,
-    pub(super) current_order: i32,
-    pub(super) tracker: &'tracker mut StatementAccessTracker,
-    pub(super) location: Option<SourceSpan>,
-    pub(super) stats: &'stats mut BlockTransferStats,
-    pub(super) value_fact_buffer: &'facts mut ValueFactBuffer,
+    context: &'a BorrowTransferContext<'module>,
+    view: OperationView<'a>,
+    state: &'state mut BorrowState,
+    block_id: BlockId,
+    current_order: i32,
+    location: Option<SourceSpan>,
+    stats: &'stats mut BlockTransferStats,
+    validation: Option<ValidationSink<'a, 'tracker, 'facts>>,
+}
+
+impl<'a, 'module, 'state, 'tracker, 'stats, 'facts>
+    CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts>
+{
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        context: &'a BorrowTransferContext<'module>,
+        view: OperationView<'a>,
+        state: &'state mut BorrowState,
+        block_id: BlockId,
+        current_order: i32,
+        location: Option<SourceSpan>,
+        stats: &'stats mut BlockTransferStats,
+        validation: Option<ValidationSink<'a, 'tracker, 'facts>>,
+    ) -> Self {
+        Self {
+            context,
+            view,
+            state,
+            block_id,
+            current_order,
+            location,
+            stats,
+            validation,
+        }
+    }
+
+    fn shared_read_env(&mut self, location: Option<SourceSpan>) -> SharedReadEnv<'_, 'module> {
+        let validation = self
+            .validation
+            .as_mut()
+            .expect("shared reads always validate");
+        SharedReadEnv {
+            context: self.context,
+            layout: validation.layout,
+            state: self.state,
+            block_id: self.block_id,
+            tracker: validation.tracker,
+            location,
+            current_order: self.current_order,
+            stats: self.stats,
+            value_fact_buffer: validation.value_facts,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -694,7 +581,7 @@ enum CallResultTransfer {
 
 impl CallResultTransfer {
     fn for_call_definition(
-        layout: &FunctionLayout,
+        view: OperationView<'_>,
         state: &BorrowState,
         block: BlockId,
         order: i32,
@@ -703,7 +590,7 @@ impl CallResultTransfer {
         let [HirLocalDestination::Define(local)] = results else {
             return Self::Immediate;
         };
-        first_definition_index(layout, state, block, order, || layout.index_of(*local))
+        first_definition_index(view, state, block, order, || view.index_of(*local))
             .map_or(Self::Immediate, Self::FirstDefinition)
     }
 }
@@ -739,26 +626,31 @@ fn transfer_call_arguments_and_result(
     let retains_success = results.clone().next().is_some() && success_lane.retains_result();
     let retains_error = error.is_some() && error_lane.retains_result();
     let mut actuals = CallActuals::new(args);
-    let mut plans = Vec::with_capacity(args.len());
+    let mut plans = Vec::new();
+    if input.validation.is_some() {
+        plans.reserve(args.len());
+        for (arg_index, arg) in args.iter().enumerate() {
+            increment_frontend_counter(FrontendCounter::BorrowArgumentPlansScanned);
+            let argument = arg.argument;
+            let argument_location = input
+                .context
+                .diagnostics
+                .value_error_span(argument, input.location);
 
-    for (arg_index, arg) in args.iter().enumerate() {
-        let argument = arg.argument;
-        let argument_location = input
-            .context
-            .diagnostics
-            .value_error_span(argument, input.location);
-
-        plans.push(plan_call_actual(
-            input,
-            &mut actuals,
-            arg_index,
-            arg,
-            argument_location,
-            storage,
-        )?);
+            plans.push(plan_call_actual(
+                input,
+                &mut actuals,
+                arg_index,
+                arg,
+                argument_location,
+                storage,
+            )?);
+        }
     }
     // Index and copy-source reads evaluated the operands. They are not call loans.
-    input.tracker.clear_reservations();
+    if let Some(validation) = &mut input.validation {
+        validation.tracker.clear_reservations();
+    }
 
     // Result provenance comes from the argument values, not from every root their evaluation
     // reads. `copy place` reads the source place but produces an independent graph, so a
@@ -778,7 +670,8 @@ fn transfer_call_arguments_and_result(
                 .value_error_span(arg.argument, input.location);
             arg_value_roots.push(call_argument_value_roots(
                 input.context,
-                input.layout,
+                input.view,
+                input.validation.as_ref().map(|sink| sink.layout),
                 input.state,
                 arg.argument,
                 argument_location,
@@ -786,7 +679,204 @@ fn transfer_call_arguments_and_result(
         }
     }
 
-    for (arg_index, arg) in args.iter().enumerate() {
+    check_call_arguments(
+        input,
+        args,
+        &mut actuals,
+        plans,
+        storage,
+        &arg_value_roots,
+        (success_lane, retains_success),
+        (error_lane, retains_error),
+        error.is_some(),
+    )?;
+    if storage.reaches_children() && any_mutable {
+        input.state.invalidate_detachments();
+    }
+
+    if matches!(result_transfer, CallResultTransfer::Diverges) {
+        return Ok(());
+    }
+    if error.is_none() && success_lane.unreachable() {
+        input.stats.diverges = true;
+    }
+    publish_call_continuations(
+        input,
+        &mut actuals,
+        args,
+        results,
+        &arg_value_roots,
+        storage,
+        result_transfer,
+        error,
+        success_lane,
+        error_lane,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_call_continuations(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    args: &[CallArgumentTransfer],
+    results: impl Iterator<Item = HirLocalDestination> + Clone,
+    arg_value_roots: &[RootSet],
+    storage: CallStorage,
+    result_transfer: CallResultTransfer,
+    error: Option<HirLocalDestination>,
+    success_lane: CallLane<'_>,
+    error_lane: CallLane<'_>,
+) -> Result<(), BorrowCheckError> {
+    // Capture both lanes against entry storage before either lane installs stores or bindings.
+    let mut member_reads = Demand::default();
+    let (mut success_ops, error_ops) = capture_call_continuations(
+        input,
+        actuals,
+        results.clone(),
+        args,
+        storage,
+        error,
+        success_lane,
+        error_lane,
+        &mut member_reads,
+    )?;
+    let mut root_sources = Vec::new();
+    let mut writes = Vec::new();
+    if matches!(result_transfer, CallResultTransfer::Immediate) && !success_lane.unreachable() {
+        // Capture and check every update before installing any result definition.
+        for (slot, result) in results.clone().enumerate() {
+            let HirLocalDestination::Update(local) = result else {
+                continue;
+            };
+            let value = call_result_local_state(
+                input,
+                success_lane.root_sources(slot, &mut root_sources),
+                arg_value_roots,
+                success_lane.derive_result(slot, actuals, input.view.local_count()),
+            )?;
+            writes.push(capture_call_result_write(
+                input,
+                local,
+                value,
+                &mut success_ops,
+            )?);
+        }
+    }
+    if !success_lane.unreachable() {
+        for (slot, result) in results.enumerate() {
+            if error.is_none() && matches!(result, HirLocalDestination::Update(_)) {
+                continue;
+            }
+            let derived = success_lane.derive_result(slot, actuals, input.view.local_count());
+            prepare_call_result_definition(
+                input,
+                result.local(),
+                success_lane.root_sources(slot, &mut root_sources),
+                arg_value_roots,
+                derived,
+                result_transfer,
+                &mut success_ops,
+                &mut writes,
+            )?;
+        }
+    }
+    if let Some(error) = error {
+        if !error_lane.unreachable() {
+            let state = call_result_local_state(
+                input,
+                error_lane.root_sources(0, &mut root_sources),
+                arg_value_roots,
+                error_lane.derive_result(0, actuals, input.view.local_count()),
+            )?;
+            input
+                .stats
+                .invoke
+                .error
+                .results
+                .push((error.local(), state));
+        }
+        input.stats.invoke.success.unreachable = success_lane.unreachable();
+        input.stats.invoke.error.unreachable = error_lane.unreachable();
+        input.stats.invoke.success.operations = success_ops;
+        input.stats.invoke.success.member_reads = member_reads;
+        input.stats.invoke.error.operations = error_ops;
+    } else {
+        apply_immediate_call_operations(input, success_ops, writes);
+        input.state.prune_retired_wrappers();
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_call_continuations(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    actuals: &mut CallActuals<'_>,
+    mut results: impl Iterator<Item = HirLocalDestination> + Clone,
+    args: &[CallArgumentTransfer],
+    storage: CallStorage,
+    error: Option<HirLocalDestination>,
+    success_lane: CallLane<'_>,
+    error_lane: CallLane<'_>,
+    member_reads: &mut Demand,
+) -> Result<(Vec<InvokeLayerOp>, Vec<InvokeLayerOp>), BorrowCheckError> {
+    let success_ops = match storage {
+        CallStorage::User | CallStorage::Native | CallStorage::Plain | CallStorage::Builtin => {
+            call_result_ops(
+                input,
+                actuals,
+                results,
+                success_lane,
+                InvokeLane::Success,
+                error.is_none(),
+            )?
+        }
+        CallStorage::Store(positions) => capture_builtin_store(input, actuals, args, positions)?,
+        CallStorage::ClearMap => call_receiver_allocs(input, actuals)?
+            .filter(|receiver| !receiver.ids.is_empty())
+            .map_or_else(Vec::new, |receiver| {
+                vec![InvokeLayerOp::Store(TypedStore::EraseFamily {
+                    coverage: receiver.holder_coverage(),
+                    receivers: receiver.ids,
+                    keys: EntryFamilies::MapEntries,
+                })]
+            }),
+        CallStorage::Remove { .. } | CallStorage::Get => capture_builtin_element_result(
+            input,
+            actuals,
+            results.next(),
+            storage,
+            error.is_some().then_some(member_reads),
+        )?,
+    };
+    let error_ops = if error.is_some() {
+        call_result_ops(
+            input,
+            actuals,
+            error.into_iter(),
+            error_lane,
+            InvokeLane::Error,
+            false,
+        )?
+    } else {
+        Vec::new()
+    };
+    Ok((success_ops, error_ops))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_call_arguments(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    args: &[CallArgumentTransfer],
+    actuals: &mut CallActuals<'_>,
+    mut plans: Vec<Option<CallAccessPlan>>,
+    storage: CallStorage,
+    arg_value_roots: &[RootSet],
+    (success_lane, retains_success): (CallLane<'_>, bool),
+    (error_lane, retains_error): (CallLane<'_>, bool),
+    on_edge: bool,
+) -> Result<(), BorrowCheckError> {
+    let mut operand_index = None;
+    for (arg_index, arg) in args.iter().take(plans.len()).enumerate() {
         let Some(mut plan) = plans[arg_index].take() else {
             continue;
         };
@@ -795,194 +885,105 @@ fn transfer_call_arguments_and_result(
             .diagnostics
             .value_error_span(arg.argument, input.location);
         let retains_argument = (retains_success
-            && success_lane.may_retain(arg_index, &arg_value_roots))
-            || (retains_error && error_lane.may_retain(arg_index, &arg_value_roots))
+            && success_lane.may_retain(arg_index, arg_value_roots))
+            || (retains_error && error_lane.may_retain(arg_index, arg_value_roots))
             || success_lane.may_store(arg_index)
-            || (error.is_some() && error_lane.may_store(arg_index));
+            || (on_edge && error_lane.may_store(arg_index));
         let optional = matches!(
             arg.effect,
             ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
         );
-        let conflicts_with_operand =
-            optional && !retains_argument && arg_index + 1 < plans.len() && {
-                let usage = plan.access.usage;
-                if usage.kind() == AccessKind::Shared {
-                    plan.access.usage = PlaceUse::Mutate { deep: true };
-                }
-                let conflict = plans[arg_index + 1..]
-                    .iter()
-                    .flatten()
-                    .any(|other| overlap(input.state, &plan.access, &other.access) != Overlap::No);
-                plan.access.usage = usage;
-                conflict
-            };
+        if optional {
+            increment_frontend_counter(
+                FrontendCounter::BorrowOptionalTransferCandidatesBeforeEligibility,
+            );
+        }
+        let layout = input
+            .validation
+            .as_ref()
+            .expect("validation owns move decisions")
+            .layout;
+        let can_move = optional
+            && !retains_argument
+            && !plan.roots.is_empty()
+            && classify_move_decision(layout, input.block_id, &plan.roots, input.current_order)
+                == MoveDecision::Move;
+        // Even an ineligible move may have a different published fact when it is forced to
+        // borrow: an empty root set changes NotAttempted, and shared access can report fewer
+        // roots. Keep checking those observable cases without attempting an exclusive move.
+        let needs_overlap = optional
+            && !retains_argument
+            && (can_move
+                || plan.roots.is_empty()
+                || arg.effect == ArgEffect::MayConsumeShared && plan.roots != plan.value_roots);
+        let conflicts_with_operand = needs_overlap && arg_index + 1 < plans.len() && {
+            increment_frontend_counter(
+                FrontendCounter::BorrowOptionalTransferCandidatesAfterEligibility,
+            );
+            let index = operand_index.get_or_insert_with(|| {
+                OperandAccessIndex::new(
+                    plans.len(),
+                    plans.iter().enumerate().filter_map(|(position, plan)| {
+                        plan.as_ref().map(|plan| (position, &plan.access))
+                    }),
+                )
+            });
+            let usage = plan.access.usage;
+            plan.access.usage = usage.for_transfer_probe();
+            let conflict = index.any_later(input.state, arg_index, &plan.access, |other| {
+                let other = plans[other]
+                    .as_ref()
+                    .expect("later operand remains planned");
+                increment_frontend_counter(FrontendCounter::BorrowOptionalTransferOverlapCalls);
+                overlap(input.state, &plan.access, &other.access) != Overlap::No
+            });
+            plan.access.usage = usage;
+            conflict
+        };
         let effect = if retains_argument || conflicts_with_operand {
             fallback_call_argument_effect(arg.effect)
         } else {
             arg.effect
         };
-        if matches!(
-            arg.effect,
-            ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
-        ) && !matches!(
-            effect,
-            ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
-        ) {
+        if optional && effect != arg.effect {
             // The retained result only keeps the argument borrowed; it does not make the
             // argument's provenance roots call-argument writes. Merging overlap or value roots
-            // here would publish an immutable parameter as `Writes` during summary finalization.
-            input.value_fact_buffer.record_optional_transfer(
-                arg.argument,
-                OptionalTransferStatus::Borrow,
-                &RootSet::empty(input.layout.local_count()),
-            );
+            // here would publish an immutable parameter as `Writes` in the summary.
+            input
+                .validation
+                .as_mut()
+                .expect("validation owns argument checks")
+                .value_facts
+                .record_optional_transfer_status(arg.argument, OptionalTransferStatus::Borrow);
         }
         let resolution = actuals.entry_place(input, arg_index)?;
         transfer_call_argument_access(
             input,
             arg.argument,
             effect,
+            can_move && !conflicts_with_operand,
             argument_location,
             plan,
             resolution.as_deref(),
         )?;
     }
-    if input.stats.observations.enabled && input.state.has_value_alternatives() {
+    if let Some(validation) = &input.validation
+        && input.stats.observations.enabled
+        && input.state.has_value_alternatives()
+    {
         input.stats.invoke.success.checkpoints = record_call_observations(
             &mut input.stats.observations,
             input.state,
-            input.tracker,
+            validation.tracker,
             input.current_order,
             input.location,
             storage.reaches_children(),
-            error.is_some() && !storage.reaches_children(),
+            on_edge && !storage.reaches_children(),
         );
     }
     // Call loans end before any result destination is written.
-    input.tracker.clear_reservations();
-    if storage.reaches_children() && any_mutable {
-        input.state.invalidate_detachments();
-    }
-
-    if !matches!(
-        result_transfer,
-        CallResultTransfer::Edge(_) | CallResultTransfer::Diverges
-    ) && success_lane.unreachable()
-    {
-        input.stats.diverges = true;
-    }
-    if !matches!(result_transfer, CallResultTransfer::Diverges) {
-        // Capture both lanes against entry storage. Neither lane may see the other's stores
-        // or a new binding for either outcome.
-        let mut member_reads = Demand::default();
-        let mut success_ops = match storage {
-            CallStorage::User | CallStorage::Native | CallStorage::Plain | CallStorage::Builtin => {
-                call_result_ops(
-                    input,
-                    &mut actuals,
-                    results.clone(),
-                    success_lane,
-                    InvokeLane::Success,
-                    error.is_none(),
-                )?
-            }
-            CallStorage::Store(positions) => {
-                capture_builtin_store(input, &mut actuals, args, positions)?
-            }
-            CallStorage::ClearMap => call_receiver_allocs(input, &mut actuals)?
-                .filter(|receiver| !receiver.ids.is_empty())
-                .map_or_else(Vec::new, |receiver| {
-                    vec![InvokeLayerOp::Store(TypedStore::EraseFamily {
-                        coverage: receiver.holder_coverage(),
-                        receivers: receiver.ids,
-                        keys: EntryFamilies::MapEntries,
-                    })]
-                }),
-            CallStorage::Remove { .. } | CallStorage::Get => capture_builtin_element_result(
-                input,
-                &mut actuals,
-                results.clone().next(),
-                storage,
-                error.is_some().then_some(&mut member_reads),
-            )?,
-        };
-        let error_ops = if error.is_some() {
-            call_result_ops(
-                input,
-                &mut actuals,
-                error.into_iter(),
-                error_lane,
-                InvokeLane::Error,
-                false,
-            )?
-        } else {
-            Vec::new()
-        };
-        let mut root_sources = Vec::new();
-        let mut writes = Vec::new();
-        if matches!(result_transfer, CallResultTransfer::Immediate) && !success_lane.unreachable() {
-            // Capture and check every update before installing any result definition.
-            for (slot, result) in results.clone().enumerate() {
-                let HirLocalDestination::Update(local) = result else {
-                    continue;
-                };
-                let value = call_result_local_state(
-                    input,
-                    success_lane.root_sources(slot, &mut root_sources),
-                    &arg_value_roots,
-                    success_lane.derive_result(slot, &actuals, input.layout.local_count()),
-                )?;
-                writes.push(capture_call_result_write(
-                    input,
-                    local,
-                    value,
-                    &mut success_ops,
-                )?);
-            }
-        }
-        if !success_lane.unreachable() {
-            for (slot, result) in results.enumerate() {
-                if error.is_none() && matches!(result, HirLocalDestination::Update(_)) {
-                    continue;
-                }
-                let derived =
-                    success_lane.derive_result(slot, &actuals, input.layout.local_count());
-                prepare_call_result_definition(
-                    input,
-                    result.local(),
-                    success_lane.root_sources(slot, &mut root_sources),
-                    &arg_value_roots,
-                    derived,
-                    result_transfer,
-                    &mut success_ops,
-                    &mut writes,
-                )?;
-            }
-        }
-        if let Some(error) = error {
-            if !error_lane.unreachable() {
-                let state = call_result_local_state(
-                    input,
-                    error_lane.root_sources(0, &mut root_sources),
-                    &arg_value_roots,
-                    error_lane.derive_result(0, &actuals, input.layout.local_count()),
-                )?;
-                input
-                    .stats
-                    .invoke
-                    .error
-                    .results
-                    .push((error.local(), state));
-            }
-            input.stats.invoke.success.unreachable = success_lane.unreachable();
-            input.stats.invoke.error.unreachable = error_lane.unreachable();
-            input.stats.invoke.success.operations = success_ops;
-            input.stats.invoke.success.member_reads = member_reads;
-            input.stats.invoke.error.operations = error_ops;
-        } else {
-            apply_immediate_call_operations(input, success_ops, writes);
-            input.state.prune_retired_wrappers();
-        }
+    if let Some(validation) = &mut input.validation {
+        validation.tracker.clear_reservations();
     }
     Ok(())
 }
@@ -997,7 +998,7 @@ fn call_receiver_allocs(
     };
     input
         .state
-        .load_place_content(place, &input.layout.local_mutable, false);
+        .load_place_content(place, input.view.local_mutable, false);
     Ok(place.content.clone())
 }
 
@@ -1046,15 +1047,15 @@ fn capture_builtin_element_result(
     deferred_reads: Option<&mut Demand>,
 ) -> Result<Vec<InvokeLayerOp>, BorrowCheckError> {
     let heap_result = result
-        .and_then(|result| input.layout.index_of(result.local()))
-        .is_some_and(|index| input.layout.local_has_in_place_mutation_surface[index]);
+        .and_then(|result| input.view.index_of(result.local()))
+        .is_some_and(|index| input.view.local_has_in_place_mutation_surface[index]);
     if !heap_result && input.state.layer_is_empty() && !matches!(storage, CallStorage::Get) {
         return Ok(Vec::new());
     }
     let Some(mut elements) = call_receiver_allocs(input, actuals)? else {
         return Ok(Vec::new());
     };
-    if input.stats.observations.enabled {
+    if input.validation.is_some() && input.stats.observations.enabled {
         let reads = selected_members(input.state, &elements);
         if let Some(deferred) = deferred_reads {
             deferred.extend(reads);
@@ -1081,7 +1082,7 @@ fn capture_builtin_element_result(
         let mut value = if heap_result {
             input
                 .state
-                .step_resolved(&mut elements, FieldKey::Elem, &input.layout.local_mutable);
+                .step_resolved(&mut elements, FieldKey::Elem, input.view.local_mutable);
             capture_graph_values(elements)
         } else {
             input
@@ -1147,18 +1148,13 @@ fn plan_call_actual(
 ) -> Result<Option<CallAccessPlan>, BorrowCheckError> {
     let expressions = input.context.expressions;
     let expression = expressions.expression(arg.argument);
-    let mut roots = RootSet::empty(input.layout.local_count());
-    let mut env = SharedReadEnv {
-        context: input.context,
-        layout: input.layout,
-        state: input.state,
-        block_id: input.block_id,
-        tracker: input.tracker,
-        location,
-        current_order: input.current_order,
-        stats: input.stats,
-        value_fact_buffer: input.value_fact_buffer,
-    };
+    let mut roots = RootSet::empty(input.view.local_count());
+    let layout = input
+        .validation
+        .as_ref()
+        .expect("argument plans always validate")
+        .layout;
+    let mut env = input.shared_read_env(location);
     let mutable = arg.may_write();
     let receiver = index == 0
         && !matches!(
@@ -1197,7 +1193,7 @@ fn plan_call_actual(
     };
     record_shared_reads_in_place_indices(&mut env, place, location, &mut roots)?;
     let value_roots = roots_for_place(
-        input.layout,
+        layout,
         input.state,
         place,
         location,
@@ -1206,9 +1202,9 @@ fn plan_call_actual(
     )?;
     let heap = if place.projections.is_empty() {
         input
-            .layout
+            .view
             .index_of(place.root)
-            .is_some_and(|local| input.layout.local_has_in_place_mutation_surface[local])
+            .is_some_and(|local| input.view.local_has_in_place_mutation_surface[local])
     } else {
         layer::is_heap_value(input.context, arg.argument)?
     };
@@ -1219,7 +1215,7 @@ fn plan_call_actual(
         actuals.entry_place(input, index)?
     };
     let mut roots = if mutable && !heap && !copy && place.projections.is_empty() {
-        RootSet::empty(input.layout.local_count())
+        RootSet::empty(input.view.local_count())
     } else {
         value_roots.clone()
     };
@@ -1227,7 +1223,7 @@ fn plan_call_actual(
         if heap {
             input
                 .state
-                .load_place_content(resolution, &input.layout.local_mutable, false);
+                .load_place_content(resolution, input.view.local_mutable, false);
         }
         report_place_cells(input.state, &resolution.address, &mut roots);
         let access = footprint(resolution, usage);
@@ -1239,11 +1235,16 @@ fn plan_call_actual(
                 Some(resolution.route.local),
             );
             check_access(&mut check, &roots, access, Some(resolution), BORROW_ACCESS)?;
-            input.value_fact_buffer.record(
-                arg.argument,
-                ValueAccessClassification::SharedRead,
-                &value_roots,
-            );
+            input
+                .validation
+                .as_mut()
+                .expect("validation owns argument checks")
+                .value_facts
+                .record(
+                    arg.argument,
+                    ValueAccessClassification::SharedRead,
+                    &value_roots,
+                );
             return Ok(None);
         }
         access
@@ -1266,40 +1267,41 @@ fn plan_call_actual(
 ///      provenance falsely extends a copied source's borrow.
 fn call_argument_value_roots(
     context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
+    validation: Option<&FunctionLayout>,
     state: &BorrowState,
     expression_id: HirValueId,
     location: Option<SourceSpan>,
 ) -> Result<RootSet, BorrowCheckError> {
     let expression = context.expressions.expression(expression_id);
+    let roots = |place: &HirPlace, span| {
+        if let Some(layout) = validation {
+            roots_for_place(layout, state, place, location, span, &context.diagnostics)
+        } else {
+            let index =
+                require_place_index(view.index_of(place.root), &context.diagnostics, place)?;
+            Ok(state.effective_roots(index))
+        }
+    };
 
     match &expression.kind {
-        HirExpressionKind::Copy(_) => Ok(RootSet::empty(layout.local_count())),
+        HirExpressionKind::Copy(_) => Ok(RootSet::empty(view.local_count())),
 
         HirExpressionKind::Load(place) => match expression.value_kind {
-            ValueKind::Place | ValueKind::RValue => roots_for_place(
-                layout,
-                state,
-                place,
-                location,
-                expression.span,
-                &context.diagnostics,
-            ),
-            ValueKind::Const => Ok(RootSet::empty(layout.local_count())),
+            ValueKind::Place | ValueKind::RValue => roots(place, expression.span),
+            ValueKind::Const => Ok(RootSet::empty(view.local_count())),
         },
 
         _ => {
-            let mut roots = RootSet::empty(layout.local_count());
+            let mut value_roots = RootSet::empty(view.local_count());
             collect_expression_roots(
-                context,
-                layout,
-                state,
+                context.expressions,
                 expression_id,
-                &mut roots,
-                location,
+                &mut value_roots,
                 expression.span,
+                roots,
             )?;
-            Ok(roots)
+            Ok(value_roots)
         }
     }
 }
@@ -1318,12 +1320,16 @@ fn call_check_context<'a, 'module>(
     location: Option<SourceSpan>,
     actor_index_hint: Option<usize>,
 ) -> AccessCheckContext<'a, 'module> {
+    let validation = input
+        .validation
+        .as_mut()
+        .expect("validation owns call access checks");
     AccessCheckContext {
         context: input.context,
-        layout: input.layout,
+        layout: validation.layout,
         state: input.state,
         block_id: input.block_id,
-        tracker: input.tracker,
+        tracker: validation.tracker,
         location,
         span,
         stats: input.stats,
@@ -1336,6 +1342,7 @@ fn transfer_call_argument_access(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     argument: HirValueId,
     effect: ArgEffect,
+    can_move: bool,
     location: Option<SourceSpan>,
     plan: CallAccessPlan,
     source: Option<&PlaceResolution>,
@@ -1370,17 +1377,6 @@ fn transfer_call_argument_access(
         effect,
         ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
     );
-    let can_move = optional
-        && !plan.roots.is_empty()
-        && matches!(
-            classify_move_decision(
-                input.layout,
-                input.block_id,
-                &plan.roots,
-                input.current_order
-            ),
-            MoveDecision::Move,
-        );
     let transferred = {
         let actor = source.map(|source| source.route.local);
         let mut check = call_check_context(input, expression.span, location, actor);
@@ -1406,29 +1402,39 @@ fn transfer_call_argument_access(
         }
     };
     if optional && !plan.roots.is_empty() {
-        input.value_fact_buffer.record_optional_transfer(
-            argument,
-            if transferred {
-                OptionalTransferStatus::Transfer
-            } else {
-                OptionalTransferStatus::Borrow
-            },
-            &plan.roots,
-        );
+        input
+            .validation
+            .as_mut()
+            .expect("validation owns argument checks")
+            .value_facts
+            .record_optional_transfer(
+                argument,
+                if transferred {
+                    OptionalTransferStatus::Transfer
+                } else {
+                    OptionalTransferStatus::Borrow
+                },
+                &plan.roots,
+            );
     }
-    input.value_fact_buffer.record(
-        argument,
-        if mutable {
-            ValueAccessClassification::MutableArgument
-        } else {
-            ValueAccessClassification::SharedRead
-        },
-        if mutable || optional {
-            &plan.roots
-        } else {
-            &plan.value_roots
-        },
-    );
+    input
+        .validation
+        .as_mut()
+        .expect("validation owns argument checks")
+        .value_facts
+        .record(
+            argument,
+            if mutable {
+                ValueAccessClassification::MutableArgument
+            } else {
+                ValueAccessClassification::SharedRead
+            },
+            if mutable || optional {
+                &plan.roots
+            } else {
+                &plan.value_roots
+            },
+        );
     Ok(())
 }
 
@@ -1485,7 +1491,7 @@ fn prepare_call_result_definition(
         return Ok(());
     }
     let before = input.stats.observations.before_rekey(input.state);
-    let retirement = if !input.layout.local_has_in_place_mutation_surface[local_index]
+    let retirement = if !input.view.local_has_in_place_mutation_surface[local_index]
         && !matches!(result_transfer, CallResultTransfer::FirstDefinition(_))
     {
         Some(
@@ -1545,29 +1551,23 @@ fn capture_call_result_write(
     ops: &mut Vec<InvokeLayerOp>,
 ) -> Result<CallResultWrite, BorrowCheckError> {
     let actor = call_result_index(input, result)?;
-    require_initialized_update_target(
-        input.layout,
-        input.state,
-        actor,
-        &input.context.diagnostics,
-        input.location,
-    )?;
+    if let Some(validation) = &input.validation {
+        require_initialized_update_target(
+            validation.layout,
+            input.state,
+            actor,
+            &input.context.diagnostics,
+            input.location,
+        )?;
+    }
     let resolved = input
         .state
-        .resolve_place_path(actor, &input.layout.local_mutable, []);
-    let mut check = AccessCheckContext {
-        context: input.context,
-        layout: input.layout,
-        state: input.state,
-        block_id: input.block_id,
-        tracker: input.tracker,
-        location: input.location,
-        span: input.location,
-        stats: input.stats,
-        actor_index_hint: Some(actor),
-        current_order: input.current_order,
-    };
-    check_local_update_access(&mut check, &resolved)?;
+        .resolve_place_path(actor, input.view.local_mutable, []);
+    if input.validation.is_some() {
+        let location = input.location;
+        let mut check = call_check_context(input, location, location, Some(actor));
+        check_local_update_access(&mut check, &resolved)?;
+    }
     let addresses = resolved.address;
 
     // Bind carries the captured value for either call form. Immediate updates already
@@ -1611,12 +1611,12 @@ fn apply_immediate_call_operations(
             .stats
             .observations
             .tail
-            .replace(op.apply_owned(input.layout, input.state));
+            .replace(op.apply_owned(input.view, input.state));
     }
     let mut writes = writes.into_iter();
     while let Some(mut write) = writes.next() {
         if let Some(slot) = write.definite_slot
-            && input.layout.local_has_in_place_mutation_surface[slot]
+            && input.view.local_has_in_place_mutation_surface[slot]
         {
             let before = input.stats.observations.before_rekey(input.state);
             let retirement = input.state.retire_slot_value(slot, input.current_order);
@@ -1645,7 +1645,7 @@ fn apply_immediate_call_operations(
             .stats
             .observations
             .tail
-            .replace(op.apply_owned(input.layout, input.state));
+            .replace(op.apply_owned(input.view, input.state));
     }
 }
 
@@ -1653,7 +1653,7 @@ fn call_result_index(
     input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
     local: LocalId,
 ) -> Result<usize, BorrowCheckError> {
-    input.layout.index_of(local).ok_or_else(|| {
+    input.view.index_of(local).ok_or_else(|| {
         input.context.diagnostics.internal_error(format!(
             "Call result local '{}' is not in the active function layout",
             input.context.diagnostics.local_name(local)
@@ -1667,7 +1667,7 @@ fn call_result_local_state(
     arg_value_roots: &[RootSet],
     derived_roots: RootSet,
 ) -> Result<LocalState, BorrowCheckError> {
-    let local_count = input.layout.local_count();
+    let local_count = input.view.local_count();
     let mut alias_roots = RootSet::empty(local_count);
     // Coarse value roots are a may-set. The independently computed derivation stays a must-set.
     if let Some(indices) = alias_arguments {
@@ -1687,15 +1687,6 @@ fn call_result_local_state(
     let mut state = LocalState::slot_from_value_roots(alias_roots);
     state.derived_from_roots = derived_roots;
     Ok(state)
-}
-
-fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<HirValueId> {
-    match operands {
-        HirNumericOperands::Unary { operand } => vec![*operand],
-        HirNumericOperands::Binary { left, right } => {
-            vec![*left, *right]
-        }
-    }
 }
 
 fn map_argument_effect(op: HirMapOp, arg_index: usize) -> ArgEffect {

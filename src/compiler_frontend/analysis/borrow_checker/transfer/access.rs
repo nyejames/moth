@@ -9,7 +9,7 @@ use super::call_semantics::{ArgEffect, resolve_call_semantics};
 use super::facts::{
     AccessFootprint, PlaceUse, StatementAccessTracker, ValueFactBuffer, roots_to_local_ids,
 };
-use super::{BlockTransferStats, BorrowTransferContext};
+use super::{BlockTransferStats, BorrowTransferContext, OperationView, ValidationSink};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     AddressSet, AllocationRetirement, BindingSpec, BorrowState, CellId, Coverage, FunctionLayout,
@@ -216,16 +216,16 @@ fn record_shared_reads_in_pattern(
 
 /// An acyclic entry prefix cannot contain an earlier legal reference to an unwritten local.
 fn first_definition_index(
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
     state: &BorrowState,
     block: BlockId,
     order: OrderKey,
     resolve_index: impl FnOnce() -> Option<usize>,
 ) -> Option<usize> {
-    if layout.acyclic_entry_block == Some(block)
+    if view.acyclic_entry_block == Some(block)
         && order >= 0
         && let Some(index) = resolve_index()
-        && layout.local_first_write_order[index] == order
+        && view.local_first_write_order[index] == order
         && state.is_virgin_definition(index)
     {
         // Only parameters enter this block initialized. The prefix has never written this
@@ -236,7 +236,29 @@ fn first_definition_index(
     }
 }
 
-/// Check and capture an assignment in the pre-state, then publish its cell stores and role change.
+/// The address of the write and the source of a possible new link both name the pre-state.
+struct AssignmentPlan {
+    local: usize,
+    mode: LocalMode,
+    is_definition: bool,
+    projected: bool,
+    destination: Option<PlaceResolution>,
+    acquisition: Option<AssignmentAcquisition>,
+    preserve_slot: bool,
+    rhs_roots: Option<RootSet>,
+    derivation: Option<RootSet>,
+}
+
+struct AssignmentAcquisition {
+    source: usize,
+    projected: bool,
+    isolated_projection: bool,
+    writable: bool,
+    capture_payload: bool,
+    resolved: PlaceResolution,
+}
+
+/// Check the planned pre-state accesses before publishing any store or role change.
 fn transfer_assign_target(
     context: &mut AssignTransferContext<'_, '_>,
     target: &HirPlace,
@@ -247,7 +269,6 @@ fn transfer_assign_target(
 ) -> Result<(), BorrowCheckError> {
     let transfer = context.context;
     let layout = context.layout;
-    let state = &mut *context.state;
     let Some(local) = local_index else {
         return Err(transfer.diagnostics.internal_error(format!(
             "Assignment target local '{}' is not in the active function layout",
@@ -257,7 +278,7 @@ fn transfer_assign_target(
     if !is_definition {
         require_initialized_update_target(
             layout,
-            state,
+            context.state,
             local,
             &transfer.diagnostics,
             context.span.or(context.location),
@@ -266,9 +287,131 @@ fn transfer_assign_target(
 
     let values = LayerValueContext {
         context: transfer,
-        layout,
+        view: OperationView::from_layout(layout),
         block_id: context.block_id,
     };
+    let plan = plan_assignment(&values, context.state, target, value, is_definition, local)?;
+    check_assignment(context, target, value, &plan)?;
+    publish_assignment(
+        &values,
+        context.state,
+        &mut context.stats.observations,
+        context.current_order,
+        value,
+        plan,
+        pristine_definition,
+    )
+}
+
+fn plan_assignment(
+    values: &LayerValueContext<'_, '_>,
+    state: &BorrowState,
+    target: &HirPlace,
+    value: HirValueId,
+    is_definition: bool,
+    local: usize,
+) -> Result<AssignmentPlan, BorrowCheckError> {
+    let transfer = values.context;
+    let view = values.view;
+    let projected = !target.projections.is_empty();
+    let mode = state.binding_mode(local);
+    let destination = (projected || !is_definition).then(|| {
+        resolve_place(view, state, transfer.expressions, target)
+            .expect("assignment target's root is in the layout")
+    });
+    let mut plan = AssignmentPlan {
+        local,
+        mode,
+        is_definition,
+        projected,
+        destination,
+        acquisition: None,
+        preserve_slot: false,
+        rhs_roots: None,
+        derivation: None,
+    };
+    if projected {
+        return Ok(plan);
+    }
+    plan.rhs_roots = direct_value_roots_from_expression(values, state, value)?;
+    plan.derivation = Some(alias_derivation_roots_from_expression(
+        view,
+        state,
+        transfer.expressions,
+        value,
+    ));
+    // Only a slot acquires a link; an existing alias receives the loaded value.
+    if let Some((source, place)) = place_load_source(view, transfer.expressions, value)
+        .filter(|_| is_definition || mode.contains(LocalMode::SLOT))
+    {
+        let projected = !place.projections.is_empty();
+        if !projected && !is_definition && source == local {
+            plan.preserve_slot = true;
+            return Ok(plan);
+        }
+        let mut resolved = resolve_place(view, state, transfer.expressions, &place)
+            .expect("assignment source's root is in the layout");
+        if !projected && !is_definition {
+            let own_cell = CellId::Slot(WrapperId::current(local));
+            plan.preserve_slot = resolved.address.cells().contains(&own_cell)
+                || resolved.address.coverage == Coverage::Partial;
+            if resolved.address.definite() == Some(own_cell) {
+                return Ok(plan);
+            }
+        }
+        // Scratch can carry a shared link but its synthetic mutability grants no authority.
+        let writable = view.local_mutable[local]
+            && !is_compiler_owned_scratch_local(transfer, view.local_ids[local]);
+        let heap = if projected {
+            layer::is_heap_value(transfer, value)?
+        } else {
+            view.local_has_in_place_mutation_surface[source]
+        };
+        let capture_payload = !is_definition
+            && mode.contains(LocalMode::ALIAS)
+            && (heap || state.has_value_alternatives());
+        // Loading the terminal value consumes its holder; keep the route proof in the plan.
+        let isolated_projection = projected && layer::isolated_projected_binding(state, &resolved);
+        if capture_payload || writable && heap {
+            state.load_place_content(&mut resolved, view.local_mutable, !heap);
+        }
+        plan.acquisition = Some(AssignmentAcquisition {
+            source,
+            projected,
+            isolated_projection,
+            writable,
+            capture_payload,
+            resolved,
+        });
+    }
+    Ok(plan)
+}
+
+fn check_assignment(
+    context: &mut AssignTransferContext<'_, '_>,
+    target: &HirPlace,
+    value: HirValueId,
+    plan: &AssignmentPlan,
+) -> Result<(), BorrowCheckError> {
+    let transfer = context.context;
+    let layout = context.layout;
+    let state = &*context.state;
+    let local = plan.local;
+    if plan.is_definition
+        && plan.mode.is_definitely_uninit()
+        && layout.local_mutable[local]
+        && let Some(roots) = plan.rhs_roots.as_ref().filter(|roots| !roots.is_empty())
+        && roots.iter_ones().all(|root| layout.local_mutable[root])
+    {
+        let status =
+            match classify_move_decision(layout, context.block_id, roots, context.current_order) {
+                MoveDecision::Borrow => OptionalTransferStatus::Borrow,
+                MoveDecision::Move => OptionalTransferStatus::Transfer,
+            };
+        context
+            .value_fact_buffer
+            .record_optional_transfer(value, status, roots);
+    }
     let mut check = AccessCheckContext {
         context: transfer,
         layout,
@@ -282,168 +425,153 @@ fn transfer_assign_target(
         current_order: context.current_order,
     };
 
-    if !target.projections.is_empty() {
-        let mut roots = roots_for_place(
-            layout,
-            check.state,
-            target,
-            check.location,
-            check.span,
-            &transfer.diagnostics,
-        )?;
-        let resolved = resolve_place(layout, check.state, transfer.expressions, target)
-            .expect("projected target's root is in the layout");
-        report_place_cells(check.state, &resolved.address, &mut roots);
-        check_place_replacement(&mut check, &resolved, &roots)?;
-        let addresses = resolved.address;
+    if let Some(resolved) = &plan.destination {
+        let roots = if plan.projected {
+            let mut roots = roots_for_place(
+                layout,
+                check.state,
+                target,
+                check.location,
+                check.span,
+                &transfer.diagnostics,
+            )?;
+            report_place_cells(check.state, &resolved.address, &mut roots);
+            check_place_replacement(&mut check, resolved, &roots)?;
+            roots
+        } else {
+            check_local_update_access(&mut check, resolved)?
+        };
         check.tracker.record_write(&roots);
-        let has_layer = !state.layer_is_empty();
-        let stored = stored_values(&values, state, value, has_layer)?;
-        if has_layer || !stored.is_empty() {
-            let receipt = state.publish_store(
-                &TypedStore::replace_cells(addresses, stored),
-                context.current_order,
-                None,
+    }
+    if plan.projected {
+        return Ok(());
+    }
+    // The cell store and the new link are two accesses of one operation.
+    check.tracker.clear_reservations();
+    if let Some(acquisition) = &plan.acquisition {
+        let resolved = &acquisition.resolved;
+        check.span = transfer.expressions.expression(value).span;
+        check.actor_index_hint = Some(acquisition.source);
+        if acquisition.writable {
+            check_cell_permission(&check, resolved)?;
+            let roots = plan
+                .rhs_roots
+                .as_ref()
+                .expect("a place acquisition has roots");
+            let mut reported;
+            let roots = if acquisition.projected {
+                roots
+            } else {
+                reported = roots.clone();
+                report_place_cells(check.state, &resolved.address, &mut reported);
+                &reported
+            };
+            check_access(
+                &mut check,
+                roots,
+                footprint(resolved, PlaceUse::Acquire),
+                Some(resolved),
+                STORE_ACCESS,
+            )?;
+        } else if acquisition.projected && check.stats.observations.enabled {
+            check.stats.observations.tail.observe(
+                check.state,
+                &footprint(resolved, PlaceUse::Acquire),
+                false,
+                Some(acquisition.source),
             );
-            context.stats.observations.tail.replace(receipt);
+        }
+    }
+    Ok(())
+}
+
+fn publish_assignment(
+    values: &LayerValueContext<'_, '_>,
+    state: &mut BorrowState,
+    observations: &mut super::facts::ValueObservations,
+    order: OrderKey,
+    value: HirValueId,
+    plan: AssignmentPlan,
+    pristine_definition: Option<usize>,
+) -> Result<(), BorrowCheckError> {
+    let AssignmentPlan {
+        local,
+        mode,
+        is_definition,
+        projected,
+        destination,
+        acquisition,
+        preserve_slot,
+        rhs_roots,
+        derivation,
+    } = plan;
+    if projected {
+        let addresses = destination
+            .expect("projected assignment has an address")
+            .address;
+        let has_layer = !state.layer_is_empty();
+        let stored = stored_values(values, state, value, has_layer)?;
+        if has_layer || !stored.is_empty() {
+            let receipt =
+                state.publish_store(&TypedStore::replace_cells(addresses, stored), order, None);
+            observations.tail.replace(receipt);
         }
         return Ok(());
     }
 
-    let expression = transfer.expressions.expression(value);
-    let source = place_load_source(layout, transfer.expressions, value);
-    let mode = check.state.binding_mode(local);
-    let own_cell = CellId::Slot(WrapperId::current(local));
-
-    let rhs_roots = direct_value_roots_from_expression(
-        layout,
-        check.state,
-        transfer.expressions,
-        value,
-        check.location,
-        &transfer.diagnostics,
-    )?;
-    let derivation =
-        alias_derivation_roots_from_expression(layout, check.state, transfer.expressions, value);
-
-    if is_definition
-        && mode.is_definitely_uninit()
-        && layout.local_mutable[local]
-        && let Some(roots) = rhs_roots.as_ref().filter(|roots| !roots.is_empty())
-        && roots.iter_ones().all(|root| layout.local_mutable[root])
-    {
-        let status =
-            match classify_move_decision(layout, context.block_id, roots, context.current_order) {
-                MoveDecision::Borrow => OptionalTransferStatus::Borrow,
-                MoveDecision::Move => OptionalTransferStatus::Transfer,
-            };
-        context
-            .value_fact_buffer
-            .record_optional_transfer(value, status, roots);
-    }
-    let rhs_roots = rhs_roots.unwrap_or_else(|| RootSet::empty(layout.local_count()));
-    let local_addresses = (!is_definition).then(|| {
-        check
-            .state
-            .resolve_place_path(local, &layout.local_mutable, [])
-    });
-    if let Some(resolved) = &local_addresses {
-        let roots = check_local_update_access(&mut check, resolved)?;
-        check.tracker.record_write(&roots);
-    }
-    // The cell store and the new link are two accesses of one operation.
-    check.tracker.clear_reservations();
-    // Scratch may carry a shared link, but its synthetic mutability cannot grant exclusivity.
-    let writable =
-        layout.local_mutable[local] && !is_compiler_owned_scratch_local(transfer, layout, local);
-    // Only the slot alternative acquires a link; existing aliases receive the loaded value.
-    let acquisition = source.filter(|_| is_definition || mode.contains(LocalMode::SLOT));
-    let mut preserve_slot = false;
-    let mixed_acquisition = !is_definition && mode.contains(LocalMode::ALIAS);
-    let mut place_payload = None;
-    let binding = if let Some((source, place)) = acquisition {
-        if place.projections.is_empty() && !is_definition && source == local {
-            preserve_slot = true;
-            None
-        } else if place.projections.is_empty() {
-            let mut resolved = check
-                .state
-                .resolve_place_path(source, &layout.local_mutable, []);
-            let addresses = &resolved.address;
-            preserve_slot = !is_definition
-                && (addresses.cells().contains(&own_cell)
-                    || addresses.coverage == Coverage::Partial);
-            if !is_definition && addresses.definite() == Some(own_cell) {
-                None
-            } else {
-                let heap = layout.local_has_in_place_mutation_surface[source];
-                let capture_payload =
-                    mixed_acquisition && (heap || check.state.has_value_alternatives());
-                if capture_payload || writable && heap {
-                    check
-                        .state
-                        .load_place_content(&mut resolved, &layout.local_mutable, !heap);
-                }
-                if writable {
-                    check.span = expression.span;
-                    check_cell_permission(&check, &resolved)?;
-                    let mut roots = rhs_roots.clone();
-                    report_place_cells(check.state, &resolved.address, &mut roots);
-                    check.actor_index_hint = Some(source);
-                    check_access(
-                        &mut check,
-                        &roots,
-                        footprint(&resolved, PlaceUse::Acquire),
-                        Some(&resolved),
-                        STORE_ACCESS,
-                    )?;
-                }
-                if capture_payload && let Some(content) = resolved.content {
-                    place_payload = Some(layer::stored_allocations(
-                        layout,
-                        check.state,
-                        content,
-                        resolved.permission.wrapper_readonly_source.is_none(),
-                    ));
-                }
+    let rhs_roots = rhs_roots.unwrap_or_else(|| RootSet::empty(values.view.local_count()));
+    let derivation = derivation.expect("whole assignment plans carry derivation");
+    let (binding, place_payload) = if let Some(acquisition) = acquisition {
+        let AssignmentAcquisition {
+            source,
+            projected,
+            isolated_projection,
+            writable,
+            capture_payload,
+            resolved,
+        } = acquisition;
+        if projected {
+            let (binding, payload) = capture_projected_binding(
+                state,
+                values.view.local_mutable,
+                resolved,
+                writable,
+                capture_payload,
+                isolated_projection,
+            );
+            (Some(binding), payload)
+        } else {
+            let payload = resolved.content.filter(|_| capture_payload).map(|content| {
+                layer::stored_allocations(
+                    values.view.local_mutable,
+                    state,
+                    content,
+                    resolved.permission.wrapper_readonly_source.is_none(),
+                )
+            });
+            (
                 Some(BindingSpec::Link {
                     source: WrapperId::current(source),
                     writable,
-                })
-            }
-        } else {
-            check.span = expression.span;
-            check.actor_index_hint = Some(source);
-            let heap = layer::is_heap_value(transfer, value)?;
-            let capture_payload =
-                mixed_acquisition && (heap || check.state.has_value_alternatives());
-            let (binding, payload) = capture_projected_binding(
-                &mut check,
-                &place,
-                writable,
-                &rhs_roots,
-                heap,
-                capture_payload,
-            )?;
-            place_payload = payload;
-            Some(binding)
+                }),
+                payload,
+            )
         }
     } else {
-        None
+        (None, None)
     };
-    let observations = &mut context.stats.observations;
 
     if is_definition {
         let defines_slot = binding.is_none();
         let mut slot = if defines_slot {
-            capture_slot_value(&values, state, value)?
+            capture_slot_value(values, state, value)?
         } else {
             Default::default()
         };
         let mut detachments = if defines_slot {
             Default::default()
         } else {
-            CapturedDetachments::from_load(&values, state, value)
+            CapturedDetachments::from_load(values, state, value)
         };
         let mut binding = binding.unwrap_or(BindingSpec::Slot);
         if matches!(&binding, BindingSpec::Link { source, .. } if *source == WrapperId::current(local))
@@ -477,16 +605,16 @@ fn transfer_assign_target(
                     }
                 });
         if first && !captures_old && state.can_publish_first_definition(local) {
-            state.update_local_state(local, LocalState::slot(layout.local_count()));
+            state.update_local_state(local, LocalState::slot(values.view.local_count()));
         } else {
             let before = observations.before_rekey(state);
-            let next = LocalState::slot(layout.local_count());
+            let next = LocalState::slot(values.view.local_count());
             let retirement = if first {
-                let retirement = state.retire_binding_allocation(local, context.current_order);
+                let retirement = state.retire_binding_allocation(local, order);
                 state.update_local_state(local, next);
                 retirement
             } else {
-                state.rebind_local(local, next, context.current_order)
+                state.rebind_local(local, next, order)
             };
             observations.after_retirement(before, state, retirement);
             slot.remap(state, retirement);
@@ -499,17 +627,10 @@ fn transfer_assign_target(
             state.set_binding(
                 local,
                 binding,
-                RootSet::empty(layout.local_count()),
+                RootSet::empty(values.view.local_count()),
                 derivation,
             );
-            let receipt = layer::publish_slot_capture(
-                state,
-                local,
-                None,
-                slot,
-                rhs_roots,
-                context.current_order,
-            );
+            let receipt = layer::publish_slot_capture(state, local, None, slot, rhs_roots, order);
             observations.tail.replace(receipt);
         } else {
             state.set_binding(local, binding, rhs_roots, derivation);
@@ -522,7 +643,7 @@ fn transfer_assign_target(
         return Ok(());
     }
 
-    let mut addresses = local_addresses
+    let mut addresses = destination
         .expect("an assignment has pre-state destinations")
         .address;
     if binding.is_some() || preserve_slot {
@@ -536,14 +657,14 @@ fn transfer_assign_target(
     if let Some(mut binding) = binding {
         let stores = mode.contains(LocalMode::ALIAS);
         let mut stored = place_payload.unwrap_or_default();
-        let mut detachments = CapturedDetachments::from_load(&values, state, value);
+        let mut detachments = CapturedDetachments::from_load(values, state, value);
         let captures_old_holder = matches!(&binding, BindingSpec::Projected { addresses, .. }
             if addresses.cells().iter().any(|cell| matches!(*cell, CellId::Projected(holder, _)
                 if state.alloc_origin_local(holder) == Some(local))));
         if !preserve_slot && (!state.layer_is_empty() || !stored.is_empty() || captures_old_holder)
         {
             let before = observations.before_rekey(state);
-            let retirement = state.retire_slot_value(local, context.current_order);
+            let retirement = state.retire_slot_value(local, order);
             observations.after_retirement(before, state, retirement);
             addresses.remap_allocations(state, retirement);
             stored.remap(state, retirement);
@@ -554,7 +675,7 @@ fn transfer_assign_target(
             let receipt = state.publish_store(
                 &TypedStore::write_through(addresses, stored, Replacement::May, local)
                     .with_slot_roots(rhs_roots.clone()),
-                context.current_order,
+                order,
                 None,
             );
             observations.tail.replace(receipt);
@@ -564,10 +685,10 @@ fn transfer_assign_target(
         observations.after_rekey(before, state, |slot| slot, |id| id);
         detachments.apply(state, local);
     } else if !preserve_slot && let Some(CellId::Slot(wrapper)) = addresses.definite() {
-        let mut captured = capture_slot_value(&values, state, value)?;
+        let mut captured = capture_slot_value(values, state, value)?;
         if captured.has_facts() || !state.layer_is_empty() {
             let before = observations.before_rekey(state);
-            let retirement = state.retire_slot_value(wrapper.local, context.current_order);
+            let retirement = state.retire_slot_value(wrapper.local, order);
             observations.after_retirement(before, state, retirement);
             captured.remap(state, retirement);
         }
@@ -578,11 +699,11 @@ fn transfer_assign_target(
             (local != wrapper.local).then_some(local),
             captured,
             rhs_roots,
-            context.current_order,
+            order,
         );
         observations.tail.replace(receipt);
     } else if !preserve_slot || mode.contains(LocalMode::ALIAS) {
-        let stored = stored_values(&values, state, value, true)?;
+        let stored = stored_values(values, state, value, true)?;
         let mut store = if preserve_slot {
             TypedStore::write_through(addresses, stored, Replacement::May, local)
         } else {
@@ -598,7 +719,7 @@ fn transfer_assign_target(
         if mode.contains(LocalMode::SLOT) && !preserve_slot {
             state.mark_slot_derivation(local, derivation);
         }
-        let receipt = state.publish_store(&store, context.current_order, None);
+        let receipt = state.publish_store(&store, order, None);
         observations.tail.replace(receipt);
     }
     Ok(())
@@ -637,13 +758,10 @@ fn remap_binding_capture(
 //      proven compiler-owned set keep the existing rules.
 fn is_compiler_owned_scratch_local(
     context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    local_index: usize,
+    local: crate::compiler_frontend::hir::ids::LocalId,
 ) -> bool {
     matches!(
-        context
-            .diagnostics
-            .local_origin_kind(layout.local_ids[local_index]),
+        context.diagnostics.local_origin_kind(local),
         Some(HirLocalOriginKind::CompilerTemp)
     )
 }
@@ -657,7 +775,7 @@ fn place_root_local_index(layout: &FunctionLayout, place: &HirPlace) -> Option<u
 /// WHY: the identity helpers below must agree on which expressions are places, and they all need
 /// the source binding index. One check keeps their preambles from drifting apart.
 fn place_load_source(
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
 ) -> Option<(usize, HirPlace)> {
@@ -668,34 +786,43 @@ fn place_load_source(
     let HirExpressionKind::Load(place) = &expression.kind else {
         return None;
     };
-    Some((layout.index_of(place.root)?, *place))
+    Some((view.index_of(place.root)?, *place))
 }
 
 fn direct_value_roots_from_expression(
-    layout: &FunctionLayout,
+    values: &LayerValueContext<'_, '_>,
     state: &BorrowState,
-    expressions: &HirExpressionStore,
     expression_id: HirValueId,
-    location: Option<SourceSpan>,
-    diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<RootSet>, BorrowCheckError> {
-    let expression = expressions.expression(expression_id);
-
+    let expression = values.context.expressions.expression(expression_id);
     let HirExpressionKind::Load(place) = &expression.kind else {
         return Ok(None);
     };
-
     match expression.value_kind {
-        ValueKind::Place | ValueKind::RValue => Ok(Some(roots_for_place(
-            layout,
-            state,
-            place,
-            location,
-            expression.span,
-            diagnostics,
-        )?)),
-        ValueKind::Const => Ok(Some(RootSet::empty(layout.local_count()))),
+        ValueKind::Place | ValueKind::RValue => {
+            increment_frontend_counter(FrontendCounter::BorrowPlaceAccessCount);
+            let index = require_place_index(
+                values.view.index_of(place.root),
+                &values.context.diagnostics,
+                place,
+            )?;
+            Ok(Some(state.effective_roots(index)))
+        }
+        ValueKind::Const => Ok(Some(RootSet::empty(values.view.local_count()))),
     }
+}
+
+fn require_place_index(
+    index: Option<usize>,
+    diagnostics: &BorrowDiagnostics<'_>,
+    place: &HirPlace,
+) -> Result<usize, BorrowCheckError> {
+    index.ok_or_else(|| {
+        diagnostics.internal_error(format!(
+            "Borrow checker could not resolve place local '{}' in the current function",
+            place.root,
+        ))
+    })
 }
 
 /// Alias bindings a value expression was provably created through.
@@ -706,17 +833,17 @@ fn direct_value_roots_from_expression(
 ///      that alias. Recording the full chain as a must fact lets joins drop paths that did not
 ///      derive.
 fn alias_derivation_roots_from_expression(
-    layout: &FunctionLayout,
+    view: OperationView<'_>,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
 ) -> RootSet {
     let expression = expressions.expression(expression_id);
     let HirExpressionKind::Load(place) = &expression.kind else {
-        return RootSet::empty(layout.local_count());
+        return RootSet::empty(view.local_count());
     };
-    let Some(source_index) = layout.index_of(place.root) else {
-        return RootSet::empty(layout.local_count());
+    let Some(source_index) = view.index_of(place.root) else {
+        return RootSet::empty(view.local_count());
     };
     state.derived_roots_from_source(source_index)
 }
@@ -748,12 +875,7 @@ fn roots_for_place(
 ) -> Result<RootSet, BorrowCheckError> {
     increment_frontend_counter(FrontendCounter::BorrowPlaceAccessCount);
 
-    let Some(local_index) = layout.index_of(place.root) else {
-        return Err(diagnostics.internal_error(format!(
-            "Borrow checker could not resolve place local '{}' in the current function",
-            place.root
-        )));
-    };
+    let local_index = require_place_index(layout.index_of(place.root), diagnostics, place)?;
 
     if state.binding_mode(local_index).is_definitely_uninit() {
         return Err(diagnostics.use_of_uninitialized_local(
@@ -817,8 +939,9 @@ fn record_assignment_value_reads(
         && let Some(local) = layout.index_of(target.root)
         && layout.local_mutable[local]
         && (is_definition || env.state.binding_mode(local).contains(LocalMode::SLOT))
-        && !is_compiler_owned_scratch_local(env.context, layout, local)
-        && let Some((source, place)) = place_load_source(layout, expressions, value)
+        && !is_compiler_owned_scratch_local(env.context, target.root)
+        && let Some((source, place)) =
+            place_load_source(OperationView::from_layout(layout), expressions, value)
         && (is_definition || source != local || !place.projections.is_empty())
     {
         // Another writer must conflict with the exclusive acquisition, not with
@@ -1017,15 +1140,12 @@ struct RootCollectStep {
 }
 
 fn collect_expression_roots(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    state: &BorrowState,
+    expressions: &HirExpressionStore,
     expression_id: HirValueId,
     out: &mut RootSet,
-    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
+    mut roots_for_place: impl FnMut(&HirPlace, Option<SourceSpan>) -> Result<RootSet, BorrowCheckError>,
 ) -> Result<(), BorrowCheckError> {
-    let expressions = context.expressions;
     let mut pending = vec![RootCollectStep {
         expression_id,
         span,
@@ -1034,14 +1154,7 @@ fn collect_expression_roots(
     while let Some(step) = pending.pop() {
         let expression = expressions.expression(step.expression_id);
         if let HirExpressionKind::Load(place) = &expression.kind {
-            let roots = roots_for_place(
-                layout,
-                state,
-                place,
-                location,
-                step.span.or(expression.span),
-                &context.diagnostics,
-            )?;
+            let roots = roots_for_place(place, step.span.or(expression.span))?;
             out.union_with(&roots);
         }
         let first = expressions.push_child_values_in_source_order(
@@ -1087,7 +1200,7 @@ enum AggregateOwnershipStep {
 ///      leave mandatory source state available for conservative borrow validation.
 pub(super) fn transfer_aggregate_expression_ownership(
     layout: &FunctionLayout,
-    state: &mut BorrowState,
+    state: &BorrowState,
     expression_id: HirValueId,
     block_id: BlockId,
     current_order: i32,
