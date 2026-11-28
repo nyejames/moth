@@ -273,24 +273,24 @@ pub(super) enum BindingSpec {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum BindingTarget {
+pub(super) enum BindingTarget {
     OwnSlot,
     Link(WrapperId),
     Projected(AllocId, FieldKey),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Origin {
-    wrapper: WrapperId,
-    owner: Option<WrapperId>,
-    isolated: bool,
+pub(super) struct Origin {
+    pub wrapper: WrapperId,
+    pub owner: Option<WrapperId>,
+    pub isolated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct BindingAlt {
-    target: BindingTarget,
-    origin: Option<Origin>,
-    writable: bool,
+pub(super) struct BindingAlt {
+    pub target: BindingTarget,
+    pub origin: Option<Origin>,
+    pub writable: bool,
 }
 
 const OWN_SLOT: BindingAlt = BindingAlt {
@@ -734,6 +734,15 @@ pub(super) fn remap_invoke_capture<T: Copy + PartialEq>(
         }
     }
     Cow::Borrowed(capture)
+}
+
+/// Projected directly from the current or retained wrapper row, including the
+/// immediate link rather than its resolved terminal.
+#[allow(dead_code)] // Used by boundary projection, not by access validation.
+pub(super) struct BoundaryBinding<'a> {
+    pub alternatives: &'a [BindingAlt],
+    pub coverage: Coverage,
+    pub routes: &'a [(CellId, DependencySet)],
 }
 
 /// Read-only access to binding role, route evidence and projected addresses.

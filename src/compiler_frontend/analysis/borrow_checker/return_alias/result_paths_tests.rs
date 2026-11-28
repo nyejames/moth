@@ -1,6 +1,7 @@
-use super::BorrowChecker;
-use crate::compiler_frontend::analysis::borrow_checker::{OptionalTransferStatus, check_borrows};
-use crate::compiler_frontend::external_packages::CallTarget;
+use super::{BorrowChecker, IndexCounts, build_sparse_index_for_test};
+use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
+use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::public_call_summary::{
@@ -8,29 +9,550 @@ use crate::compiler_frontend::public_call_summary::{
     CallParameterPath, CallResultPath, CallSharing, CallSharingCondition,
     FunctionReturnAliasSummary,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::hir_fixture_support::{LoweredHirFixture, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Instant;
+
+struct ResultFixture {
+    hir: LoweredHirFixture,
+    packages: Arc<ExternalPackageRegistry>,
+    paths: PathInternerFork,
+    strings: StringTable,
+}
+
+impl ResultFixture {
+    fn new(source: &str) -> Self {
+        let (ast, mut paths, mut strings) = parse_single_file_ast(source);
+        let packages = default_external_package_registry(&mut strings);
+        let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
+        Self {
+            hir,
+            packages,
+            paths,
+            strings,
+        }
+    }
+
+    fn checker(&self) -> BorrowChecker<'_> {
+        BorrowChecker::new(
+            &self.hir,
+            &self.hir.type_environment,
+            &self.packages,
+            &self.paths,
+            &self.strings,
+        )
+    }
+}
+
+fn named_function<'a>(checker: &BorrowChecker<'a>, name: &str) -> &'a HirFunction {
+    checker
+        .module
+        .functions
+        .iter()
+        .find(|function| {
+            checker.module.side_table.resolve_function_name(
+                function.id,
+                checker.path_fork,
+                checker.string_table,
+            ) == Some(name)
+        })
+        .unwrap_or_else(|| panic!("fixture should lower function {name}"))
+}
+
+#[test]
+#[ignore = "reads locally generated sparse-index measurement inputs"]
+fn measure_sparse_index_from_generated_hir() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tmp/bc06-review/b2x/measure");
+    for family in ["scalar", "independent", "correlated", "receivers"] {
+        let mut previous = None::<IndexCounts>;
+        for size in [16, 64, 256] {
+            let name = format!("{family}-{size}");
+            let path = root.join(&name).join("@entry.moth");
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+
+            // Parse source text with the harness's synthetic module identity.
+            // The on-disk family names are never interpreted as Moth identifiers.
+            let started = Instant::now();
+            let (ast, mut paths, mut strings) = parse_single_file_ast(&source);
+            let packages = default_external_package_registry(&mut strings);
+            let parse_time = started.elapsed();
+            let started = Instant::now();
+            let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
+            let hir_time = started.elapsed();
+            let started = Instant::now();
+            let mut checker =
+                BorrowChecker::new(&hir, &hir.type_environment, &packages, &paths, &strings);
+            let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+            let builder_time = started.elapsed();
+
+            let mut work = IndexCounts::default();
+            let mut ports = 0;
+            let mut guards = 0;
+            let mut conditional_supports = 0;
+            let mut conditional_arms = 0;
+            for index in indexes.values() {
+                work += index.counts;
+                ports += index.ports.len();
+                guards += index.guards.len();
+                conditional_supports += index.conditional_supports.len();
+                conditional_arms += index.conditional_arm_count;
+            }
+            let statements = hir
+                .blocks
+                .iter()
+                .map(|block| block.statements.len())
+                .sum::<usize>();
+            eprintln!(
+                "{name}: parse={parse_time:?} lower_hir={hir_time:?} sparse_builder={builder_time:?} hir_functions={} hir_blocks={} hir_statements={statements} ports={ports} guards={guards} conditional_supports={conditional_supports} conditional_arms={conditional_arms} work={work:?}",
+                hir.functions.len(),
+                hir.blocks.len()
+            );
+            assert!(work.blocks <= hir.blocks.len(), "{name}: {work:?}");
+            assert!(work.statements <= statements, "{name}: {work:?}");
+            assert_eq!(work.index_builds, hir.functions.len(), "{name}: {work:?}");
+            if let Some(earlier) = previous {
+                for (label, now, before) in [
+                    ("blocks", work.blocks, earlier.blocks),
+                    ("statements", work.statements, earlier.statements),
+                    ("arguments", work.arguments, earlier.arguments),
+                    ("access", work.access_incidences, earlier.access_incidences),
+                    (
+                        "selector",
+                        work.selector_incidences,
+                        earlier.selector_incidences,
+                    ),
+                    ("reach", work.reach_incidences, earlier.reach_incidences),
+                    (
+                        "compatibility",
+                        work.compatibility_candidates,
+                        earlier.compatibility_candidates,
+                    ),
+                    (
+                        "support",
+                        work.support_candidates,
+                        earlier.support_candidates,
+                    ),
+                    ("reverse", work.reverse_visits, earlier.reverse_visits),
+                ] {
+                    let bound = if family == "receivers" && label != "arguments" {
+                        before
+                    } else {
+                        4 * before
+                    };
+                    assert!(
+                        now <= bound,
+                        "{name}: {label} raw work grew from {before} to {now}"
+                    );
+                }
+            }
+            previous = Some(work);
+
+            let named_index = |name: &str| &indexes[&named_function(&checker, name).id];
+            match family {
+                "scalar" => {
+                    assert_eq!(guards, 0, "{name}");
+                    for index in indexes.values() {
+                        assert!(
+                            index.ports.iter().all(|port| matches!(port,
+                            super::EntryPort::Value { path, .. } if path.is_empty())),
+                            "{name}"
+                        );
+                    }
+                    assert_eq!(work.compatibility_candidates, 0, "{name}");
+                    assert!(work.reverse_visits <= 100 * size, "{name}: {work:?}");
+                }
+                "independent" => {
+                    let index = named_index("choose");
+                    eprintln!(
+                        "  choose: ports={} guarded_tests={} conditional_supports={} conditional_arms={} work={:?}",
+                        index.ports.len(),
+                        index.guards.len(),
+                        index.conditional_supports.len(),
+                        index.conditional_arm_count,
+                        index.counts
+                    );
+                    assert_eq!(index.conditional_supports.len(), size, "{name}");
+                    assert_eq!(index.conditional_arm_count, 2 * size, "{name}");
+                    assert_eq!(index.counts.compatibility_candidates, 0, "{name}");
+                    assert!(index.ports.len() <= 4 * size, "{name}");
+                    assert!(
+                        index.counts.support_candidates <= 16 * size,
+                        "{name}: {:?}",
+                        index.counts
+                    );
+                    assert!(
+                        index.counts.reverse_visits <= 96 * size,
+                        "{name}: {:?}",
+                        index.counts
+                    );
+                }
+                "correlated" => {
+                    let index = named_index("change");
+                    eprintln!(
+                        "  change: ports={} guarded_tests={} conditional_supports={} work={:?}",
+                        index.ports.len(),
+                        index.guards.len(),
+                        index.conditional_supports.len(),
+                        index.counts
+                    );
+                    assert_eq!(index.guards.len(), 1, "{name}");
+                    assert_eq!(index.conditional_supports.len(), 1, "{name}");
+                    assert_eq!(index.counts.compatibility_candidates, size, "{name}");
+                    assert!(index.ports.len() <= 2 * size + 8, "{name}");
+                    assert!(
+                        index.counts.support_candidates <= 24 * size,
+                        "{name}: {:?}",
+                        index.counts
+                    );
+                }
+                "receivers" => {
+                    let index = named_index("forward");
+                    eprintln!(
+                        "  forward: ports={} guarded_tests={} conditional_supports={} work={:?}",
+                        index.ports.len(),
+                        index.guards.len(),
+                        index.conditional_supports.len(),
+                        index.counts
+                    );
+                    assert_eq!(index.guards.len(), 1, "{name}");
+                    assert!(index.ports.len() <= 8, "{name}");
+                    assert!(
+                        index.ports.iter().all(|port| match port {
+                            super::EntryPort::Value { parameter, .. }
+                            | super::EntryPort::Wrapper(parameter)
+                            | super::EntryPort::Immediate(parameter)
+                            | super::EntryPort::Terminal(parameter) => *parameter == 0,
+                            super::EntryPort::Edge(..) => true,
+                        }),
+                        "{name}"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
+fn sparse_supports_couple_shared_control_without_merging_independent_diamonds() {
+    let source = r#"
+LeftHolder = |items {I32}|
+RightHolder = |items {I32}|
+
+shared_choice |left ~LeftHolder, right ~RightHolder, take Bool|:
+    if take:
+        ~left.items = {1}
+        ~right.items = {2}
+    ;
+;
+
+independent_choices |left ~LeftHolder, right ~RightHolder, take_left Bool, take_right Bool|:
+    if take_left:
+        ~left.items = {1}
+    ;
+    if take_right:
+        ~right.items = {2}
+    ;
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    for (name, expected_supports) in [("shared_choice", 1), ("independent_choices", 2)] {
+        let index = &indices[&named_function(&checker, name).id];
+        let cell_supports: std::collections::BTreeSet<_> = index
+            .ports
+            .iter()
+            .zip(&index.port_supports)
+            .filter_map(|(port, support)| {
+                matches!(port, super::EntryPort::Edge(..)).then_some(*support)
+            })
+            .collect();
+        assert_eq!(cell_supports, index.conditional_supports, "{name}");
+        assert_eq!(cell_supports.len(), expected_supports, "{name}");
+    }
+}
+
+#[test]
+fn sparse_collection_get_preserves_the_selected_tail_and_receiver() {
+    let source = r#"
+Item = |item {I32}, count I32|
+
+read_item |items {Item}| -> {I32}:
+    selected = items.get(0) catch:
+        return {0}
+    ;
+    return selected.item
+;
+
+read_count |items {Item}| -> I32:
+    selected = items.get(0) catch:
+        return 0
+    ;
+    return selected.count
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    for (name, field) in [("read_item", 0), ("read_count", 1)] {
+        let index = &indices[&named_function(&checker, name).id];
+        let path = |field| [CallField::Elem, CallField::Field(field)];
+        let value = |expected: &[CallField]| {
+            index.ports.iter().position(|port| {
+                matches!(port, super::EntryPort::Value { parameter: 0, path } if path.as_ref() == expected)
+            })
+        };
+        let selected = value(&path(field)).expect("selected member path");
+        let receiver = value(&[]).expect("receiver loan root");
+        assert!(value(&path(1 - field)).is_none());
+        assert_eq!(index.port_supports[selected], index.port_supports[receiver]);
+    }
+}
+
+#[test]
+fn sparse_ordinary_call_results_preserve_a_selected_path_through_actuals() {
+    let source = r#"
+Saved = |item I32, count I32|
+Envelope = |saved Saved|
+
+relay |saved Saved| -> Saved:
+    return saved
+;
+
+unwrap_saved |wrapped Envelope| -> Saved:
+    return wrapped.saved
+;
+
+read_item |saved Saved| -> I32:
+    forwarded = relay(saved)
+    return forwarded.item
+;
+
+read_count |wrapped Envelope| -> I32:
+    forwarded = unwrap_saved(wrapped)
+    return forwarded.count
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    let field = CallField::Field;
+    for (name, selected, sibling) in [
+        ("read_item", &[field(0)][..], &[field(1)][..]),
+        (
+            "read_count",
+            &[field(0), field(1)][..],
+            &[field(0), field(0)][..],
+        ),
+    ] {
+        let ports = &indexes[&named_function(&checker, name).id].ports;
+        let has_path = |expected: &[CallField]| {
+            ports.iter().any(|port| {
+            matches!(port, super::EntryPort::Value { parameter: 0, path } if path.as_ref() == expected)
+        })
+        };
+        assert!(has_path(selected), "{name}");
+        assert!(!has_path(sibling), "{name}");
+    }
+}
+
+#[test]
+fn sparse_selected_results_follow_fresh_constructor_fields_to_the_right_actual() {
+    let source = r#"
+Saved = |item I32, count I32|
+Envelope = |saved Saved, spare Saved|
+
+wrap |saved Saved, spare Saved| -> Envelope:
+    return Envelope(saved, spare)
+;
+
+relay |saved Saved, spare Saved| -> Envelope:
+    forwarded = wrap(saved, spare)
+    return forwarded
+;
+
+read_item |saved Saved, spare Saved| -> I32:
+    forwarded = wrap(saved, spare)
+    return forwarded.saved.item
+;
+
+read_count |saved Saved, spare Saved| -> I32:
+    forwarded = relay(saved, spare)
+    return forwarded.spare.count
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    for (name, parameter, selector) in [("read_item", 0, 0), ("read_count", 1, 1)] {
+        let function = named_function(&checker, name);
+        let projected: Vec<_> = indexes[&function.id]
+            .ports
+            .iter()
+            .filter_map(|port| match port {
+                super::EntryPort::Value { parameter, path } if !path.is_empty() => {
+                    Some((*parameter, path.as_ref()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            projected,
+            [(parameter, &[CallField::Field(selector)][..])],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn sparse_supports_do_not_assume_an_ordinary_call_reconverges() {
+    let source = r#"
+LeftHolder = |items {I32}|
+RightHolder = |items {I32}|
+
+pending || -> I32:
+    return pending()
+;
+
+choose |left ~LeftHolder, right ~RightHolder, take_left Bool, take_right Bool|:
+    if take_left:
+        ~left.items = {1}
+        result = pending()
+    ;
+    if take_right:
+        ~right.items = {2}
+    ;
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indexes = build_sparse_index_for_test(&mut checker).unwrap();
+    let function = named_function(&checker, "choose");
+    let snapshot = super::Snapshot::collect(&checker, function).unwrap();
+    assert!(
+        snapshot
+            .calls
+            .iter()
+            .any(|call| matches!(call.continuation, super::CallContinuation::Statement))
+    );
+    let index = &indexes[&function.id];
+    let edits: std::collections::BTreeSet<_> = index
+        .ports
+        .iter()
+        .zip(&index.port_supports)
+        .filter_map(|(port, &support)| {
+            matches!(port, super::EntryPort::Edge(..)).then_some(support)
+        })
+        .collect();
+    assert_eq!(edits, index.conditional_supports);
+    assert_eq!(edits.len(), 1);
+}
+
+#[test]
+fn sparse_recursive_revisits_count_snapshot_rows_only_once() {
+    let source = r#"
+recur |take Bool, value I32| -> I32:
+    if take:
+        return value
+    ;
+    return recur(true, value)
+;
+"#;
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
+    let indices = build_sparse_index_for_test(&mut checker).unwrap();
+    let function = named_function(&checker, "recur");
+    let snapshot = super::Snapshot::collect(&checker, function).unwrap();
+    let work = indices[&function.id].counts;
+    assert!(work.index_builds > 1);
+    assert_eq!(work.blocks, snapshot.counts.blocks);
+    assert_eq!(work.statements, snapshot.counts.statements);
+    assert_eq!(work.arguments, snapshot.counts.arguments);
+}
 
 fn with_results(source: &str, check: impl FnOnce(&dyn Fn(&str) -> FunctionId, &BorrowChecker<'_>)) {
-    let (ast, mut paths, mut strings) = parse_single_file_ast(source);
-    let packages = default_external_package_registry(&mut strings);
-    let hir = lower_hir(ast, &mut strings, &mut paths, &packages);
-    let mut checker = BorrowChecker::new(&hir, &hir.type_environment, &packages, &paths, &strings);
+    let fixture = ResultFixture::new(source);
+    let mut checker = fixture.checker();
     checker.build_public_call_summaries().unwrap();
-    let by_name = |name: &str| {
-        hir.functions
-            .iter()
-            .find(|function| {
-                hir.side_table
-                    .function_name_path(function.id)
-                    .and_then(|path| paths.component(path))
-                    .is_some_and(|component| strings.resolve(component) == name)
-            })
-            .unwrap()
-            .id
-    };
+    let by_name = |name: &str| named_function(&checker, name).id;
     check(&by_name, &checker);
+}
+
+#[test]
+fn cold_reverse_call_graph_includes_statement_invoke_and_never_edges() {
+    with_results(
+        r#"
+ordinary |value I32| -> I32:
+    return value
+;
+
+fallible |take Bool| -> I32, Error!:
+    if take:
+        return 1
+    ;
+    return! Error("no result")
+;
+
+stop || -> !:
+    assert(false, "stop")
+;
+
+forward |take Bool| -> !:
+    first = ordinary(0)
+    value = fallible(take) catch then first
+    stop()
+;
+"#,
+        |function, checker| {
+            let (_, reverse) = checker.cold_return_alias_indices().unwrap();
+            let caller = function("forward");
+            let caller_position = checker
+                .module
+                .functions
+                .iter()
+                .position(|function| function.id == caller)
+                .unwrap();
+            for callee in ["ordinary", "fallible", "stop"] {
+                assert_eq!(reverse[&function(callee)], [caller_position], "{callee}");
+            }
+            let function = &checker.module.functions[caller_position];
+            let blocks = checker.collect_reachable_blocks(function).unwrap();
+            let terminal = blocks
+                .iter()
+                .map(|&id| checker.block_by_id_or_error(id, caller).unwrap())
+                .find(|block| matches!(block.terminator, super::HirTerminator::NeverCall { .. }))
+                .expect("forward ends with a terminal call");
+            let mut successors = Vec::new();
+            super::for_each_terminator_target(&terminal.terminator, |target| {
+                successors.push(target)
+            });
+            assert!(successors.is_empty());
+            let snapshot = super::Snapshot::collect(checker, function).unwrap();
+            let cfg = super::SparseCfg::new(checker, &snapshot, &mut 0);
+            for call in &snapshot.calls {
+                let index = snapshot
+                    .blocks
+                    .iter()
+                    .position(|id| id.0 == call.site.0)
+                    .unwrap();
+                let successors = &cfg.successors[index];
+                assert!(successors.contains(&cfg.exit));
+                match call.continuation {
+                    super::CallContinuation::Invoke => assert_eq!(successors.len(), 3),
+                    super::CallContinuation::Never => assert_eq!(successors, &[cfg.exit]),
+                    super::CallContinuation::Statement => assert!(cfg.unproved_continuation[index]),
+                }
+            }
+        },
+    );
 }
 
 fn facts<'a>(checker: &'a BorrowChecker<'_>, function: FunctionId) -> &'a CallAllocationFacts {
@@ -607,13 +1129,12 @@ probe || -> I32:
                     _ => None,
                 })
                 .expect("probe calls unwrap_link");
-            let report = check_borrows(
+            let report = run_borrow_checker_with_types(
                 checker.module,
                 checker.type_environment,
                 checker.external_package_registry,
                 checker.path_fork,
                 checker.string_table,
-                None,
             )
             .expect("the caller can read the returned payload after the call");
             assert_eq!(

@@ -39,6 +39,30 @@ use crate::compiler_frontend::semantic_identity::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
+pub(in crate::compiler_frontend) fn statement_call_target(
+    statement: &HirStatementKind,
+) -> Option<&CallTarget> {
+    match statement {
+        HirStatementKind::Call { target, .. } => Some(target),
+        _ => None,
+    }
+}
+
+/// A terminal call contributes a dependency without contributing an edge to a
+/// continuation. Keep call discovery independent of successor enumeration.
+pub(in crate::compiler_frontend) fn terminator_call_target(
+    terminator: &HirTerminator,
+) -> Option<&CallTarget> {
+    match terminator {
+        HirTerminator::Invoke {
+            operation: HirFallibleOperation::Call { target, .. },
+            ..
+        }
+        | HirTerminator::NeverCall { target, .. } => Some(target),
+        _ => None,
+    }
+}
+
 /// The first reachable local function with a direct ProjectContext dependency.
 ///
 /// The function ID and direct provenance remain paired so boundary diagnostics identify the
@@ -814,10 +838,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         for statement in &block.statements {
             self.collect_runtime_feature_uses_from_statement(statement);
 
-            let HirStatementKind::Call { target, .. } = &statement.kind else {
-                continue;
-            };
-            self.collect_call_target(target, statement.span);
+            if let Some(target) = statement_call_target(&statement.kind) {
+                self.collect_call_target(target, statement.span);
+            }
         }
     }
 
@@ -1013,9 +1036,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         span: Option<SourceSpan>,
     ) {
         match operation {
-            HirFallibleOperation::Call { target, .. } => {
-                self.collect_call_target(target, span);
-            }
+            HirFallibleOperation::Call { .. } => {}
             HirFallibleOperation::MapOp { op, .. } => {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Operation(*op),
@@ -1074,6 +1095,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
     fn collect_runtime_feature_uses_from_terminator(&mut self, block: &HirBlock) {
         let fallback_span = self.index.hir.side_table.terminator_span(block.id).copied();
+        if let Some(target) = terminator_call_target(&block.terminator) {
+            let span = match &block.terminator {
+                HirTerminator::Invoke { span, .. } => span.or(fallback_span),
+                _ => fallback_span,
+            };
+            self.collect_call_target(target, span);
+        }
         let expression_collector =
             RuntimeFeatureUseCollector::new(self.index.hir, self.owner_function);
 
@@ -1111,11 +1139,8 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
             }
 
-            HirTerminator::NeverCall { target, args } => {
-                // A Never call is a normal call edge. Its evaluated arguments carry the same
-                // resource and project-context facts as an ordinary call, and the terminator has
-                // no result provenance because it produces no value.
-                self.collect_call_target(target, fallback_span);
+            HirTerminator::NeverCall { args, .. } => {
+                // The terminal site still evaluates its inputs, without a receiving value.
                 for value in self.index.hir.expressions.values(*args) {
                     expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
                 }

@@ -139,6 +139,13 @@ pub(crate) enum FrontendCounter {
     BorrowStatementFactCount,
     BorrowTerminatorFactCount,
     BorrowValueFactCount,
+    BorrowIndexEntryPorts,
+    BorrowIndexAccessIncidences,
+    BorrowIndexReachIncidences,
+    BorrowIndexSelectorIncidences,
+    BorrowIndexCompatibilityCandidates,
+    BorrowIndexSupportCandidates,
+    BorrowIndexReverseVisits,
     ConvergenceInitialBaseBorrowPasses,
     ConvergenceBaseBorrowPasses,
     ConvergenceGeneratedSidecarBorrowPasses,
@@ -411,6 +418,13 @@ mod detailed {
     static BORROW_STATEMENT_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_TERMINATOR_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_VALUE_FACT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_ENTRY_PORTS: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_ACCESS_INCIDENCES: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_REACH_INCIDENCES: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_SELECTOR_INCIDENCES: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_COMPATIBILITY_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_SUPPORT_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
+    static BORROW_INDEX_REVERSE_VISITS: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_INITIAL_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
@@ -668,6 +682,13 @@ mod detailed {
             FrontendCounter::BorrowStatementFactCount,
             FrontendCounter::BorrowTerminatorFactCount,
             FrontendCounter::BorrowValueFactCount,
+            FrontendCounter::BorrowIndexEntryPorts,
+            FrontendCounter::BorrowIndexAccessIncidences,
+            FrontendCounter::BorrowIndexReachIncidences,
+            FrontendCounter::BorrowIndexSelectorIncidences,
+            FrontendCounter::BorrowIndexCompatibilityCandidates,
+            FrontendCounter::BorrowIndexSupportCandidates,
+            FrontendCounter::BorrowIndexReverseVisits,
             FrontendCounter::ConvergenceInitialBaseBorrowPasses,
             FrontendCounter::ConvergenceBaseBorrowPasses,
             FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
@@ -956,6 +977,15 @@ mod detailed {
             FrontendCounter::BorrowTerminatorFactCount => &BORROW_TERMINATOR_FACT_COUNT,
 
             FrontendCounter::BorrowValueFactCount => &BORROW_VALUE_FACT_COUNT,
+            FrontendCounter::BorrowIndexEntryPorts => &BORROW_INDEX_ENTRY_PORTS,
+            FrontendCounter::BorrowIndexAccessIncidences => &BORROW_INDEX_ACCESS_INCIDENCES,
+            FrontendCounter::BorrowIndexReachIncidences => &BORROW_INDEX_REACH_INCIDENCES,
+            FrontendCounter::BorrowIndexSelectorIncidences => &BORROW_INDEX_SELECTOR_INCIDENCES,
+            FrontendCounter::BorrowIndexCompatibilityCandidates => {
+                &BORROW_INDEX_COMPATIBILITY_CANDIDATES
+            }
+            FrontendCounter::BorrowIndexSupportCandidates => &BORROW_INDEX_SUPPORT_CANDIDATES,
+            FrontendCounter::BorrowIndexReverseVisits => &BORROW_INDEX_REVERSE_VISITS,
 
             FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
                 &CONVERGENCE_INITIAL_BASE_BORROW_PASSES
@@ -1364,6 +1394,15 @@ mod detailed {
             FrontendCounter::BorrowTerminatorFactCount => "borrow_terminator_fact_count",
 
             FrontendCounter::BorrowValueFactCount => "borrow_value_fact_count",
+            FrontendCounter::BorrowIndexEntryPorts => "borrow_index_entry_ports",
+            FrontendCounter::BorrowIndexAccessIncidences => "borrow_index_access_incidences",
+            FrontendCounter::BorrowIndexReachIncidences => "borrow_index_reach_incidences",
+            FrontendCounter::BorrowIndexSelectorIncidences => "borrow_index_selector_incidences",
+            FrontendCounter::BorrowIndexCompatibilityCandidates => {
+                "borrow_index_compatibility_candidates"
+            }
+            FrontendCounter::BorrowIndexSupportCandidates => "borrow_index_support_candidates",
+            FrontendCounter::BorrowIndexReverseVisits => "borrow_index_reverse_visits",
 
             FrontendCounter::ConvergenceInitialBaseBorrowPasses => {
                 "convergence_initial_base_borrow_passes"

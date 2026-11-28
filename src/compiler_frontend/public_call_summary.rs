@@ -15,6 +15,9 @@ use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::structs::HirStruct;
 
+#[allow(dead_code)] // The payload is exercised directly before it replaces the live contract.
+pub(in crate::compiler_frontend) mod typed;
+
 /// The source-level access contract for one function parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicCallParameterAccess {
@@ -682,8 +685,8 @@ fn validate_parameter_index(
     })
 }
 
-fn strictly_sorted<T: Ord>(atoms: &[T]) -> bool {
-    atoms.windows(2).all(|pair| pair[0] < pair[1])
+fn strictly_sorted<T: Ord>(atoms: impl IntoIterator<Item = T>) -> bool {
+    atoms.into_iter().is_sorted_by(|left, right| left < right)
 }
 
 /// A declaration-side walk can reach a nominal whose provider layout has not been closed in yet.

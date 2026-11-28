@@ -4,10 +4,13 @@
 //! WHY: external package access policy and user-function signature summaries are normalized once
 //! here so statement transfer can stay focused on state transitions.
 
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+use super::{
+    BorrowDiagnostics, ExternalPackageRegistry, FunctionId, FxHashMap, GeneratedFunctionIdentity,
+    ModulePrivateExecutableIdentity, OriginFunctionId, PublicCallSummary,
+};
+use crate::compiler_frontend::analysis::borrow_checker::{BorrowCheckError, BorrowChecker};
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionId, ExternalReturnAlias,
-    ExternalReturnSlot,
+    CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalReturnAlias, ExternalReturnSlot,
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess, PublicCallParameterSummary,
@@ -42,100 +45,136 @@ pub(super) enum ArgEffect {
     MayConsumeMutable,
 }
 
+impl ArgEffect {
+    pub(super) fn may_write(self) -> bool {
+        matches!(self, Self::MutableBorrow | Self::MayConsumeMutable)
+    }
+}
+
 pub(super) fn resolve_call_semantics<'a>(
     context: &BorrowTransferContext<'a>,
     target: &CallTarget,
     arg_len: usize,
 ) -> Result<CallSemantics<'a>, BorrowCheckError> {
-    let summary = match target {
-        CallTarget::Local(id) => context.public_call_summaries.get(id),
-        CallTarget::CrossModule(origin) => context.imported_call_summaries.get(origin),
-        CallTarget::ModulePrivate(identity) => context.module_private_call_summaries.get(identity),
-        CallTarget::Generated(identity) => context.generated_call_summaries.get(identity.as_ref()),
-        CallTarget::External(id) => {
-            let host = resolve_host_definition(context, *id)?;
+    let call = CallSignatures {
+        registry: context.external_package_registry,
+        local: context.public_call_summaries,
+        imported: context.imported_call_summaries,
+        private: context.module_private_call_summaries,
+        generated: context.generated_call_summaries,
+    }
+    .resolve(target, arg_len, &context.diagnostics)?;
+    Ok(CallSemantics {
+        arg_effects: (0..arg_len).map(|index| call.arg_effect(index)).collect(),
+        returns: call.returns(),
+    })
+}
+
+pub(in super::super) struct CallSignatures<'a> {
+    registry: &'a ExternalPackageRegistry,
+    local: &'a FxHashMap<FunctionId, PublicCallSummary>,
+    imported: &'a FxHashMap<OriginFunctionId, PublicCallSummary>,
+    private: &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
+    generated: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+}
+
+impl BorrowChecker<'_> {
+    pub(in super::super) fn call_signatures(&self) -> CallSignatures<'_> {
+        CallSignatures {
+            registry: self.external_package_registry,
+            local: &self.public_call_summaries,
+            imported: &self.module.imported_call_summaries,
+            private: &self.module.module_private_call_summaries,
+            generated: &self.module.generated_call_summaries,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(in super::super) enum BorrowedCall<'a> {
+    Host(&'a ExternalFunctionDef),
+    User(&'a PublicCallSummary),
+}
+
+impl<'a> CallSignatures<'a> {
+    pub(in super::super) fn summary(&self, target: &CallTarget) -> Option<&'a PublicCallSummary> {
+        match target {
+            CallTarget::Local(id) => self.local.get(id),
+            CallTarget::CrossModule(origin) => self.imported.get(origin),
+            CallTarget::ModulePrivate(identity) => self.private.get(identity),
+            CallTarget::Generated(identity) => self.generated.get(identity.as_ref()),
+            CallTarget::External(_) => None,
+        }
+    }
+
+    pub(in super::super) fn resolve(
+        &self,
+        target: &CallTarget,
+        arg_len: usize,
+        diagnostics: &BorrowDiagnostics<'_>,
+    ) -> Result<BorrowedCall<'a>, BorrowCheckError> {
+        if let CallTarget::External(id) = target {
+            let host = self.registry.get_function_by_id(*id).ok_or_else(|| {
+                diagnostics.internal_error(format!(
+                    "Borrow checker could not resolve host call target '{}'",
+                    id.name(),
+                ))
+            })?;
             if host.parameters.len() != arg_len {
-                return Err(context.diagnostics.internal_error(format!(
+                return Err(diagnostics.internal_error(format!(
                     "Borrow checker found argument count mismatch for host function '{}': expected {}, got {}",
                     host.name, host.parameters.len(), arg_len,
                 )));
             }
-            let slots = host.hir_return_sources();
-            for slot in slots {
-                if let ExternalReturnAlias::AliasArgs(indices) = &slot.alias {
-                    validate_alias_indices(context, indices, arg_len, &host.name)?;
+            for slot in host.hir_return_sources() {
+                if let ExternalReturnAlias::AliasArgs(indices) = &slot.alias
+                    && let Some(index) = indices.iter().find(|&&index| index >= arg_len)
+                {
+                    return Err(diagnostics.internal_error(format!(
+                        "Borrow checker found out-of-range return-alias index {} for {} with {} argument(s)",
+                        index, host.name, arg_len,
+                    )));
                 }
             }
-            return Ok(CallSemantics {
-                arg_effects: host
-                    .parameters
-                    .iter()
-                    .map(|param| match param.access_kind {
-                        ExternalAccessKind::Shared => ArgEffect::SharedBorrow,
-                        ExternalAccessKind::Mutable => ArgEffect::MutableBorrow,
-                    })
-                    .collect(),
-                returns: CallReturns::External(slots),
-            });
+            return Ok(BorrowedCall::Host(host));
         }
-    };
-    let Some(summary) = summary else {
-        return Err(context.diagnostics.internal_error(format!(
-            "Borrow checker is missing the public call summary for {target:?}"
-        )));
-    };
-    if summary.parameters.len() != arg_len {
-        return Err(context.diagnostics.internal_error(format!(
-            "Borrow checker found argument count mismatch for {target:?}: expected {}, got {}",
-            summary.parameters.len(),
-            arg_len,
-        )));
+        let summary = self.summary(target).ok_or_else(|| {
+            diagnostics.internal_error(format!(
+                "Borrow checker is missing the public call summary for {target:?}"
+            ))
+        })?;
+        if summary.parameters.len() != arg_len {
+            return Err(diagnostics.internal_error(format!(
+                "Borrow checker found argument count mismatch for {target:?}: expected {}, got {}",
+                summary.parameters.len(),
+                arg_len,
+            )));
+        }
+        Ok(BorrowedCall::User(summary))
     }
-    Ok(CallSemantics {
-        arg_effects: summary
-            .parameters
-            .iter()
-            .map(parameter_arg_effect)
-            .collect(),
-        returns: CallReturns::Summary(&summary.return_alias),
-    })
 }
 
-fn resolve_host_definition<'a>(
-    context: &BorrowTransferContext<'a>,
-    id: ExternalFunctionId,
-) -> Result<&'a ExternalFunctionDef, BorrowCheckError> {
-    // Host metadata is keyed by the stable ExternalFunctionId emitted into HIR.
-    // Borrow checking should not silently reinterpret a missing symbol through a
-    // second fallback path because that can hide registry drift.
-    if let Some(definition) = context.external_package_registry.get_function_by_id(id) {
-        return Ok(definition);
-    }
-
-    Err(context.diagnostics.internal_error(format!(
-        "Borrow checker could not resolve host call target '{}'",
-        id.name()
-    )))
-}
-
-fn validate_alias_indices(
-    context: &BorrowTransferContext<'_>,
-    indices: &[usize],
-    arg_len: usize,
-    callee_name: &str,
-) -> Result<(), BorrowCheckError> {
-    for index in indices {
-        if *index < arg_len {
-            continue;
+impl<'a> BorrowedCall<'a> {
+    fn arg_effect(self, index: usize) -> ArgEffect {
+        match self {
+            Self::Host(host) => match host.parameters[index].access_kind {
+                ExternalAccessKind::Shared => ArgEffect::SharedBorrow,
+                ExternalAccessKind::Mutable => ArgEffect::MutableBorrow,
+            },
+            Self::User(summary) => parameter_arg_effect(&summary.parameters[index]),
         }
-
-        return Err(context.diagnostics.internal_error(format!(
-            "Borrow checker found out-of-range return-alias index {} for {} with {} argument(s)",
-            index, callee_name, arg_len
-        )));
     }
 
-    Ok(())
+    pub(in super::super) fn is_mutable(self, index: usize) -> bool {
+        self.arg_effect(index).may_write()
+    }
+
+    pub(in super::super) fn returns(self) -> CallReturns<'a> {
+        match self {
+            Self::Host(host) => CallReturns::External(host.hir_return_sources()),
+            Self::User(summary) => CallReturns::Summary(&summary.return_alias),
+        }
+    }
 }
 
 fn parameter_arg_effect(parameter: &PublicCallParameterSummary) -> ArgEffect {

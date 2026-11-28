@@ -34,7 +34,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-mod conflicts;
+pub(in super::super) mod conflicts;
 mod layer;
 mod move_decision;
 mod statement;
@@ -49,6 +49,7 @@ use layer::{
     stored_values,
 };
 use move_decision::{MoveDecision, classify_move_decision};
+pub(in super::super) use statement::call_member_result;
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
 

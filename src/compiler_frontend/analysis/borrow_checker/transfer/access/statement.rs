@@ -605,10 +605,7 @@ pub(super) struct CallArgumentTransfer {
 
 impl CallArgumentTransfer {
     pub(super) fn may_write(&self) -> bool {
-        matches!(
-            self.effect,
-            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
-        )
+        self.effect.may_write()
     }
 }
 
@@ -630,6 +627,16 @@ enum CallStorage {
     },
     /// A builtin returns one of its receiver's elements.
     Get,
+}
+
+pub(in crate::compiler_frontend::analysis::borrow_checker) fn call_member_result(
+    target: &CallTarget,
+) -> Option<usize> {
+    matches!(
+        CallStorage::for_target(target),
+        CallStorage::Get | CallStorage::Remove { .. }
+    )
+    .then_some(0)
 }
 
 impl CallStorage {
@@ -709,12 +716,8 @@ fn transfer_call_arguments_and_result(
     result_transfer: CallResultTransfer,
     storage: CallStorage,
 ) -> Result<(), BorrowCheckError> {
-    if args.iter().any(|arg| {
-        matches!(
-            arg.effect,
-            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
-        )
-    }) {
+    let any_mutable = args.iter().any(CallArgumentTransfer::may_write);
+    if any_mutable {
         input.stats.mutable_call_sites += 1;
     }
 
@@ -857,14 +860,7 @@ fn transfer_call_arguments_and_result(
     }
     // Call loans end before any result destination is written.
     input.tracker.clear_reservations();
-    if storage.reaches_children()
-        && args.iter().any(|arg| {
-            matches!(
-                arg.effect,
-                ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
-            )
-        })
-    {
+    if storage.reaches_children() && any_mutable {
         input.state.invalidate_detachments();
     }
 
@@ -1163,10 +1159,7 @@ fn plan_call_actual(
         stats: input.stats,
         value_fact_buffer: input.value_fact_buffer,
     };
-    let mutable = matches!(
-        arg.effect,
-        ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
-    );
+    let mutable = arg.may_write();
     let receiver = index == 0
         && !matches!(
             storage,

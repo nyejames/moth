@@ -37,6 +37,9 @@ use std::collections::VecDeque;
 #[path = "return_alias.rs"]
 mod return_alias;
 
+type ReturnAliasIndices = Vec<Option<return_alias::IndexedFunction>>;
+type ReturnAliasCallers = FxHashMap<FunctionId, Vec<usize>>;
+
 /// Per-block read liveness and direct-assignment facts for one function.
 ///
 /// Read liveness kills the incoming value at a definition so rebound locals do not stay live
@@ -182,8 +185,19 @@ impl<'a> BorrowChecker<'a> {
         self.public_call_summaries =
             Self::seed_public_call_summaries(self.module, &self.diagnostics)?;
 
+        let (indices, callers) = self.cold_return_alias_indices()?;
+        self.stabilize_return_alias_summaries(
+            indices,
+            &callers,
+            (0..self.module.functions.len()).collect(),
+        )
+    }
+
+    fn cold_return_alias_indices(
+        &self,
+    ) -> Result<(ReturnAliasIndices, ReturnAliasCallers), BorrowCheckError> {
         let mut indices = Vec::with_capacity(self.module.functions.len());
-        let mut callers = FxHashMap::<FunctionId, Vec<usize>>::default();
+        let mut callers = ReturnAliasCallers::default();
         for (position, function) in self.module.functions.iter().enumerate() {
             let index = return_alias::IndexedFunction::new(self, function, true)?;
             for &callee in &index.callees {
@@ -191,11 +205,7 @@ impl<'a> BorrowChecker<'a> {
             }
             indices.push(Some(index));
         }
-        self.stabilize_return_alias_summaries(
-            indices,
-            &callers,
-            (0..self.module.functions.len()).collect(),
-        )
+        Ok((indices, callers))
     }
 
     pub(super) fn refresh_return_alias_summaries(
@@ -232,8 +242,8 @@ impl<'a> BorrowChecker<'a> {
 
     fn stabilize_return_alias_summaries(
         &mut self,
-        mut indices: Vec<Option<return_alias::IndexedFunction>>,
-        callers: &FxHashMap<FunctionId, Vec<usize>>,
+        mut indices: ReturnAliasIndices,
+        callers: &ReturnAliasCallers,
         mut queue: VecDeque<usize>,
     ) -> Result<(), BorrowCheckError> {
         let mut queued = vec![false; indices.len()];

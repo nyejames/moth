@@ -10,10 +10,10 @@
 //!      that never stores one.
 
 use super::{
-    AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, CapturedValue,
-    CellId, Coverage, DependencySet, EntryFamilies, Init, LocalState, OWN_SLOT, OrderKey, Origin,
-    Replacement, RootSet, SmallSet, StoreReceipt, TypedStore, TypedWrite, ValueAlt,
-    ValueAlternatives, ValueKind, WrapperAge, WrapperId, remap_invoke_capture,
+    AddressSet, BindingAlt, BindingRow, BindingSpec, BindingTarget, BorrowState, BoundaryBinding,
+    CapturedValue, CellId, Coverage, DependencySet, EntryFamilies, Init, LocalState, OWN_SLOT,
+    OrderKey, Origin, Replacement, RootSet, SmallSet, StoreReceipt, TypedStore, TypedWrite,
+    ValueAlt, ValueAlternatives, ValueKind, WrapperAge, WrapperId, remap_invoke_capture,
     remap_value_alternatives,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
@@ -168,15 +168,15 @@ impl AllocTable {
 
 /// One explicit holder edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Edge {
+pub(in super::super) struct Edge {
     holder: AllocId,
-    key: FieldKey,
+    pub key: FieldKey,
     held: AllocId,
     /// Whether a mutation may pass through this edge. A value stored from an immutable binding
     /// keeps that binding's permission.
     writable: bool,
     /// Whether this group holds this allocation at most once.
-    single: bool,
+    pub single: bool,
 }
 
 impl Edge {
@@ -184,15 +184,16 @@ impl Edge {
         (self.holder, self.key, self.held)
     }
 
-    fn value_alternative(&self) -> ValueAlt {
-        ValueAlt::plain(if self.held == AllocId::EMPTY {
-            ValueKind::Absent
-        } else {
-            ValueKind::Allocation(StoredValue {
-                id: self.held,
-                writable: self.writable,
-            })
-        })
+    pub(in super::super) fn value_alternative(&self) -> ValueAlt {
+        ValueAlt::plain(stored_value_kind(self.held, self.writable))
+    }
+}
+
+fn stored_value_kind(id: AllocId, writable: bool) -> ValueKind {
+    if id == AllocId::EMPTY {
+        ValueKind::Absent
+    } else {
+        ValueKind::Allocation(StoredValue { id, writable })
     }
 }
 
@@ -1323,6 +1324,40 @@ impl BorrowState {
             .map(|index| &self.layer.wrappers[index])
     }
 
+    fn current_wrapper_init(&self, wrapper: WrapperId) -> Option<Init> {
+        (wrapper.age == WrapperAge::Current).then(|| self.locals[wrapper.local].init)
+    }
+
+    fn wrapper_coverage(init: Option<Init>, explicit: Option<Coverage>) -> Coverage {
+        match (init, explicit) {
+            (Some(Init::Yes), None | Some(Coverage::Complete))
+            | (None, Some(Coverage::Complete)) => Coverage::Complete,
+            _ => Coverage::Partial,
+        }
+    }
+
+    fn implicit_binding_alternatives(init: Option<Init>) -> &'static [BindingAlt] {
+        if matches!(init, Some(Init::Yes | Init::Maybe)) {
+            &[OWN_SLOT]
+        } else {
+            &[]
+        }
+    }
+
+    #[allow(dead_code)] // Boundary export also visits wrappers no longer named by a local.
+    pub(in super::super) fn boundary_binding(&self, wrapper: WrapperId) -> BoundaryBinding<'_> {
+        let row = self.binding_row(wrapper);
+        let init = self.current_wrapper_init(wrapper);
+        BoundaryBinding {
+            alternatives: row.map_or_else(
+                || Self::implicit_binding_alternatives(init),
+                |row| row.alts.as_slice(),
+            ),
+            coverage: Self::wrapper_coverage(init, row.map(|row| row.coverage)),
+            routes: row.map_or(&[], |row| row.routes.as_slice()),
+        }
+    }
+
     pub(in super::super) fn has_wrapped_binding(&self, local: usize) -> bool {
         self.binding_row(WrapperId::current(local)).is_some()
     }
@@ -1622,20 +1657,13 @@ impl BorrowState {
         aliases_only: bool,
         readonly_source: Option<usize>,
     ) -> ResolvedCells {
-        let init = if wrapper.age == WrapperAge::Current {
-            self.locals[wrapper.local].init
-        } else {
-            Init::No
-        };
+        let init = self.current_wrapper_init(wrapper);
         ResolvedCells {
             addresses: {
                 let mut addresses = AddressSet::from_cells(
-                    (init != Init::No && !aliases_only).then_some(CellId::Slot(wrapper)),
-                    if init == Init::Yes {
-                        Coverage::Complete
-                    } else {
-                        Coverage::Partial
-                    },
+                    (!aliases_only && !Self::implicit_binding_alternatives(init).is_empty())
+                        .then_some(CellId::Slot(wrapper)),
+                    Self::wrapper_coverage(init, None),
                 )
                 .with_singleton_proof();
                 // A missing Current binding is uninitialised, not an unmodelled address.
@@ -1656,8 +1684,6 @@ impl BorrowState {
         readonly_source: Option<usize>,
     ) -> ResolutionFrame<'a> {
         let wrapper = row.wrapper;
-        let partial = row.coverage == Coverage::Partial
-            || wrapper.age == WrapperAge::Current && self.locals[wrapper.local].init != Init::Yes;
         ResolutionFrame {
             wrapper,
             alternatives: row.alts.as_slice().iter(),
@@ -1665,11 +1691,10 @@ impl BorrowState {
                 addresses: {
                     let mut addresses = AddressSet::from_cells(
                         [],
-                        if partial {
-                            Coverage::Partial
-                        } else {
-                            Coverage::Complete
-                        },
+                        Self::wrapper_coverage(
+                            self.current_wrapper_init(wrapper),
+                            Some(row.coverage),
+                        ),
                     );
                     addresses.all_candidates_known = row.coverage == Coverage::Complete;
                     addresses.routes.clone_from(&row.routes);
@@ -3282,6 +3307,67 @@ impl BorrowState {
         self.layer.contents(cell)
     }
 
+    /// Preserve explicit absence even when the same slot may hold an allocation,
+    /// without resolving an implicit root in the interner.
+    #[allow(dead_code)]
+    pub(in super::super) fn retained_slot_payload(
+        &self,
+        slot: WrapperId,
+    ) -> Option<impl Iterator<Item = ValueKind> + '_> {
+        let payload = self.layer.bound_of(slot);
+        (!payload.is_empty()).then(|| {
+            payload
+                .iter()
+                .map(|&(_, id, readonly)| stored_value_kind(id, !readonly))
+        })
+    }
+
+    /// Raw explicit edge groups preserve the distinction between an absent
+    /// group and the empty sentinel. They never intern a lazy child.
+    #[allow(dead_code)] // The boundary quotient walks just the reached holders.
+    pub(in super::super) fn retained_edge_groups(
+        &self,
+        holder: AllocId,
+    ) -> impl Iterator<Item = &[Edge]> {
+        let start = self
+            .layer
+            .edges
+            .partition_point(|edge| edge.holder < holder);
+        let end = start + self.layer.edges[start..].partition_point(|edge| edge.holder == holder);
+        self.layer.edges[start..end].chunk_by(|left, right| left.key == right.key)
+    }
+
+    /// The exceptional rows include dependency-carrying scalars without an
+    /// allocation edge. Export needs both projections of the same cell.
+    #[allow(dead_code)]
+    pub(in super::super) fn retained_projected_values(
+        &self,
+        holder: AllocId,
+    ) -> impl Iterator<Item = (FieldKey, &[ValueAlt])> {
+        let is_before = |(cell, _): &(CellId, ValueAlternatives)| match cell {
+            CellId::Slot(_) => true,
+            CellId::Projected(owner, _) => *owner < holder,
+        };
+        let start = self.layer.contents.partition_point(is_before);
+        self.layer.contents[start..]
+            .iter()
+            .map_while(move |(cell, values)| match cell {
+                CellId::Projected(owner, key) if *owner == holder => {
+                    Some((*key, values.as_slice()))
+                }
+                _ => None,
+            })
+    }
+
+    #[allow(dead_code)]
+    pub(in super::super) fn retained_projection_views(
+        &self,
+        view: AllocId,
+        selector: FieldKey,
+    ) -> impl Iterator<Item = AllocId> + '_ {
+        self.layer.sharing.projections(view, selector)
+    }
+
     pub(in super::super) fn retained_value_routes(
         &self,
         owner: WrapperId,
@@ -4536,6 +4622,81 @@ mod tests {
         state.publish_store(&write, 1, None);
         assert_eq!(state.layer.wrappers.capacity(), 0);
         assert_eq!(state.layer.bound.capacity(), 0);
+        assert!(state.layer.table.borrow().infos.is_empty());
+    }
+
+    #[test]
+    fn boundary_observes_the_immediate_link_and_the_resolved_cell_separately() {
+        let mut state = BorrowState::new_uninitialized(3);
+        for local in 0..3 {
+            state.rebind_local(local, LocalState::slot(3), 0);
+        }
+        let source = WrapperId::current(0);
+        let intermediate = WrapperId::current(1);
+        let alias = WrapperId::current(2);
+        state.install_binding_spec(
+            1,
+            BindingSpec::Link {
+                source,
+                writable: true,
+            },
+        );
+        state.install_binding_spec(
+            2,
+            BindingSpec::Link {
+                source: intermediate,
+                writable: false,
+            },
+        );
+
+        let binding = state.boundary_binding(alias);
+        assert_eq!(binding.coverage, Coverage::Complete);
+        assert_eq!(
+            binding.alternatives[0].target,
+            BindingTarget::Link(intermediate)
+        );
+        assert!(!binding.alternatives[0].writable);
+        assert_eq!(state.boundary_binding(source).alternatives, &[OWN_SLOT]);
+        let place = state.resolve_place_path(2, &[true; 3], []);
+        assert_eq!(place.address.definite(), Some(CellId::Slot(source)));
+        assert!(place.content.is_none());
+        assert_eq!(place.permission.wrapper_readonly_source, Some(2));
+        assert!(state.layer.table.borrow().infos.is_empty());
+    }
+
+    #[test]
+    fn boundary_keeps_implicit_and_explicit_slot_alternatives_distinct() {
+        let mut state = BorrowState::new_uninitialized(2);
+        let slot = WrapperId::current(0);
+        assert!(state.boundary_binding(slot).alternatives.is_empty());
+        assert_eq!(state.boundary_binding(slot).coverage, Coverage::Partial);
+        state.rebind_local(0, LocalState::slot(2), 0);
+        assert_eq!(state.boundary_binding(slot).coverage, Coverage::Complete);
+        assert!(state.retained_slot_payload(slot).is_none());
+
+        state.layer.bound.push((slot, AllocId::EMPTY, false));
+        assert_eq!(
+            state
+                .retained_slot_payload(slot)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [ValueKind::Absent],
+        );
+        let allocation = AllocId(0);
+        state.layer.bound.insert(0, (slot, allocation, true));
+        assert_eq!(
+            state
+                .retained_slot_payload(slot)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [
+                ValueKind::Allocation(StoredValue {
+                    id: allocation,
+                    writable: false
+                }),
+                ValueKind::Absent
+            ],
+        );
         assert!(state.layer.table.borrow().infos.is_empty());
     }
 }

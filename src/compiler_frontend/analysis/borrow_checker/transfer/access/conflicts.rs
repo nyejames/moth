@@ -24,7 +24,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use std::cell::OnceCell;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Overlap {
+pub(in super::super::super) enum Overlap {
     No,
     Yes,
     Unknown,
@@ -182,7 +182,11 @@ fn graph_overlap(state: &BorrowState, a: GraphFootprint<'_>, b: GraphFootprint<'
     Overlap::No
 }
 
-pub(super) fn overlap(state: &BorrowState, a: &AccessFootprint, b: &AccessFootprint) -> Overlap {
+pub(in super::super::super) fn overlap(
+    state: &BorrowState,
+    a: &AccessFootprint,
+    b: &AccessFootprint,
+) -> Overlap {
     overlap_with_detachment(state, a, b, false)
 }
 
@@ -241,7 +245,10 @@ fn overlap_with_detachment(
     result
 }
 
-pub(super) fn footprint(resolved: &PlaceResolution, usage: PlaceUse) -> AccessFootprint {
+pub(in super::super::super) fn footprint(
+    resolved: &PlaceResolution,
+    usage: PlaceUse,
+) -> AccessFootprint {
     AccessFootprint {
         address: resolved.address.clone(),
         traversal: resolved.traversal.clone(),

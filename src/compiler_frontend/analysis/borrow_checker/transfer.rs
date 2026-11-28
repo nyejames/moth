@@ -6,8 +6,8 @@
 //! WHY: transfer owns borrow-rule effects and side-table fact emission; it must
 //! not mutate HIR or perform backend ownership lowering.
 
-mod access;
-mod call_semantics;
+pub(super) mod access;
+pub(super) mod call_semantics;
 pub(super) mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
@@ -36,6 +36,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use rustc_hash::FxHashMap;
 
+pub(super) use access::call_member_result;
 use access::{
     AggregateTransferContext, transfer_aggregate_expression_ownership, transfer_statement,
     transfer_terminator,

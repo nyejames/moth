@@ -6,12 +6,576 @@ use super::super::public_call_summary::{
     PublicCallSummaryTransition, PublicCallTransferEffect, validate_public_call_allocation_layout,
     validate_public_call_summary_transition,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::hir::ids::{FieldId, StructId};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::symbols::path_interner::PathId;
+
+use super::super::public_call_summary::typed::{
+    BindingPost, CellPort, CellPost, Component, Coverage, Derivation, EntryPort, ExportPort,
+    Footprint, Guard, IdentityKind, Lane, ObjectRef, OutputPort, PathAccess, Permission, PortId,
+    Post, Predicate, Product, ReachBound, ReachKind, ReceiverDependency, RetainedRoute, Role,
+    ScalarSource, ScalarSourceBound, Shape, StorageKind, SupportId, TypedCallAllocationFacts,
+    ValueRef, ValueSource,
+};
+
+fn scalar(source: ScalarSource) -> ValueRef {
+    ValueRef {
+        source: ValueSource::Scalar(source),
+        access: PathAccess {
+            restriction: None,
+            derived_from: None,
+        },
+        dependencies: vec![],
+    }
+}
+
+fn binary_effect(index: u32) -> Post {
+    Post {
+        cells: vec![(
+            CellPort::Terminal(PortId(index)),
+            CellPost::Replace(vec![Some(scalar(ScalarSource::Independent))]),
+        )],
+        ..Post::default()
+    }
+}
+
+fn collecting_product(worlds: u8) -> Lane {
+    if worlds == 0 {
+        return Lane::Bottom;
+    }
+    let components = (0..2)
+        .map(|index| Component {
+            support: SupportId(index),
+            alternatives: (0..4)
+                .filter(|world| worlds & (1 << world) != 0)
+                .map(|world| {
+                    if world & (1 << index) == 0 {
+                        Post::default()
+                    } else {
+                        binary_effect(index)
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    Lane::Returning(Product::new(components).unwrap())
+}
+
+#[test]
+fn typed_product_normalisation_is_closed_under_incremental_delivery() {
+    for left in 0..16 {
+        for right in 0..16 {
+            let expected = collecting_product(left | right);
+            assert_eq!(
+                collecting_product(left).union(&collecting_product(right)),
+                expected
+            );
+            assert_eq!(
+                collecting_product(right).union(&collecting_product(left)),
+                expected
+            );
+            for cut in 0..=4 {
+                let low = (1 << cut) - 1;
+                assert_eq!(
+                    collecting_product(left & low)
+                        .union(&collecting_product(right))
+                        .union(&collecting_product(left & !low)),
+                    expected
+                );
+            }
+        }
+    }
+    let independent = Product::new(
+        (0..24)
+            .map(|index| Component {
+                support: SupportId(index),
+                alternatives: vec![Post::default(), binary_effect(index)],
+            })
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(
+        independent
+            .components()
+            .iter()
+            .map(|component| component.alternatives.len())
+            .sum::<usize>(),
+        48
+    );
+}
+
+#[test]
+fn typed_guard_rejects_inconsistent_equations_and_keeps_broad_preserve() {
+    let equal = |a, b| Predicate::Equal(IdentityKind::Allocation, PortId(a), PortId(b));
+    let ab = equal(0, 1);
+    let ac = equal(0, 2);
+    let bc = equal(1, 2);
+    assert!(Guard::new([(ab, true), (bc, true), (ac, false)]).is_none());
+    assert!(
+        Guard::new([
+            (Predicate::Role(PortId(0), Role::WholeAlias), true),
+            (Predicate::Role(PortId(0), Role::ProjectedAlias), true),
+        ])
+        .is_none()
+    );
+
+    let written = Product::new(vec![Component {
+        support: SupportId(0),
+        alternatives: vec![binary_effect(0)],
+    }])
+    .unwrap();
+    let effect = Lane::guarded(Guard::new([(ab, true)]).unwrap(), written);
+    let preserve = Lane::Returning(Product::default());
+    let joined = preserve.union(&effect);
+    assert_eq!(joined, effect.union(&preserve));
+    assert_eq!(
+        joined.for_presentation(|_| false),
+        Some(&Product::default())
+    );
+    assert_eq!(
+        joined.for_presentation(|_| true).unwrap().components()[0].alternatives,
+        [Post::default(), binary_effect(0)]
+    );
+}
+
+#[test]
+fn typed_shape_requires_explicit_scalar_results_and_monotone_executed_facts() {
+    let ports = [EntryPort::Value {
+        parameter: 0,
+        path: Box::new([]),
+    }];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Shared],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(1),
+        error_slot: false,
+    };
+    let returning = |source| TypedCallAllocationFacts {
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    results: vec![(0, scalar(source))],
+                    ..Post::default()
+                }],
+            }])
+            .unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    let input = returning(ScalarSource::EntryValue(PortId(0)));
+    let independent = returning(ScalarSource::Independent);
+    let both = TypedCallAllocationFacts {
+        success: input.success.union(&independent.success),
+        may_retain: vec![0],
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(input.validate_transition(&both, &shape).is_ok());
+    assert!(both.validate_transition(&input, &shape).is_err());
+    assert!(
+        returning(ScalarSource::EntryValue(PortId(1)))
+            .validate(&shape)
+            .is_err()
+    );
+    assert!(
+        returning(ScalarSource::Unresolved(ScalarSourceBound::Values(vec![])))
+            .validate(&shape)
+            .is_err()
+    );
+    assert!(
+        returning(ScalarSource::Unresolved(ScalarSourceBound::Values(vec![
+            PortId(0)
+        ])))
+        .validate(&shape)
+        .is_ok()
+    );
+    assert!(
+        TypedCallAllocationFacts {
+            success: Lane::Returning(Product::default()),
+            ..TypedCallAllocationFacts::default()
+        }
+        .validate(&shape)
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_unknown_and_preserve_rows_do_not_absorb_each_other() {
+    let prefix = binary_effect(0);
+    let mut unknown = prefix.clone();
+    unknown.coverage = Coverage::Unresolved(Footprint::Locations(vec![OutputPort::Cell(
+        CellPort::Terminal(PortId(1)),
+    )]));
+    let lane = |post| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        )
+    };
+    let preserve = lane(Post::default());
+    let known = lane(prefix.clone());
+    let incomplete = lane(unknown.clone());
+    let joined = preserve.union(&known).union(&incomplete);
+    assert_eq!(joined, incomplete.union(&known).union(&preserve));
+    assert_eq!(
+        joined
+            .for_presentation(|_| unreachable!())
+            .unwrap()
+            .components()[0]
+            .alternatives,
+        [Post::default(), prefix, unknown],
+    );
+}
+
+#[test]
+fn typed_guard_role_partitions_have_the_same_normal_form() {
+    let port = PortId(0);
+    let lane = |role, truth| {
+        Lane::guarded(
+            Guard::new([(Predicate::Role(port, role), truth)]).unwrap(),
+            Product::default(),
+        )
+    };
+    let not_slot = lane(Role::Slot, false);
+    let whole = lane(Role::WholeAlias, true);
+    let projected = lane(Role::ProjectedAlias, true);
+    assert_eq!(not_slot, whole.union(&projected));
+    assert_eq!(not_slot, projected.union(&whole));
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[EntryPort::Wrapper(0)],
+        support_count: 0,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let facts = |success| TypedCallAllocationFacts {
+        success,
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(
+        facts(not_slot)
+            .validate_transition(&facts(whole.union(&projected)), &shape)
+            .is_ok()
+    );
+}
+
+#[test]
+fn typed_equality_guard_partitions_have_the_same_normal_form() {
+    let equal = |a, b| Predicate::Equal(IdentityKind::Cell, PortId(a), PortId(b));
+    let ab = equal(0, 1);
+    let bc = equal(1, 2);
+    let lane = |literals| Lane::guarded(Guard::new(literals).unwrap(), Product::default());
+    let direct = lane(vec![(bc, true)]);
+    let equal = lane(vec![(ab, true), (bc, true)]);
+    let distinct = lane(vec![(ab, false), (bc, true)]);
+    assert_eq!(direct, equal.union(&distinct));
+    assert_eq!(direct, distinct.union(&equal));
+    assert_ne!(direct, equal);
+    assert_ne!(direct, distinct);
+}
+
+#[test]
+fn typed_products_reject_overlapping_and_readonly_writes() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 2],
+        ports: &[EntryPort::Terminal(0), EntryPort::Terminal(1)],
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let component = |support, port| Component {
+        support: SupportId(support),
+        alternatives: vec![binary_effect(port)],
+    };
+    let facts = |literals, supports| TypedCallAllocationFacts {
+        success: Lane::guarded(
+            Guard::new(literals).unwrap(),
+            Product::new(supports).unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(
+        facts(vec![], vec![component(0, 0), component(1, 0)])
+            .validate(&shape)
+            .is_err()
+    );
+    let equal = Predicate::Equal(IdentityKind::Cell, PortId(0), PortId(1));
+    for (holds, valid) in [(true, false), (false, true)] {
+        assert_eq!(
+            facts(vec![(equal, holds)], vec![component(0, 0), component(1, 1)])
+                .validate(&shape)
+                .is_ok(),
+            valid,
+        );
+    }
+    assert!(
+        facts(
+            vec![(Predicate::Writable(PortId(0)), false)],
+            vec![component(0, 0)]
+        )
+        .validate(&shape)
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_support_ownership_includes_own_slots_and_bounded_reaches() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 2],
+        ports: &[
+            EntryPort::Wrapper(0),
+            EntryPort::Terminal(0),
+            EntryPort::Terminal(1),
+            EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            },
+            EntryPort::Value {
+                parameter: 1,
+                path: Box::new([]),
+            },
+        ],
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let mut slot = binary_effect(1);
+    slot.cells[0].0 = CellPort::Slot(ObjectRef::Entry(PortId(0)));
+    let reach = |root, region| Post {
+        coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+            roots: vec![PortId(root)],
+            region,
+            types: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)],
+        })),
+        ..Post::default()
+    };
+    let validate = |first, second, relation: Option<_>| {
+        let mut literals = vec![(Predicate::Role(PortId(0), Role::Slot), true)];
+        literals.extend(relation);
+        let product = Product::new(
+            [first, second]
+                .into_iter()
+                .enumerate()
+                .map(|(i, post)| Component {
+                    support: SupportId(i as u32),
+                    alternatives: vec![post],
+                })
+                .collect(),
+        )
+        .unwrap();
+        TypedCallAllocationFacts {
+            success: Lane::guarded(Guard::new(literals).unwrap(), product),
+            ..TypedCallAllocationFacts::default()
+        }
+        .validate(&shape)
+        .is_ok()
+    };
+    let distinct = Some((
+        Predicate::Equal(IdentityKind::Cell, PortId(1), PortId(2)),
+        false,
+    ));
+    let cell = |root| reach(root, ReachKind::Cell);
+    assert!(!validate(slot.clone(), binary_effect(1), None));
+    assert!(validate(slot.clone(), binary_effect(2), distinct));
+    assert!(!validate(cell(1), slot, None));
+    assert!(!validate(binary_effect(1), cell(1), None));
+    assert!(!validate(cell(1), cell(1), None));
+    assert!(validate(cell(1), cell(2), distinct));
+    let compare_referents = |equal| {
+        validate(
+            reach(3, ReachKind::Referent),
+            reach(4, ReachKind::EntryStructure),
+            Some((
+                Predicate::Equal(IdentityKind::Allocation, PortId(3), PortId(4)),
+                equal,
+            )),
+        )
+    };
+    assert!(!compare_referents(true));
+    assert!(compare_referents(false));
+}
+
+#[test]
+fn typed_reach_uses_guarded_equality_of_a_holder_ancestor() {
+    let field = CallField::Field;
+    let ports = [
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(0)]),
+        },
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(1)]),
+        },
+        EntryPort::Value {
+            parameter: 0,
+            path: Box::new([field(1), field(0)]),
+        },
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &ports,
+        support_count: 2,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let mut edit = binary_effect(0);
+    edit.cells[0].0 = CellPort::Edge(ObjectRef::Entry(PortId(2)), field(0));
+    let product = Product::new(vec![
+        Component {
+            support: SupportId(0),
+            alternatives: vec![Post {
+                coverage: Coverage::Unresolved(Footprint::WritableReach(ReachBound {
+                    roots: vec![PortId(0)],
+                    region: ReachKind::Referent,
+                    types: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)],
+                })),
+                ..Post::default()
+            }],
+        },
+        Component {
+            support: SupportId(1),
+            alternatives: vec![edit],
+        },
+    ])
+    .unwrap();
+    let equal = Predicate::Equal(IdentityKind::Allocation, PortId(0), PortId(1));
+    for holds in [false, true] {
+        let facts = TypedCallAllocationFacts {
+            success: Lane::guarded(Guard::new([(equal, holds)]).unwrap(), product.clone()),
+            ..TypedCallAllocationFacts::default()
+        };
+        assert_eq!(facts.validate(&shape).is_err(), holds);
+    }
+}
+
+#[test]
+fn typed_exact_cell_absence_is_not_preserve_or_a_scalar() {
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable],
+        ports: &[
+            EntryPort::Terminal(0),
+            EntryPort::Value {
+                parameter: 0,
+                path: Box::new([]),
+            },
+        ],
+        support_count: 1,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let lane = |contents| {
+        Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![Post {
+                    cells: vec![(CellPort::Terminal(PortId(0)), CellPost::Replace(contents))],
+                    ..Post::default()
+                }],
+            }])
+            .unwrap(),
+        )
+    };
+    let value = Some(ValueRef {
+        source: ValueSource::Allocation(ObjectRef::Entry(PortId(1))),
+        access: PathAccess {
+            restriction: Some(Permission::ReadOnly),
+            derived_from: None,
+        },
+        dependencies: vec![],
+    });
+    let erased = lane(vec![None]);
+    let mixed = lane(vec![None, value.clone()]);
+    let preserve = Lane::Returning(Product::default());
+    assert_ne!(erased, preserve);
+    assert_ne!(mixed, lane(vec![value]));
+    for (success, valid) in [(erased, true), (mixed, true), (lane(vec![]), false)] {
+        assert_eq!(
+            TypedCallAllocationFacts {
+                success,
+                ..TypedCallAllocationFacts::default()
+            }
+            .validate(&shape)
+            .is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
+fn typed_projected_routes_keep_their_own_loans_and_retained_derivation() {
+    let ports = [
+        EntryPort::Wrapper(0),
+        EntryPort::Wrapper(1),
+        EntryPort::Terminal(2),
+        EntryPort::Value {
+            parameter: 3,
+            path: Box::new([]),
+        },
+        EntryPort::Value {
+            parameter: 4,
+            path: Box::new([]),
+        },
+    ];
+    let shape = Shape {
+        parameters: &[PublicCallParameterAccess::Mutable; 5],
+        ports: &ports,
+        support_count: 1,
+        success_slots: Some(0),
+        error_slot: false,
+    };
+    let anchor = ObjectRef::Exact(ExportPort::PrivateTerminal(2));
+    let route = |receiver| {
+        BindingPost::Projected(
+            CellPort::Terminal(PortId(2)),
+            RetainedRoute {
+                access: PathAccess {
+                    restriction: Some(Permission::ReadOnly),
+                    derived_from: Some(Derivation::Retained(anchor.clone())),
+                },
+                dependencies: vec![ReceiverDependency::Known(vec![ObjectRef::Entry(PortId(
+                    receiver,
+                ))])],
+            },
+        )
+    };
+    let mut post = Post {
+        bindings: vec![
+            (ObjectRef::Entry(PortId(0)), route(3)),
+            (ObjectRef::Entry(PortId(1)), route(4)),
+        ],
+        retained: vec![(
+            anchor.clone(),
+            StorageKind::Wrapper,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        )],
+        ..Post::default()
+    };
+    assert_ne!(post.bindings[0].1, post.bindings[1].1);
+    let facts = |post| TypedCallAllocationFacts {
+        success: Lane::Returning(
+            Product::new(vec![Component {
+                support: SupportId(0),
+                alternatives: vec![post],
+            }])
+            .unwrap(),
+        ),
+        ..TypedCallAllocationFacts::default()
+    };
+    assert!(facts(post.clone()).validate(&shape).is_ok());
+    post.retained.clear();
+    assert!(facts(post).validate(&shape).is_err());
+}
 
 fn parameter(
     access: PublicCallParameterAccess,
